@@ -26,14 +26,17 @@ yet.
 from __future__ import annotations
 
 import functools
+import hashlib
 import importlib.machinery
 import os
+import re
 import site
 import sys
 import sysconfig
 import types
 from typing import TYPE_CHECKING
 
+import torch
 from torch._guards import ChainedSource
 from torch.utils._config_module import ConfigModule
 
@@ -766,3 +769,243 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
         and _owning_module(value) == "builtins"
         and getattr(value, "__name__", None) == source.index
     )
+
+
+# Object addresses differ every run, so they are scrubbed from rendered guard
+# facts. Keep these anchored to the call shapes that carry addresses: a bare
+# \b\d{9,}\b also eats a user constant (a dict key, a slice bound), so two
+# variants guarding different values render the same fact and invent an
+# invariant neither holds.
+_OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
+_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
+# Dynamo appends a per-process counter to the builtins dict it installs, so the
+# same guard reads __builtins_dict___6 in one compilation and ___8 in the next.
+# Of the globals Dynamo mints, only the three families in
+# aot_compile._MINTED_GLOBAL_PREFIXES can root a serializable guard: this one and
+# the two install_global_by_id shapes the pattern below covers. __compiled_fn_*
+# and __resume_at_* are codegen-only LOAD_GLOBAL targets, never guard subjects.
+_DYNAMO_COUNTER = re.compile(re.escape(_BUILTINS_DICT_PREFIX) + r"_\d+")
+# OutputGraph.install_global_by_id names a global "<prefix>_<id(value)>_c<n>",
+# so a guard reading one carries BOTH an address and a compile counter inside
+# an identifier, where neither pattern above can see it. Real models reach this
+# -- transformers' Qwen2 installs three -- and the report then differs run to
+# run, which is exactly what the "commit and diff" contract rules out. The
+# prefix can be empty (torch itself is installed as "_<id>_c<n>"), so the digit
+# width is the anchor: it is what keeps a user identifier such as w_1_c2 intact.
+_DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
+
+
+def _normalize(text: str) -> str:
+    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
+    text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
+    return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
+
+
+def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
+    return tuple(_normalize(part) for part in (code_list or ()))
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+# Guards whose check IS object identity, directly or through a derived guard,
+# which is the same test default_guard_filter_fn drops on.
+_IDENTITY_GUARD_TYPES = frozenset(
+    CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+)
+
+
+# Ellipsis and NotImplemented repr by name, so they are as stable as a literal.
+_STABLE_CONST_TYPES = (
+    str,
+    int,
+    float,
+    complex,
+    bytes,
+    bool,
+    type(None),
+    type(Ellipsis),
+    type(NotImplemented),
+)
+
+
+def _stable_consts(consts: tuple[object, ...]) -> tuple[object, ...]:
+    """
+    co_consts reduced to the part that reprs the same in every process.
+
+    A nested code object reprs with its ADDRESS, so it cannot go into a digest
+    that ends up in a file meant to be committed and diffed. Containers are
+    filtered recursively rather than dropped whole: two lambdas differing only
+    in a tuple or frozenset constant -- ``x * (1, 2)`` against ``x * (1, 3)`` --
+    are genuinely different variants, and dropping the container is what let
+    them collide. A const of any other type keeps its SLOT as a type marker:
+    ``x[..., 0]`` and ``x[0, ...]`` fold to one const tuple at the same index,
+    so with the slot dropped they would collide the same way.
+    """
+    out: list[object] = []
+    for c in consts:
+        if isinstance(c, _STABLE_CONST_TYPES):
+            out.append(c)
+        elif isinstance(c, types.CodeType):
+            # A nested code object reprs with its ADDRESS, so it cannot go in
+            # verbatim -- but dropping it merges two lambdas that differ only in
+            # a comprehension or an inner lambda, which is this same bug one
+            # level down. Recurse into its own fingerprint instead.
+            out.append(_code_fingerprint(c))
+        elif isinstance(c, tuple):
+            out.append(_stable_consts(c))
+        elif isinstance(c, frozenset):
+            # Sorted by repr so the digest does not inherit set iteration order.
+            out.append(tuple(sorted(_stable_consts(tuple(c)), key=repr)))
+        else:
+            out.append(f"<{type(c).__name__}>")
+    return tuple(out)
+
+
+def _code_fingerprint(code: types.CodeType) -> str:
+    """
+    Name a code object by its body, for callables a definition site cannot tell
+    apart -- an ACT2FN table written on one source line makes every lambda in it
+    agree on file AND lineno.
+
+    Everything hashed is derived from the source, so the digest is identical in
+    another process. It is NOT stable across Python versions, since co_code is
+    version-specific bytecode: a committed invariants file churns wholesale on
+    an interpreter upgrade even with unchanged source.
+    """
+    return _hash_text(
+        repr(
+            (
+                code.co_code,
+                code.co_names,
+                code.co_varnames,
+                # LOAD_DEREF addresses a cell by INDEX, so two closures that
+                # capture different variables have identical co_code and are
+                # told apart only by the names they close over.
+                code.co_freevars,
+                code.co_cellvars,
+                _stable_consts(code.co_consts),
+            )
+        )
+    )
+
+
+def _object_identity(value: object) -> str:
+    """
+    A stable stand-in for the id ``_normalize`` stripped.
+
+    A qualname alone does not separate the case this exists for: an ACT2FN-style
+    table whose entries are all ``<lambda>`` in one module, where two variants
+    holding different entries would render identically and the CLOSURE_MATCH
+    that split them would be reported as an invariant of both. So a callable is
+    also named by where it is DEFINED (basename, so no checkout path) and by a
+    digest of its body, both source-derived and so stable across processes.
+
+    The discriminating part goes FIRST: truncation bounds this string, and a
+    transformers lambda nested in a long module path exceeds the limit on the
+    qualname alone, so a digest appended at the end would be cut off exactly on
+    the names that need it most.
+
+    Only the code object is named, not the data bound to it. Two closures from
+    one factory (``make(2)`` and ``make(3)``), two functions differing only in
+    ``__defaults__``, bound methods of two instances, and every
+    ``functools.partial`` render the same, as do two instances of one class.
+    """
+    if isinstance(value, types.ModuleType):
+        return f"is module {value.__name__}"
+    name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
+    if isinstance(name, str):
+        code = getattr(value, "__code__", None)
+        where = ""
+        if isinstance(code, types.CodeType):
+            filename = os.path.basename(code.co_filename or "?")
+            where = f"@{filename}:{code.co_firstlineno}#{_code_fingerprint(code)} "
+        return _normalize(f"is {where}{_owning_module(value) or '?'}.{name}")[:160]
+    return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
+
+
+# Guard types that pin an input's shape, value or kind. An invariance policy
+# never drops one, and the report compares them across variants.
+_SHAPE_BEARING_GUARD_TYPES = frozenset(
+    {
+        "BOOL_MATCH",
+        "CONSTANT_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "COW_TENSOR_MATCH",
+        "DICT_CONTAINS",
+        "DICT_KEYS_MATCH",
+        "DICT_NOT_CONTAINS",
+        "DUPLICATE_INPUT",
+        "EMPTY_NN_MODULE_HOOKS_DICT",
+        "EQUALS_MATCH",
+        "FAKE_SCRIPT_TYPE_MATCH",
+        "HASATTR",
+        "MAPPING_KEYS_CHECK",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
+        "NOT_PRESENT_IN_GENERIC_DICT",
+        "RANGE_ITERATOR_MATCH",
+        "SEQUENCE_LENGTH",
+        "SET_CONTAINS",
+        "SET_NOT_CONTAINS",
+        "TENSOR_MATCH",
+        "TUPLE_ITERATOR_LEN",
+        "TYPE_MATCH",
+    }
+)
+
+
+# Guard types on ambient or process state that the guard leaf checks for itself
+# and nothing in this module fingerprints. Never dropped, never compared.
+_UNMODELLED_GUARD_TYPES = frozenset(
+    {
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        "DEFAULT_DEVICE",
+        "DISPATCH_KEY_SET_MATCH",
+        "DTENSOR_SPEC_MATCH",
+        "DUAL_LEVEL",
+        "FSDP_TRAINING_STATE",
+        "FUNCTORCH_STACK_MATCH",
+        "GLOBAL_STATE",
+        "OPAQUE_OBJ_GUARD_FN_MATCH",
+        "SHAPE_ENV",
+        "TENSOR_SUBCLASS_METADATA_MATCH",
+        "TORCH_FUNCTION_STATE",
+    }
+)
+
+
+# Guard types whose GuardBuilder method is `pass`: the guard is a marker, and
+# the check it names is made by GLOBAL_STATE's leaf. Nothing about them is
+# serialized or dropped, so they never appear in a dropped-guard report --
+# listing GRAD_MODE as "a precondition nothing checks" would be false, since
+# GlobalStateGuard checks it on every call. Their facts ARE compared, from the
+# same process state GlobalStateGuard snapshots (see _value_fingerprint).
+_NOOP_GUARD_TYPES = frozenset({"DETERMINISTIC_ALGORITHMS", "GRAD_MODE"})
+
+
+def _is_noop_guard_type(guard_type: str) -> bool:
+    # EMPTY_NN_MODULE_HOOKS_DICT is classified shape-bearing for the config
+    # where it emits a check; under skip_nnmodule_hook_guards, the default,
+    # GuardBuilder emits nothing for it, so a report must not call it a
+    # precondition.
+    return guard_type in _NOOP_GUARD_TYPES or (
+        guard_type == "EMPTY_NN_MODULE_HOOKS_DICT"
+        and torch._dynamo.config.skip_nnmodule_hook_guards
+    )
+
+
+# The ONLY guard types the invariance policy may drop, and only when proven
+# invariant across every captured variant: the identity guards the default
+# filter drops anyway as unserializable, plus BUILTIN_MATCH, an identity match
+# on a builtin that the default filter keeps. The four sets are a total,
+# disjoint classification of GuardBuilder's guard methods, pinned by
+# test_guard_policy_classification_is_total: a guard type in none of them --
+# any type added to GuardBuilder after this list -- is KEPT unconditionally
+# until someone classifies it, so a new value-pinning guard can never become
+# silently droppable. Guards installed outside GuardBuilder (the root manager's
+# DuplicateInputs and StorageOverlap exprs, the dimension-marking lambda) never
+# reach the guard filter and are outside the policy as well.
+_INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset({"BUILTIN_MATCH"})

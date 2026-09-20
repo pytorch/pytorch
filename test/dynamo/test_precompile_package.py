@@ -7,9 +7,11 @@ import enum
 import functools
 import importlib.machinery
 import importlib.util
+import itertools
 import os
 import re
 import site
+import subprocess
 import sys
 import sysconfig
 import tempfile
@@ -1752,6 +1754,166 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         self.assertIs(namespaces["G['__import_torch']"], torch)
         self.assertIs(namespaces["G['mypkg'].layers"], layers)
+
+    def test_guard_policy_classification_is_total(self):
+        # A guard type in no set is KEPT, so a drop policy can only ever
+        # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
+        # what makes the never-drop claim enforceable:
+        # a guard type added to GuardBuilder fails here until someone triages
+        # it into exactly one of the four sets.
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.precompile_package import (
+            _IDENTITY_GUARD_TYPES,
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _NOOP_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _UNMODELLED_GUARD_TYPES,
+        )
+
+        # dir() rather than vars(): a guard method added on GuardBuilderBase or
+        # a future mixin is a GuardBuilder guard type too.
+        guard_types = {
+            name
+            for name in dir(GuardBuilder)
+            if name.isupper() and callable(getattr(GuardBuilder, name))
+        }
+        sets = {
+            "_SHAPE_BEARING_GUARD_TYPES": _SHAPE_BEARING_GUARD_TYPES,
+            "_UNMODELLED_GUARD_TYPES": _UNMODELLED_GUARD_TYPES,
+            "_INVARIANT_DROPPABLE_GUARD_TYPES": _INVARIANT_DROPPABLE_GUARD_TYPES,
+            "_NOOP_GUARD_TYPES": _NOOP_GUARD_TYPES,
+        }
+        classified: frozenset[str] = frozenset().union(*sets.values())
+        self.assertEqual(
+            sorted(guard_types - classified),
+            [],
+            "unclassified GuardBuilder guard type(s): add each to exactly one "
+            "policy set in torch/_dynamo/precompile_package.py (KEPT until then)",
+        )
+        self.assertEqual(
+            sorted(classified - guard_types),
+            [],
+            "phantom entries: no GuardBuilder method by these names",
+        )
+        for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
+            self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
+        # The identity guards the default filter drops are droppable by
+        # construction; a literal rewrite of the set must not lose that.
+        self.assertTrue(_IDENTITY_GUARD_TYPES <= _INVARIANT_DROPPABLE_GUARD_TYPES)
+
+    def test_noop_guard_type_follows_the_hook_guard_config(self):
+        # EMPTY_NN_MODULE_HOOKS_DICT emits nothing under the default config and
+        # a SEQUENCE_LENGTH on the hook dicts otherwise, so whether a report may
+        # treat it as a marker depends on the config the frame compiled under.
+        from torch._dynamo.precompile_package import _is_noop_guard_type
+
+        self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
+        self.assertFalse(_is_noop_guard_type("TENSOR_MATCH"))
+        self.assertTrue(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
+        with torch._dynamo.config.patch(skip_nnmodule_hook_guards=False):
+            self.assertFalse(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
+            self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
+
+    def test_normalize_scrubs_addresses_and_counters_but_not_user_constants(self):
+        # Both directions matter: anything run-varying that survives makes the
+        # committed report churn, and anything meaningful that is erased makes
+        # two variants guarding different values render one fact.
+        from torch._dynamo.precompile_package import _normalize
+
+        cases = {
+            "___check_obj_id(G['fn'], 140311678493200), type=<class 'function'>": "___check_obj_id(G['fn'], <id>), type=<class 'function'>",
+            "G['__builtins_dict___6']['len']": "G['__builtins_dict___<n>']['len']",
+            "G['__import_mod_140311678493200_c1']": "G['__import_mod_<id>_c<n>']",
+            "G['___unnamed_scope_140311678493200_c1']": "G['___unnamed_scope_<id>_c<n>']",
+            "G['_140311678493200_c3'] is not None": "G['_<id>_c<n>'] is not None",
+            "top_saved_tensors_hooks ids == (139, 140)": "top_saved_tensors_hooks ids == (<ids>)",
+            # User constants and identifiers are not addresses.
+            "L['dims'][0] == 140311678493200": "L['dims'][0] == 140311678493200",
+            "L['w_1_c2'] == 3": "L['w_1_c2'] == 3",
+            "len(L['xs']) == 6": "len(L['xs']) == 6",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(_normalize(text), expected, text)
+
+    def test_code_fingerprint_recurses_into_container_and_nested_consts(self):
+        # _code_fingerprint names a callable by its body so an ACT2FN-style table
+        # can be told apart. Two lambdas can differ ONLY inside a constant the
+        # outer co_code does not distinguish: a tuple, a frozenset, or a nested
+        # code object. Filtering those out whole -- rather than recursing -- gives
+        # both the same digest, _object_identity names them identically, and the
+        # guard that split the two compilations is reported as an invariant of
+        # each.
+        from torch._dynamo.precompile_package import _code_fingerprint, _stable_consts
+
+        pairs = {
+            "tuple const": (lambda x: x * (1, 2), lambda x: x * (1, 3)),
+            "frozenset const": (lambda x: x in {1, 2}, lambda x: x in {1, 3}),
+            # Not called: what matters is the nested code object in co_consts.
+            "nested code": (lambda x: (lambda y: y + 1), lambda x: (lambda y: y + 2)),
+            # A subscript with Ellipsis folds to ONE const tuple at one index, so
+            # a const type outside the stable set must keep its slot.
+            "ellipsis const": (lambda x: x[..., 0], lambda x: x[0, ...]),
+        }
+        for label, (left, right) in pairs.items():
+            self.assertEqual(
+                left.__code__.co_code,
+                right.__code__.co_code,
+                f"{label}: the pair must differ only in co_consts",
+            )
+            self.assertNotEqual(
+                _code_fingerprint(left.__code__),
+                _code_fingerprint(right.__code__),
+                f"{label}: two different bodies share a fingerprint",
+            )
+        # An unrenderable const keeps its position as a type marker.
+        self.assertEqual(_stable_consts((object(), 1)), ("<object>", 1))
+        # And the digest is a function of the body, not of the code object:
+        # the same source compiled twice must agree.
+        src = "lambda x: (x * 2, 'a', (lambda y: y + 1))"
+        self.assertEqual(
+            _code_fingerprint(compile(src, "<a>", "eval")),
+            _code_fingerprint(compile(src, "<b>", "eval")),
+        )
+
+    def test_code_fingerprint_is_stable_across_processes(self):
+        # The digest goes into a file meant to be committed and diffed, so it
+        # has to agree in a fresh interpreter; within one process any two calls
+        # trivially agree, which is why the positive case above cannot catch a
+        # regression that puts an address back (repr of an arbitrary const).
+        from torch._dynamo.precompile_package import _code_fingerprint
+
+        src = "lambda x: (x * 2, 'a', (lambda y: y + 1), x in {1, 2})"
+        probe = (
+            "from torch._dynamo.precompile_package import _code_fingerprint;"
+            f"print(_code_fingerprint(compile({src!r}, '<p>', 'eval')))"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+        )
+        self.assertEqual(
+            out.stdout.strip(), _code_fingerprint(compile(src, "<p>", "eval"))
+        )
+
+    def test_object_identity_puts_the_digest_before_the_truncation_point(self):
+        from torch._dynamo.precompile_package import _code_fingerprint, _object_identity
+
+        self.assertEqual(
+            _object_identity(torch.nn.functional), "is module torch.nn.functional"
+        )
+        self.assertEqual(_object_identity(object()), "is a builtins.object")
+
+        def fn():
+            pass
+
+        # A qualname that alone exceeds the 160-character bound: the site and
+        # digest must survive the cut and the qualname tail is what goes.
+        fn.__qualname__ = "Outer." * 40 + "fn"
+        rendered = _object_identity(fn)
+        code = fn.__code__
+        prefix = f"is @{os.path.basename(code.co_filename)}:{code.co_firstlineno}#{_code_fingerprint(code)} "
+        self.assertEqual(len(rendered), 160)
+        self.assertTrue(rendered.startswith(prefix), rendered)
+        self.assertNotIn("#", rendered[len(prefix) :])
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)
