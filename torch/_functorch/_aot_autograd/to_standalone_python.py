@@ -53,7 +53,6 @@ if TYPE_CHECKING:
 
     from torch.fx import GraphModule
 
-
 # Serializes compile_to_python: the wrapper-source capture is thread-local, but the
 # AOTAutograd capture pass and the inner inductor compile swap process-global cache state
 # (see the THREADING note on compile_to_python), so concurrent compiles must not overlap.
@@ -857,6 +856,78 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
             ):
                 return True
     return False
+
+
+def namespace_module_names(sources: Sequence[str]) -> list[str]:
+    """Suffix every top-level name each module DEFINES, per module.
+
+    Splicing several Inductor modules into ONE namespace is only safe if their
+    top-level names are disjoint, because the code inside a module resolves its
+    siblings as late-bound globals: a module's ``call`` looks up its kernels and
+    its ``_runtime_wrapper`` when INVOKED, not when defined. Two modules of the
+    same computation -- a forward and its backward, or two shape variants of one
+    frame -- otherwise define the same names, and the first silently runs the
+    second's code. Snapshotting each module's entry is not enough for the same
+    reason.
+
+    Rewriting is driven by AST positions rather than a text match, which is what
+    keeps three lookalikes out of it: an attribute (``runner.call`` is an
+    ``Attribute``, not a ``Name``), a nested binding (``def call`` inside
+    ``class Runner`` is not module-level), and an import (``async_compile`` is
+    both a local binding and part of ``torch._inductor.async_compile``).
+    """
+    out: list[str] = []
+    for slot, source in enumerate(sources):
+        tree = ast.parse(source)
+        imported: set[str] = set()
+        defined: set[str] = set()
+        headers: list[tuple[int, str]] = []
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    imported.add((alias.asname or alias.name).split(".")[0])
+            elif isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                defined.add(node.name)
+                headers.append((node.lineno, node.name))
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        defined.add(target.id)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                defined.add(node.target.id)
+        targets = defined - imported
+        if not targets:
+            out.append(source)
+            continue
+        suffix = f"_s{slot}"
+        edits: dict[int, list[tuple[int, int, str]]] = {}
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Name)
+                and node.id in targets
+                and node.end_col_offset is not None
+            ):
+                edits.setdefault(node.lineno, []).append(
+                    (node.col_offset, node.end_col_offset, node.id + suffix)
+                )
+        lines = source.split("\n")
+        for lineno, name in headers:
+            if name not in targets:
+                continue
+            found = re.search(rf"\b{re.escape(name)}\b", lines[lineno - 1])
+            if found is not None:
+                edits.setdefault(lineno, []).append(
+                    (found.start(), found.end(), name + suffix)
+                )
+        for lineno, spans in edits.items():
+            line = lines[lineno - 1]
+            for begin, finish, text in sorted(spans, reverse=True):
+                line = line[:begin] + text + line[finish:]
+            lines[lineno - 1] = line
+        out.append("\n".join(lines))
+    return out
 
 
 def compile_to_python(
