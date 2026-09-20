@@ -4658,13 +4658,17 @@ class GuardsStatePickler(FunctionPicklerBase):
     # The C pickler saves an exact builtin container by type, before it ever
     # consults reducer_override, so a pruned ``self.its = [generator]`` was
     # still walked and still failed. persistent_id is asked about every object
-    # first, so it is the one hook that can substitute those. Everything else
-    # in missing_values stays on the reducer_override path.
-    _PRUNED_CONTAINER_TYPES = (list, dict, tuple, set, frozenset, bytearray)
+    # first, so it is the one hook that can substitute those. Only the MUTABLE
+    # exact containers: the compiler folds a constant tuple or frozenset into
+    # one object shared across a module, so an unguarded ``self.dims = (0, 1)``
+    # can be the very object in another function's co_consts or in a guarded
+    # __defaults__, and substituting it by id would put the sentinel there.
+    # Everything else in missing_values stays on the reducer_override path.
+    _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
     # pyrefly: ignore [bad-override]
     def persistent_id(self, obj: Any) -> str | None:
-        if id(obj) in self.missing_values and type(obj) in self._PRUNED_CONTAINER_TYPES:
+        if type(obj) in self._PRUNED_CONTAINER_TYPES and id(obj) in self.missing_values:
             return _PRUNED_VALUE_PID
         return None
 
