@@ -102,7 +102,7 @@ class PrecompileSummary:
         resume_functions: Of those, the graph-break continuations.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
-        bypassed: ``co_name``s of frames the package holds nothing installable
+        bypassed: ``co_name`` of the frames the package holds nothing installable
             for: no compile of the frame recorded a guarded code and one was
             bypassed (its guards could not be serialized, or its graph held
             parameters by static address), or a
@@ -115,8 +115,8 @@ class PrecompileSummary:
             as ``>=``: from a limit hit on, that frame and the frames it calls
             run without tracing, so a limit hit that would follow it there is
             never recorded.
-        uncovered_frames: ``co_name``s of frames the capture ran that ended with no
-            guarded code and were not bypassed, so the artifact cannot serve
+        uncovered_frames: ``co_name`` of the frames the capture ran that ended with
+            no guarded code and were not bypassed, so the artifact cannot serve
             them: a thin wrapper whose graphs all landed in an inner frame, a
             frame Dynamo gave up on, or a frame whose compile raised (its
             message is in ``capture_errors``, so one failure shows in both

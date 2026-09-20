@@ -1116,8 +1116,8 @@ class TestPrecompile(TestCase):
                 PrecompileError, "unbacked capture cannot run inside another trace"
             ):
                 _precompile_pair(lambda m, t: m(t), model, marked)
-            # The STATIC path's mode is a plain FakeTensorMode carrying neither hardening
-            # setting, so it has nothing to lose to the ambient one and is NOT refused.
+            # The STATIC path builds the same hardened mode but is NOT refused: with
+            # backend="eager" it captures inside another trace as it does outside one.
             _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
         # detect_fake_mode also ranks the dispatch-mode stack, so an enclosing
         # `with FakeTensorMode()` -- no TracingContext at all -- gets the same named refusal
@@ -1169,6 +1169,23 @@ class TestPrecompile(TestCase):
             ) as cm:
                 _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
             self.assertIsInstance(cm.exception.__cause__, UnsupportedOperatorException)
+
+    def test_static_capture_refuses_a_meta_less_op_in_an_allowlisted_namespace(self):
+        # The STATIC path builds its mode through the same constructor, so it carries
+        # allow_fallback_kernels=False too; with the default True the real kernel runs on
+        # zero-filled substitutes and the capture silently succeeds.
+        from torch.library import _scoped_library
+
+        m = torch.nn.Linear(4, 3).eval()
+        x, y = torch.randn(8, 4), torch.randn(2, 3)
+        with _scoped_library("quantized", "FRAGMENT") as qlib:
+            qlib.define("mlprecompile_static_no_meta(Tensor x) -> Tensor")
+            qlib.impl("mlprecompile_static_no_meta", lambda t: t * 2, "CPU")
+            op = torch.ops.quantized.mlprecompile_static_no_meta
+            with self.assertRaisesRegex(
+                PrecompileError, "mlprecompile_static_no_meta.*register_fake"
+            ):
+                _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
 
 
 class _FilesModel(torch.nn.Module):

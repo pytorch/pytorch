@@ -163,15 +163,16 @@ it.
 #    AOTAutograd / inductor one) lacks the data-ptr snapshot as well, so a
 #    ``.data_ptr()`` read would bake 0 rather than raise; a torch.compile / export mode
 #    does build under that patch, so for those two only the fallback setting is lost.
-#    A STATIC capture's mode is a plain ``FakeTensorMode(allow_non_fake_inputs=True)``
-#    carrying neither setting, so it is not refused. An enclosing ``with
-#    FakeTensorMode()`` is simply displaced for the trace (entering a fake mode unsets
-#    the outer one), so it captures as it does outside one; an ambient TracingContext
-#    mode is adopted by make_fx instead, and when that mode has a ShapeEnv (a
-#    torch.compile / export one) a data-dependent op is captured as an unbacked symint
-#    rather than refused, while the inductor lowering itself refuses a foreign fake mode
-#    ("Mixing fake modes NYI"), a limitation that predates this note. Call precompile
-#    outside the enclosing trace. You can opt specific user-input dims into being
+#    A STATIC capture's mode carries the same two settings (both modes come from
+#    ``_capture_fake_mode``; the static one just has no ShapeEnv), but it is not refused:
+#    an enclosing ``with FakeTensorMode()`` is simply displaced for the trace (entering a
+#    fake mode unsets the outer one), so it captures as it does outside one; an ambient
+#    TracingContext mode is adopted by make_fx instead, carrying the enclosing trace's
+#    settings rather than capture's, and when that mode has a ShapeEnv (a torch.compile /
+#    export one) a data-dependent op is captured as an unbacked symint rather than
+#    refused, while the inductor lowering itself refuses a foreign fake mode ("Mixing
+#    fake modes NYI"), a limitation that predates this note. Call precompile outside the
+#    enclosing trace. You can opt specific user-input dims into being
 #    dynamic by marking them with
 #    ``torch._dynamo.decorators.mark_unbacked`` before calling: those dims are
 #    captured as UNBACKED symints (symbolic capture), which CANNOT be guarded on -- so
@@ -305,8 +306,9 @@ it.
 # rewrite of fn that extracts the runtime model's params/buffers, calls a compiled
 # subgraph, and reassembles fn's output -- plus (b) the subgraph (an fx GraphModule) for
 # the backend to lower. So precompile INLINES the transformed bytecode into python_code
-# (marshalled to a base64 blob, rehydrated by the driver via marshal.loads +
-# types.FunctionType) and lowers the subgraph through the SAME backends as make_fx
+# (a SerializedCode record pickled into a base64 blob, rehydrated by the driver via
+# pickle.loads + SerializedCode.to_code_object + types.FunctionType) and lowers the
+# subgraph through the SAME backends as make_fx
 # ("inductor" -> aot_autograd.compile_to_python source, "eager" -> the inlined subgraph),
 # wiring the subgraph in under the backend id the bytecode calls. The transformed bytecode
 # IS the calling convention: it reads params off the runtime model itself (given a
@@ -407,6 +409,7 @@ if TYPE_CHECKING:
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 
 # ``precompile`` and ``PrecompileError`` are exposed under the compiler namespace as
@@ -820,6 +823,29 @@ def _detect_memory_format(t: torch.Tensor) -> torch.memory_format:
     )
 
 
+def _capture_fake_mode(shape_env: ShapeEnv | None = None) -> FakeTensorMode:
+    """Build the FakeTensorMode BOTH capture paths trace under (invariant 3 in the Note).
+
+    allow_non_fake_inputs lets a real tensor fn closes over flow through as a baked
+    constant, which _check_no_constant_tensors then rejects with its clean PrecompileError.
+    allow_fallback_kernels=False keeps a meta-less op in an allowlisted namespace (aten,
+    prims, quantized, ...) from having its real kernel run on zero-filled substitutes and
+    whatever shape that produced baked. FakeTensorMode SNAPSHOTS the unsafe-data-ptr config
+    at construction, and that snapshot is what every fake tensor it makes consults, so the
+    patch must wrap the CONSTRUCTION (as make_fx does around its own mode): with it off, a
+    .data_ptr() read in fn raises instead of returning a meaningless value.
+    """
+    import torch._functorch.config as functorch_config
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with functorch_config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+        return FakeTensorMode(
+            shape_env=shape_env,
+            allow_non_fake_inputs=True,
+            allow_fallback_kernels=False,
+        )
+
+
 def _fakeify_with_unbacked(
     pb_flat: list[Tensor], user_flat: list[object], marks: list[dict[int, _MarkSpec]]
 ) -> tuple[list[object], FakeTensorMode]:
@@ -831,24 +857,10 @@ def _fakeify_with_unbacked(
     one symbol; ``min``/``max`` add runtime asserts. Returns ``(flat_fake, fake_mode)``;
     the fake_mode (ShapeEnv) is threaded to the lowering via from_tracing_context.
     """
-    import torch._functorch.config as functorch_config
-    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     shape_env = ShapeEnv()
-    # FakeTensorMode SNAPSHOTS this config at construction, and that snapshot is what
-    # every fake tensor it makes consults, so the patch must wrap the CONSTRUCTION (as
-    # make_fx does around its own mode): with it off, a .data_ptr() read in fn raises
-    # instead of returning a meaningless value. allow_fallback_kernels=False keeps a
-    # meta-less op in an allowlisted namespace (aten, prims, quantized, ...) from having
-    # its real kernel run on zero-filled substitutes and whatever shape that produced
-    # baked.
-    with functorch_config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-        fake_mode = FakeTensorMode(
-            shape_env=shape_env,
-            allow_non_fake_inputs=True,
-            allow_fallback_kernels=False,
-        )
+    fake_mode = _capture_fake_mode(shape_env=shape_env)
     # shape_id -> unbacked symint (a dynamic SymInt); untyped so grouped dims share one symbol.
     shared: dict[object, Any] = {}
     with fake_mode:
@@ -1148,10 +1160,10 @@ def _capture(
     # (GuardOnDataDependentSymNode) rather than baking it. Reading the marks here (instead
     # of a precompile kwarg) keeps the precompile signature simple.
     marks = _read_unbacked_marks(user_flat)
-    # An UNBACKED capture traces under a fake mode IT built, and an ambient one outranks
-    # that, carrying neither of the two settings _fakeify_with_unbacked gives it (invariant
-    # 3 in the Note has the details), so refuse rather than trace under someone else's
-    # contract. The STATIC path's plain mode carries neither setting, so it is not refused. Ask
+    # BOTH paths trace under the hardened mode _capture_fake_mode builds, and an ambient
+    # one outranks that, carrying neither of its two settings (invariant 3 in the Note has
+    # the details). Only the UNBACKED path refuses, rather than trace under someone else's
+    # contract: the static path is pinned to keep capturing inside another trace. Ask
     # detect_fake_mode -- what make_fx itself resolves through -- so both sources it sees
     # without arguments (an ambient TracingContext, the dispatch-mode stack) are refused by
     # name here instead of reaching its own mode-mismatch assertion once capture enters its
@@ -1185,13 +1197,12 @@ def _capture(
     from torch._subclasses.fake_tensor import (
         DataDependentOutputException,
         DynamicOutputShapeException,
-        FakeTensorMode,
         UnsupportedOperatorException,
     )
 
     # ``fake_mode`` is the DYNAMIC (symbolic) fake mode -- set only on the unbacked path,
     # where it threads its ShapeEnv to the lowering (and turns on scalar_asserts). The
-    # static path also traces on fakes, but with a plain (non-symbolic) fake mode kept in
+    # static path also traces on fakes, but with a non-symbolic (no ShapeEnv) mode kept in
     # ``capture_cm`` only, so ``_Capture.fake_mode`` stays None and the lowering treats
     # the capture as static. Either way ``capture_cm`` is the FakeTensorMode we trace in.
     fake_mode = None
@@ -1207,12 +1218,13 @@ def _capture(
         ]
     else:
         # Static capture: fakeify every input so the trace runs no real compute (no
-        # in-place input mutation, no grad on the example model). allow_non_fake_inputs
-        # lets a real tensor that fn closes over (an unregistered attr, a global, a
-        # captured constant -- invariant 1) flow through as a baked constant, so
+        # in-place input mutation, no grad on the example model), under the SAME hardened
+        # mode as the unbacked path minus the ShapeEnv. Its allow_non_fake_inputs lets a
+        # real tensor that fn closes over (an unregistered attr, a global, a captured
+        # constant -- invariant 1) flow through as a baked constant, so
         # _check_no_constant_tensors below rejects it with the same clean PrecompileError
         # a real trace gave, rather than a raw mixed-fake AssertionError.
-        capture_cm = FakeTensorMode(allow_non_fake_inputs=True)
+        capture_cm = _capture_fake_mode()
         with capture_cm:
             flat_args = [
                 capture_cm.from_tensor(a, static_shapes=True)
