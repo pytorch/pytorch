@@ -1242,6 +1242,9 @@ def _make_sum_callback():
     return cb
 
 
+_Cfg = collections.namedtuple("_Cfg", "opts")
+
+
 class _ModuleSharingAConstantTuple(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1482,6 +1485,36 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         )
         # The protection is by object, so the module's alias stays real too.
         self.assertEqual(out.output_graph.local_scope["m"].cfg, {"a": 1})
+
+    def test_a_verbatim_default_inside_a_namedtuple_survives_an_unguarded_alias(self):
+        # A tuple SUBCLASS inside a value-guarded __defaults__ must not stop the
+        # verbatim walk: the aliased dict below it would otherwise be substituted
+        # and EQUALS_MATCH, which falls back to == for a namedtuple, would miss.
+        m = _ModuleWithGenerators()
+
+        def fn(a, cfg=_Cfg(m.cfg)):
+            return a
+
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"m": m, "fn": fn},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={
+                id(m): m,
+                id(fn): fn,
+                id(fn.__defaults__): fn.__defaults__,
+            },
+            value_guarded_containers={id(fn.__defaults__): fn.__defaults__},
+        )
+        out = load_guards_state(
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+        )
+        self.assertEqual(
+            out.output_graph.local_scope["fn"].__defaults__, (_Cfg({"a": 1}),)
+        )
 
     def test_an_unguarded_tuple_shared_with_a_code_constant_is_not_substituted(self):
         # A guarded <locals> callback is rebuilt by value, co_consts included; an
