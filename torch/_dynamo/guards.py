@@ -4201,7 +4201,17 @@ def _get_unsupported_types() -> tuple[type, ...]:
         weakref.ReferenceType,
     )
     try:
-        ret += (torch._C._distributed_c10d.ProcessGroup,)
+        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
+        # alone let an unguarded one fail the whole frame with "cannot pickle".
+        # The C++ Backend is also the Python backend extension point (a Python
+        # class subclasses it through its pybind trampoline), so a subclass
+        # carrying instance state is covered too, deliberately: it cannot be
+        # pickled either, and nothing rebuilds it at load.
+        ret += (
+            torch._C._distributed_c10d.ProcessGroup,
+            torch._C._distributed_c10d.Backend,
+        )
     except AttributeError:
         pass
     return ret
@@ -4738,6 +4748,14 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("capsule",)
 
         elif isinstance(obj, _get_unsupported_types()):
+            # Only when no guard reads it: a guarded one (a TYPE_MATCH on a
+            # stream local, a FAKE_SCRIPT_TYPE_MATCH on a process-group local)
+            # would otherwise load as a sentinel the rebuilt guard can never
+            # match, so it is refused by name.
+            if id(obj) in self.guard_tree_values:
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads a {type(obj).__name__}, which cannot be serialized"
+                )
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
