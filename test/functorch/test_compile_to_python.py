@@ -178,6 +178,49 @@ _EFFECTFUL_TARGETS = [
 ]
 
 
+# Module-level shapes ``namespace_module_names`` REFUSES, each with a fragment of its
+# message. Only the statement kinds Inductor's wrapper codegen emits are accepted, so every
+# other way of binding a module-level name is rejected by that allowlist rather than by a
+# guard per binder form. ``call`` is the rename target throughout, and none of these is
+# exec'd, so free names in them (``flag``, ``deco``, ...) stay undefined.
+_UNSUPPORTED_SHAPES = {
+    "compound": ("if flag: kernel = 1\ndef call(a): return kernel\n", "['kernel']"),
+    "import_rebind": (
+        "if flag:\n    import torch\n    torch = 1\ndef call(a): return torch\n",
+        "['torch']",
+    ),
+    "walrus_value": ("total = (n := 5)\ndef call(a): return n\n", "walrus"),
+    "walrus_decorator": ("@deco(n := 1)\ndef call(a): return n\n", "walrus"),
+    "walrus_class_base": (
+        "class R(B := object): pass\ndef call(a): return R\n",
+        "walrus",
+    ),
+    "match": ("match flag:\n    case [a]: pass\ndef call(x): return a\n", "Match"),
+    "attribute_target": ("cfg.flag = 1\ndef call(a): return cfg\n", "plain name"),
+    "opaque_binder_suffix": (
+        "def call(a): return a\ndef helper(call_s0): return call(3)\n",
+        "['call_s0']",
+    ),
+    "class_body_store": (
+        "def call(a): return a\nclass R:\n    call = print\n    alias = call\n",
+        "rebinds ['call']",
+    ),
+    "header_off_def_line": ("def \\\ncall(a): return a\n", "on its own line"),
+    "imported_and_assigned": (
+        "from math import sqrt\nsqrt = 1\ndef call(a): return sqrt\n",
+        "imported and assigned",
+    ),
+    "nested_global": (
+        "weight = None\ndef call():\n    global weight\n    weight = 1\n    return weight\n",
+        "rebinds ['weight']",
+    ),
+    "suffix_taken": (
+        "def call_s0(a): return a\ndef call(a): return call_s0(a)\n",
+        "already uses",
+    ),
+}
+
+
 @instantiate_parametrized_tests
 class TestAOTCompileToPython(TestCase):
     # End-to-end coverage of the functorch composition layer: compile_to_python composes
@@ -771,182 +814,6 @@ class TestAOTCompileToPython(TestCase):
             "from torch._inductor.async_compile import AsyncCompile\n", renamed
         )
 
-    def test_namespace_module_names_raises_on_a_module_level_compound_binding(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        src = textwrap.dedent(
-            """
-            import torch
-            if torch.backends.mkldnn.is_available():
-                kernel = torch.ones
-            def call(args):
-                return kernel(args[0])
-            """
-        )
-        with self.assertRaisesRegex(NotImplementedError, "compound statement binds"):
-            namespace_module_names([src, src])
-
-    def test_namespace_module_names_raises_on_a_target_shadowed_in_a_nested_scope(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        # The ``global`` + assignment pair Inductor's benchmark harness emits against a
-        # module-level placeholder: the placeholder is renamed, the ``global`` is not.
-        src = textwrap.dedent(
-            """
-            weight = None
-            def get_args():
-                global weight
-                weight = 1
-                return weight
-            """
-        )
-        with self.assertRaisesRegex(NotImplementedError, "nested scope rebinds"):
-            namespace_module_names([src])
-
-    def test_namespace_module_names_raises_when_the_suffixed_name_is_taken(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        src = textwrap.dedent(
-            """
-            def call_s0(args):
-                return args
-            def call(args):
-                return call_s0(args)
-            """
-        )
-        with self.assertRaisesRegex(NotImplementedError, "already uses"):
-            namespace_module_names([src])
-
-    def test_namespace_module_names_raises_when_an_opaque_binder_takes_the_suffix(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        # ``call_s0`` is only ever an ``ast.arg`` here, so it is no ``ast.Name`` the clash
-        # set can see -- yet renaming ``call`` makes the body call the parameter.
-        src = textwrap.dedent(
-            """
-            def call(args):
-                return args
-            def helper(call_s0):
-                return call(3)
-            """
-        )
-        with self.assertRaisesRegex(NotImplementedError, "already uses"):
-            namespace_module_names([src])
-
-    def test_namespace_module_names_raises_on_a_class_body_store(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        # A class-body store is read as ``Runner.call``, an attribute the rewrite leaves
-        # alone, so renaming the store would break every reader.
-        src = textwrap.dedent(
-            """
-            def call(args):
-                return args
-            class Runner:
-                call = staticmethod(print)
-            """
-        )
-        with self.assertRaisesRegex(NotImplementedError, "class-body store"):
-            namespace_module_names([src])
-
-    def test_namespace_module_names_raises_on_a_module_level_walrus(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        # ``n`` is bound in the assignment's VALUE, which _assigned_names does not walk.
-        src = textwrap.dedent(
-            """
-            total = (n := 5)
-            def call(args):
-                return n + total
-            """
-        )
-        with self.assertRaisesRegex(NotImplementedError, "walrus"):
-            namespace_module_names([src])
-
-    def test_namespace_module_names_raises_when_a_name_is_imported_and_assigned(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        # The surviving binding is the module's own, but the import line is not renamed.
-        src = textwrap.dedent(
-            """
-            from math import sqrt
-            sqrt = 1
-            def call(args):
-                return sqrt
-            """
-        )
-        with self.assertRaisesRegex(NotImplementedError, "imported and assigned"):
-            namespace_module_names([src])
-
-    def test_namespace_module_names_leaves_a_conditional_import_alone(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        # A compound statement that binds only import aliases needs no rename at all
-        # (imports are excluded from the targets), so it must not trip the guard.
-        src = textwrap.dedent(
-            """
-            import sys
-            if sys.version_info >= (3, 12):
-                from torch import empty_strided
-            else:
-                from torch import empty_permuted as empty_strided
-            def call(args):
-                return empty_strided
-            """
-        )
-        (renamed,) = namespace_module_names([src])
-        self.assertIn("def call_s0(args):", renamed)
-        self.assertIn("    from torch import empty_strided\n", renamed)
-        self.assertIn("    return empty_strided\n", renamed)
-
-    def test_namespace_module_names_raises_when_a_header_is_not_on_its_own_line(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        # A def name is located textually on ``node.lineno``; a continuation puts it on the
-        # next line, and renaming only the call sites would leave the definition behind.
-        src = "def \\\ncall(args):\n    return args\n"
-        with self.assertRaisesRegex(NotImplementedError, "is not on its own line"):
-            namespace_module_names([src])
-
-    def test_namespace_module_names_renames_a_decorated_def(self):
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            namespace_module_names,
-        )
-
-        # ``FunctionDef.lineno`` is the ``def`` line, not the decorator's.
-        src = textwrap.dedent(
-            """
-            def deco(f):
-                return f
-            @deco
-            def call(args):
-                return args
-            """
-        )
-        (renamed,) = namespace_module_names([src])
-        self.assertIn("@deco_s0\ndef call_s0(args):", renamed)
-        ns: dict[str, object] = {}
-        exec(renamed, ns)
-        self.assertEqual(ns["call_s0"]([1]), [1])
-
     def test_namespace_module_names_splices_by_utf8_byte_offset(self):
         from torch._functorch._aot_autograd.to_standalone_python import (
             namespace_module_names,
@@ -965,6 +832,63 @@ class TestAOTCompileToPython(TestCase):
         ns: dict[str, object] = {}
         exec(renamed, ns)
         self.assertEqual(ns["call_s0"]([2]), 2)
+
+    @parametrize("shape", sorted(_UNSUPPORTED_SHAPES))
+    def test_namespace_module_names_raises_on_an_unsupported_shape(self, shape):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        src, fragment = _UNSUPPORTED_SHAPES[shape]
+        with self.assertRaises(NotImplementedError) as caught:
+            namespace_module_names([src])
+        self.assertIn(fragment, str(caught.exception))
+
+    def test_namespace_module_names_accepts_the_shapes_codegen_emits(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # Lookalikes of the refused shapes that must NOT raise: a conditional import binds
+        # only aliases, which are never renamed; a comprehension is a scope of its own, so a
+        # class-body one over the target renames its binder and loads together; real
+        # graph_partition codegen puts a ``def call`` in ``class Runner`` beside a
+        # module-level ``call`` and never reads bare ``call`` in the class body; and a
+        # decorated def is renamed at its ``def`` line, not its decorator's.
+        accepted = {
+            "if flag:\n    from torch import empty_strided\nelse:\n"
+            "    from torch import empty_permuted as empty_strided\n"
+            "def call(a): return empty_strided\n": "def call_s0(a): return empty_strided",
+            "def call(a): return a\nclass R:\n"
+            "    fns = [call for call in ()]\n": "fns = [call_s0 for call_s0 in ()]",
+            "def call(a): return a\nclass R:\n    def call(self, a): return a\n"
+            "call = R().call\n": "    def call(self, a): return a",
+            "def deco(f): return f\n@deco\n"
+            "def call(a): return a\n": "@deco_s0\ndef call_s0(a): return a",
+        }
+        for src, expected in accepted.items():
+            with self.subTest(expected):
+                (renamed,) = namespace_module_names([src])
+                ast.parse(renamed)
+                self.assertIn(expected, renamed)
+
+    def test_namespace_module_names_splices_two_real_composed_modules(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # The shapes that finally matter are the ones Inductor really emits: no guard may
+        # fire on a composed module, and two slots of one must coexist in a single namespace
+        # and both still match eager.
+        m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
+        x = torch.randn(5, 4)
+        src, _cache = _compose(m, x)
+        first, second = namespace_module_names([src, src])
+        ns: dict[str, object] = {}
+        exec(first + "\n" + second, ns)
+        with torch.no_grad():
+            for slot in ("call_s0", "call_s1"):
+                self.assertEqual(ns[slot](_flat_inputs(m, x))[0], m(x))
 
 
 @instantiate_parametrized_tests
