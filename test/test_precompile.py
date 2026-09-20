@@ -617,9 +617,15 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "not runnable"):
             PrecompiledModule(lambda x: x)(1)
 
-    def test_precompile_error_result_defaults_to_none(self):
-        # Nothing ran before an ordinary refusal, so the error carries no result.
-        self.assertIsNone(PrecompileError("refused").result)
+    def test_precompile_error_result_defaults_to_sentinel(self):
+        # Nothing ran before an ordinary refusal, so the default is the sentinel, not
+        # None: a training step that ends in .backward() returns None for real.
+        from torch._precompile import _NO_RESULT
+
+        err = PrecompileError("refused")
+        self.assertIs(err.result, _NO_RESULT)
+        err.result = None
+        self.assertIsNone(err.result)
 
     def test_make_fx_capture_constructor(self):
         # A partial hides its bound arguments from the capture, so it is refused
@@ -631,7 +637,7 @@ class TestPrecompile(TestCase):
             return model(x)
 
         bound = functools.partial(step, torch.nn.Linear(2, 2))
-        table: dict = {}
+        table = {torch.ops.aten.add.Tensor: lambda *a, **k: None}
         tracer = MakeFxTracer(decompositions=table)
         with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
             _MakeFxCapture(
