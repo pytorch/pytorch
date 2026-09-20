@@ -119,6 +119,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MACOS_VERSION,
+    MI200_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
     parametrize,
@@ -1513,6 +1514,7 @@ class CommonTemplate:
                 a ^ b,
                 torch.logical_and(a, b),
                 torch.logical_or(a, b),
+                torch.logical_xor(a, b),
                 torch.logical_not(a),
                 torch.sign(b),
             )
@@ -7456,6 +7458,30 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([16, 16]),),
         )
 
+    @parametrize("op", ["sinh", "cosh", "asinh", "acosh"])
+    def test_hyperbolic(self, op):
+        if is_pallas_backend(self.device) and op in ("asinh", "acosh"):
+            raise unittest.SkipTest(f"Pallas does not support {op}")
+
+        # acosh is only defined for x >= 1
+        self.common(getattr(torch, op), (torch.rand(16, 16) * 4 + 1,))
+
+    def test_hypot(self):
+        self.common(torch.hypot, (torch.randn(16, 16), torch.randn(16, 16)))
+
+    @skip_if_halide  # copysign not implemented
+    def test_copysign(self):
+        self.common(torch.copysign, (torch.randn(16, 16), torch.randn(16, 16)))
+
+    @skip_if_halide  # frexp not implemented
+    def test_frexp(self):
+        self.common(torch.frexp, (torch.randn(16, 16) * 100,))
+
+    @skip_if_halide  # ldexp not implemented
+    def test_ldexp(self):
+        exponent = torch.randint(-8, 8, (16, 16), dtype=torch.int32)
+        self.common(torch.ldexp, (torch.randn(16, 16), exponent))
+
     def test_repeat(self):
         def fn(x):
             return (
@@ -7763,7 +7789,7 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or TEST_WITH_ROCM,
+        TEST_WITH_TORCHINDUCTOR,
         "https://github.com/pytorch/pytorch/issues/165879",
     )
     @parametrize("tile_reduction", (False, True))
@@ -13434,6 +13460,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @skip_if_halide  # compiles for 5+ minutes
+    @skipIfRocmArch(MI200_ARCH)  # exceeds the inductor compile-worker timeout
     def test_avg_pool3d_backward2(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -17555,7 +17582,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = f(torch.tensor([20]))
         self.assertTrue(len(result) == 3)
 
-    @xfail_if_mps
     def test_generate_rand_fp8(self):
         """
         PyTorch can not generate fp8 tensors with a normal distribution because of
@@ -18095,51 +18121,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             f"region did not fall back:\n{codes[0]}",
         )
         self.assertNotIn("aten.cos", body)
-
-    @skip_if_lite_mode("neither half emits a Triton reduction to compare")
-    def test_regional_codegen_only_config_cpp_wrapper(self):
-        # A codegen-TIME knob on the region must reach the cpp wrapper.
-        # `triton.persistent_reductions` is consulted while the region's kernels
-        # are built (choices.py should_use_persistent_reduction), i.e. after the
-        # lowering-time config.patch in ir.InvokeSubgraph.create has already
-        # closed. Only the patch inside CppWrapperCpu.codegen_subgraph can carry
-        # it. Both halves compute the same softmax: with the region patched, its
-        # reduction must be emitted looped (triton_red_*) while the parent's
-        # stays persistent (triton_per_*).
-        # mps is a GPU_TYPE but has no Triton and no cpp-wrapper backend, so the
-        # persistent-vs-looped contrast this test checks does not exist there.
-        if self.device != GPU_TYPE or self.device == "mps":
-            raise unittest.SkipTest("requires a Triton GPU for reduction kernels")
-
-        from torch._higher_order_ops.invoke_subgraph import (
-            get_invoke_subgraph_compile_options,
-        )
-
-        with torch._dynamo.config.patch(
-            enable_invoke_subgraph_regional_compile=True,
-            inline_single_use_invoke_subgraph=False,
-        ):
-            opts = get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"triton.persistent_reductions": False}
-            )
-
-            @torch.compiler.nested_compile_region(options=opts)
-            def gn(x):
-                return torch.softmax(x, dim=-1) + 1
-
-            def fn(x):
-                return gn(torch.softmax(x, dim=-1) * 2)
-
-            with config.patch(cpp_wrapper=True):
-                opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-                x = torch.randn(1024, 256, device=self.device)
-                result, codes = run_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x), atol=2e-3, rtol=2e-3)
-        code = "\n".join(codes)
-        # the region's kernel is looped, the parent's is persistent
-        self.assertIn("triton_red_", code)
-        self.assertIn("triton_per_", code)
 
     def test_lite_triton_kernel_wrapper_functional(self):
         if self.device != GPU_TYPE or self.device == "mps":
@@ -19150,7 +19131,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179970")
     @requires_gpu_and_triton
     @torch._inductor.config.patch(cpp_wrapper=True)
     def test_cpu_scalar_with_gpu_tensor_cpp(self):

@@ -105,6 +105,7 @@ from torch._inductor.utils import (
     ALIGN_BYTES,
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
+    fp32_matmul_precision_key,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -467,7 +468,7 @@ class PersistentCache(CacheBase):
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
-        precision = torch.get_float32_matmul_precision()
+        precision = fp32_matmul_precision_key()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
@@ -1191,9 +1192,8 @@ class CacheabilityValidator:
     def _check_nested_region_inductor_config_patches(self) -> None:
         # Nested region config patches are hashed by pickling their raw value
         # (see _collect_nested_region_inductor_config_patches_for_hash). Unlike
-        # top-level custom passes there is no uuid() fallback, so any callable or
-        # custom-pass value is conservatively treated as uncacheable, including a
-        # CustomGraphPass that provides a stable uuid().
+        # top-level custom passes there is no uuid() fallback, so any callable is
+        # conservatively treated as uncacheable.
         for _, config_patches in _collect_nested_region_inductor_config_patches(
             self.gm
         ):
@@ -1204,10 +1204,6 @@ class CacheabilityValidator:
                 if any(callable(v) for v in values):
                     self.bypass(
                         f"Uncacheable nested region config '{key}': callable value"
-                    )
-                if key in _NESTED_REGION_UNCACHEABLE_CONFIG_KEYS and value:
-                    self.bypass(
-                        f"Uncacheable nested region config '{key}': custom pass"
                     )
 
     def _check_frozen_params(self) -> None:
@@ -1330,20 +1326,6 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
 @dataclasses.dataclass
 class HashableOpaqueValue:
     ordinal: int
-
-
-_NESTED_REGION_UNCACHEABLE_CONFIG_KEYS = OrderedSet(
-    [
-        "custom_partitioner_fn",
-        "joint_custom_post_pass",
-        "joint_custom_pre_pass",
-        "post_grad_custom_post_pass",
-        "post_grad_custom_pre_pass",
-        "pre_grad_custom_pass",
-        "_post_fusion_custom_pass",
-        "_pre_fusion_custom_pass",
-    ]
-)
 
 
 def _collect_nested_region_inductor_config_patches(
