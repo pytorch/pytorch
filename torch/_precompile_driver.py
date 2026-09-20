@@ -406,10 +406,10 @@ def _build_multigraph_forward():
     functions, bound the way install binds them. A continuation is reached the
     way Dynamo emits it -- the entry bytecode does LOAD_GLOBAL on the resume
     name -- so binding the resume dispatcher under that name in the module is
-    all the wiring the graph-break path needs. A load refused partway through
-    leaves the names it had already seeded in that module; a load that would
-    rebind a resume name held there by anything but a compile of the same
-    continuation (another standalone artifact, a user binding) is refused.
+    all the wiring the graph-break path needs. A resume name held there by
+    anything but this artifact (another standalone artifact, a live compile, a
+    user binding) refuses the load before anything is seeded; a load refused
+    for another reason partway through leaves the names it had already seeded.
 
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
@@ -666,6 +666,29 @@ def _build_multigraph_forward():
     entry = None
     if not any(_frame["is_entry"] for _frame in frames):
         raise _PrecompileError("precompile: artifact has no entry frame")
+    # Checked over every frame before anything is seeded, so a refusal leaves
+    # the module as it was: a resume name is rebound only over this artifact's
+    # own dispatcher (a rebuild), never over another artifact's, a live
+    # compile's or a user's binding, whose LOAD_GLOBAL it would repoint.
+    opened = set()
+    for _frame in frames:
+        module = _frame["python_module"]
+        if _frame["variants"]:
+            opened.add(module)
+        for _name in _frame["resume_names"] if module in opened else ():
+            existing = vars(_import(module)).get(_name)
+            other = getattr(existing, "__precompile_artifact__", None)
+            if existing is not None and other != tag:
+                what = f"precompile: {_name!r} in module {module!r}"
+                raise _PrecompileError(
+                    f"{what} is bound by artifact {other} and this artifact ({tag}) mints "
+                    f"the same resume name: only one standalone artifact per captured "
+                    f"module can serve continuations in a process."
+                    if other
+                    else f"{what} is a resume name this artifact ({tag}) mints and this "
+                    f"process already holds it (a live compile of the same function, or a "
+                    f"user binding); load the artifact in a fresh process."
+                )
     for _frame in frames:
         dispatcher = _make_dispatcher(_frame)
         if _frame["is_entry"]:
@@ -681,23 +704,6 @@ def _build_multigraph_forward():
         # has no frame left to name it, so it binds nothing.
         scope = scopes.get(_frame["python_module"])
         if scope is not None:
-            # Permit an unbound name, this artifact's own dispatcher and a live
-            # compile of the same continuation (a function over the record's
-            # code, or Dynamo's closure factory holding it); refuse the rest.
-            code = SerializedCode.to_code_object(_frame["code"])
             for _name in _frame["resume_names"]:
-                existing = scope.get(_name)
-                other = getattr(existing, "__precompile_artifact__", None)
-                cells = getattr(existing, "__closure__", None) or ()
-                held = [getattr(existing, "__code__", None)]
-                held += [c.cell_contents for c in cells if c != types.CellType()]
-                by = f"artifact {other}" if other else "a live compile or user binding"
-                if not (existing is None or other == tag or code in held):
-                    raise _PrecompileError(
-                        f"precompile: {_name!r} in module {scope['__name__']!r} is bound by "
-                        f"{by} and this artifact ({tag}) mints the same resume name: only "
-                        f"one standalone artifact per captured module can serve continuations "
-                        f"in a process. Serve them from separate processes."
-                    )
                 _seed(scope, _name, dispatcher)
     return entry
