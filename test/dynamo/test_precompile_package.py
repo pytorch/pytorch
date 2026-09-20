@@ -1941,13 +1941,40 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             torch._dynamo.reset()
             observed.clear()
             session = self._session(
-                _SessionStep(), training=training, guard_filter_fn=spy
+                _SessionStep(),
+                backend="inductor",
+                training=training,
+                guard_filter_fn=spy,
             )
             with session as cap:
                 cap(torch.randn(3, 4))
             self.assertTrue(observed)
             self.assertEqual(set(observed), {training})
+            # The outcome, not just the flag: a lazy backward leaves the bundle
+            # unwritten until the first .backward() call, so a capture that
+            # never makes one files no artifact at all.
+            self.assertEqual(bool(session._backend_artifacts), training)
         self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
+
+    def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        def reads_one_symbolic_size(x):
+            x.size(0)
+            return None
+
+        # Dynamic shapes put a sym_size_int node in the graph, so the frame is
+        # compiled; pruning then empties it and output_graph substitutes
+        # noop_graph_call, filing nothing under the id the bytecode names.
+        session = self._session(reads_one_symbolic_size, dynamic=True)
+        with session as cap:
+            self.assertIsNone(cap(torch.randn(3, 4)))
+        (backend_id,) = session._package.cache_entry().backend_ids
+        self.assertIs(session._package.cached_backends[backend_id], noop_graph_call)
+        artifact = session._backend_artifacts[backend_id]
+        self.assertIsInstance(artifact, EagerCacheArtifact)
+        self.assertIs(artifact.content, noop_graph_call)
 
     def test_capture_config_restores_every_patch_when_the_body_unwinds(self):
         import torch._functorch.config as functorch_config
@@ -2079,15 +2106,50 @@ def _session_branches(x, flag):
     return x * 2 if flag else x + 1
 
 
+def _hook_double(x):
+    return x * 2
+
+
+def _hook_increment(x):
+    return x + 1
+
+
+# Rebound by the tests through _rebind_hook, never in place.
+_SESSION_HOOK = _hook_double
+
+
+def _session_calls_hook(x):
+    return _SESSION_HOOK(x)
+
+
+# The identity guard the default filter drops for _session_calls_hook.
+_HOOK_SLOT = ("CLOSURE_MATCH", "G['_SESSION_HOOK']")
+
+_PINNED_PROMPT = "p" * 80
+_PINNED_PATH = "/home/someone/secret_weights.pt"
+
+
+class _SessionPinsValues(torch.nn.Module):
+    """Every value-embedding guard type one capture can reach."""
+
+    def __init__(self):
+        super().__init__()
+        self.n = 3
+        self.on = True
+        self.prompt = _PINNED_PROMPT
+        self.path = _PINNED_PATH
+
+    def forward(self, x):
+        return x * self.n if self.on and self.prompt and self.path else x
+
+
 class _ReprRaises:
     def __repr__(self):
         raise RuntimeError("no repr for you")
 
 
-class _ReprRaisesStr(str):
-    """A scalar _plain_value does render, whose repr raises anyway."""
-
-    __slots__ = ()
+class _ReprRaisesNumber(float):
+    """A number _plain_value does render, whose repr raises anyway."""
 
     def __repr__(self):
         raise RuntimeError("no repr for you")
@@ -2130,6 +2192,12 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         with session as cap:
             cap(torch.randn(2, 4))
         return session
+
+    def _rebind_hook(self, fn):
+        """Rebind the global _session_calls_hook reads, restored after the test."""
+        previous = globals()["_SESSION_HOOK"]
+        self.addCleanup(globals().__setitem__, "_SESSION_HOOK", previous)
+        globals()["_SESSION_HOOK"] = fn
 
     def _report(self, session):
         with tempfile.TemporaryDirectory() as d:
@@ -2190,6 +2258,7 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
                 text = f.read()
             self.assertIn("frame forward", text)
             self.assertIn("invariant", text)
+            self.assertIn("# NOTE: some frames were compiled once", text)
             os.unlink(path)
             with self.assertRaisesRegex(RuntimeError, "boom"):
                 with self._session(model, invariants=path) as cap:
@@ -2256,10 +2325,10 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         # PrecompileSummary.dropped_guard_code.
         session = self._session(_SessionReadsAttr())
         slot = ("EQUALS_MATCH", "n")
-        session._record_dropped_code(slot, ["L['n'] == 3"])
-        session._record_dropped_code(slot, ["L['n'] == 4"])
+        session._record_dropped_code(slot, ["L['n'] == 3"], "3")
+        session._record_dropped_code(slot, ["L['n'] == 4"], "4")
         self.assertEqual(session._dropped_guard_code[slot], "L['n'] == 3")
-        session._record_dropped_code(("TENSOR_MATCH", "x"), [])
+        session._record_dropped_code(("TENSOR_MATCH", "x"), [], "")
         self.assertNotIn(("TENSOR_MATCH", "x"), session._dropped_guard_code)
 
     def test_a_guarded_value_renders_as_its_shape_or_its_type_only(self):
@@ -2273,16 +2342,19 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertEqual(rendered(3), "3")
         self.assertEqual(rendered(True), "True")
         self.assertEqual(rendered(None), "None")
-        self.assertEqual(rendered("small"), "'small'")
-        # A long string is the data itself, and any other object renders as its
-        # type: neither a prompt nor a tensor's elements reach the report.
+        # A string is the data itself whatever its length -- a prompt, a path --
+        # and any other object renders as its type, so neither those nor a
+        # tensor's elements reach the report.
+        self.assertEqual(rendered("small"), "<str>")
         self.assertEqual(rendered("x" * 100), "<str>")
+        self.assertEqual(rendered(b"raw"), "<bytes>")
+        self.assertEqual(rendered(10**100), "<int>")
         self.assertEqual(rendered(_ReprRaises()), "<_ReprRaises>")
         self.assertEqual(rendered(torch.nn.ReLU()), "<ReLU>")
         self.assertEqual(rendered(3, has_value=False), "")
         # Reading the value is fallible, and a failure here would otherwise
         # propagate out of the guard filter and kill the compile.
-        self.assertEqual(rendered(_ReprRaisesStr("boom")), "<unavailable>")
+        self.assertEqual(rendered(_ReprRaisesNumber(1.5)), "<unavailable>")
 
     @parametrize(
         "raw,masked",
@@ -2301,6 +2373,9 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
             ),
             # Narrower than an address: a real name, left alone.
             ("G['_12345_c0'].weight", "G['_12345_c0'].weight"),
+            # A hex literal in a check is not an address; masking it would make
+            # two different values read as one.
+            ("L['self'].mask == 0xdeadbeef", "L['self'].mask == 0xdeadbeef"),
             ("self.eps", "self.eps"),
         ],
     )
@@ -2312,28 +2387,21 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertEqual(_normalize(masked), masked)
 
     def test_the_rendered_report_is_stable_and_names_every_class(self):
-        x2 = _fact("TENSOR_MATCH", "x", value="torch.float32 (2, 4) cpu")
-        x3 = _fact("TENSOR_MATCH", "x", value="torch.float32 (3, 4) cpu")
-        scale = _fact("EQUALS_MATCH", "self.scale", ("L['self'].scale == 2",), "2")
-        act = _fact(
-            "MODULE_MATCH",
-            "self.act",
-            ("___check_obj_id(L['self'].act, <id>)",),
-            "<ReLU>",
-            enforced=False,
-        )
-        ambient = _fact("GLOBAL_STATE", "", ("___check_global_state()",))
-        session = self._session(_SessionReadsAttr())
-        forward = ("forward", "/pkg/m.py", 7, 1)
-        session._guard_sets = {
-            ("resume_in_forward", "/pkg/m.py", 19, 2): [frozenset({scale})],
-            forward: [frozenset({x2, scale, act}), frozenset({x3, scale, act})],
-        }
-        session._undetermined = {forward: {ambient}}
+        # Driven by a real capture, so the golden pins the recording path too --
+        # the filter's verdicts, the rendered checks and values, the frame key
+        # and both orderings -- rather than write_invariants alone. Deterministic
+        # on eager and CPU with fixed shapes; the only thing masked is the line
+        # the fixture happens to sit on, which moves with every edit to this file.
+        session = self._session(_session_calls_hook)
+        with session as cap:
+            cap(torch.ones(2, 4))
+            self._rebind_hook(_hook_increment)
+            cap(torch.ones(3, 4))
+        report = re.sub(r"(\.py):\d+\)", r"\1:<line>)", self._report(session))
         self.assertExpectedInline(
-            self._report(session),
+            report,
             """\
-# precompile invariants for _SessionReadsAttr
+# precompile invariants for _session_calls_hook
 #
 # Conditions that held in EVERY compiled variant of a frame. A call
 # violating one cannot be served by any graph in this artifact, so
@@ -2350,20 +2418,134 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
 #            NOTHING checks at serving time. See
 #            PrecompileSummary.dropped_guards.
 #
-# 2 frame(s), 3 compilation(s)
-# NOTE: some frames were compiled once, so their invariants are just every guard. Exercise more variants for a real diff.
+# 1 frame(s), 2 compilation(s)
 
-frame forward (m.py:7)  2 variant(s), 2 invariant, 2 varying, 1 undetermined
-  invariant [dropped ] ___check_obj_id(L['self'].act, <id>) <ReLU> on self.act
-  invariant [enforced] L['self'].scale == 2 2 on self.scale
-  varies    [enforced] <TENSOR_MATCH> torch.float32 (2, 4) cpu on x
-  varies    [enforced] <TENSOR_MATCH> torch.float32 (3, 4) cpu on x
-  unknown   [enforced] ___check_global_state()
-
-frame resume_in_forward (m.py:19)  1 variant(s), 1 invariant, 0 varying, 0 undetermined
-  invariant [enforced] L['self'].scale == 2 2 on self.scale
+frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 invariant, 3 varying, 3 undetermined
+  invariant [enforced] torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None
+  invariant [enforced] utils_device.CURRENT_DEVICE == None
+  invariant [enforced] <DETERMINISTIC_ALGORITHMS>
+  invariant [enforced] <GRAD_MODE>
+  varies    [dropped ] <CLOSURE_MATCH> <function> on G['_SESSION_HOOK']
+  varies    [enforced] hasattr(L['x'], '_dynamo_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_static_indices') == False torch.float32 (2, 4) cpu on x
+  varies    [enforced] hasattr(L['x'], '_dynamo_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_static_indices') == False torch.float32 (3, 4) cpu on x
+  unknown   [enforced] <GLOBAL_STATE>
+  unknown   [enforced] <SHAPE_ENV>
+  unknown   [enforced] <TORCH_FUNCTION_STATE>
 """,
         )
+
+    def test_a_check_renders_its_form_not_the_value_it_embeds(self):
+        # A guard that compares against a value renders it with repr() into its
+        # own check, and write_invariants writes that into a file it tells the
+        # user to commit, so the check has to report its FORM.
+        session = self._session(_SessionPinsValues())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        (frame,) = session.invariants()
+        rendered = {
+            (f.guard_type, f.source): precompile_package._render_fact(f)
+            for f in frame.invariant + frame.varying + frame.undetermined
+        }
+        for slot, line in [
+            # A number or a bool is the form: it is what makes the report worth
+            # reading, and it is not the user's data.
+            (("EQUALS_MATCH", "self.n"), "[enforced] L['self'].n == 3 3 on self.n"),
+            (
+                ("CONSTANT_MATCH", "self.on"),
+                "[enforced] L['self'].on == True True on self.on",
+            ),
+            (("DEFAULT_DEVICE", ""), "[enforced] utils_device.CURRENT_DEVICE == None"),
+            # A string is the data itself: the operator and its target stay, the
+            # literal does not, at any length.
+            (
+                ("CONSTANT_MATCH", "self.prompt"),
+                "[enforced] L['self'].prompt == <str> <str> on self.prompt",
+            ),
+            (
+                ("CONSTANT_MATCH", "self.path"),
+                "[enforced] L['self'].path == <str> <str> on self.path",
+            ),
+        ]:
+            self.assertEqual(rendered[slot], line)
+        report = self._report(session)
+        self.assertNotIn(_PINNED_PROMPT, report)
+        self.assertNotIn(_PINNED_PATH, report)
+
+    def test_a_dropped_slot_whose_value_changed_between_variants_is_risky(self):
+        # Through the DEFAULT filter, with no custom one to make the drop risky
+        # by construction. The filter drops the identity guard from the live
+        # guards as well, so the rebind cannot recompile on its own: the shape is
+        # what produces the second variant, and the rebind is what the artifact
+        # will not notice.
+        session = self._session(_session_calls_hook)
+        with session as cap:
+            cap(torch.ones(2, 4))
+            self._rebind_hook(_hook_increment)
+            cap(torch.ones(3, 4))
+        summary = session.summary()
+        self.assertIn(_HOOK_SLOT, summary.dropped_guards)
+        self.assertIn(_HOOK_SLOT, summary.risky_dropped_guards)
+        # And the report agrees: both variants render the slot identically, since
+        # the id its check embeds is masked, but its value did not hold.
+        (frame,) = session.invariants()
+        self.assertIn(_HOOK_SLOT, {(f.guard_type, f.source) for f in frame.varying})
+        self.assertNotIn(
+            _HOOK_SLOT, {(f.guard_type, f.source) for f in frame.invariant}
+        )
+
+    def test_a_dropped_slot_whose_value_held_is_not_risky(self):
+        session = self._session(_session_calls_hook)
+        with session as cap:
+            cap(torch.ones(2, 4))
+            cap(torch.ones(3, 4))
+        summary = session.summary()
+        self.assertIn(_HOOK_SLOT, summary.dropped_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        (frame,) = session.invariants()
+        self.assertIn(_HOOK_SLOT, {(f.guard_type, f.source) for f in frame.invariant})
+
+    def test_a_value_fingerprint_tells_scalars_apart_without_rendering_them(self):
+        # The comparison the coarse rendering cannot make: two different scalars
+        # both render themselves here, but a string renders as <str>, so only the
+        # fingerprint can say the slot varied.
+        def print_of(value, has_value=True):
+            entry = _entry(LocalSource("x"), value, "TENSOR_MATCH")
+            return precompile_package._value_fingerprint(
+                dataclasses.replace(entry, has_value=has_value)
+            )
+
+        self.assertEqual(print_of(3), print_of(3))
+        self.assertNotEqual(print_of(3), print_of(4))
+        self.assertNotEqual(print_of("a" * 80), print_of("b" * 80))
+        # A tensor fingerprints on what a guard compares it by, so differing
+        # elements are not variation but a differing shape is.
+        self.assertEqual(print_of(torch.ones(2, 4)), print_of(torch.rand(2, 4)))
+        self.assertNotEqual(print_of(torch.ones(2, 4)), print_of(torch.ones(3, 4)))
+        self.assertEqual(print_of(3, has_value=False), 0)
+
+    def test_a_guard_the_config_turns_into_a_no_op_is_not_enforced(self):
+        # EMPTY_NN_MODULE_HOOKS_DICT passes the serializer pre-check, so the
+        # filter keeps it, but under skip_nnmodule_hook_guards GuardBuilder emits
+        # no check for it and GlobalStateGuard holds no hook state: nothing
+        # rechecks it at load time, and a report of unchecked preconditions must
+        # not print it as enforced. It is not risky -- no filter decision dropped it.
+        self.assertTrue(torch._dynamo.config.skip_nnmodule_hook_guards)
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        summary = session.summary()
+        self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
+        self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
+        self.assertEqual(summary.risky_dropped_guards, ())
+
+    @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False)
+    def test_a_hook_dict_guard_the_config_keeps_is_enforced(self):
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        summary = session.summary()
+        self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
+        self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
 
     def test_the_report_is_written_as_utf8_whatever_the_locale(self):
         session = self._session(_SessionReadsAttr())
