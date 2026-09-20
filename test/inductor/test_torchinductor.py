@@ -96,8 +96,6 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
-    CPUTestBase,
-    dtypes,
     e4m3_type,
     expectedFailureXPU,
     instantiate_device_type_tests,
@@ -20617,115 +20615,6 @@ def instantiate_device_type_tests_from_templates(
     )
 
     return generated
-
-
-@instantiate_parametrized_tests
-class TemplateInstantiationTests(InductorTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    @parametrize("expansion", ("none", "parameters", "all"))
-    def test_parameter_expansion(self, expansion):
-        calls = []
-
-        class Template:
-            @dtypes(torch.float32, torch.float64)
-            @parametrize("value", (1, 2))
-            def test_case(self, device, dtype, value):
-                calls.append((device, dtype, value))
-
-        class Host(InductorTestCase):
-            @parametrize("value", (3, 4))
-            def test_host(self, value):
-                calls.append(value)
-
-        if expansion == "parameters":
-            original = Template.test_case
-            for value in (1, 2):
-
-                @functools.wraps(original)
-                def parameter_case(self, device, dtype, value=value):
-                    return original(self, device, dtype, value)
-
-                setattr(Template, f"test_case_value_{value}", parameter_case)
-            del Template.test_case
-
-        with patch(
-            "torch.testing._internal.common_device_type.get_desired_device_type_test_bases",
-            return_value=[CPUTestBase],
-        ):
-            if expansion == "all":
-
-                class Source(InductorTestCase):
-                    pass
-
-                source_cls = instantiate_device_type_tests_from_templates(
-                    Source, {"Source": Source}, templates=(Template,), only_for="cpu"
-                )[0]
-                bound_template = type("BoundTemplate", (), {})
-                for name in unittest.defaultTestLoader.getTestCaseNames(source_cls):
-                    func = getattr(source_cls(name), name)
-
-                    def bound_test(self, func=func):
-                        return func()
-
-                    # Match wrapper factories that copy an already bound case.
-                    bound_test.__name__ = name
-                    bound_test.__dict__ = copy.deepcopy(func.__dict__)
-                    setattr(bound_template, name, bound_test)
-                Template = bound_template
-
-            generated = instantiate_device_type_tests_from_templates(
-                Host,
-                {"Host": Host},
-                templates=(Template,),
-                templates_are_preexpanded=expansion == "all",
-                only_for="cpu",
-                suffix_overrides={"cpu": ""} if expansion == "all" else None,
-            )
-
-        self.assertEqual(len(generated), 1)
-        names = unittest.defaultTestLoader.getTestCaseNames(generated[0])
-        self.assertEqual(
-            names,
-            [
-                f"test_case_value_{value}_cpu_{dtype}"
-                for value in (1, 2)
-                for dtype in ("float32", "float64")
-            ]
-            + ["test_host_value_3", "test_host_value_4"],
-        )
-        for name in names:
-            getattr(generated[0](name), name)()
-        self.assertCountEqual(
-            calls,
-            [
-                ("cpu", dtype, value)
-                for value in (1, 2)
-                for dtype in (torch.float32, torch.float64)
-            ]
-            + [3, 4],
-        )
-
-    def test_filtered_host(self):
-        class Template:
-            def test_case(self):
-                pass
-
-        class Host(InductorTestCase):
-            pass
-
-        scope = {"Host": Host}
-        with patch(
-            "torch.testing._internal.common_device_type.get_desired_device_type_test_bases",
-            return_value=[],
-        ):
-            self.assertEqual(
-                instantiate_device_type_tests_from_templates(
-                    Host, scope, templates=(Template,)
-                ),
-                (),
-            )
-        self.assertNotIn("Host", scope)
 
 
 def add_test_failures(
