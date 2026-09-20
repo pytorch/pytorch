@@ -1362,6 +1362,25 @@ class TestInductorOpInfo(TestCase):
         )
         self.assertEqual(actual.isnan(), expected.isnan())
 
+    @device_dtypes(torch.float16, torch.bfloat16)
+    @parametrize("load_upcast_to_fp32", (False, True))
+    @unittest.skipUnless(NEXTAFTER_IN_RANGE, "nextafter is outside this OpInfo shard")
+    @skipCPUIf(True, "triton.codegen_upcast_to_fp32 only affects Triton backends")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+    @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
+    def test_nextafter_load_upcast_to_fp32(self, device, dtype, load_upcast_to_fp32):
+        int_dtype = NEXTAFTER_DTYPE_CONFIG[dtype][0]
+        x = torch.tensor([0.0, 1.0], device=device, dtype=dtype)
+        y = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
+        expected = torch.nextafter(x, y)
+
+        with torch._inductor.config.patch(
+            "triton.codegen_upcast_to_fp32", load_upcast_to_fp32
+        ):
+            actual = torch.compile(torch.nextafter, fullgraph=True)(x, y)
+
+        self.assertEqual(actual.view(int_dtype), expected.view(int_dtype))
+
     @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipUnless(NEXTAFTER_IN_RANGE, "nextafter is outside this OpInfo shard")
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
