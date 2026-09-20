@@ -1233,6 +1233,76 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         for name in ("_all_weights", "_flat_weights_names", "_flat_weights"):
             self.assertNotIn(id(lstm.__dict__[name]), pickler.missing_values, name)
 
+    def test_fake_tensor_reduces_from_the_real_tensors_recorded_dispatch_keys(self):
+        # A guarded FakeTensor stands for a real tensor: the converter may have
+        # recorded that tensor's dispatch keys, whereas _dispatch_keys(fake)
+        # reports the Python keys of the fake itself, and empty_like(fake)
+        # returns another fake (mode active or not) that drags the mode along.
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        real = torch.randn(2)
+        mode = FakeTensorMode()
+        real_keys = torch._C._dispatch_keys(real).raw_repr()
+        # from_meta_and_device is how a loaded artifact's tensors are rebuilt
+        # (from_real_tensor records keys only for an mkldnn source).
+        with_keys = mode.fake_tensor_converter.from_meta_and_device(
+            mode,
+            torch.empty_like(real, device="meta"),
+            real.device,
+            torch.Tensor,
+            torch._C._dispatch_keys(real),
+        )
+        without_keys = mode.from_tensor(real)
+        self.assertIsNone(without_keys.dispatch_keys)
+        for fake in (with_keys, without_keys):
+            buf = io.BytesIO()
+            pickler = GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf)
+            # The meta template is a plain tensor, not another fake carrying
+            # the mode (without no_dispatch the dump still succeeds, with the
+            # mode and its converters pickled along).
+            _, args = pickler.reducer_override(fake)
+            self.assertIs(type(args[0]), torch.Tensor)
+            pickler.dump({"t": fake})
+            self.assertNotIn(b"FakeTensorMode", buf.getvalue())
+            out = load_guards_state(buf.getvalue())["t"]
+            self.assertIsInstance(out, FakeTensor)
+            self.assertEqual(out.shape, real.shape)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(with_keys): with_keys}, {}, {}, {}, buf).dump(
+            {"t": with_keys}
+        )
+        self.assertEqual(
+            load_guards_state(buf.getvalue())["t"].dispatch_keys.raw_repr(), real_keys
+        )
+
+    def test_retained_grad_non_leaf_survives_pickle(self):
+        # A plain non-leaf's .grad is None (and reading it warns), but a
+        # RETAINED-grad non-leaf -- which torch.optim explicitly permits as a
+        # param -- has a real .grad that a guard can chain through; safe_grad
+        # reads it without the warning and must not drop it.
+        base = torch.randn(4, requires_grad=True)
+        x = base * 1
+        x.retain_grad()
+        x.sum().backward()
+        grad = x.grad
+        self.assertIsNotNone(grad)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x, id(grad): grad}, {}, {}, {}, buf).dump(x)
+        out = load_guards_state(buf.getvalue())
+        self.assertIsNotNone(out.grad)
+        self.assertEqual(out.grad.shape, grad.shape)
+
+    def test_an_unguarded_grad_loads_as_none(self):
+        # The .grad of a guarded leaf is a tensor the guard tree may not reach;
+        # it is pruned to the sentinel, and assigning that to .grad raises.
+        x = torch.randn(4, requires_grad=True)
+        x.sum().backward()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump(x)
+        out = load_guards_state(buf.getvalue())
+        self.assertIsNone(out.grad)
+        self.assertEqual(out.shape, x.shape)
+
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
         # torch.float32 registered the one dtype object as missing, and every
