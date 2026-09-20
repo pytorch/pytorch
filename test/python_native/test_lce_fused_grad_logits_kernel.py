@@ -29,8 +29,9 @@ def _reference(logits, row_scale, target, out_dtype):
     g = e * (row_scale / row_sum).unsqueeze(1)
     rows = torch.arange(logits.shape[0], device=logits.device)
     g[rows, target] -= row_scale
-    # Both statistics carry the row max, matching the kernel: their difference
-    # is the loss, and unshifted terms lose it to rounding at a large offset.
+    # Both statistics are shifted by the row max, matching the kernel: their
+    # difference is the loss, and the unshifted pair loses it to rounding at a
+    # large offset.
     return (
         g.to(out_dtype),
         row_sum.log(),
@@ -137,10 +138,19 @@ class TestFusedGradLogitsKernel(TestCase):
     def test_aliased_g_shares_the_logits_storage(self, dtype, num_rows, V):
         """`g` written into the logits' own bytes, which is what makes a chunk
         cost one buffer instead of two. `g[n, j]` occupies `z[n, j // 2]`, so
-        the kernel must order its writes against its reads; a stale read shows
-        up as a wrong value here. An element left unwritten would hold
-        reinterpreted fp32 bytes, so matching the reference everywhere also
-        proves full coverage -- the aliased buffer is its own sentinel.
+        the kernel must order its writes against its reads. An element left
+        unwritten would hold reinterpreted fp32 bytes, so matching the
+        reference everywhere also proves full coverage -- the aliased buffer is
+        its own sentinel.
+
+        The ordering, though, is checked only probabilistically: a missing
+        barrier is a data race, and this sees a symptom rather than the bug.
+        Removing the barrier fails 2-3 of these ten cases, varying run to run,
+        and only ever the ones whose `V` runs past a single staging group --
+        4097 and 32000 at the default knobs. The small-`V` cases pass a
+        barrier-less kernel, so they are not what guards it. A deterministic
+        check would need `compute-sanitizer --tool racecheck`, too slow to keep
+        in this suite.
 
         The kernel takes `g`'s layout from the caller and orders its writes
         either way, so this and the separate-buffer tests above exercise one
@@ -157,6 +167,34 @@ class TestFusedGradLogitsKernel(TestCase):
         # The target logit is read before any write could occupy its bytes,
         # which the loss term would expose: it is the only place that logit
         # reaches an output.
+        self.assertEqual(
+            term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
+        )
+
+    @parametrize("num_rows, V", [(4, 4097), (8, 12289)])
+    def test_aliased_g_at_the_same_width_as_the_logits(self, num_rows, V):
+        """The fp16 production layout: an fp16 buffer aliased by an fp16 `g`,
+        so `g[n, j]` lands exactly on `z[n, j]` rather than halfway back.
+
+        The aliased test above is always 2:1, because `_inputs` builds an fp32
+        buffer, so `(fp16, fp16)` is a compile key nothing else reaches and the
+        layout production uses at fp16 is exercised nowhere.
+
+        This is NOT the write-ordering test. At 1:1 the byte mapping is the
+        identity, so a thread overwrites only what it read itself and the
+        barrier is not load-bearing -- removing it leaves these cases passing
+        while some of the 2:1 ones fail. What this pins is that the 1:1 key
+        compiles and computes the right values, across several staging
+        groups."""
+        logits, row_scale, target = _inputs(num_rows, V, logits_dtype=torch.float16)
+        source = logits.clone()
+        _, term = _outputs(num_rows, V, torch.float16)
+        g = logits.view(torch.float16).narrow(1, 0, V)
+        self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target)
+        want_g, want_log_row_sum, want_shifted = _reference(
+            source, row_scale, target, torch.float16
+        )
+        self.assertEqual(g, want_g)
         self.assertEqual(
             term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
         )
@@ -200,14 +238,17 @@ class TestFusedGradLogitsKernel(TestCase):
         same way -- so its one load-bearing job is keeping `exp` in range.
         `test_large_magnitudes_do_not_overflow` exercises that with a uniformly
         large row, where every lane carries a usable maximum. Here it sits
-        alone in the last thread's column, so the range depends on a single
-        partial surviving the cross-warp combine."""
+        alone in the last thread's column, so the range depends on one partial
+        surviving both reduction stages."""
         num_rows, V = 4, 4096
         logits = torch.zeros((num_rows, V), device="cuda", dtype=torch.float32)
-        # Column 511 is the last thread of the default 512-wide block, so its
-        # partial reaches the row max only through the cross-warp combine.
+        # The last column of the block's first tile: lane 31 of the last warp.
+        # `block_reduce` publishes only from lane 0, so this value has to cross
+        # the warp's own butterfly before it reaches the cross-warp slot, and
+        # losing it at either stage takes the row out of range --
         # exp(120) is inf in fp32, exp(0) is not.
-        logits[:, 511] = 120.0
+        high_col = self.kernel._DEFAULT_THREADS_PER_BLOCK - 1
+        logits[:, high_col] = 120.0
         _, row_scale, target = _inputs(num_rows, V)
         g, term = self._run(logits, row_scale, target, torch.float32)
         self.assertTrue(torch.isfinite(g).all())
@@ -337,9 +378,9 @@ class TestFusedGradLogitsKernel(TestCase):
         "meta",
         [
             {},
-            {"threads_per_block": 128},
+            {"threads_per_block": 128, "tiles_per_stage": 4},
             {"tiles_per_stage": 1},
-            {"threads_per_block": 1024, "tiles_per_stage": 4},
+            {"threads_per_block": 1024, "tiles_per_stage": 8},
         ],
     )
     def test_shape_knobs_do_not_change_the_result(self, meta):
@@ -365,7 +406,10 @@ class TestFusedGradLogitsKernel(TestCase):
         "meta, message",
         [
             ({"threads_per_block": 100}, "multiple of 32"),
-            ({"threads_per_block": 2048}, "multiple of 32"),
+            # A multiple of 32 on both sides of the range, so each one can only
+            # be reported by the bound it crosses.
+            ({"threads_per_block": 2048}, r"in \[32, 1024\]"),
+            ({"threads_per_block": 0}, r"in \[32, 1024\]"),
             ({"tiles_per_stage": 0}, "at least 1"),
             ({"tiles_pre_stage": 4}, "unknown meta parameters"),
         ],
