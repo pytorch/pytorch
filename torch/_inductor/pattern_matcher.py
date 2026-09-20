@@ -68,7 +68,11 @@ from torch._subclasses.fake_tensor import (
     unset_fake_temporarily,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    ShapeEnv,
+    statically_known_true,
+)
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -1845,24 +1849,49 @@ def _get_match_node_value(node: torch.fx.Node) -> Any:
     return node.meta["example_value"]
 
 
-def _specific_pattern_cache_key(args: Sequence[Any]) -> tuple[Any, ...] | None:
+class _SpecificPatternCache:
     """
-    Key for caching check_fn's retraced specific pattern, or None when the
-    args are symbolic: SymInt sizes belong to a per-compile ShapeEnv, so those
-    matches retrace every time instead of being cached across compiles.
+    check_fn's retraced specific patterns, keyed by input metadata.  Entries
+    for static shapes stay valid across compiles.  Symbolic sizes are keyed by
+    their sympy exprs, which (like the SymInts the cached pattern's
+    expected_meta embeds) only mean something within one ShapeEnv, so those
+    entries are dropped as soon as a different ShapeEnv shows up.
     """
-    key: list[Any] = []
-    for arg in args:
-        if isinstance(arg, torch.Tensor):
-            sizes, strides = tuple(arg.shape), tuple(arg.stride())
-            if not all(type(s) is int for s in sizes + strides):
+
+    def __init__(self) -> None:
+        self.static: dict[tuple[Any, ...], PatternExpr] = {}
+        self.symbolic: dict[tuple[Any, ...], PatternExpr] = {}
+        self.shape_env: ShapeEnv | None = None
+
+    def lookup(
+        self, args: Sequence[Any], shape_env: ShapeEnv | None
+    ) -> tuple[dict[tuple[Any, ...], PatternExpr], tuple[Any, ...]] | None:
+        """The (table, key) to cache args under, or None if not cacheable."""
+        key: list[Any] = []
+        symbolic = False
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                meta: list[Any] = []
+                for s in itertools.chain(arg.shape, arg.stride()):
+                    if isinstance(s, torch.SymInt):
+                        symbolic = True
+                        meta.append(s.node.expr)
+                    else:
+                        meta.append(s)
+                key.append((tuple(meta), arg.dtype, arg.device, arg.requires_grad))
+            elif isinstance(arg, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                symbolic = True
+                key.append(arg.node.expr)
+            elif isinstance(arg, (int, float, bool, str, torch.dtype)) or arg is None:
+                key.append(arg)
+            else:
                 return None
-            key.append((sizes, strides, arg.dtype, arg.device, arg.requires_grad))
-        elif isinstance(arg, (int, float, bool, str, torch.dtype)) or arg is None:
-            key.append(arg)
-        else:
-            return None
-    return tuple(key)
+        if not symbolic:
+            return self.static, tuple(key)
+        if shape_env is not self.shape_env:
+            self.symbolic.clear()
+            self.shape_env = shape_env
+        return self.symbolic, tuple(key)
 
 
 def check_and_add_duplicate_pattern(
@@ -1956,7 +1985,7 @@ def register_replacement(
         lambda x: isinstance(x, torch.Tensor) and x.requires_grad,
         initial_trace_args,
     )
-    specific_pattern_cache: dict[tuple[Any, ...], PatternExpr] = {}
+    specific_pattern_cache = _SpecificPatternCache()
 
     def check_fn(match: Match) -> bool:
         """
@@ -2020,10 +2049,8 @@ def register_replacement(
             # same shapes across layers.
             specific_arg_info = _trace_arg_info(argnames_static, args)
             specific_argnames = specific_arg_info.flat_argnames
-            cache_key = _specific_pattern_cache_key(args)
-            specific_pattern = None
-            if cache_key is not None:
-                specific_pattern = specific_pattern_cache.get(cache_key)
+            cached = specific_pattern_cache.lookup(args, fake_mode.shape_env)
+            specific_pattern = cached[0].get(cached[1]) if cached else None
 
             if specific_pattern is None:
                 if sym_args:
@@ -2087,8 +2114,8 @@ def register_replacement(
                     scalar_workaround=scalar_workaround,
                     match_node_meta=True,
                 )
-                if cache_key is not None:
-                    specific_pattern_cache[cache_key] = specific_pattern
+                if cached is not None:
+                    cached[0][cached[1]] = specific_pattern
 
             node = match.output_nodes()[0]
             if node is None:
