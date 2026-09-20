@@ -2792,6 +2792,21 @@ def calc_conv_nd_return_shape(
         else:
             output_padding_list = output_padding
 
+    # Validate output_padding < stride or dilation in each dim (mirrors C++
+    # NaiveConvolutionTransposeNd check).
+    if is_transposed and output_padding_list:
+        torch._check(
+            all(
+                op < s or op < d
+                for op, s, d in zip(output_padding_list, stride, dilation, strict=True)
+            ),
+            lambda: (
+                f"output padding must be smaller than either stride or dilation, "
+                f"but got output_padding={output_padding_list}, "
+                f"stride={stride}, dilation={dilation}"
+            ),
+        )
+
     # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
     # in aten/src/ATen/native/Convolution.cpp).
     if not is_transposed:
@@ -2935,6 +2950,17 @@ def meta_conv(
         groups,
         output_padding if is_transposed else None,
     )
+
+    if is_transposed and bias is not None:
+        expected = weight.shape[1] * groups
+        torch._check(
+            bias.ndim == 1 and bias.shape[0] == expected,
+            lambda: (
+                f"Given transposed=1, weight of size {list(weight.shape)}, "
+                f"expected bias to be 1-dimensional with {expected} elements, "
+                f"but got bias of size {list(bias.shape)} instead"
+            ),
+        )
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -5926,12 +5952,13 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
+    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
+    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
-        not (
-            input.ndim == 5
-            and interpolation_mode == GridSamplerInterpolation.BICUBIC.value
-        ),
-        lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
+        interpolation_mode != GridSamplerInterpolation.BICUBIC.value
+        or device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
+        f"on {device_hint(input)}",
     )
 
 

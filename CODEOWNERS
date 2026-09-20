@@ -916,7 +916,7 @@
 /.github/ @pytorch/pytorch-dev-infra
 #
 # [infra_build_packaging]
-# /.ci/manywheel/
+# /.ci/wheel/
 # /.coveragerc
 # /.ctags.d/
 # /.dockerignore
@@ -1049,6 +1049,7 @@
 # /test/spincli/
 # /test/strobelight/
 /test/test_public_bindings.py @albanD
+# /test/test_reuse_old_whl.py
 # /test/test_testing.py
 # /test/test_utils.py
 # /test/test_utils_config_module.py
