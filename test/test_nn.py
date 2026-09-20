@@ -11874,6 +11874,35 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_update_stats(device)
 
+    @onlyAccelerator
+    @skipMPS
+    def test_batch_norm_gather_stats_invalid_shapes(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189828.
+        # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
+        # indexes invstd and counts with them, so an invstd that disagrees with mean used to
+        # be read out of bounds. The op must validate the shapes instead.
+        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device=device)
+        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device=device)
+        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
+            torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
+                                          -9223372036854775808)
+
+        # mean must be (world_size, num_features); a 1-D mean would index past its dims
+        with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
+            torch.batch_norm_gather_stats(input, torch.ones(3, device=device), torch.ones(3, device=device),
+                                          None, None, 0.1, 1e-5, 2)
+
+        # counts is indexed up to mean.size(0), so it must have at least that many elements
+        with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
+            torch.batch_norm_gather_stats_with_counts(
+                torch.randn(1, 3, 3, 3, device=device),
+                torch.ones(2, 3, device=device),
+                torch.ones(2, 3, device=device),
+                None, None, 0.1, 1e-5,
+                torch.ones(1, device=device),
+            )
+
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float16)
     def test_activations_bfloat16_half_cpu(self, device, dtype):
@@ -15661,6 +15690,75 @@ if __name__ == '__main__':
             self.assertNotEqual(hy1, hy3)
 
     @skipMPS
+    @skipCUDAIfNoCudnn
+    @set_default_dtype(torch.double)
+    @parametrize_test('train', [True, False])
+    def test_RNN_change_dropout(self, device, train):
+        rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu').to(device)
+        input = torch.rand(3, 2, 100, device=device)
+
+        if train:
+            rnn.train()
+        else:
+            rnn.eval()
+
+        prev_output = None
+        for p in (0, 0.5, 0, 0.7, 0.2, 1, 0.2, 0):
+            rnn.dropout = p
+            output1, hy1 = rnn(input)
+            output2, hy2 = rnn(input)
+
+            if p == 0 or p == 1 or not train:
+                self.assertEqual(output1, output2)
+                self.assertEqual(hy1, hy2)
+            else:
+                self.assertNotEqual(output1, output2)
+                self.assertNotEqual(hy1, hy2)
+
+            if prev_output is not None:
+                if not train:
+                    self.assertEqual(output1.data, prev_output)
+                    self.assertEqual(output2.data, prev_output)
+                else:
+                    self.assertNotEqual(output1.data, prev_output)
+                    self.assertNotEqual(output2.data, prev_output)
+            prev_output = output1.data
+
+    def test_RNN_dropout_gradients(self, device):
+        # Regression test for ROCm/ROCm#6339: a multi-layer GRU with dropout set
+        # via the module parameter (which routes through the fused cuDNN/MIOpen
+        # dropout path) must produce a fresh mask each training step and must not
+        # zero the input-to-hidden gradients. A prior MIOpen bug reused a single
+        # all-drop mask, which zeroed weight_ih_l* gradients and stalled training.
+        torch.manual_seed(0)
+        rnn = nn.GRU(16, 32, num_layers=2, dropout=0.5).to(device)
+        rnn.train()
+        input = torch.randn(7, 4, 16, device=device)
+        target = torch.randn(7, 4, 32, device=device)
+
+        # Consecutive training forwards on the same input must differ (dropout is
+        # actually stochastic across steps, not a fixed mask). Compare multiple
+        # consecutive pairs: under the original bug the first forward generated a
+        # real mask and only later steps repeated the fixed all-drop mask, so
+        # out1 != out2 held even on broken code while out2 == out3 exposed it.
+        out1, _ = rnn(input)
+        out2, _ = rnn(input)
+        out3, _ = rnn(input)
+        self.assertNotEqual(out1, out2)
+        self.assertNotEqual(out2, out3)
+        self.assertNotEqual(out1, out3)
+
+        # After a backward, the input-to-hidden gradients of the dropped layer
+        # must not be entirely zero.
+        rnn.zero_grad()
+        out, _ = rnn(input)
+        (out - target).pow(2).mean().backward()
+        for name, param in rnn.named_parameters():
+            if name.startswith("weight_ih"):
+                self.assertIsNotNone(param.grad)
+                self.assertGreater(param.grad.abs().sum().item(), 0.0)
+
+    @skipMPS
     def test_PReLU_backward_requires_grad_false(self, device):
         m = nn.PReLU().to(device)
         x = torch.randn(2, 3, 4, 5, device=device, requires_grad=False)
@@ -16761,77 +16859,6 @@ class TestNNCUDA(NNTestCase):
         self._test_RNN_cpu_vs_device(device, 1)
 
     @skipCUDAIfNoCudnn
-    @set_default_dtype(torch.double)
-    def test_RNN_change_dropout(self, device):
-        for train, cuda in product((True, False), repeat=2):
-            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
-            input = torch.rand(3, 2, 100)
-            if cuda:
-                input.data = input.data.cuda()
-                rnn.cuda()
-
-            if train:
-                rnn.train()
-            else:
-                rnn.eval()
-
-            prev_output = None
-            for p in (0, 0.5, 0, 0.7, 0.2, 1, 0.2, 0):
-                rnn.dropout = p
-                output1, hy1 = rnn(input)
-                output2, hy2 = rnn(input)
-
-                if p == 0 or p == 1 or not train:
-                    self.assertEqual(output1, output2)
-                    self.assertEqual(hy1, hy2)
-                else:
-                    self.assertNotEqual(output1, output2)
-                    self.assertNotEqual(hy1, hy2)
-
-                if prev_output is not None:
-                    if not train:
-                        self.assertEqual(output1.data, prev_output)
-                        self.assertEqual(output2.data, prev_output)
-                    else:
-                        self.assertNotEqual(output1.data, prev_output)
-                        self.assertNotEqual(output2.data, prev_output)
-                prev_output = output1.data
-
-    def test_RNN_dropout_gradients(self, device):
-        # Regression test for ROCm/ROCm#6339: a multi-layer GRU with dropout set
-        # via the module parameter (which routes through the fused cuDNN/MIOpen
-        # dropout path) must produce a fresh mask each training step and must not
-        # zero the input-to-hidden gradients. A prior MIOpen bug reused a single
-        # all-drop mask, which zeroed weight_ih_l* gradients and stalled training.
-        torch.manual_seed(0)
-        rnn = nn.GRU(16, 32, num_layers=2, dropout=0.5).cuda()
-        rnn.train()
-        input = torch.randn(7, 4, 16, device="cuda")
-        target = torch.randn(7, 4, 32, device="cuda")
-
-        # Consecutive training forwards on the same input must differ (dropout is
-        # actually stochastic across steps, not a fixed mask). Compare multiple
-        # consecutive pairs: under the original bug the first forward generated a
-        # real mask and only later steps repeated the fixed all-drop mask, so
-        # out1 != out2 held even on broken code while out2 == out3 exposed it.
-        out1, _ = rnn(input)
-        out2, _ = rnn(input)
-        out3, _ = rnn(input)
-        self.assertNotEqual(out1, out2)
-        self.assertNotEqual(out2, out3)
-        self.assertNotEqual(out1, out3)
-
-        # After a backward, the input-to-hidden gradients of the dropped layer
-        # must not be entirely zero.
-        rnn.zero_grad()
-        out, _ = rnn(input)
-        (out - target).pow(2).mean().backward()
-        for name, param in rnn.named_parameters():
-            if name.startswith("weight_ih"):
-                self.assertIsNotNone(param.grad)
-                self.assertGreater(param.grad.abs().sum().item(), 0.0)
-
-    @skipCUDAIfNoCudnn
     def test_batchnorm_cudnn_nhwc(self, device):
         def run_test(input, grad_output):
             c = input.size(1)
@@ -16885,33 +16912,6 @@ class TestNNCUDA(NNTestCase):
         self.assertEqualTypeString(cudnn_output, input)
         self.assertEqual(cudnn_output, thnn_output)
         self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
-
-    def test_batch_norm_gather_stats_invalid_shapes(self, device):
-        # Regression test for https://github.com/pytorch/pytorch/issues/189828.
-        # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
-        # indexes invstd and counts with them, so an invstd that disagrees with mean used to
-        # be read out of bounds. The op must validate the shapes instead.
-        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device=device)
-        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device=device)
-        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
-            torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
-                                          -9223372036854775808)
-
-        # mean must be (world_size, num_features); a 1-D mean would index past its dims
-        with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
-            torch.batch_norm_gather_stats(input, torch.ones(3, device=device), torch.ones(3, device=device),
-                                          None, None, 0.1, 1e-5, 2)
-
-        # counts is indexed up to mean.size(0), so it must have at least that many elements
-        with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
-            torch.batch_norm_gather_stats_with_counts(
-                torch.randn(1, 3, 3, 3, device=device),
-                torch.ones(2, 3, device=device),
-                torch.ones(2, 3, device=device),
-                None, None, 0.1, 1e-5,
-                torch.ones(1, device=device),
-            )
 
 
 class TestFunctionalPickle(TestCase):
