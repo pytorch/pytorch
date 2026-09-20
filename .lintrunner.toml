@@ -605,8 +605,6 @@ exclude_patterns = [
     'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
     'c10/util/StringUtil.cpp',  # range_error -> ValueError
     # Burned down later in this stack. Nothing may be added here.
-    'torch/csrc/distributed/**',
-    'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
 ]
 command = [
