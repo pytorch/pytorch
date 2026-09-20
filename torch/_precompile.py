@@ -3046,7 +3046,7 @@ def capture(
 # This ``load`` takes two PATHS and is the public one; the transitional
 # ``_PrecompileApi.load`` at the bottom of this file (reachable as
 # torch.compiler._precompile_callable.load) still takes the in-memory (python_code, cache)
-# pair -- same name, same arity. It retires with the alias.
+# pair -- same name, same arity.
 def load(
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
@@ -3117,9 +3117,9 @@ for _f in (capture, load):
 del _f
 
 
-# The callable API this module's public surface replaces, kept reachable for one commit as
-# ``torch.compiler._precompile_callable`` so it is retired separately from the module
-# switch. Private, undocumented, in no ``__all__``; the commit above deletes it.
+# The callable API this module's public surface replaces, kept reachable as the
+# transitional ``torch.compiler._precompile_callable`` pending its removal. Private,
+# undocumented, in no ``__all__``.
 class _PrecompileApi:
     """The retired callable API, reachable as ``torch.compiler._precompile_callable``.
 
