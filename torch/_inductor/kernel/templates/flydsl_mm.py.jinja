@@ -69,6 +69,9 @@ def _inductor_tensor_arg(tensor):
                         "a_is_transposed": A_IS_TRANSPOSED,
                         "b_is_transposed": B_IS_TRANSPOSED,
                         "has_bias": {% if IS_MXFP and HAS_BIAS %}True{% else %}False{% endif %},
+{% if IS_MXFP %}
+                        "bias_is_fp32": BIAS_IS_FP32,
+{% endif %}
                         "has_k_tail": has_k_tail,
                     },
                 )

@@ -339,8 +339,8 @@ class TestFlyDSLTemplate(TestCase):
 
         self.assertIsNotNone(metadata)
         names = (*input_names, "output")
-        self.assertEqual(metadata["precompile_shapes"], dict.fromkeys(names, [1]))
-        self.assertEqual(metadata["precompile_strides"], dict.fromkeys(names, [1]))
+        self.assertEqual(metadata["precompile_shapes"], {name: [1] for name in names})
+        self.assertEqual(metadata["precompile_strides"], {name: [1] for name in names})
         self.assertEqual(metadata["precompile_dtypes"], dict.fromkeys(names, "float32"))
 
     @parametrize(
@@ -426,7 +426,12 @@ class TestFlyDSLTemplate(TestCase):
             ) as validate,
             mock.patch.dict(
                 flydsl_kernels.__dict__,
-                {"GEMM_DTYPE_BF16": 2, "GEMM_DTYPE_FP16": 3},
+                {
+                    "GEMM_DTYPE_BF16": 2,
+                    "GEMM_DTYPE_FP16": 3,
+                    "GEMM_DTYPE_MXFP4": 4,
+                    "GEMM_DTYPE_MXFP8": 5,
+                },
             ),
         ):
             mat1_stride = [1, m] if a_is_transposed else [k, 1]
@@ -1243,6 +1248,14 @@ class TestFlyDSLMXFPMetadata(TestCase):
             name="bias",
             layout=FixedLayout(torch.device("cuda", 0), torch.float32, [96], [1]),
         )
+        out_bias = Buffer(
+            name="out_bias",
+            layout=FixedLayout(torch.device("cuda", 0), torch.bfloat16, [96], [1]),
+        )
+        cpu_bias = Buffer(
+            name="cpu_bias",
+            layout=FixedLayout(torch.device("cpu"), torch.float32, [96], [1]),
+        )
         with mock.patch.object(torch.version, "hip", "test"):
             for overrides, expected in (
                 ({}, mxfp_format),
@@ -1254,6 +1267,8 @@ class TestFlyDSLMXFPMetadata(TestCase):
                 ({"contraction_dim": [1]}, None),
                 ({"bias": object()}, None),
                 ({"bias": bias}, mxfp_format),
+                ({"bias": out_bias}, mxfp_format),
+                ({"bias": cpu_bias}, None),
                 ({"scale_a": []}, None),
                 ({"mat_b": args["scale_b"][0]}, None),
             ):
@@ -1362,6 +1377,7 @@ class TestFlyDSLMXFPDevice(TestCase):
             out_dtype,
             transposed,
             has_bias=bias is not None,
+            bias_is_fp32=bias is not None and bias.dtype == torch.float32,
         )
         _mxfp_call(inputs, out, param, bias)()
         expected = reference if bias is None else reference + bias
@@ -1414,7 +1430,17 @@ class TestFlyDSLMXFPDevice(TestCase):
         import flydsl.compiler as flyc
 
         tile = (256, 256, 256 if mxfp_format == "mxfp4" else 128, 2, 2, 4, 0, True)
-        param = _mxfp_param(mxfp_format, tile, 640, out_dtype, has_bias=True)
+        params = {
+            bias_is_fp32: _mxfp_param(
+                mxfp_format,
+                tile,
+                640,
+                out_dtype,
+                has_bias=True,
+                bias_is_fp32=bias_is_fp32,
+            )
+            for bias_is_fp32 in (False, True)
+        }
         compiler = mock.Mock(wraps=flyc.compile)
         with mock.patch.object(
             kernels.gemm_mxfp_gfx950, "_compiled_cache", {}, create=True
@@ -1449,8 +1475,13 @@ class TestFlyDSLMXFPDevice(TestCase):
                         (m * stride + 32,), -317, device=device, dtype=out_dtype
                     )
                     out = arena[16:-16].view(m, stride)[:, :n]
-                    bias = torch.randn(n, device=device)
-                    call = _mxfp_call(inputs, out, param, bias, compiler)
+                    bias_is_fp32 = i % 2 == 0
+                    bias = torch.randn(
+                        n,
+                        device=device,
+                        dtype=torch.float32 if bias_is_fp32 else out_dtype,
+                    )
+                    call = _mxfp_call(inputs, out, params[bias_is_fp32], bias, compiler)
                     graph = torch.cuda.CUDAGraph()
                     with torch.cuda.graph(graph):
                         call()
@@ -1471,7 +1502,7 @@ class TestFlyDSLMXFPDevice(TestCase):
                             arena[16:-16].view(m, stride)[:, n:],
                         ):
                             self.assertEqual(guard, torch.full_like(guard, -317))
-        self.assertEqual(compiler.call_count, 1)
+        self.assertEqual(compiler.call_count, 2)
 
     @parametrize("mxfp_format", ("mxfp4", "mxfp8", None))
     def test_compiled_routes(self, device, mxfp_format):
@@ -1483,7 +1514,7 @@ class TestFlyDSLMXFPDevice(TestCase):
             reference = _scaled_mm_mxfp(*inputs)
         else:
             inputs, reference = _mxfp_case(mxfp_format, (64, 96, 256), device)
-            eager = mm._scaled_mm_v2_mxfp(*inputs, out_dtype=torch.bfloat16)
+            eager = _scaled_mm_mxfp(*inputs)
             self.assertEqual(eager, reference.bfloat16(), atol=3e-2, rtol=2e-2)
             inputs, reference = _mxfp_case(mxfp_format, (64, 4096, 4096), device)
         with inductor_config.patch(

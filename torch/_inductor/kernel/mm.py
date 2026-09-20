@@ -231,47 +231,13 @@ def scaled_mm_v2_choice(
     )
 
 
-aten__fp8_mm_v2 = ExternKernelChoice(
+aten__scaled_mm_v2 = ExternKernelChoice(
     scaled_mm_v2_choice,
     name="_scaled_mm_v2",
     kernel_creator=functools.partial(
         scaled_mm_v2_choice,
         kernel=functools.partial(FallbackKernel.create, aten._scaled_mm_v2.default),
     ),
-)
-
-
-def _scaled_mm_v2_mxfp(
-    mat_a,
-    mat_b,
-    scale_a,
-    scale_b,
-    *,
-    out_dtype,
-):
-    recipe = [ScalingType.BlockWise1x32.value]
-    swizzle = [SwizzleType.NO_SWIZZLE.value]
-    return aten._scaled_mm_v2.default(
-        mat_a,
-        mat_b,
-        [scale_a],
-        recipe,
-        swizzle,
-        [scale_b],
-        recipe,
-        swizzle,
-        None,
-        out_dtype,
-        [],
-        False,
-    )
-
-
-aten__scaled_mm_v2_mxfp = ExternKernelChoice(
-    _scaled_mm_v2_mxfp,
-    None,
-    name="_scaled_mm_v2_mxfp",
-    has_out_variant=False,
 )
 
 
@@ -317,7 +283,15 @@ def check_supported_striding(mat_a, mat_b) -> None:
 
 
 def get_flydsl_mm_template_kwargs(
-    layout, mat1, mat2, static_shape, is_nonzero, *, mxfp_format=None, has_bias=False
+    layout,
+    mat1,
+    mat2,
+    static_shape,
+    is_nonzero,
+    *,
+    mxfp_format=None,
+    has_bias=False,
+    bias_dtype=None,
 ) -> list[dict[str, Any]]:
     """Return shape-compatible FlyDSL GEMM template configurations."""
     from ..heuristics.template.flydsl import (
@@ -437,6 +411,7 @@ def get_flydsl_mm_template_kwargs(
             GEMM_DTYPE_FP16 if layout.dtype == torch.float16 else GEMM_DTYPE_BF16
         )
         extra["OUT_DTYPE_ID"] = out_dtype_id
+        extra["BIAS_IS_FP32"] = has_bias and bias_dtype == torch.float32
         validity["out_dtype_id"] = out_dtype_id
     # Filter shape-incompatible configs before autotuning.
     return [
@@ -1352,7 +1327,10 @@ def _flydsl_mxfp_bias_supported(
         return True
     get_size = getattr(bias, "get_size", None)
     get_dtype = getattr(bias, "get_dtype", None)
-    if get_size is None or get_dtype is None:
+    get_device = getattr(bias, "get_device", None)
+    if get_size is None or get_dtype is None or get_device is None:
+        return False
+    if get_device() != mat_b.get_device():
         return False
     size = get_size()
     if len(size) != 1:
@@ -1430,6 +1408,8 @@ def get_flydsl_mxfp_template_kwargs(
         for node in nodes
     ):
         return []
+    if bias is not None and bias.get_device() != layout.device:
+        return []
     if is_unaligned(scale_a) or is_unaligned(scale_b):
         return []
 
@@ -1484,6 +1464,7 @@ def get_flydsl_mxfp_template_kwargs(
         True,
         mxfp_format=mxfp_format,
         has_bias=bias is not None,
+        bias_dtype=bias.get_dtype() if bias is not None else None,
     )
 
 
@@ -1618,14 +1599,6 @@ def tuned_scaled_mm_v2(
             mxfp_input_nodes.append(mxfp_bias)
         mxfp_nodes = mxfp_input_nodes
         mxfp_choices: list[ChoiceCaller] = []
-        if use_aten_gemm_kernels() and mxfp_bias is None:
-            mxfp_choices.append(
-                aten__scaled_mm_v2_mxfp.bind(
-                    mxfp_nodes,
-                    mxfp_layout,
-                    out_dtype=out_dtype,
-                )
-            )
         for mxfp_kwargs in get_flydsl_mxfp_template_kwargs(
             mxfp_format,
             mxfp_layout,
@@ -1642,6 +1615,18 @@ def tuned_scaled_mm_v2(
                 **mxfp_kwargs,
             )
         if mxfp_choices:
+            if use_aten_gemm_kernels():
+                mxfp_choices.insert(
+                    0,
+                    aten__scaled_mm_v2.bind(
+                        mxfp_nodes,
+                        mxfp_layout,
+                        recipe_a=ScalingType.BlockWise1x32.value,
+                        recipe_b=ScalingType.BlockWise1x32.value,
+                        out_dtype=out_dtype,
+                        use_fast_accum=False,
+                    ),
+                )
             counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
             node, _ = autotune_select_algorithm(
                 "scaled_mm",
@@ -1764,7 +1749,7 @@ def tuned_scaled_mm_v2(
             scale_option_a in main_loop_scaling_types
             or scale_option_b in main_loop_scaling_types
         ):
-            choice = aten__fp8_mm_v2
+            choice = aten__scaled_mm_v2
             extern_kwargs.update(recipe_a=recipe_a[0], recipe_b=recipe_b[0])
         else:
             choice = aten__fp8_mm
