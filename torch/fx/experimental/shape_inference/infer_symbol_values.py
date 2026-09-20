@@ -61,8 +61,9 @@ def infer_symbol_values(
         right_equation = sp.cancel(right_equation / left_equation)
 
         right_vars = list(right_equation.free_symbols)
+        batch_symbol = sp.sympify(str(init_symints[0]))
         for right_var in right_vars:
-            if sp.sympify(right_var) == sp.sympify("s0"):
+            if sp.sympify(right_var) == batch_symbol:
                 right_equation = sp.cancel(right_equation / right_var)
                 right_vars.remove(right_var)  # noqa: B909
 

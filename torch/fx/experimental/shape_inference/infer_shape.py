@@ -21,8 +21,7 @@ This is the function that runs shape inference. It will modify the input graph m
 def infer_shape(
     gm: torch.fx.GraphModule, input_tensors: list[torch.Tensor]
 ) -> (
-    tuple[torch.fx.GraphModule, list[torch.Tensor], FakeTensorMode, list[IntLikeType]]
-    | None
+    tuple[torch.fx.GraphModule, list[torch.Tensor], FakeTensorMode, IntLikeType] | None
 ):
     # Prepare environments
     shape_env = ShapeEnv()
@@ -39,7 +38,7 @@ def infer_shape(
         for k, v in sample.items()
     ]
     symints: list[IntLikeType] = copy.deepcopy(init_symints)
-    symbol_to_idx_dict = {str(init_symints[i]): i for i in range(dim_count)}
+    symbol_to_idx_dict = {str(sym): i for i, sym in enumerate(init_symints)}
     padding_constraints = defaultdict(list)  # type: ignore[var-annotated]
 
     complete_flag = False
@@ -69,7 +68,7 @@ def infer_shape(
                     _allow_fake_constant=True,
                 )(*sym_tensors)
             complete_flag = True
-            return (gm, input_tensors, fake_mode, symints)
+            return (gm, input_tensors, fake_mode, symints[0])
         except RuntimeError as e:
             if e:
                 infer_symbol_values(
