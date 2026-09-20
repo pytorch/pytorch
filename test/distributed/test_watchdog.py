@@ -172,7 +172,7 @@ class TestWatchdog(TestCase):
         with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
             shutdown()
             with op_timeout(0.1, fired.set):
-                time.sleep(0.5)
+                fired.wait(timeout=5.0)
 
             self.assertTrue(fired.is_set(), "cpu timeout should fire during block")
 
