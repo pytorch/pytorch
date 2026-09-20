@@ -507,7 +507,10 @@ def compiled_module_main(
 
         if acc is not None:
             peak_mem = torch.accelerator.max_memory_allocated()
-            print(f"Peak {acc.type.upper()} memory usage {peak_mem / 1e6:.3f} MB")
+            # Keep the historical CUDA label ("GPU") so scripts that scrape this
+            # line keep working; other accelerators print their device type.
+            device_name = "GPU" if acc.type == "cuda" else acc.type.upper()
+            print(f"Peak {device_name} memory usage {peak_mem / 1e6:.3f} MB")
 
         if torch.cuda.is_available() and args.cuda_memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)

@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import torch
 from torch._inductor.wrapper_benchmark import compiled_module_main
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class TestCompiledModuleMainPeakMemory(TestCase):
@@ -32,7 +37,14 @@ class TestCompiledModuleMainPeakMemory(TestCase):
         benchmark_fn.assert_called_once_with(times=10, repeat=10)
         self.assertNotIn("Peak", " ".join(str(c) for c in mock_print.call_args_list))
 
-    def test_accelerator_resets_and_reports_peak_memory(self):
+    @parametrize(
+        "device_type,expected",
+        [
+            ("cuda", "Peak GPU memory usage 2.000 MB"),
+            ("xpu", "Peak XPU memory usage 2.000 MB"),
+        ],
+    )
+    def test_accelerator_resets_and_reports_peak_memory(self, device_type, expected):
         events = []
         benchmark_fn = MagicMock(
             side_effect=lambda times, repeat: events.append("benchmark") or 0.001
@@ -40,7 +52,7 @@ class TestCompiledModuleMainPeakMemory(TestCase):
         with (
             patch(
                 "torch.accelerator.current_accelerator",
-                return_value=torch.device("cuda"),
+                return_value=torch.device(device_type),
             ),
             patch(
                 "torch.accelerator.reset_peak_memory_stats",
@@ -58,7 +70,10 @@ class TestCompiledModuleMainPeakMemory(TestCase):
         mock_reset.assert_called_once_with()
         mock_max.assert_called_once_with()
         printed = " ".join(str(c) for c in mock_print.call_args_list)
-        self.assertIn("Peak CUDA memory usage 2.000 MB", printed)
+        self.assertIn(expected, printed)
+
+
+instantiate_parametrized_tests(TestCompiledModuleMainPeakMemory)
 
 
 if __name__ == "__main__":
