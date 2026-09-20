@@ -4790,11 +4790,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-            # A symbolic scalar cannot be rebuilt against the ShapeEnv the
-            # guards refer to. Unguarded, it is pruned like any other bystander;
-            # guarded, the package is refused.
-            if id(obj) not in self.guard_tree_values:
-                return _Missing, ("symbolic scalar",)
+            # Unconditional on purpose: a bystander symbolic scalar (an unguarded
+            # local or attribute) is registered in missing_values and pruned by
+            # the branch above before this one is reached, so what arrives here
+            # is structure -- the sizes of a guarded dynamic-shaped tensor's
+            # payload -- where a sentinel would only break the load.
             raise torch._dynamo.exc.PackageError(
                 f"Cannot serialize {type(obj).__name__} {obj} (node: {obj.node})"
             )
