@@ -80,7 +80,9 @@ TensorFloat-32(TF32) on ROCm
 TF32 is supported on AMD Instinct MI300 (gfx942, CDNA3) via hipBLASLt. The
 same ``torch.backends.cuda.matmul.fp32_precision`` and
 ``torch.backends.cuda.matmul.allow_tf32`` controls used on NVIDIA hardware
-also apply on ROCm. The TF32 path on MI300 has hardware-level numerical
+also apply on ROCm, except that the ``"bfx9"`` precision mode is NVIDIA-only
+and raises an error on ROCm because rocBLAS and hipBLASLt have no corresponding
+nine-product compute mode. The TF32 path on MI300 has hardware-level numerical
 differences from the NVIDIA implementation; see :ref:`tf32_on_mi300` for
 details.
 
@@ -116,6 +118,8 @@ To debug memory errors, set
 hipBLAS workspaces
 ------------------
 
+Unlike CUDA, ROCm continues to cache workspaces by default.
+
 For each combination of hipBLAS handle and HIP stream, a hipBLAS workspace will be allocated if that
 handle and stream combination executes a hipBLAS kernel that requires a workspace.  In order to
 avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
@@ -133,6 +137,37 @@ hipFFT/rocFFT plan cache
 ------------------------
 
 Setting the size of the cache for hipFFT/rocFFT plans is not supported.
+
+.. _rocm-gds:
+
+hipFile (GPUDirect Storage)
+---------------------------
+
+The ``torch.cuda.gds`` APIs are implemented with `hipFile
+<https://rocm.docs.amd.com/projects/hipFile/en/latest/>`_ on ROCm, taking the
+place of cuFile on CUDA. hipFile ships with ROCm 7.14 and later; on older ROCm
+the build disables GDS support and :func:`torch.cuda.gds.is_available` returns
+``False``. As elsewhere in the HIP port, the build option keeps its CUDA name,
+so ``USE_CUFILE=0`` is what disables the support in a ROCm build. hipFile is
+Linux-only, so a Windows ROCm build never has GDS support.
+
+Each wrapper in ``torch.cuda.gds`` calls the hipFile counterpart of the
+cuFile function named in its docstring: ``hipFileRead``, ``hipFileWrite``,
+``hipFileBufRegister``, ``hipFileBufDeregister``, ``hipFileHandleRegister`` and
+``hipFileHandleDeregister``. Errors quote the hipFile name, so a failed read
+raises ``hipFileRead failed: ...``. hipFile is close to cuFile but not identical;
+the known divergences, including that numeric error codes are not guaranteed to
+match, are listed in `cuFile compatibility
+<https://rocm.docs.amd.com/projects/hipFile/en/latest/reference/hipFile-cuFile-compatibility.html>`_.
+
+Configuring a system for GDS on ROCm differs from CUDA, and the NVIDIA
+GPUDirect Storage installation and troubleshooting guide does not apply. Refer
+instead to the hipFile documentation:
+
+* `Install hipFile <https://rocm.docs.amd.com/projects/hipFile/en/latest/install/install.html>`_
+* `Check for fastpath compatibility <https://rocm.docs.amd.com/projects/hipFile/en/latest/how-to/checking-system-compatibility.html>`_
+* `Set up a local NVMe drive <https://rocm.docs.amd.com/projects/hipFile/en/latest/how-to/setup-local-nvme.html>`_
+* `Troubleshooting <https://rocm.docs.amd.com/projects/hipFile/en/latest/troubleshooting/troubleshooting.html>`_
 
 .. _torch-distributed-backends:
 
@@ -211,3 +246,35 @@ To enable CK in either scenario, simply pass 'ck' to those functions.
 In order to set the backend to CK, the user MUST have built with the correct environment variable. If not,
 PyTorch will print a warning and use the "default" backend. For GEMMs, this will route to hipblas and
 for SDPA it routes to aotriton.
+
+.. _sdpa-input-layout-on-rocm:
+
+SDPA input layout on ROCm
+-------------------------
+
+The AOTriton backend for
+:func:`~torch.nn.functional.scaled_dot_product_attention` selects kernel
+configurations from a tuning database that assumes contiguous BHSD
+(batch, heads, seqlen, head_dim) inputs. Inputs that are BHSD-shaped but
+not contiguous, such as the view produced by ``permute(0, 2, 1, 3)`` on a
+BSHD tensor, fall outside the tuned configuration space and may select a
+suboptimal kernel.
+
+Materializing contiguous inputs first trades a copy for a better kernel
+choice, so whether it wins depends on device, shape and dtype. It is
+generally not profitable on discrete GPUs, where the copy overhead tends to
+outweigh the kernel benefit. It has been observed to be a large win on the
+AMD gfx1151 iGPU at long sequence lengths (see
+`#190154 <https://github.com/pytorch/pytorch/issues/190154>`_ for measurements).
+Time both forms end to end, including the copies, on the shapes and dtype
+your model actually uses::
+
+    def sdpa_permute(q, k, v):
+        q2, k2, v2 = (x.permute(0, 2, 1, 3) for x in (q, k, v))
+        out = torch.nn.functional.scaled_dot_product_attention(q2, k2, v2)
+        return out.permute(0, 2, 1, 3)
+
+    def sdpa_contiguous(q, k, v):
+        q2, k2, v2 = (x.transpose(1, 2).contiguous() for x in (q, k, v))
+        out = torch.nn.functional.scaled_dot_product_attention(q2, k2, v2)
+        return out.transpose(1, 2)
