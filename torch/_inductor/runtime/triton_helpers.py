@@ -334,6 +334,32 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
 
 
 @triton.jit
+def _first_index_of(value, result, index, dim):
+    # The smallest index whose lane attains `result` from max2/min2 (the NaN
+    # lanes when it is NaN): the index a NaN-aware tuple reduce would pick, at
+    # the cost of two native reductions instead of a combine of about ten
+    # instructions per element. The paired value is the extremum, not the
+    # winning lane's, which differs on a tie between -0.0 and 0.0.
+    hit = (value == tl.expand_dims(result, dim)) | (value != value)
+    sentinel = tl.full(
+        [1], (1 << (index.dtype.primitive_bitwidth - 1)) - 1, index.dtype
+    )
+    return tl.min(tl.where(hit, index, sentinel), dim)
+
+
+@triton.jit
+def min_with_first_index(value, index, dim):
+    min_value = min2(value, dim)
+    return min_value, _first_index_of(value, min_value, index, dim)
+
+
+@triton.jit
+def max_with_first_index(value, index, dim):
+    max_value = max2(value, dim)
+    return max_value, _first_index_of(value, max_value, index, dim)
+
+
+@triton.jit
 def min_with_index(value, index, dim):
     return tl.reduce((value, index), dim, minimum_with_index)
 
@@ -400,6 +426,29 @@ def online_softmax_combine(
     # but since rhs_sum is all 1, we can simplify it.
     out_sum = lhs_sum * lhs_scale + rhs_scale
     return out_max, out_sum
+
+
+@triton.jit
+def online_softmax_reduce_scalar_combine(
+    lhs_max,
+    lhs_sum,
+    rhs,
+    rhs_mask,
+    dim,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
+    """
+    Reduce a block of values along `dim` and fold it into a per-row (max, sum)
+    state, so only one max/sum per output row stays live across the loop.
+    """
+    rhs = tl.where(rhs_mask, rhs, float("-inf")).to(lhs_max.dtype)
+    rhs_max, rhs_sum = online_softmax_reduce(
+        rhs, tl.where(rhs_mask, 1.0, 0.0), dim, use_fast_math, strict_signed_zero
+    )
+    return online_softmax_combine_with_sum(
+        lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math, strict_signed_zero
+    )
 
 
 @triton.jit
@@ -791,108 +840,44 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 
 
 @triton.jit
-def exclusive_scan_decoupled_lookback_2(
-    scratch_base, block_value0, block_value1, index, combine_fn
-):
-    """Two-lane variant of exclusive_scan_decoupled_lookback_64.
-
-    Computes the exclusive scan of a 2-tuple carried value between blocks.
-    Uses the separate-slot scheme of the 64-bit variant (value stored apart
-    from the flag, ordered by debug_barrier + release/acquire) generalized to
-    two lanes, so it is width-uniform: each lane is bitcast to a same-width
-    unsigned int and zero-extended into its own u64 slot, regardless of the
-    lane's element width.
-
-    scratch_base: Pointer to scratch space in global memory (tl.uint64)
-    block_value0, block_value1: This block's block-sum for each lane
-    index: Scalar index of this block relative to the current scan
-    combine_fn: Function ``(v0, v1, v0, v1) -> (v0, v1)`` scanned over
-
-    Slot layout per block (5 x u64): [flag, bv0, bv1, ip0, ip1]
-    """
-    dtype0 = block_value0.dtype
-    dtype1 = block_value1.dtype
-    uint0 = tl.core.get_int_dtype(dtype0.primitive_bitwidth, signed=False)
-    uint1 = tl.core.get_int_dtype(dtype1.primitive_bitwidth, signed=False)
-
-    # Publish block sums so subsequent blocks don't get stuck waiting for us
-    if index > 0:
-        tl.store(
-            scratch_base + 5 * index + 1,
-            block_value0.to(uint0, bitcast=True).to(tl.uint64),
-        )
-        tl.store(
-            scratch_base + 5 * index + 2,
-            block_value1.to(uint1, bitcast=True).to(tl.uint64),
-        )
-        tl.debug_barrier()
-        flag_one = tl.full([], 1, tl.uint64)
-        tl.atomic_xchg(scratch_base + 5 * index + 0, flag_one, sem="release")
-
-    # Calculate exclusive prefix scan
-    exclusive_prefix0 = tl.zeros([], dtype0)
-    exclusive_prefix1 = tl.zeros([], dtype1)
-    prefix_valid = False
-    test_target = index - 1
-    while test_target >= 0:
-        flag = tl.full([], 0, tl.uint64)
-        while flag == 0:
-            flag = tl.atomic_add(scratch_base + 5 * test_target + 0, 0, sem="acquire")
-
-        # flag == 1 -> block sums at slots (1, 2); flag == 2 -> inclusive prefixes
-        # at slots (3, 4). Offsets are (2 * flag - 1) and (2 * flag).
-        base = scratch_base + 5 * test_target
-        raw0 = tl.load(base + (2 * flag - 1).to(tl.int32))
-        raw1 = tl.load(base + (2 * flag).to(tl.int32))
-        value0 = raw0.to(uint0).to(dtype0, bitcast=True)
-        value1 = raw1.to(uint1).to(dtype1, bitcast=True)
-        if prefix_valid:
-            exclusive_prefix0, exclusive_prefix1 = combine_fn(
-                value0, value1, exclusive_prefix0, exclusive_prefix1
-            )
-        else:
-            exclusive_prefix0 = value0
-            exclusive_prefix1 = value1
-            prefix_valid = True
-
-        if flag == 2:
-            test_target = tl.full([], -1, index.dtype)  # Match the original type
-        else:
-            test_target = test_target - 1
-
-    # Make inclusive block sums visible to other blocks
-    if prefix_valid:
-        inclusive_prefix0, inclusive_prefix1 = combine_fn(
-            exclusive_prefix0, exclusive_prefix1, block_value0, block_value1
-        )
-    else:
-        inclusive_prefix0 = block_value0
-        inclusive_prefix1 = block_value1
-    tl.store(
-        scratch_base + 5 * index + 3,
-        inclusive_prefix0.to(uint0, bitcast=True).to(tl.uint64),
-    )
-    tl.store(
-        scratch_base + 5 * index + 4,
-        inclusive_prefix1.to(uint1, bitcast=True).to(tl.uint64),
-    )
-    tl.debug_barrier()
-    flag_two = tl.full([], 2, tl.uint64)
-    tl.atomic_xchg(scratch_base + 5 * index + 0, flag_two, sem="release")
-
-    return exclusive_prefix0, exclusive_prefix1
-
-
-@triton.jit
 def frexp(x):
-    # TODO(isuruf): use inline_asm_elementwise here
-    zero = x == 0
-    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
-    special = zero | not_finite
-    safe_x = tl.where(special, 1.0, x)
-    y = libdevice.ilogb(safe_x) + 1
-    exponent = tl.where(special, 0, y)
-    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
+    # Decompose the IEEE-754 bit pattern with integer ops rather than calling
+    # libdevice.ilogb/ldexp: CUDA compiles libdevice with FTZ, which flushes
+    # float32 subnormals to zero and would return a mantissa of 0 for subnormal
+    # inputs, and the float path also loses the sign of -0.0.
+    if x.dtype == tl.float64:
+        MBITS: tl.constexpr = 52
+        EMASK: tl.constexpr = 0x7FF
+        BIAS: tl.constexpr = 1023
+    elif x.dtype == tl.float32:
+        MBITS: tl.constexpr = 23
+        EMASK: tl.constexpr = 0xFF
+        BIAS: tl.constexpr = 127
+    elif x.dtype == tl.bfloat16:
+        MBITS: tl.constexpr = 7
+        EMASK: tl.constexpr = 0xFF
+        BIAS: tl.constexpr = 127
+    else:
+        tl.static_assert(x.dtype == tl.float16)
+        MBITS: tl.constexpr = 10
+        EMASK: tl.constexpr = 0x1F
+        BIAS: tl.constexpr = 15
+    FMASK: tl.constexpr = (1 << MBITS) - 1
+    idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+    bits = x.to(idtype, bitcast=True)
+    exp_field = (bits >> MBITS) & EMASK
+    frac = bits & FMASK
+    # Normalize subnormals by converting the fraction to float (exact, since
+    # it fits in the mantissa), then reuse the normal-number path on that.
+    is_sub = (exp_field == 0) & (frac != 0)
+    norm_bits = frac.to(x.dtype).to(idtype, bitcast=True)
+    src_bits = tl.where(is_sub, (bits & ~FMASK) | (norm_bits & FMASK), bits)
+    src_exp = tl.where(is_sub, (norm_bits >> MBITS) - (BIAS - 1 + MBITS), exp_field)
+    mantissa_bits = (src_bits & ~(EMASK << MBITS)) | ((BIAS - 1) << MBITS)
+    # frexp(+-0) = (+-0, 0), frexp(+-inf) = (+-inf, 0), frexp(nan) = (nan, 0)
+    special = (exp_field == EMASK) | ((exp_field == 0) & (frac == 0))
+    mantissa = tl.where(special, x, mantissa_bits.to(x.dtype, bitcast=True))
+    exponent = tl.where(special, 0, src_exp - (BIAS - 1)).to(tl.int32)
     return mantissa, exponent
 
 
