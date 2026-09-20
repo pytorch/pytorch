@@ -92,7 +92,7 @@ class _SourceGraphModule(torch.nn.Module):
     """
 
     # Installed by __init__ through __dict__, which nn.Module's __setattr__ would
-    # otherwise intercept; declared so they do not resolve through its __getattr__.
+    # otherwise intercept; these annotations are type-checker declarations only.
     _src: _EagerGraphSource
     _generated_forward: Callable[..., Any]
 
@@ -114,31 +114,26 @@ class _SourceGraphModule(torch.nn.Module):
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         return self._generated_forward(self, *args, **kwargs)
 
-    def _current_src(self) -> _EagerGraphSource:
-        # _src.body still aliases the containers this instance was BUILT from,
-        # which for a deepcopy are the ORIGINAL's parameter/buffer dicts -- so
-        # pickling _src directly would round-trip the original's (possibly
-        # since-mutated) tensors into the copy's artifact. Snapshot this
-        # instance's own parameter/buffer/submodule containers instead (other
-        # nn.Module state still comes from _src), converting live sub-GraphModules back
-        # to blobs (GraphModule.__reduce__ is lossy for a Dynamo graph, which
-        # is why they travel as blobs in the first place).
-        body = {**self._src.body}
-        body["_parameters"] = dict(self._parameters)
-        body["_buffers"] = dict(self._buffers)
+    def __reduce__(self) -> tuple[Any, ...]:
+        # Required: an artifact can be re-serialized after having been loaded once,
+        # and the default reduction would try to pickle the exec'd forward by
+        # reference to a module that does not exist. Snapshot this instance's own
+        # state rather than _src.body, which still aliases the containers it was
+        # BUILT from -- for a deepcopy, the ORIGINAL's. Live sub-GraphModules go
+        # back to blobs (GraphModule.__reduce__ is lossy for a Dynamo graph,
+        # which is why they travel as blobs in the first place).
+        body = {
+            k: v
+            for k, v in self.__dict__.items()
+            if k not in ("_src", "_generated_forward", "_modules")
+        }
         body["_modules"] = {
             name: _SubgraphBlob(_graph_module_to_blob(sub))
             if isinstance(sub, torch.fx.GraphModule)
             else sub
             for name, sub in self._modules.items()
         }
-        return dataclasses.replace(self._src, body=body)
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        # Required: an artifact can be re-serialized after having been loaded once,
-        # and the default reduction would try to pickle the exec'd forward by
-        # reference to a module that does not exist.
-        return (_SourceGraphModule, (self._current_src(),))
+        return (_SourceGraphModule, (dataclasses.replace(self._src, body=body),))
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "_SourceGraphModule":
         # Same reason GraphModule defines one: without it deepcopy falls through to
@@ -147,9 +142,7 @@ class _SourceGraphModule(torch.nn.Module):
         # no_dispatch(), where rebuilding a fake tensor asserts.
         new = object.__new__(type(self))
         memo[id(self)] = new
-        # _src and the exec'd forward are safely shared -- __reduce__ snapshots
-        # the instance's own containers via _current_src(), so the shared _src
-        # never leaks the original's state into a pickled copy. Everything else
+        # _src and the exec'd forward are safely shared. Everything else
         # nn.Module keeps on an instance is state, hook dicts included, and a
         # copy sharing it lets an update on one copy silently edit the other.
         shared = {"_src": self._src, "_generated_forward": self._generated_forward}
@@ -206,6 +199,7 @@ def _graph_module_to_source(gm: torch.fx.GraphModule) -> _EagerGraphSource:
     )
     body = gm.__dict__.copy()
     body.pop("_graph", None)
+    body.pop("_code", None)  # the same string as _EagerGraphSource.code
     # A HOP body is kept as a Graph: some eager HOP implementations run it through
     # fx.Interpreter, which reads .graph. The top level is only ever called.
     body["_modules"] = {
@@ -238,9 +232,7 @@ class EagerCacheArtifact(BackendCacheArtifact[Any]):
         return (_rebuild_eager_artifact, (self.key, _graph_module_to_source(gm)))
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "EagerCacheArtifact":
-        return EagerCacheArtifact(
-            key=self.key, content=copy.deepcopy(self.content, memo)
-        )
+        return type(self)(key=self.key, content=copy.deepcopy(self.content, memo))
 
 
 class BypassDynamoCacheEntry(Exception):
