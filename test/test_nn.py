@@ -2528,6 +2528,43 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
+    def test_CTCLoss_target_value_checks_cpu(self):
+        # Out-of-range target values used to index log_probs and its gradient
+        # without bound-checking, corrupting memory (gh-193794).
+        for dtype in (torch.int64, torch.int32):
+            log_probs = torch.randn(5, 6, requires_grad=True)
+            input_lengths = torch.tensor([5])
+            target_lengths = torch.tensor([4])
+
+            # exact repro from the issue: target value beyond num_labels
+            targets = torch.tensor([[3, 5, 6, 7]], dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "target values to be in the range"):
+                torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+            # concatenated targets with a negative value
+            targets = torch.tensor([3, 5, -1, 2], dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "target values to be in the range"):
+                torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+            # padded entries beyond target_lengths are never used and must not raise
+            targets = torch.tensor([[3, 5, 4, 2, 99]], dtype=dtype)
+            loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+            self.assertTrue(torch.isfinite(loss).item())
+            loss.backward()
+
+            # valid concatenated targets of exactly sum(target_lengths) must not raise
+            targets = torch.tensor([3, 5, 4, 2], dtype=dtype)
+            loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+            self.assertTrue(torch.isfinite(loss).item())
+            loss.backward()
+
+        # the public API upcasts targets to int64, so call the op directly to
+        # exercise the int32 (kInt) instantiation of the check
+        log_probs = torch.randn(5, 1, 6, requires_grad=True)
+        targets = torch.tensor([[3, 5, 6, 7]], dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "target values to be in the range"):
+            torch._ctc_loss(log_probs, targets, [5], [4], 0, False)
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)

@@ -116,6 +116,23 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
              " (while checking arguments for ", c, ")");
   }
 
+  // Target values are used as indices into log_probs by the kernels below, so
+  // validate every target entry that is actually read. Note that entries beyond
+  // target_lengths[b] are padded and never used, so they are not checked.
+  // Meta tensors have no data to check.
+  if (!targets.is_meta()) {
+    using target_t = std::conditional_t<target_scalar_type == kInt, int, int64_t>;
+    const auto* targets_data = targets.const_data_ptr<target_t>();
+    for (const auto b : c10::irange(batch_size)) {
+      for (const auto j : c10::irange(target_lengths[b])) {
+        const auto t = targets_data[tg_batch_offsets[b] + static_cast<int64_t>(tg_target_stride) * j];
+        TORCH_CHECK(t >= 0 && t < num_labels,
+                    "Expected target values to be in the range [0, ", num_labels, "), but got value ", t,
+                    " for batch ", b, " (while checking arguments for ", c, ")");
+      }
+    }
+  }
+
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
