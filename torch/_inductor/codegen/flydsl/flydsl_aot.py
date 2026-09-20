@@ -51,6 +51,7 @@ def compile_launcher(
     arguments: tuple[Any, ...],
     *,
     signature: inspect.Signature,
+    stream_parameter: tuple[int, inspect.Parameter] | None = None,
     bound_self: Any = None,
 ) -> FlyDSLAOTArtifact:
     from torch._higher_order_ops.flydsl_kernel_wrap import (
@@ -78,14 +79,46 @@ def compile_launcher(
     except Exception:
         os.unlink(object_path)
         raise
+    abi = _normalize_stream_abi(tuple(metadata["abi"]), stream_parameter)
     return FlyDSLAOTArtifact(
         object_file_path=metadata["object_file_path"],
         symbol=metadata["symbol"],
         runtime_libraries=tuple(metadata["runtime_libraries"]),
-        abi=tuple(metadata["abi"]),
+        abi=abi,
         module_init_symbol=metadata["module_init_symbol"],
         module_load_symbol=metadata["module_load_symbol"],
     )
+
+
+def _normalize_stream_abi(
+    abi: tuple[dict[str, Any], ...],
+    stream_parameter: tuple[int, inspect.Parameter] | None,
+) -> tuple[dict[str, Any], ...]:
+    if stream_parameter is None:
+        return abi
+
+    stream_index, stream_parameter_value = stream_parameter
+    normalized = []
+    found_stream = False
+    for original_slot in abi:
+        slot = dict(original_slot)
+        arg_index = slot["arg_index"]
+        if arg_index == stream_index:
+            if slot["kind"] != "stream":
+                raise AssertionError(
+                    f"FlyDSL parameter {stream_parameter_value.name!r} did not "
+                    "produce a stream ABI slot"
+                )
+            slot["arg_index"] = None
+            found_stream = True
+        elif arg_index is not None and arg_index > stream_index:
+            slot["arg_index"] = arg_index - 1
+        normalized.append(slot)
+    if not found_stream:
+        raise AssertionError(
+            f"FlyDSL parameter {stream_parameter_value.name!r} has no stream ABI slot"
+        )
+    return tuple(normalized)
 
 
 def _define_module_loader(wrapper, artifact: FlyDSLAOTArtifact) -> None:
@@ -204,6 +237,7 @@ def define_aot_kernel(wrapper, launcher_idx: int, call_spec_idx: int, example_ar
         registration.launcher,
         full_example_args,
         signature=registration.signature,
+        stream_parameter=registration.stream_parameter,
         bound_self=registration.bound_self,
     )
     if artifact.object_file_path not in ROCmCodeCache.aot_kernels_o:
