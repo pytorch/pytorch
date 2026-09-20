@@ -1187,8 +1187,9 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
 if torch.distributed.is_available():
 
     class _PyBackend(torch._C._distributed_c10d.Backend):
-        # A Python backend, as torch/distributed/_nccl4py/backend.py defines one:
-        # module-level, so pickle looks it up by name and finds it.
+        # A Python backend, as torch/distributed/_nccl4py/backend.py defines one.
+        # Module-level: a <locals> class would hit the local-scope refusal that
+        # sits behind the unsupported-types branch even without this change.
         def __init__(self):
             super().__init__(0, 1)
             self.calls = []
@@ -1417,22 +1418,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # A c10d Backend is not a ProcessGroup, so an unguarded one failed the
         # dump instead of pruning to the sentinel; a Python subclass of the C++
         # Backend (the backend extension point) cannot be pickled either. A
-        # GUARDED unsupported value (a TYPE_MATCH on a stream local) must not
-        # prune, or the rebuilt guard compares against the sentinel forever: it
+        # GUARDED unsupported value (a TYPE_MATCH on a stream local, a
+        # FAKE_SCRIPT_TYPE_MATCH on a process-group local) must not prune, or
+        # the rebuilt guard compares against the sentinel forever: it
         # is refused by name, and pickle_guards_state re-raises that
         # PackageError unchanged as the bypass reason.
-        from torch._C._distributed_c10d import Backend, FakeProcessGroup
+        from torch._C._distributed_c10d import Backend, FakeProcessGroup, ProcessGroup
 
         pg = FakeProcessGroup._create_internal(0, world_size=2)
         self.assertIsInstance(pg, Backend)
-        self.assertNotIsInstance(pg, torch._C._distributed_c10d.ProcessGroup)
+        self.assertNotIsInstance(pg, ProcessGroup)
         referent = _ModuleWithDtypeAttr()
-        for obj in (
-            pg,
-            _PyBackend(),
-            torch.Stream(device="cpu"),
-            weakref.ref(referent),
-        ):
+        objs = (pg, _PyBackend(), ProcessGroup(0, 1), torch.Stream(device="cpu"))
+        for obj in (*objs, weakref.ref(referent)):
             with self.subTest(type(obj).__name__):
                 buf = io.BytesIO()
                 GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
