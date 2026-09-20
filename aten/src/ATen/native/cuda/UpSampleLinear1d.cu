@@ -19,6 +19,8 @@
 #include <ATen/ops/upsample_linear1d_backward_native.h>
 #endif
 
+#include <limits>
+
 namespace at::native {
 namespace {
 
@@ -87,19 +89,18 @@ __global__ void upsample_linear1d_out_frame_unrolled(
   const int width1 = idata.size(2);
   const int width2 = odata.size(2);
 
-  const int64_t thread_id = threadIdx.x + static_cast<int64_t>(blockIdx.x) * blockDim.x;
-  const int64_t channels_width2 = static_cast<int64_t>(channels) * width2;
-  const int64_t num_total = batchsize * channels_width2;
+  const int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+  const int num_total = batchsize * channels * width2;
   if (thread_id >= num_total) return;
 
   // Get a unique (n, c, index) from thread_id
-  const int64_t n = thread_id / channels_width2;
-  const int64_t c = (thread_id - n*channels_width2) / width2;
-  const int64_t index = thread_id - n*channels_width2 - c*width2;
+  const int n = thread_id / (channels * width2);
+  const int c = (thread_id - n*(channels * width2)) / width2;
+  const int index = thread_id - n*(channels * width2) - c*width2;
 
   // Do only one interpolation for the (n, c, index) coordinate
   if (index < num_kernels) {
-    const int w2 = static_cast<int>(index % width2);
+    const int w2 = index % width2;
     // special case: just copy
     if (width1 == width2) {
       const int w1 = w2;
@@ -189,19 +190,18 @@ __global__ void upsample_linear1d_out_frame_backward_unrolled(
   const int width1 = idata.size(2);
   const int width2 = odata.size(2);
 
-  const int64_t thread_id = threadIdx.x + static_cast<int64_t>(blockIdx.x) * blockDim.x;
-  const int64_t channels_width2 = static_cast<int64_t>(channels) * width2;
-  const int64_t num_total = batchsize * channels_width2;
+  const int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+  const int num_total = batchsize * channels * width2;
   if (thread_id >= num_total) return;
 
   // Get a unique (n, c, index) from thread_id
-  const int64_t n = thread_id / channels_width2;
-  const int64_t c = (thread_id - n*channels_width2) / width2;
-  const int64_t index = thread_id - n*channels_width2 - c*width2;
+  const int n = thread_id / (channels * width2);
+  const int c = (thread_id - n*(channels * width2)) / width2;
+  const int index = thread_id - n*(channels * width2) - c*width2;
 
   // Do only one backward interpolation for the (n, c, index) coordinate
   if (index < num_kernels) {
-    const int w2 = static_cast<int>(index % width2);
+    const int w2 = index % width2;
     // special case: just copy
     if (width1 == width2) {
       const int w1 = w2;
@@ -250,8 +250,16 @@ static void upsample_linear1d_out_cuda_template(
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
+  // The unrolled kernels index one thread per output element with 32-bit math,
+  // and on ROCm gridDim.x * blockDim.x must fit in uint32_t (the HSA AQL
+  // dispatch packet stores grid_size_{x,y,z} as uint32_t). Both limits are
+  // respected by only taking that path when the output fits in an int32.
+  const int64_t num_total = input.size(0) * input.size(1) * output_width;
+  const bool use_unrolled = num_blocks < num_blocks_threshold &&
+      num_total <= std::numeric_limits<int32_t>::max();
+
   // Use unrolled version if the number of blocks is small
-  if (num_blocks < num_blocks_threshold){
+  if (use_unrolled){
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -264,12 +272,8 @@ static void upsample_linear1d_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales);
 
-        const int batchsize = idata.size(0);
-        const int channels  = idata.size(1);
-        const int64_t num_total = static_cast<int64_t>(batchsize) * channels * output_width;
-
         upsample_linear1d_out_frame_unrolled<scalar_t, accscalar_t>
-            <<<ceil_div(num_total, static_cast<int64_t>(num_threads)),
+            <<<ceil_div(static_cast<int>(num_total), num_threads),
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
@@ -328,8 +332,14 @@ static void upsample_linear1d_backward_out_cuda_template(
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
+  // See the note on the forward launch: the unrolled kernels require the output
+  // to fit in an int32 for both 32-bit indexing and the ROCm grid limit.
+  const int64_t num_total = input_size[0] * input_size[1] * output_width;
+  const bool use_unrolled = num_blocks < num_blocks_threshold &&
+      num_total <= std::numeric_limits<int32_t>::max();
+
   // Use unrolled version if the number of blocks is small
-  if (num_blocks < num_blocks_threshold){
+  if (use_unrolled){
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_linear1d_out_frame_backward_unrolled", [&] {
@@ -341,12 +351,8 @@ static void upsample_linear1d_backward_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales);
 
-        const int batchsize = idata.size(0);
-        const int channels  = idata.size(1);
-        const int64_t num_total = static_cast<int64_t>(batchsize) * channels * output_width;
-
         upsample_linear1d_out_frame_backward_unrolled<scalar_t, accscalar_t>
-            <<<ceil_div(num_total, static_cast<int64_t>(num_threads)),
+            <<<ceil_div(static_cast<int>(num_total), num_threads),
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
