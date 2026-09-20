@@ -5010,6 +5010,11 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+# Children the diagnostic walk queues per container; with the visit bound below
+# it keeps a huge state from turning a bypass into a stall.
+_WALK_FAN_OUT = 20000
+
+
 def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
     """The named values a guard state can reach, for the diagnostic walk."""
     return [
@@ -5076,20 +5081,23 @@ def _offending_value_path(
                 # dict leads to sys.modules and would saturate the walk.
                 continue
             children: list[tuple[str, Any]] = []
-            # Per node: one object whose container or __dict__ read raises (a
-            # dict subclass, a type-level __dict__ property, a proxy) must not
-            # end the whole walk.
+            # Per node: one object whose container read raises (a dict subclass,
+            # a container mutated concurrently) must not end the whole walk nor
+            # lose its __dict__ children, so each read has its own try. Fan-out
+            # is bounded per container BEFORE any path string is built.
             try:
                 if isinstance(value, (list, tuple, OrderedSet)):
-                    children = [(f"{path}[{i}]", v) for i, v in enumerate(value)]
+                    items = itertools.islice(enumerate(value), _WALK_FAN_OUT)
+                    children = [(f"{path}[{i}]", v) for i, v in items]
                 elif isinstance(value, (set, frozenset)):
-                    children = [(f"a member of {path}", v) for v in value]
+                    members = itertools.islice(value, _WALK_FAN_OUT)
+                    children = [(f"{path}[<a member>]", v) for v in members]
                 elif isinstance(value, dict):
-                    for k, v in value.items():
-                        if isinstance(k, (str, int)):
+                    for k, v in itertools.islice(value.items(), _WALK_FAN_OUT):
+                        if type(k) in (str, int):
                             children.append((f"{path}[{k!r}]", v))
                         else:
-                            children.append((f"a key of {path}", k))
+                            children.append((f"{path}[<a key>]", k))
                             children.append((f"{path}[<that key>]", v))
                 elif isinstance(value, functools.partial):
                     # Guard.create_fn is a partial whose arguments the pickler walks.
@@ -5122,17 +5130,16 @@ def _offending_value_path(
                         except ValueError:  # an empty cell
                             continue
                         # A pasteable accessor, annotated with the variable name.
-                        children.append(
-                            (
-                                f"{path}.__closure__[{i}].cell_contents  # {name}",
-                                contents,
-                            )
-                        )
+                        accessor = f"{path}.__closure__[{i}].cell_contents  # {name}"
+                        children.append((accessor, contents))
                 elif isinstance(value, types.MethodType):
                     # A guard can be rooted at a bound method; the reducer
                     # carries its function and receiver.
                     children.append((f"{path}.__func__", value.__func__))
                     children.append((f"{path}.__self__", value.__self__))
+            except Exception:
+                pass
+            try:
                 instance_dict = _instance_dict(value)
                 if instance_dict is not None:
                     children += [
@@ -5154,7 +5161,7 @@ def _offending_value_path(
                                 pass
             except Exception:
                 pass
-            queue.extend(children[:20000])
+            queue.extend(children)
     except Exception:
         return ""
     return ""
@@ -5220,8 +5227,13 @@ def pickle_guards_state(
             state.output_graph.global_scope = {}
 
         pickler.dump(state)
-    except torch._dynamo.exc.PackageError:
-        raise
+    except torch._dynamo.exc.PackageError as e:
+        # Raised by the reducer itself, so last_reduced IS the culprit; the
+        # message already says what, only the path is added.
+        last = pickler.last_reduced if pickler is not None else None
+        raise torch._dynamo.exc.PackageError(
+            f"{e}{_offending_value_path(state, last, scope_roots)}"
+        ) from e
     except RecursionError as e:
         # A deep (but finite) guarded object graph, or a __reduce__ that never
         # memoizes, overflows the recursion limit inside dump: a serialization
