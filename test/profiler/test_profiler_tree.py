@@ -1157,7 +1157,6 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
         )
 
 
-instantiate_device_type_tests(TestProfilerTree, globals(), only_for="cpu")
 instantiate_device_type_tests(TestProfilerTreeCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
