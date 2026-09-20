@@ -224,16 +224,23 @@ _UNSUPPORTED_SHAPES = {
         "registers ['generated_kernel_0'] as a string literal",
     ),
     "string_bound_setattr": (
-        "setattr(cfg, 'call', 1)\ndef call(a): return a\n",
+        "import sys\nsetattr(sys.modules[__name__], 'call', 1)\ndef call(a): return a\n",
         "calls setattr(), which binds a name given as a string",
     ),
     "opaque_binder_suffix": (
         "def call(a): return a\ndef helper(call_s0): return call(3)\n",
         "already uses ['call_s0']",
     ),
+    # A class attribute's readers are ``R.call`` attributes OUTSIDE the body, so this
+    # raises with nothing in the body reading bare ``call``.
     "class_body_store": (
-        "def call(a): return a\nclass R:\n    call = print\n    alias = call\n",
-        "rebinds ['call'] and reads it there",
+        "def call(a): return a\nclass R:\n    call = print\n",
+        "rebinds ['call'] with a binder the rewrite cannot follow",
+    ),
+    # The opaque half DOES need the read: an unrenamed parameter under a renamed load.
+    "opaque_binder_read": (
+        "def call(a): return a\ndef helper(call): return call(3)\n",
+        "rebinds ['call'] with a binder the rewrite cannot follow",
     ),
     "header_off_def_line": (
         "def \\\ncall(a): return a\n",
@@ -243,9 +250,11 @@ _UNSUPPORTED_SHAPES = {
         "from math import sqrt\nsqrt = 1\ndef call(a): return sqrt\n",
         "['sqrt'] are both imported and assigned",
     ),
+    # Write-only, which is the shape codegen emits: a ``global`` rebinds the module-level
+    # name whether or not the scope reads it back.
     "nested_global": (
-        "weight = None\ndef call():\n    global weight\n    weight = 1\n    return weight\n",
-        "rebinds ['weight'] and reads it there",
+        "weight = None\ndef call():\n    global weight\n    weight = 1\n",
+        "rebinds ['weight'] with a binder the rewrite cannot follow",
     ),
     "suffix_taken": (
         "def call_s0(a): return a\ndef call(a): return call_s0(a)\n",
@@ -909,6 +918,10 @@ class TestAOTCompileToPython(TestCase):
                 ast.parse(renamed)
                 self.assertIn(expected, renamed)
 
+    # graph_partition defaults OFF in fbcode (config.py: "1" if not is_fbcode() else "0")
+    # and nothing on this path pins it, so the Runner assertions below are ambient unless
+    # the flag is patched -- the same constraint test_precompile.py patches around.
+    @torch._inductor.config.patch(graph_partition=True)
     def test_namespace_module_names_splices_two_real_composed_modules(self):
         from torch._functorch._aot_autograd.to_standalone_python import (
             namespace_module_names,
@@ -920,10 +933,10 @@ class TestAOTCompileToPython(TestCase):
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
         x = torch.randn(5, 4)
         src, _cache = _compose(m, x)
-        # Graph partition is on by default, so this real output already carries the
-        # partitioned shape the docstring claims to handle -- a ``class Runner`` with a
-        # ``def call`` method beside the module-level ``call = runner.call`` -- rather than
-        # the accepted-shapes fixture being its only coverage. Pin that.
+        # With graph partition on, this real output carries the partitioned shape the
+        # docstring claims to handle -- a ``class Runner`` with a ``def call`` method beside
+        # the module-level ``call = runner.call`` -- rather than the accepted-shapes fixture
+        # being its only coverage. Pin that.
         runners = [
             n
             for n in ast.parse(src).body

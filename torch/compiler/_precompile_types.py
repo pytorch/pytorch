@@ -26,11 +26,15 @@ class GuardFact:
             the ``Guard.name`` with local scope stripped (``L['x']`` -> ``x``),
             the same spelling as the ``(guard_type, source)`` slots of
             ``PrecompileSummary``: ``"x"``, ``"self.eps"``, ``"G['CFG'].width"``.
-            Empty for a guard checked against no source.
-        code: The rendered check parts, with the addresses Dynamo interpolates
-            scrubbed by the producer, e.g.
-            ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``; empty
-            when the guard renders none.
+            Empty for a guard checked against no source. A subscript key that
+            does not read as an attribute name is masked (``cfg[<str>]``), since
+            the key a source spells into the name is otherwise guarded data.
+        code: The rendered check parts as a skeleton: the operators and the
+            callables, with every literal the check embeds rendered the way
+            ``value`` renders one and the addresses Dynamo interpolates scrubbed,
+            e.g. ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``;
+            empty when the guard renders no check, or renders one that is not an
+            expression.
         value: A rendered fragment for what the check compares that its code does
             not show: a tensor's dtype and shape line, or ``"is <callable>"`` for
             an identity guard. Empty when the code says it all.
