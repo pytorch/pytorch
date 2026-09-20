@@ -3794,6 +3794,43 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
         h.remove()
 
+    def test_loaded_nested_module_keeps_its_bookkeeping_containers(self):
+        # _parameters/_buffers/_modules are exact dicts and
+        # _non_persistent_buffers_set an exact set, so persistent_id would prune
+        # an unguarded one to the sentinel: nn.Module.__getattr__ indexes the
+        # dicts on every attribute miss, register_buffer and __setattr__ index
+        # the set. A module-scope class, so the outer module loads as its own
+        # type rather than as the bare nn.Module a <locals> class becomes.
+        def fn(m, x):
+            return m(x)
+
+        m = GlobalNestedModule()
+        m.register_buffer("scratch", torch.zeros(1), persistent=False)
+        self._test_serialization("TENSOR_MATCH", fn, m, torch.randn(2, 10))
+        loaded = load_guards_state(self._cached_guards_state).output_graph
+        loaded = loaded.local_scope["m"]
+        self.assertIsInstance(loaded, GlobalNestedModule)
+        self.assertFalse(hasattr(loaded, "absent"))
+        self.assertFalse(hasattr(loaded.linear, "absent"))
+        self.assertEqual(loaded.linear.in_features, 10)
+        loaded.register_buffer("extra", torch.zeros(1), persistent=False)
+        self.assertEqual(loaded._non_persistent_buffers_set, {"scratch", "extra"})
+
+    @torch._dynamo.config.patch(allow_rnn=True)
+    def test_loaded_rnn_module_survives_its_own_setstate(self):
+        # RNNBase.__setstate__ indexes _all_weights, an unguarded exact list;
+        # a module with its own __setstate__ is pickled whole rather than pruned.
+        def fn(m, x):
+            return m(x)[0]
+
+        lstm, x = torch.nn.LSTM(4, 4), torch.randn(2, 3, 4)
+        self._test_serialization("TENSOR_MATCH", fn, lstm, x)
+        loaded = load_guards_state(self._cached_guards_state).output_graph
+        loaded = loaded.local_scope["m"]
+        self.assertIsInstance(loaded, torch.nn.LSTM)
+        self.assertEqual(loaded._all_weights, lstm._all_weights)
+        self.assertEqual(loaded._flat_weights_names, lstm._flat_weights_names)
+
     def test_grad_mode(self):
         def fn(x):
             return x + 1
