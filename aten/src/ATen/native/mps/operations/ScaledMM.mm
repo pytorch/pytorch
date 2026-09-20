@@ -140,7 +140,16 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   };
   using namespace std::string_view_literals;
   const auto type_str = scalarToMetalTypeString(dtype);
-  const auto kernel_name = fmt::format("scaled_mm_{}{}", has_mpp() ? "mpp_"sv : ""sv, type_str);
+  const auto is_load_aligned = [](const Tensor& t, int64_t stride) {
+    return stride % scaled_mm_gemv_load_bytes == 0 && t.storage_offset() % scaled_mm_gemv_load_bytes == 0;
+  };
+  const bool contiguous_k = mat_a.stride(1) == 1 && mat_b.stride(0) == 1;
+  const bool aligned_loads = (k % scaled_mm_gemv_load_bytes == 0) && is_load_aligned(mat_a, mat_a.stride(0)) &&
+      is_load_aligned(mat_b, mat_b.stride(1));
+  const bool gemv = (m <= scaled_mm_gemv_max_rows) && contiguous_k && aligned_loads;
+  const auto kernel_name = gemv ? fmt::format("scaled_mm_gemv_{}_{}", m, type_str)
+                                : fmt::format("scaled_mm_{}{}", has_mpp() ? "mpp_"sv : ""sv, type_str);
+  const auto cols_per_group = gemv ? scaled_mm_simdgroups : scaled_mm_tile;
   auto pso = lib.getPipelineStateForFunc(kernel_name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -149,8 +158,8 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, mat_a, mat_b, out, scale_a, scale_b, bias_vec, params);
-      [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(n, scaled_mm_tile),
-                                                c10::metal::ceil_div<int64_t>(m, scaled_mm_tile),
+      [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(n, cols_per_group),
+                                                gemv ? 1 : c10::metal::ceil_div<int64_t>(m, scaled_mm_tile),
                                                 1)
               threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);

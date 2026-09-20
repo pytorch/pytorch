@@ -3671,6 +3671,30 @@ class TestFP8Matmul(TestCase):
         actual = torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b, offs)
         self.assertEqual(actual, expected)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("rows", [1, 2, 3, 4])
+    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_scaled_mm_few_rows(self, device, rows, out_dtype):
+        k, n = 1040, 48
+        x = torch.randn(rows, k, device=device).to(e4m3_type)
+        y = torch.randn(n, k, device=device).to(e4m3_type).t()
+        x_scale = torch.tensor(2.0, device=device)
+        y_scale = torch.tensor(4.0, device=device)
+        bias = None if out_dtype == torch.float32 else torch.randn(n, device=device, dtype=out_dtype)
+        out = scaled_mm_wrap(x, y, x_scale.reciprocal(), y_scale.reciprocal(), out_dtype=out_dtype, bias=bias)
+        out_emulated = mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias)
+        self.assertEqual(out, out_emulated, atol=k * torch.finfo(torch.float32).eps, rtol=torch.finfo(out_dtype).eps)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_mm_few_rows_fp8_values(self, device):
+        values = torch.arange(256, dtype=torch.uint8).view(e4m3_type)
+        x = torch.tensor([-1, 1, 2**-9, float("nan")], dtype=e4m3_type).view(4, 1).repeat(1, 16)
+        y = values[:, None].repeat(1, 16).t()
+        scale = torch.ones((), device=device)
+        out = scaled_mm_wrap(x.to(device), y.to(device), scale, scale, out_dtype=torch.float32)
+        expected = x[:, :1].float() * values.float() * 16
+        self.assertEqual(out.cpu(), expected, atol=0, rtol=0, equal_nan=True)
+
 
 instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True, allow_mps=True)
 
