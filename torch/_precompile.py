@@ -417,6 +417,10 @@ _LeafBounds = dict[int, tuple[int | None, int | None]] | None
 # boundary here.
 _NO_MARKS: Mapping[int, Any] = MappingProxyType({})
 
+# Default of PrecompileError.result. Distinct from None because None is a real return
+# (the documented training step ends in .backward()); the sentinel means nothing ran.
+_NO_RESULT: object = object()
+
 
 class PrecompileError(RuntimeError):
     """The error type raised by ``torch.compiler.precompile`` and its artifacts.
@@ -428,15 +432,16 @@ class PrecompileError(RuntimeError):
     See Note [precompile programming model] in this module for the full contract.
 
     ``result`` is what ``fn`` returned when the capture call that raised this had
-    already run before the refusal fired, so the return value is not lost; ``None``
-    otherwise.
+    already run before the refusal fired, so the return value is not lost: ``None``
+    means that call ran and returned ``None``. When nothing ran, ``result`` is a
+    private sentinel instead, never ``None``.
     """
 
     # Re-exported in torch.compiler.__all__, so pickle and test_public_bindings
     # resolve it there.
     __module__ = "torch.compiler"
 
-    result: object = None
+    result: object = _NO_RESULT
 
 
 @dataclasses.dataclass(frozen=True)
@@ -493,7 +498,9 @@ class Capture:
     capture, call it exactly as you would ``fn`` inside the block -- each call
     runs for real, folds what it exercised into the capture, and returns what
     ``fn`` returned -- and the artifact is written once, to the ``artifact_path``
-    / ``cache_path`` files, when the block exits.
+    / ``cache_path`` files, when the block exits. How many calls the block takes
+    depends on ``tracer``: the make_fx front-end takes exactly one and refuses a
+    second; the Dynamo front-end accumulates across calls.
     """
 
     def __enter__(self) -> Self:
@@ -513,10 +520,9 @@ class _MakeFxCapture(Capture):
     its ``decompositions`` to the ``PrecompiledModule`` it builds for ``fn``. Only
     the constructor and ``__enter__`` exist so far: the constructor refuses a
     partial and a ``tracer`` that is not a :class:`MakeFxTracer`, builds that module,
-    and records the paths and the ``_traced``/``_rendered`` state the capture
-    drives. ``__call__`` and ``__exit__`` still raise ``NotImplementedError`` from
-    :class:`Capture`; the one-call rule they will enforce is the one
-    :class:`MakeFxTracer` documents.
+    and records the state the capture will drive. ``__call__`` and ``__exit__``
+    still raise ``NotImplementedError`` from :class:`Capture`; the one-call rule
+    they will enforce is the one :class:`MakeFxTracer` documents.
     """
 
     def __init__(
