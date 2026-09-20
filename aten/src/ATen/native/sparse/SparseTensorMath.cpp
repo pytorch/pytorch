@@ -1011,9 +1011,10 @@ static Tensor& intersection_binary_op_sparse_dense_out(
   res_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   res_impl->set_indices_and_values_unsafe(res_indices, res_values);
   res_impl->set_nnz_and_narrow(res_nnz);
-  // By design of index expansion and that s is coalesced,
-  // the result is also coalesced.
-  return res._coalesced_(true);
+  // Index expansion preserves the order of s_indices, so the result is
+  // coalesced iff s is. s is uncoalesced when _sparse_broadcast_to above
+  // expanded a non-trailing sparse dim.
+  return res._coalesced_(s.is_coalesced());
 }
 
 Tensor& _mul_dense_sparse_out(const Tensor& d, const Tensor& s, Tensor& res) {

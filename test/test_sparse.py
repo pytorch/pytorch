@@ -4163,19 +4163,28 @@ class TestSparse(TestSparseBase):
                 # TODO: uncomment once supported
                 # check_autograd(x, y)
 
+    @coalescedonoff
     @expectedFailureMPS
-    @dtypes(torch.double)
-    def test_sparse_dense_mul_broadcast_singleton(self, device, dtype):
-        # Regression test for https://github.com/pytorch/pytorch/issues/188900
-        # A size-1 sparse dimension that must broadcast up used to silently drop
-        # data: only index 0 along the broadcast dimension was populated, and the
-        # rest were left as zeros.
-        s = torch.tensor([[1., 2.], [3., 4.]], dtype=dtype, device=device).to_sparse_coo()
-        s1 = s[:, :, None]  # (2, 2, 1): trailing size-1 sparse dim
-        d = torch.ones(1, 1, 3, dtype=dtype, device=device)  # broadcasts to (2, 2, 3)
-        expected = s1.to_dense() * d
-        self.assertEqual((s1 * d).to_dense(), expected)
-        self.assertEqual((d * s1).to_dense(), expected)  # commutativity
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_sparse_dense_mul_broadcast_sparse_dim(self, device, dtype, coalesced):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188900.
+        # Broadcasting a non-trailing size-1 sparse dim yields unsorted indices,
+        # so the result must not be flagged coalesced in that case.
+        for sparse_shape, dense_shape in (
+            ((2, 2, 1), (1, 1, 3)),      # trailing dim, s.dim() == d.dim()
+            ((1, 2, 2), (3, 1, 1)),      # leading dim, s.dim() == d.dim()
+            ((1, 2), (2, 3, 2)),         # leading dim, d.dim() > s.dim()
+            ((2, 1, 3), (4, 2, 5, 3)),   # middle dim, d.dim() > s.dim()
+        ):
+            s = make_tensor(sparse_shape, dtype=dtype, device=device, exclude_zero=True).to_sparse()
+            if not coalesced:
+                s = torch.sparse_coo_tensor(s._indices().repeat(1, 2), s._values().repeat(2), s.shape)
+            d = make_tensor(dense_shape, dtype=dtype, device=device)
+            for res in (s * d, d * s):
+                self.assertEqual(res.to_dense(), s.to_dense() * d)
+                if res.is_coalesced():
+                    self.assertTrue(is_coalesced_indices(res))
 
     @coalescedonoff
     @expectedFailureMPS
