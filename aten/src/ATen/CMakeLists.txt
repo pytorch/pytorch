@@ -368,6 +368,12 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
     UNFUSE_FMA
   )
 
+  if(MSVC)
+    target_compile_definitions(flash_attention PRIVATE _USE_MATH_DEFINES)
+    target_compile_options(flash_attention PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/permissive>)
+  endif()
+
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
   if(FLASH_ATTENTION_MAX_JOBS)
