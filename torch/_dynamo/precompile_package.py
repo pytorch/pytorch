@@ -795,10 +795,12 @@ def _is_risky_drop(
     a different object because config, a flag, or an env var differs. Three
     bindings are waived -- a builtin read the ordinary way (see
     ``_reads_a_builtin``), a read off a TRUSTED namespace (see
-    ``_module_namespaces``) that torch or the stdlib owns or that owns the
-    value itself, and a global bound to a def of that same name when torch or
-    the stdlib owns the def or it lives in the file doing the reading. The rest
-    are slots whose occupant config chooses: instance attributes, closure
+    ``_module_namespaces``) that torch or the stdlib owns or that owns a def
+    statement of that name, and a global bound to a def of that same name when
+    torch or the stdlib owns the def or it lives in the file doing the reading.
+    Both def-name tests compare ``__qualname__``, as ``_defined_where_read``
+    does, so a def lifted off a class or returned by a factory is a slot. The
+    rest are slots whose occupant config chooses: instance attributes, closure
     cells, aliased imports, cross-module ``from x import op``, registry
     lookups.
 
@@ -807,8 +809,9 @@ def _is_risky_drop(
     ``own_helpers.call`` is waived because own_helpers owns a def of that same
     name, subject to the gap below. ``mypkg.op`` re-exported from
     ``mypkg.impl_b``, ``dispatch.op``, ``own_helpers.act`` bound to some other
-    def, and ``mypkg.impl.op`` where ``mypkg/__init__`` did ``from . import
-    impl_b as impl`` are not waived: the import or assignment that chose the
+    def, ``own_helpers.op`` bound to a staticmethod lifted off a class, and
+    ``mypkg.impl.op`` where ``mypkg/__init__`` did ``from . import impl_b as
+    impl`` are not waived: the import or assignment that chose the
     implementation lives in a file the inlined-source checksum never sees, so
     capture and serve can disagree with every other rail passing.
     ``test_risky_drop_decision_table`` in test_precompile_package.py pins these
@@ -866,7 +869,7 @@ def _is_risky_drop(
                 _is_library_module(namespace.__name__)
                 or (
                     _owning_module(value) == namespace.__name__
-                    and getattr(value, "__name__", None) == source.member
+                    and getattr(value, "__qualname__", None) == source.member
                 )
             )
     if (
