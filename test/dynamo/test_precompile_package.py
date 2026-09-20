@@ -1903,15 +1903,21 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         entries = self._guard_entries(_SessionStep(), torch.randn(3, 4))
         base = default_guard_filter_fn(entries)
         self.assertIn(True, base)
-        keep_all = _compose_with_default(lambda e: [True] * len(e))
-        self.assertEqual(list(keep_all(entries)), list(base))
-        keep_none = _compose_with_default(lambda e: [False] * len(e))
-        self.assertEqual(list(keep_none(entries)), [False] * len(entries))
+        keep_all, reported = _compose_with_default(lambda e: [True] * len(e))(entries)
+        self.assertEqual(list(keep_all), list(base))
+        # The default's own decisions come back with the composition, which is
+        # what lets the recorder judge a drop without running it again.
+        self.assertEqual(list(reported), list(base))
+        keep_none, _ = _compose_with_default(lambda e: [False] * len(e))(entries)
+        self.assertEqual(list(keep_none), [False] * len(entries))
+        # No custom filter at all: the default's decisions ARE the composition.
+        composed, reported = _compose_with_default(None)(entries)
+        self.assertEqual(list(composed), list(base))
+        self.assertEqual(list(reported), list(base))
         # A custom filter cannot re-admit what the default dropped.
         dropped = [i for i, kept in enumerate(base) if not kept]
         self.assertTrue(dropped)
-        widened = _compose_with_default(lambda e: [True] * len(e))(entries)
-        self.assertFalse(any(widened[i] for i in dropped))
+        self.assertFalse(any(keep_all[i] for i in dropped))
 
     def test_compose_with_default_refuses_a_wrong_length_decision_list(self):
         from torch._dynamo.precompile_package import _compose_with_default
@@ -1945,14 +1951,16 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             self.assertEqual(set(observed), {training})
             # The outcome, not just the flag: a lazy backward leaves the bundle
             # unwritten until the first .backward() call, so a capture that
-            # never makes one files no artifact and says so.
+            # never makes one files no artifact and records that it did not.
+            # The message lists the plausible causes rather than diagnosing
+            # one, so this pins the fact of the error, not a diagnosis.
             self.assertEqual(bool(session._backend_artifacts), training)
             if training:
                 self.assertEqual(session._capture_errors, [])
             else:
                 (recorded,) = session._capture_errors
                 self.assertIn("recorded no artifact", recorded)
-                self.assertIn("training=True", recorded)
+                self.assertIn("the usual causes are", recorded)
         self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
 
     def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
@@ -2053,6 +2061,31 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
                     cap(torch.ones(2), True)
         self.assertEqual(session._capture_errors, ["ValueError: boom"])
 
+    def test_recording_an_error_runs_under_the_session_lock(self):
+        import threading
+
+        # The once-only dedup is a check-then-add on shared state, so it has to
+        # hold _state: holding it from here must stall a recording thread.
+        session = self._session(_session_raises)
+        started = threading.Event()
+        done = threading.Event()
+
+        def record():
+            started.set()
+            session._record_capture_error(ValueError("boom"))
+            done.set()
+
+        worker = threading.Thread(target=record)
+        with session._state:
+            worker.start()
+            started.wait()
+            self.assertFalse(done.wait(0.5))
+            self.assertEqual(session._capture_errors, [])
+        worker.join()
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+        session._record_capture_error(ValueError("boom"))
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+
     def test_eager_backends_survive_exit_for_the_render(self):
         session = self._session(_session_breaks)
         with session as cap:
@@ -2087,7 +2120,368 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             _entry_fn_of(3)
 
 
+class _SessionReadsAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+        self.scale = 2
+
+    def forward(self, x):
+        return self.lin(x) * self.scale
+
+
+def _drop_scale(entries):
+    return ["scale" not in e.name for e in entries]
+
+
+def _hook_double(x):
+    return x * 2
+
+
+def _hook_increment(x):
+    return x + 1
+
+
+# Rebound by the tests through _rebind_hook, never in place.
+_SESSION_HOOK = _hook_double
+
+
+def _session_calls_hook(x):
+    return _SESSION_HOOK(x)
+
+
+# The identity guard the default filter drops for _session_calls_hook.
+_HOOK_SLOT = ("CLOSURE_MATCH", "G['_SESSION_HOOK']")
+
+
+class _ReprRaises:
+    def __repr__(self):
+        raise RuntimeError("no repr for you")
+
+
+class _ReprRaisesNumber(float):
+    """A number _plain_value does render, whose repr raises anyway."""
+
+    def __repr__(self):
+        raise RuntimeError("no repr for you")
+
+
+class _FakeCompile:
+    """The frame being compiled, as the recording filter reads it."""
+
+    def __init__(self, python_code):
+        self.python_code = python_code
+
+
+class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _session(self, fn, **kwargs):
+        from torch._dynamo.precompile_package import precompile_capture
+
+        kwargs.setdefault("backend", "eager")
+        kwargs.setdefault("dynamic", False)
+        return precompile_capture(fn, **kwargs)
+
+    def _risky_session(self):
+        """A capture whose custom filter drops self.scale, so the drop is risky."""
+        session = self._session(_SessionReadsAttr(), guard_filter_fn=_drop_scale)
+        with session as cap:
+            cap(torch.randn(2, 4))
+        return session
+
+    def _rebind_hook(self, fn):
+        """Rebind the global _session_calls_hook reads, restored after the test."""
+        previous = globals()["_SESSION_HOOK"]
+        self.addCleanup(globals().__setitem__, "_SESSION_HOOK", previous)
+        globals()["_SESSION_HOOK"] = fn
+
+    def test_summary_counts_frames_variants_and_guards(self):
+        model = _SessionReadsAttr()
+        session = self._session(model)
+        with session as cap:
+            cap(torch.randn(2, 4))
+            cap(torch.randn(3, 4))
+        summary = session.summary()
+        self.assertEqual(summary.frames, 1)
+        self.assertEqual(summary.guarded_codes, 2)
+        self.assertEqual(summary.backend_graphs, 2)
+        self.assertEqual(summary.bypassed, ())
+        self.assertEqual(summary.capture_errors, ())
+        self.assertTrue(summary.complete)
+        self.assertIn("TENSOR_MATCH", summary.kept_guard_types)
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        self.assertEqual(summary.policy_dropped_guards, ())
+
+    def test_a_custom_filter_composes_with_the_default_and_its_drops_are_risky(self):
+        session = self._risky_session()
+        summary = session.summary()
+        self.assertTrue(any("scale" in name for _, name in summary.dropped_guards))
+        self.assertTrue(
+            any("scale" in name for _, name in summary.risky_dropped_guards)
+        )
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
+        self.assertTrue(
+            any("scale" in name for _, name, _ in summary.dropped_guard_code)
+        )
+
+    def test_a_dropped_slot_keeps_the_first_rendering(self):
+        # One rendering per slot, whatever the variants: see
+        # PrecompileSummary.dropped_guard_code.
+        session = self._session(_SessionReadsAttr())
+        slot = ("EQUALS_MATCH", "n")
+        session._record_dropped_code(slot, ["L['n'] == 3"])
+        session._record_dropped_code(slot, ["L['n'] == 4"])
+        self.assertEqual(session._dropped_guard_code[slot], "L['n'] == 3")
+        session._record_dropped_code(("TENSOR_MATCH", "x"), [])
+        self.assertNotIn(("TENSOR_MATCH", "x"), session._dropped_guard_code)
+
+    def test_a_guarded_value_renders_as_its_shape_or_its_type_only(self):
+        def rendered(value, has_value=True):
+            entry = _entry(LocalSource("x"), value, "TENSOR_MATCH")
+            return precompile_package._plain_value(
+                dataclasses.replace(entry, has_value=has_value)
+            )
+
+        self.assertEqual(rendered(torch.ones(2, 4)), "torch.float32 (2, 4) cpu")
+        self.assertEqual(rendered(3), "3")
+        self.assertEqual(rendered(True), "True")
+        self.assertEqual(rendered(None), "None")
+        # A string is the data itself whatever its length -- a prompt, a path --
+        # and any other object renders as its type, so neither those nor a
+        # tensor's elements reach the report.
+        self.assertEqual(rendered("small"), "<str>")
+        self.assertEqual(rendered("x" * 100), "<str>")
+        self.assertEqual(rendered(b"raw"), "<bytes>")
+        self.assertEqual(rendered(10**100), "<int>")
+        self.assertEqual(rendered(_ReprRaises()), "<_ReprRaises>")
+        self.assertEqual(rendered(torch.nn.ReLU()), "<ReLU>")
+        self.assertEqual(rendered(3, has_value=False), "")
+        # Reading the value is fallible, and a failure here would otherwise
+        # propagate out of the guard filter and kill the compile.
+        self.assertEqual(rendered(_ReprRaisesNumber(1.5)), "<unavailable>")
+
+    @parametrize(
+        "raw,masked",
+        [
+            ("<mypkg.Cfg object at 0x7F88c01a2d90>", "<mypkg.Cfg object at <addr>>"),
+            (
+                "___check_obj_id(L['x'], 140234567), type=<class 'int'>",
+                "___check_obj_id(L['x'], <id>), type=<class 'int'>",
+            ),
+            ("G['__builtins_dict___14']['len']", "G['__builtins_dict___<n>']['len']"),
+            ("__compiled_fn_3_0(L['x'])", "__compiled_fn_<n>(L['x'])"),
+            ("G['_140234567891_c0'].weight", "G['_<id>_c<n>'].weight"),
+            # A subscript key that reads as an attribute name tells two slots of
+            # one dict apart; anything else is the guarded data.
+            ("L['self']._modules['fc1'].weight", "L['self']._modules['fc1'].weight"),
+            ("L['self'].cfg['/home/u/secret']", "L['self'].cfg[<str>]"),
+            ("L['self'].cfg['%s']" % ("p" * 80), "L['self'].cfg[<str>]"),
+            # Narrower than an address: a real name, left alone.
+            ("G['_12345_c0'].weight", "G['_12345_c0'].weight"),
+            # A hex literal in a check is not an address; masking it would make
+            # two different values read as one.
+            ("L['self'].mask == 0xdeadbeef", "L['self'].mask == 0xdeadbeef"),
+            ("self.eps", "self.eps"),
+        ],
+    )
+    def test_normalize_masks_only_what_changes_run_to_run(self, raw, masked):
+        from torch._dynamo.precompile_package import _normalize
+
+        self.assertEqual(_normalize(raw), masked)
+        # Idempotent, or a re-normalized slot would spell itself differently.
+        self.assertEqual(_normalize(masked), masked)
+
+    @parametrize(
+        "part,masked",
+        [
+            # A number or a bool IS the form of a check; a string, a container
+            # display, a keys list and a containment argument are its data.
+            ("L['self'].n == 3", "L['self'].n == 3"),
+            ("L['self'].prompt == 'a secret prompt'", "L['self'].prompt == <str>"),
+            ("L['self'].tags == {'alpha'}", "L['self'].tags == <set>"),
+            (
+                "list(dict.keys(L['x'])) == ['alpha']",
+                "list(dict.keys(L['x'])) == <list>",
+            ),
+            ("set.__contains__(L['x'], 'alpha')", "set.__contains__(L['x'], <str>)"),
+            # The member a getattr names -- and TENSOR_MATCH's dimension marking
+            # through it -- is what the check is about rather than its data.
+            (
+                "hasattr(L['x'], '_dynamo_dynamic_indices') == False",
+                "hasattr(L['x'], '_dynamo_dynamic_indices') == False",
+            ),
+            # A data-shaped subscript key is masked, one that reads as a name is not.
+            ("L['self'].cfg['/home/u/secret'] == 3", "L['self'].cfg[<str>] == 3"),
+            ("L['self']._modules['fc1'].weight", "L['self']._modules['fc1'].weight"),
+            # No expression at all, so nothing can be masked and the part goes.
+            ("top_saved_tensors_hooks ids == (11, 12)", ""),
+        ],
+    )
+    def test_a_rendered_check_keeps_its_form_and_not_its_data(self, part, masked):
+        from torch._dynamo.precompile_package import _render_code
+
+        self.assertEqual(_render_code([part]), (masked,) if masked else ())
+
+    def test_two_frames_dropping_a_same_named_slot_are_not_risky(self):
+        # entry.name is frame-local, so the same name in two frames is two
+        # slots: one fingerprint table for both would read a rebind that never
+        # happened, and the default gate would refuse a valid artifact.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            lambda es: ([False] * len(es), [False] * len(es))
+        )
+        slot = ("CLOSURE_MATCH", "fn")
+        keys = {}
+        # Held for the length of the test: a frame key ends in an address, and a
+        # freed one is reused.
+        alive = []
+        for fn in (_hook_double, _hook_increment):
+            compiling = _FakeCompile(fn.__code__)
+            alive.append(compiling)
+            session._package._current_entry = compiling
+            code = compiling.python_code
+            keys[fn] = (
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                id(compiling),
+            )
+            record([_entry(LocalSource("fn"), fn, "CLOSURE_MATCH")])
+        self.assertIn(slot, session._dropped_guards)
+        self.assertEqual(session._value_varying_slots(), set())
+        # A second value in ONE frame is the variation the rail exists for, and
+        # it belongs to that frame alone: _current_entry is still the second
+        # frame's, so the first frame's slot still held.
+        record([_entry(LocalSource("fn"), _hook_double, "CLOSURE_MATCH")])
+        self.assertEqual(session._value_varying_slots(), {slot})
+        varying = session._value_varying_slots
+        self.assertEqual(varying(keys[_hook_increment]), {slot})
+        self.assertEqual(varying(keys[_hook_double]), set())
+
+    def test_a_guard_nothing_checks_is_not_enforced_however_the_filter_votes(self):
+        # FSDP_TRAINING_STATE's GuardBuilder body is `pass` and GlobalStateGuard
+        # snapshots no training state, so the default filter keeping it does not
+        # make it a condition anything rechecks at load time. Not risky either:
+        # no filter decision dropped it.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            lambda es: ([True] * len(es), [True] * len(es))
+        )
+        record([_entry(LocalSource("self"), None, "FSDP_TRAINING_STATE")])
+        slot = ("FSDP_TRAINING_STATE", "self")
+        self.assertIn(slot, session._dropped_guards)
+        self.assertNotIn(slot, session._kept_guards)
+        self.assertEqual(session._risky_dropped_guards, set())
+
+    def test_a_no_op_marker_is_enforced_only_with_the_leaf_that_checks_it(self):
+        # GRAD_MODE's own check is `pass`: GLOBAL_STATE's leaf is what compares
+        # the flag, so a filter that drops GLOBAL_STATE drops the check too,
+        # whatever it voted on the marker.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            lambda es: (
+                [e.guard_type != "GLOBAL_STATE" for e in es],
+                [True] * len(es),
+            )
+        )
+        record(
+            [
+                _entry(LocalSource("x"), None, "GLOBAL_STATE"),
+                _entry(LocalSource("x"), None, "GRAD_MODE"),
+            ]
+        )
+        self.assertIn(("GRAD_MODE", "x"), session._dropped_guards)
+        self.assertNotIn(("GRAD_MODE", "x"), session._kept_guards)
+
+    def test_a_dropped_slot_whose_value_changed_between_variants_is_risky(self):
+        # Through the DEFAULT filter, with no custom one to make the drop risky
+        # by construction. The filter drops the identity guard from the live
+        # guards as well, so the rebind cannot recompile on its own: the shape is
+        # what produces the second variant, and the rebind is what the artifact
+        # will not notice.
+        session = self._session(_session_calls_hook)
+        with session as cap:
+            cap(torch.ones(2, 4))
+            self._rebind_hook(_hook_increment)
+            cap(torch.ones(3, 4))
+        summary = session.summary()
+        self.assertIn(_HOOK_SLOT, summary.dropped_guards)
+        self.assertIn(_HOOK_SLOT, summary.risky_dropped_guards)
+
+    def test_a_dropped_slot_whose_value_held_is_not_risky(self):
+        session = self._session(_session_calls_hook)
+        with session as cap:
+            cap(torch.ones(2, 4))
+            cap(torch.ones(3, 4))
+        summary = session.summary()
+        self.assertIn(_HOOK_SLOT, summary.dropped_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+
+    def test_a_value_fingerprint_tells_scalars_apart_without_rendering_them(self):
+        # The comparison the coarse rendering cannot make: two different scalars
+        # both render themselves here, but a string renders as <str>, so only the
+        # fingerprint can say the slot varied.
+        def print_of(value, has_value=True):
+            entry = _entry(LocalSource("x"), value, "TENSOR_MATCH")
+            return precompile_package._value_fingerprint(
+                dataclasses.replace(entry, has_value=has_value)
+            )
+
+        self.assertEqual(print_of(3), print_of(3))
+        self.assertNotEqual(print_of(3), print_of(4))
+        self.assertNotEqual(print_of("a" * 80), print_of("b" * 80))
+        # A tensor fingerprints on what a guard compares it by, so differing
+        # elements are not variation but a differing shape is.
+        self.assertEqual(print_of(torch.ones(2, 4)), print_of(torch.rand(2, 4)))
+        self.assertNotEqual(print_of(torch.ones(2, 4)), print_of(torch.ones(3, 4)))
+        self.assertEqual(print_of(3, has_value=False), 0)
+        # A callable fingerprints on where it was DEFINED rather than on its
+        # address: two distinct functions differ, and one minted per call -- a
+        # closure, a functools.partial -- is not a rebind of the slot.
+        self.assertNotEqual(print_of(_hook_double), print_of(_hook_increment))
+
+        def minted():
+            def inner(y):
+                return y
+
+            return inner
+
+        # Both held, because an address freed by the first is reused by the
+        # second and identity would then call two objects one.
+        first, second = minted(), minted()
+        self.assertEqual(print_of(first), print_of(second))
+
+    def test_a_guard_the_config_turns_into_a_no_op_is_not_enforced(self):
+        # EMPTY_NN_MODULE_HOOKS_DICT passes the serializer pre-check, so the
+        # filter keeps it, but under skip_nnmodule_hook_guards GuardBuilder emits
+        # no check for it and GlobalStateGuard holds no hook state: nothing
+        # rechecks it at load time, and a report of unchecked preconditions must
+        # not print it as enforced. It is not risky -- no filter decision dropped it.
+        self.assertTrue(torch._dynamo.config.skip_nnmodule_hook_guards)
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        summary = session.summary()
+        self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
+        self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
+        self.assertEqual(summary.risky_dropped_guards, ())
+
+    @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False)
+    def test_a_hook_dict_guard_the_config_keeps_is_enforced(self):
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        summary = session.summary()
+        self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
+        self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
+
+
 instantiate_parametrized_tests(TestPrecompilePackage)
+instantiate_parametrized_tests(TestPrecompileSessionSummary)
 
 
 if __name__ == "__main__":
