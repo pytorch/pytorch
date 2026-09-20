@@ -26,7 +26,10 @@ it.
 # Note [precompile programming model]
 #
 # ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
-# or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step.
+# or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step
+# (calls run in the caller's grad mode; with grad enabled, a dynamo capture lowers the
+# backward eagerly under ``training=True`` -- see the tracer note -- while a make_fx
+# capture traces THROUGH the backward, invariant 5).
 # Among the positional args, the nn.Module arguments have their parameters and
 # buffers lifted to explicit graph inputs (via functional reparametrization), so
 # nothing live is baked in; the remaining args are the runtime inputs. The artifact
@@ -127,7 +130,20 @@ it.
 #    ``.backward()`` step), not the grads. The grad scatter is the ONLY mutation
 #    precompile performs, and it happens in Python outside the graph, so the graph stays
 #    functional. precompile does not own optimizer state; bring your own optimizer and
-#    zero grads as usual.
+#    zero grads as usual. The dynamo tracer accumulates by a different route (see the
+#    tracer note): a ``.backward()`` in ``fn`` graph-breaks, so at serve time the live
+#    autograd engine runs it through the compiled backward and does the accumulate
+#    itself; there is no harvested-output list (``training=True`` lowers that backward
+#    at capture even if ``fn`` never calls ``.backward()``).
+#    What matches make_fx: the in-place accumulate of the common path, frozen
+#    params keeping ``.grad = None``, and ``fn``'s own return value. What differs: the
+#    engine goes through AccumulateGrad, so tensor hooks and post-accumulate-grad hooks
+#    on the params fire; a make_fx capture silently drops them end to end (capture
+#    reparametrizes the module onto fresh fake params, so the hook stays behind on the
+#    real one, and the scatter above never runs AccumulateGrad). And ``requires_grad``
+#    is part of the params' TENSOR_MATCH guards, so a param flipped at runtime is a loud
+#    guard miss on a standalone artifact (an installed one compiles the call fresh)
+#    rather than make_fx's silent no-op (invariant 2).
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
@@ -161,7 +177,7 @@ it.
 #    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
 #    run. The code_hash binds the cache to its python_code:
-#    load() rejects a (code, cache) pair from different precompile() calls (same
+#    load() rejects a (code, cache) pair from different precompile captures (same
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
 # self-contained: ``python_code`` runs on its own -- it inlines the composed graph
@@ -179,7 +195,7 @@ it.
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair that did not come from the same precompile() call.
+# (python_code, cache) pair that did not come from the same precompile capture.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
