@@ -5030,7 +5030,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
         orig_guard=guard,
-        code=tuple(guard.code_list or ()),
+        code_parts=tuple(guard.code_list or ()),
     )
 
 
@@ -5040,7 +5040,7 @@ _WALK_BUDGET = 20000
 
 
 def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
-    """The named values a guard state can reach, for the diagnostic walk."""
+    """The scope seeds for the diagnostic walk: the two scopes' named values."""
     return [
         (f"local_scope[{k!r}]", v)
         for k, v in (getattr(graph, "local_scope", None) or {}).items()
@@ -5067,12 +5067,12 @@ def _offending_value_path(
     values, so a value living anywhere else -- a lock on a compiler internal,
     say -- was unreachable however well the scopes were preserved. The scopes
     stay as SEEDS, ahead of ``state`` in the queue, so the common case still
-    reports the short readable path rather than a long one through the graph.
-    Guards are slotted dataclasses whose create_fn is a functools.partial, so
-    slots and partials are descended too; modules are not, since they pickle
-    by name and their dicts lead to the whole of sys.modules.
-    ``roots`` lets the caller pass scope seeds captured before pruning emptied
-    ``global_scope``; by default they are read off ``state`` as it is now.
+    reports the short readable path rather than a long one through the graph;
+    ``roots`` are those seeds, captured by the caller before pruning emptied
+    ``global_scope`` (by default read off ``state`` as it is now). Guards are
+    slotted dataclasses whose create_fn is a functools.partial, so slots and
+    partials are descended too; modules are not, since they pickle by name and
+    their dicts lead to the whole of sys.modules.
 
     A shared object is reported by the first path breadth-first search reaches,
     which need not be the one the pickler took. Best-effort by construction: it
@@ -5238,9 +5238,14 @@ def pickle_guards_state(
 
         # Snapshot the diagnostic's search roots before the pruning below
         # empties global_scope: a value that also lives on a global is then
-        # still named by that global rather than by a long path through the
-        # output graph, or by nothing.
-        scope_roots = _scope_roots(state.output_graph)
+        # still named by that global binding, which is what a user recognises
+        # even though the pruned scope itself is not in the artifact, rather
+        # than by a long path through the output graph. Best-effort like the
+        # walk itself: a scope whose read raises must not fail a good dump.
+        try:
+            scope_roots = _scope_roots(state.output_graph)
+        except Exception:
+            scope_roots = None
 
         if all(
             torch.compiler.keep_portable_guards_unsafe(

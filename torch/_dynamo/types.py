@@ -47,10 +47,11 @@ class GuardFilterEntry:
     derived_guard_types: tuple[str, ...]
     is_global: bool
     orig_guard: Guard
-    # Snapshot of orig_guard.code_list as of the inspection build. Every later
-    # build_guards call resets and repopulates it, so reading it off orig_guard
-    # later yields whatever the last build that included the guard emitted.
-    code: tuple[str, ...] = ()
+    # Snapshot of orig_guard.code_list (the rendered checks, as GuardFn's
+    # code_parts) as of the inspection build. Every later build_guards call
+    # resets and repopulates that list, so reading it off orig_guard later
+    # yields whatever the last build that included the guard emitted.
+    code_parts: tuple[str, ...] = ()
 
 
 class GuardFn(Protocol):

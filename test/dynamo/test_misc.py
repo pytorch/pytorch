@@ -17707,31 +17707,23 @@ fn
         self.assertEqual(fn(x), opt_fn(x))
 
     def test_guard_filter_entry_snapshots_the_guard_code(self):
-        # entry.code is a copy of orig_guard.code_list taken at inspection
-        # time; build_guards resets and repopulates the list on every later
-        # build, so the entry must not share it.
-        seen = []
+        # entry.code_parts is populated from orig_guard.code_list at inspection
+        # time and is a copy: a later build_guards mutates that list in place
+        # (reset, then repopulated), and the entry must not follow it.
+        from torch._dynamo.guards import make_guard_filter_entry
+        from torch._dynamo.source import LocalSource
+        from torch._guards import Guard
 
-        def guard_filter_fn(entries):
-            for entry in entries:
-                self.assertEqual(entry.code, tuple(entry.orig_guard.code_list or ()))
-            seen.extend(entries)
-            return [entry.guard_type == "TENSOR_MATCH" for entry in entries]
-
-        @torch.compile(
-            fullgraph=True,
-            options={"guard_filter_fn": guard_filter_fn},
-            backend="eager",
-        )
-        def fn(x):
-            return x + 1
-
-        fn(torch.randn(3, 2))
-        entry = next(e for e in seen if e.guard_type == "TENSOR_MATCH")
-        self.assertTrue(entry.code)
-        snapshot = entry.code
-        entry.orig_guard.code_list = None  # what the next build_guards does
-        self.assertEqual(entry.code, snapshot)
+        guard = Guard(LocalSource("x"), lambda *a: None)
+        guard.code_list = ["___check_type_id(L['x'], 1)"]
+        builder = types.SimpleNamespace(get=lambda g: 1)
+        entry = make_guard_filter_entry(guard, builder)
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        guard.code_list.clear()
+        guard.code_list.append("something else")
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        guard.code_list = None
+        self.assertEqual(make_guard_filter_entry(guard, builder).code_parts, ())
 
     def test_guard_filter_fn_by_id(self):
         def guard_filter_fn(entries):
