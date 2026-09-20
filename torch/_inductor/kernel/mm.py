@@ -1478,6 +1478,25 @@ def tuned_scaled_mm_v2(
 
     bias_real = realize_inputs(bias) if bias else None
 
+    # DeepSeek v2 scale extents are independent of TMA / SM-count template
+    # eligibility. Keep the check outside use_triton_template so SM12 / low-SM
+    # devices raise the scale-shape error instead of NoValidChoicesError.
+    if use_triton_scaling_template(
+        scale_option_a, scale_option_b, main_loop_scaling_types
+    ):
+        for scale, mat, outer, recipe, transpose in (
+            (scale_a_real, mat_a, m, scale_option_a, False),
+            (scale_b_real, mat_b, n, scale_option_b, True),
+        ):
+            scale_size = scale.get_size()
+            if len(scale_size) != 2:
+                raise RuntimeError("DeepSeek scales must be two-dimensional")
+            if recipe == ScalingType.BlockWise1x128:
+                for actual, expected in zip(scale_size, (outer, ceildiv(k, 128))):
+                    V.graph.sizevars.check_equals(actual, expected)
+            elif not is_desired_scaling(mat, scale_size, recipe, transpose):
+                raise RuntimeError("DeepSeek scale shape does not match recipe")
+
     input_nodes: list[Any]
 
     if not bias:
@@ -1542,21 +1561,6 @@ def tuned_scaled_mm_v2(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
-                # Shared inference accepts v1 RHS shapes; v2 loads require v2 extents.
-                for scale, mat, outer, recipe, transpose in (
-                    (scale_a_real, mat_a, m, scale_option_a, False),
-                    (scale_b_real, mat_b, n, scale_option_b, True),
-                ):
-                    scale_size = scale.get_size()
-                    if len(scale_size) != 2:
-                        raise RuntimeError("DeepSeek scales must be two-dimensional")
-                    if recipe == ScalingType.BlockWise1x128:
-                        for actual, expected in zip(
-                            scale_size, (outer, ceildiv(k, 128))
-                        ):
-                            V.graph.sizevars.check_equals(actual, expected)
-                    elif not is_desired_scaling(mat, scale_size, recipe, transpose):
-                        raise RuntimeError("DeepSeek scale shape does not match recipe")
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
                 overriders["SCALE_A_TRANSPOSED"] = _scale_is_transposed(
