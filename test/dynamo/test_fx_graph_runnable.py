@@ -16,10 +16,10 @@ from torch._inductor.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     HardwareClassification,
     IS_FBCODE,
     IS_SANDCASTLE,
-    instantiate_parametrized_tests,
     parametrize,
 )
 from torch.utils._triton import has_triton
