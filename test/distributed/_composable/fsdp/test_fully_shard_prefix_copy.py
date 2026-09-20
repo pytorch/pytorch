@@ -2,17 +2,18 @@
 
 import math
 import unittest
+from collections import Counter
 from unittest.mock import Mock
 
 import torch
 import torch.distributed as dist
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    AllGatherResult,
     foreach_reduce_scatter_copy_in,
 )
-from torch.distributed.fsdp.experimental import (
-    reduce_scatter_input_fn_for_nonzero_dim_shards,
-)
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.tensor import Shard
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -27,17 +28,28 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
+
+
+class _OpCounter(TorchDispatchMode):
+    def __init__(self):
+        super().__init__()
+        self.counts = Counter()
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.counts[func] += 1
+        return func(*args, **(kwargs or {}))
 
 
 @unittest.skipIf(IS_WINDOWS, "FSDP2 is not supported on Windows")
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
-    @parametrize("use_nonzero_dim", [False, True])
+    @parametrize("nonzero_shards", [False, True])
     @parametrize("world_size", [1, 4])
     @parametrize("mixed_layout", [False, True])
     @dtypes(torch.bfloat16)
     def test_reduce_scatter_preparation(
-        self, device, dtype, use_nonzero_dim, world_size, mixed_layout
+        self, device, dtype, nonzero_shards, world_size, mixed_layout
     ):
         shapes = [
             (world_size * 3 - 1, 5),
@@ -47,8 +59,9 @@ class TestPrefixCopy(TestCase):
         grads = [make_tensor(shape, device=device, dtype=dtype) for shape in shapes]
         if mixed_layout:
             grads[2] = grads[2].transpose(0, 1).contiguous().transpose(0, 1)
+        shard_dims = list(range(len(grads))) if nonzero_shards else [0] * len(grads)
         shards = []
-        for dim, grad in enumerate(grads):
+        for dim, grad in zip(shard_dims, grads):
             shape = list(grad.shape)
             shape[dim] = math.ceil(shape[dim] / world_size) * world_size
             padded = grad.new_zeros(shape)
@@ -57,21 +70,131 @@ class TestPrefixCopy(TestCase):
         expected = torch.cat(
             [shard[rank].flatten() for rank in range(world_size) for shard in shards]
         ).float()
-        params = [Mock(fsdp_placement=Shard(dim)) for dim in range(len(grads))]
-        prepare = (
-            reduce_scatter_input_fn_for_nonzero_dim_shards
-            if use_nonzero_dim
-            else _default_reduce_scatter_input_fn
-        )
-        prepared = prepare(params, grads, world_size)
+        params = [Mock(fsdp_placement=Shard(dim)) for dim in shard_dims]
+        prepared = _default_reduce_scatter_input_fn(params, grads, world_size)
         sizes = prepared.padded_unsharded_sizes
-        if not use_nonzero_dim or world_size == 1:
+        use_prefix_copy = nonzero_shards and world_size > 1
+        if use_prefix_copy:
+            self.assertIsNot(prepared.copy_in, foreach_reduce_scatter_copy_in)
+        else:
             self.assertIs(prepared.copy_in, foreach_reduce_scatter_copy_in)
         self.assertEqual(len(sizes), len(params))
         self.assertEqual(sum(size.numel() for size in sizes), expected.numel())
         output = torch.empty_like(expected)
-        prepared.copy_in(grads, output, world_size)
+        with _OpCounter() as counter:
+            prepared.copy_in(grads, output, world_size)
         self.assertEqual(output, expected, atol=0, rtol=0)
+        self.assertEqual(
+            counter.counts[torch.ops.fsdp._chunk_cat_with_prefixes_.default],
+            int(use_prefix_copy),
+        )
+        self.assertEqual(
+            counter.counts[torch.ops.fsdp.chunk_cat.default], int(not use_prefix_copy)
+        )
+
+    @parametrize(
+        "layout",
+        [
+            "shard0",
+            "shard1",
+            "singleton_prefix",
+            "mixed",
+            "extension",
+            "post_forward",
+            "zero_prefix",
+            "mixed_fallback",
+        ],
+    )
+    def test_all_gather_default(self, device, layout):
+        world_size = 4
+        layouts = {
+            "mixed": ("shard0", "shard1"),
+            "zero_prefix": ("zero_prefix", "shard0"),
+            "mixed_fallback": ("shard1", "extension", "post_forward", "zero_prefix"),
+        }.get(layout, (layout,))
+        params, expected, shards, outputs = [], [], [], []
+        for kind in layouts:
+            dim = 0 if kind in ("shard0", "post_forward") else 1
+            shape = {
+                "shard0": (12, 5),
+                "singleton_prefix": (1, 12, 5),
+                "post_forward": (16, 5),
+                "zero_prefix": (0, 12, 5),
+            }.get(kind, (2, 12, 5))
+            dtype = torch.bfloat16 if layout == "mixed" and dim == 1 else torch.float32
+            tensor = make_tensor(shape, device=device, dtype=dtype)
+            rank_shards = tensor.chunk(world_size, dim=dim)
+            shard_size = list(rank_shards[0].size())
+            state = ShardedState.SHARDED
+            if kind == "post_forward":
+                state = ShardedState.SHARDED_POST_FORWARD
+                shard_size[dim] //= 2
+            output = tensor.new_empty(tensor.numel())
+            params.append(
+                Mock(
+                    fsdp_placement=Shard(dim),
+                    padded_sharded_param_size=torch.Size(shard_size),
+                    sharded_state=state,
+                    _sharded_local_tensor=(
+                        Mock(spec=["fsdp_pre_all_gather"])
+                        if kind == "extension"
+                        else rank_shards[0]
+                    ),
+                    _sharded_post_forward_param_data=(
+                        rank_shards[0].flatten() if kind == "post_forward" else None
+                    ),
+                    all_gather_outputs=[output],
+                )
+            )
+            expected.append(tensor)
+            shards.append(rank_shards)
+            outputs.append(output)
+
+        gather_dtype = torch.uint8 if layout == "mixed" else torch.float32
+        packed = torch.cat(
+            [
+                shard[rank].contiguous().view(gather_dtype).flatten()
+                for rank in range(world_size)
+                for shard in shards
+            ]
+        )
+        splits = [
+            tensor.nbytes // world_size
+            if gather_dtype == torch.uint8
+            else tensor.numel() // world_size
+            for tensor in expected
+        ]
+        result = AllGatherResult(
+            packed,
+            None,
+            None,
+            [[tensor.dtype] for tensor in expected],
+            [[tensor.numel() // world_size] for tensor in expected],
+            splits,
+        )
+        versions = [output._version for output in outputs]
+        with torch.no_grad(), _OpCounter() as counter:
+            _default_all_gather_output_fn(params, result, world_size)
+
+        self.assertEqual(
+            [output.view(tensor.shape) for output, tensor in zip(outputs, expected)],
+            expected,
+            atol=0,
+            rtol=0,
+        )
+        self.assertEqual([output._version for output in outputs], versions)
+        use_prefix_copy = "shard1" in layouts or "singleton_prefix" in layouts
+        prefix_op = torch.ops.fsdp._split_with_sizes_copy_with_prefixes_.default
+        self.assertEqual(counter.counts[prefix_op], int(use_prefix_copy))
+        self.assertEqual(
+            counter.counts[torch.ops.fsdp.split_with_sizes_copy.default],
+            int(not use_prefix_copy),
+        )
+        fallback_layouts = ("extension", "zero_prefix")
+        self.assertEqual(
+            counter.counts[torch.ops.aten.cat.out],
+            sum(kind in fallback_layouts for kind in layouts),
+        )
 
     @parametrize("num_chunks", [1, 4])
     @parametrize("num_prefixes", [1, 128])

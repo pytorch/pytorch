@@ -38,11 +38,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     HSDPMeshInfo,
     ShardPlacementResult,
 )
-from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_for_nonzero_dim_shards,
-    reduce_scatter_input_fn_for_nonzero_dim_shards,
-    ReduceScatterInput,
-)
+from torch.distributed.fsdp.experimental import ReduceScatterInput
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -384,8 +380,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "use_shard_placement_fn": [True],
                 # False tests Shard(1)-only weights; True adds Shard(0) biases.
                 "bias": [False, True],
-                "use_all_gather_output_fn": [False, True],
-                "use_reduce_scatter_input_fn": [False, True],
             },
             self._test_train_parity_single_group,
         )
@@ -460,8 +454,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         lin_shapes: list[tuple[int, int]],
         use_shard_placement_fn: bool,
         bias: bool = True,
-        use_all_gather_output_fn: bool = False,
-        use_reduce_scatter_input_fn: bool = False,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -478,12 +470,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
-        if use_all_gather_output_fn:
-            model.set_all_gather_output_fn(all_gather_output_fn_for_nonzero_dim_shards)
-        if use_reduce_scatter_input_fn:
-            model.set_reduce_scatter_input_fn(
-                reduce_scatter_input_fn_for_nonzero_dim_shards
-            )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
