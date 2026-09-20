@@ -1606,16 +1606,18 @@ HAS_FREE = set(dis.hasfree)
 HAS_CONST = set(dis.hasconst)
 
 
-def get_const_index(code_options: dict[str, Any], val: Any) -> int:
-    for i, v in enumerate(code_options["co_consts"]):
-        # NOTE: stronger comparison is required, since we have
-        # examples where two values compare equal but have
-        # different semantic meaning in some cases, e.g.
-        # 0.0 == -0.0 but have different effects in torch.copysign.
-        if val is v:
-            return i
+def get_const_index(
+    code_options: dict[str, Any], val: Any, const_indices: dict[int, int]
+) -> int:
+    # Identity is required because equal constants can have different semantics,
+    # such as 0.0 and -0.0 in torch.copysign.
+    index = const_indices.get(id(val))
+    if index is not None:
+        return index
     code_options["co_consts"] += (val,)
-    return len(code_options["co_consts"]) - 1
+    index = len(code_options["co_consts"]) - 1
+    const_indices[id(val)] = index
+    return index
 
 
 def fix_vars(
@@ -1625,6 +1627,9 @@ def fix_vars(
 ) -> None:
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+    const_indices: dict[int, int] = {}
+    for idx, value in enumerate(code_options["co_consts"]):
+        const_indices.setdefault(id(value), idx)
 
     def get_name_index(name: str) -> int:
         try:
@@ -1758,8 +1763,9 @@ def fix_vars(
             # NOTE: only update argval if arg is not provided. This assumes
             # that any additions to co_consts are appended.
             if instructions[i].arg is None:
-                # cannot use a dictionary since consts may not be hashable
-                idx = get_const_index(code_options, instructions[i].argval)
+                idx = get_const_index(
+                    code_options, instructions[i].argval, const_indices
+                )
                 if idx < 0:
                     raise AssertionError(
                         f"failed to find constant index for {instructions[i].argval}"
@@ -1982,6 +1988,28 @@ def unique_id(name: str, with_uuid: bool = False) -> str:
     if with_uuid:
         ret += f"_{uuid.uuid4()}".replace("-", "_")
     return ret
+
+
+def unique_id_unbound_in(prefix: str, scope: dict[str, Any]) -> str:
+    """
+    Mint a name that is free in `scope`, not merely unused by this process.
+
+    unique_id's counter never repeats within a process, but a name installed into
+    a module dict also has to miss whatever a DIFFERENT process baked in there:
+    both load paths seed a captured __builtins_dict___N key -- CompilePackage.install()
+    into sys.modules[...].__dict__, where it also re-installs a loaded entry's
+    __resume_at_* globals, and AOTCompiledFunction.deserialize() through
+    _seed_guard_scope into whatever guard scope the caller passed, which can be a
+    live module dict -- and a process that only loads starts counting from zero, so
+    it regenerates those names and would collide (CleanupHook.create raises).
+    Skip forward past the bound ones; each retry steps over one name already
+    bound under this prefix, so a counter already past them does not retry at
+    all.
+    """
+    name = unique_id(prefix)
+    while name in scope:
+        name = unique_id(prefix)
+    return name
 
 
 COMPILED_FN_PREFIX = "__compiled_fn"

@@ -15,14 +15,20 @@ static PyObject* THPMPSStream_pynew(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
 
+  int64_t stream_id = -1;
+
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  constexpr const char* kwlist[] = {nullptr};
+  constexpr const char* kwlist[] = {
+      "stream_id",
+      nullptr,
+  };
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "",
+          "|L",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          const_cast<char**>(kwlist))) {
+          const_cast<char**>(kwlist),
+          &stream_id)) {
     return nullptr;
   }
 
@@ -31,7 +37,9 @@ static PyObject* THPMPSStream_pynew(
     return nullptr;
   }
 
-  at::mps::MPSStream* stream = at::mps::getStreamFromPool();
+  at::mps::MPSStream* stream = (stream_id == -1)
+      ? at::mps::getStreamFromPool()
+      : at::mps::getStreamByID(stream_id);
   c10::Stream unwrapped = stream->unwrap();
 
   THPMPSStream* self = (THPMPSStream*)ptr.get();
@@ -117,16 +125,11 @@ void THPMPSStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THPMPSStreamType.tp_base = THPStreamClass;
   THPMPSStreamClass = (PyObject*)&THPMPSStreamType;
-  if (PyType_Ready(&THPMPSStreamType) < 0) {
-    // @allow-raw-throw: rethrows the error PyType_Ready has already set
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THPMPSStreamType) >= 0);
   Py_INCREF(&THPMPSStreamType);
-  if (PyModule_AddObject(
-          module, "_MPSStreamBase", (PyObject*)&THPMPSStreamType) < 0) {
-    // @allow-raw-throw: rethrows the error PyModule_AddObject has already set
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_MPSStreamBase", (PyObject*)&THPMPSStreamType) >= 0);
 }
 
 #endif // USE_MPS
