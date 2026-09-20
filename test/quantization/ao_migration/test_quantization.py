@@ -9,10 +9,11 @@ from .common import AOMigrationTestCase
 
 
 class TestAOMigrationQuantization(AOMigrationTestCase):
-    hw_classification = HardwareClassification.GENERIC
     r"""Modules and functions related to the
     `torch/quantization` migration to `torch/ao/quantization`.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_function_import_quantize(self):
         function_list = [
