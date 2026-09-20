@@ -1433,8 +1433,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     def test_symbolic_scalars_are_refused_as_package_errors(self):
         # SymInt was refused with a RuntimeError while SymFloat and SymBool fell
         # through to default pickling; all three are the same serialization
-        # limit: a GUARDED one surfaces as the PackageError the bypass path
-        # understands, an unguarded one is pruned like any other bystander.
+        # limit and surface as the PackageError the bypass path understands.
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         env = ShapeEnv()
@@ -1449,9 +1448,43 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 GuardsStatePickler({id(sym): sym}, {}, {}, {}, io.BytesIO()).dump(
                     {"s": sym}
                 )
-            buf = io.BytesIO()
-            GuardsStatePickler({}, {}, {}, {}, buf).dump({"s": sym})
-            self.assertIsInstance(load_guards_state(buf.getvalue())["s"], _Missing)
+        # An unguarded symbolic LOCAL is a bystander: pickle_guards_state
+        # registers it and it is pruned before the refusal is reached.
+        s, x = env.create_unbacked_symint(), torch.randn(2)
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"s": s, "x": x},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(x): x}, value_guarded_containers={}
+        )
+        out = load_guards_state(
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+        )
+        self.assertIsInstance(out.output_graph.local_scope["s"], _Missing)
+
+    def test_a_guarded_dynamic_fake_is_refused_not_loaded_broken(self):
+        # The sizes of a guarded dynamic-shaped fake's meta template are
+        # symbolic and in no guard tree; pruning them would dump a payload that
+        # dies at load in empty_strided, so the refusal must stay unconditional.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.DYNAMIC]
+        )
+        fake = mode.from_tensor(torch.randn(4, 3), symbolic_context=ctx)
+        with self.assertRaisesRegex(PackageError, "Cannot serialize SymInt"):
+            GuardsStatePickler({id(fake): fake}, {}, {}, {}, io.BytesIO()).dump(
+                {"t": fake}
+            )
 
     def test_unguarded_bystander_on_a_guarded_user_object_is_pruned(self):
         # Only nn.Module attributes were pruned; a guarded plain object holding
