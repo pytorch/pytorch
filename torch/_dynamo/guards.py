@@ -75,12 +75,7 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
-from torch._dynamo.package import (
-    _Missing,
-    _PRUNED_VALUE_PID,
-    FunctionPicklerBase,
-    SerializedCode,
-)
+from torch._dynamo.package import _Missing, FunctionPicklerBase, SerializedCode
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -4249,53 +4244,6 @@ def _is_shared_constant(value: Any) -> bool:
     return FunctionPicklerBase._is_literal(value)
 
 
-def _instance_dict(obj: Any) -> dict[str, Any] | None:
-    """obj.__dict__ via object.__getattribute__: a user __getattr__ or
-    __getattribute__ never runs (a type-level __dict__ property still does, and
-    only its AttributeError is absorbed); None when there is no instance dict."""
-    try:
-        d = object.__getattribute__(obj, "__dict__")
-    except AttributeError:
-        return None
-    return d if isinstance(d, dict) else None
-
-
-def _pickles_by_default(obj: Any) -> bool:
-    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``
-    (judged from the type's own hooks; the copyreg dispatch table is not consulted).
-
-    Attribute pruning is only sound for that protocol. A custom __reduce_ex__
-    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
-    __getnewargs__(_ex) reads attributes no guard named and gets the sentinel
-    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned).
-    """
-    cls = type(obj)
-    return (
-        cls.__reduce_ex__ is object.__reduce_ex__
-        and cls.__reduce__ is object.__reduce__
-        and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
-        and not hasattr(cls, "__setstate__")
-        and not hasattr(cls, "__getnewargs__")
-        and not hasattr(cls, "__getnewargs_ex__")
-    )
-
-
-# Module prefixes of the DTensor structural types the attribute pruner leaves
-# alone (see _prune_unguarded_attributes).
-_DTENSOR_MODULES = ("torch.distributed.tensor", "torch.distributed.device_mesh")
-
-
-# What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
-# breaks the module itself: __getattr__ indexes the three dicts for every name
-# outside __dict__, and __setattr__/__delattr__ index all four on any
-# assignment. The hook OrderedDicts are pruned deliberately, unless a guard
-# reads them: state_dict()/load_state_dict() on a loaded module then raise, the
-# accepted cost of keeping a module with a local-lambda hook serializable.
-_NN_MODULE_STATE_ATTRS = frozenset(
-    {"_parameters", "_buffers", "_modules", "_non_persistent_buffers_set"}
-)
-
-
 class GuardsStatePickler(FunctionPicklerBase):
     def __init__(
         self,
@@ -4319,23 +4267,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._missing_cache: dict[str, _Missing] = {}
         self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
-        # Elements of a container carried verbatim (a value-guarded __defaults__
-        # tuple, see _keep_container_verbatim) must stay real even when an
-        # unguarded attribute is the very same object and registers it mid-dump.
-        self._verbatim_elements: set[int] = set()
-        stack = list(value_guarded_containers.values())
-        while stack:
-            for element in stack.pop():
-                if id(element) in self._verbatim_elements:
-                    continue
-                self._verbatim_elements.add(id(element))
-                if type(element) in (list, tuple, set, frozenset):
-                    stack.append(element)
-                elif type(element) is dict:
-                    stack.append(list(element.values()))
-        # The object reducer_override was last handed, so a failure inside a
-        # __reduce__ can be attributed to a value rather than only to a type.
-        self.last_reduced: Any = None
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4676,33 +4607,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             globals_snapshot=snapshot,
         )
 
-    # The C pickler saves an exact builtin container by type, before it ever
-    # consults reducer_override, so a pruned ``self.its = [generator]`` was
-    # still walked and still failed. persistent_id is asked about every object
-    # first, so it is the one hook that can substitute those. Only the MUTABLE
-    # exact containers: the compiler folds a constant tuple or frozenset into
-    # one object shared across a module, so an unguarded ``self.dims = (0, 1)``
-    # can be the very object in another function's co_consts or in a guarded
-    # __defaults__, and substituting it by id would put the sentinel there.
-    # Everything else in missing_values stays on the reducer_override path.
-    _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
-
-    def persistent_id(self, obj: Any) -> int | str | None:
-        if (
-            type(obj) in self._PRUNED_CONTAINER_TYPES
-            and id(obj) in self.missing_values
-            and id(obj) not in self._verbatim_elements
-        ):
-            return _PRUNED_VALUE_PID
-        return None
-
     # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: Any
     ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
         import sympy
-
-        self.last_reduced = obj
 
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
@@ -4781,22 +4690,26 @@ class GuardsStatePickler(FunctionPicklerBase):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
-            # A module with its own __setstate__ (RNNBase indexes _all_weights)
-            # would read a pruned attribute at load, so it is pickled whole. DDP
-            # is rebuilt through nn.Module.__setstate__ below, so it stays pruned.
-            is_ddp = isinstance(obj, torch.nn.parallel.DistributedDataParallel)
-            if is_ddp or type(obj).__setstate__ is torch.nn.Module.__setstate__:
-                self._prune_unguarded_attributes(obj)
+            for attr in obj.__dict__.values():
+                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                    continue
+                if id(attr) in self.guard_tree_values:
+                    continue
+                if callable(attr):
+                    continue
+                if _is_shared_constant(attr):
+                    continue
+                self.missing_values[id(attr)] = attr
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
-            if is_ddp:
+            if isinstance(obj, torch.nn.parallel.DistributedDataParallel):
                 return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented
-            if obj.__class__.__getstate__ is torch.nn.Module.__getstate__:
+            if obj.__class__.__getstate__ == torch.nn.Module.__getstate__:
                 return type(self)._unpickle_module, (obj.__getstate__(),)
 
         elif inspect.ismodule(obj):
@@ -4909,29 +4822,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)
 
-        if (
-            id(obj) in self.guard_tree_values
-            and _instance_dict(obj) is not None
-            and not inspect.isfunction(obj)
-            and str(getattr(type(obj), "__module__", "")).partition(".")[0] != "torch"
-            and _pickles_by_default(obj)
-        ):
-            # Any object the guard tree reached, not just an nn.Module: a guarded
-            # train pipeline or dataloader wrapper was pickled whole, so one
-            # unguarded attribute several levels down (a live generator, a
-            # process group) took the entire frame with it. Deliberately LAST,
-            # so every specific reducer above (methods, cells, ops) gets first
-            # refusal; a by-name function falls through the isfunction branch
-            # and is excluded here, since its __dict__ is never serialized. A
-            # class (mappingproxy), a python module (its branch returns), an
-            # nn.Module and a Tensor (their own pickle protocol) never get here.
-            # Deliberately USER objects only: pruning is safe when nothing reads
-            # the pruned attribute on the way back, which does not hold for
-            # torch's structural types (a DTensorSpec's fields rebuild the spec
-            # although no guard names each one; a tensor subclass carries its
-            # spec in __dict__).
-            self._prune_unguarded_attributes(obj)
-
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4966,43 +4856,6 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: Any) -> None:
-        """Mark every ``__dict__`` value nothing guards as prunable.
-
-        Reaching an object through the guard tree does not mean its whole state
-        is needed, only the attributes a guard actually reads. The rest becomes
-        the _Missing sentinel, which is what keeps an unpicklable bystander (a
-        generator, a live iterator, a C handle) from taking the frame down.
-        What the object itself reads back at load stays: for a module, the
-        containers in _NN_MODULE_STATE_ATTRS. Precondition: the callers have
-        checked that no custom __setstate__/__reduce__ reads a pruned attribute
-        at load (DDP qualifies because _unpickle_ddp_module rebuilds it through
-        nn.Module.__setstate__).
-        """
-        is_module = isinstance(obj, torch.nn.Module)
-        for name, attr in (_instance_dict(obj) or {}).items():
-            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                continue
-            if is_module and name in _NN_MODULE_STATE_ATTRS:
-                continue
-            if id(attr) in self.guard_tree_values:
-                continue
-            if callable(attr):
-                continue
-            if _is_shared_constant(attr):
-                continue
-            if str(getattr(type(attr), "__module__", "")).startswith(_DTENSOR_MODULES):
-                # A DTensor structural value (a Placement, a DeviceMesh) may be
-                # the very object a DTensorSpec elsewhere in the state rebuilds
-                # itself from, and pruning it by id would put the sentinel
-                # there. Only those: any other torch-typed bystander (a
-                # GradScaler whose __getstate__ asserts) stays prunable.
-                continue
-            # Registration is global and by id: an attribute pruned here is the
-            # sentinel wherever else the same object appears, including inside
-            # the state of a receiver excluded from pruning by _pickles_by_default.
-            self.missing_values[id(attr)] = attr
-
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
     MISSING = object()
@@ -5034,168 +4887,6 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-# One budget for the diagnostic walk: objects visited and children queued in
-# total, so a huge state cannot turn a bypass into a stall or an allocation.
-_WALK_BUDGET = 20000
-
-
-def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
-    """The scope seeds for the diagnostic walk: the two scopes' named values."""
-    return [
-        (f"local_scope[{k!r}]", v)
-        for k, v in (getattr(graph, "local_scope", None) or {}).items()
-    ] + [
-        (f"global_scope[{k!r}]", v)
-        for k, v in (getattr(graph, "global_scope", None) or {}).items()
-    ]
-
-
-def _offending_value_path(
-    state: Any, target: Any, roots: list[tuple[str, Any]] | None = None
-) -> str:
-    """Best-effort attribute path to the value that could not be pickled.
-
-    The error names WHAT failed and never WHERE it lives, which in a large model
-    means bisecting by hand across multi-minute captures. The pickler records
-    the object it was reducing, so this walks the guard state breadth-first and
-    reports the first path holding THAT object -- by identity, not by type,
-    which would report a same-typed bystander instead.
-
-    Searched from ``state``, because that is what gets pickled. Rooting only at
-    the two scopes searched a handful of objects on a real capture while the
-    pickler walked the whole output graph, its guards and its guard-tree
-    values, so a value living anywhere else -- a lock on a compiler internal,
-    say -- was unreachable however well the scopes were preserved. The scopes
-    stay as SEEDS, ahead of ``state`` in the queue, so the common case still
-    reports the short readable path rather than a long one through the graph;
-    ``roots`` are those seeds, captured by the caller before pruning emptied
-    ``global_scope`` (by default read off ``state`` as it is now). Guards are
-    slotted dataclasses whose create_fn is a functools.partial, so slots and
-    partials are descended too; modules are not, since they pickle by name and
-    their dicts lead to the whole of sys.modules.
-
-    A shared object is reported by the first path breadth-first search reaches,
-    which need not be the one the pickler took. Best-effort by construction: it
-    is a diagnostic appended to an error that is already being raised, so any
-    failure here must stay silent rather than mask the real one, and the walk is
-    bounded (visits and per-container fan-out) so a huge state cannot turn a
-    bypass into a stall.
-    """
-    try:
-        if target is None:
-            return ""
-        if roots is None:
-            roots = _scope_roots(state.output_graph)
-        queue = collections.deque([*roots, ("state", state)])
-        seen: set[int] = set()
-        budget = _WALK_BUDGET
-        for _ in range(_WALK_BUDGET):
-            if not queue:
-                break
-            path, value = queue.popleft()
-            if id(value) in seen:
-                continue
-            seen.add(id(value))
-            if value is target:
-                return f"\n  reached via: {path}"
-            if inspect.ismodule(value):
-                # Pickled by name, so nothing inside it is in the artifact; its
-                # dict leads to sys.modules and would saturate the walk.
-                continue
-            children: list[tuple[str, Any]] = []
-            # Per node: one object whose container read raises (a dict subclass,
-            # a container mutated concurrently) must not end the whole walk nor
-            # lose its __dict__ children, so each read has its own try. Fan-out
-            # draws on the shared budget BEFORE any path string is built.
-            try:
-                if isinstance(value, (list, tuple)):
-                    items = itertools.islice(enumerate(value), budget)
-                    children = [(f"{path}[{i}]", v) for i, v in items]
-                elif isinstance(value, OrderedSet):
-                    # GuardsSet.inner; not subscriptable, so spell the accessor.
-                    items = itertools.islice(enumerate(value), budget)
-                    children = [(f"list({path})[{i}]", v) for i, v in items]
-                elif isinstance(value, (set, frozenset)):
-                    members = itertools.islice(value, budget)
-                    children = [(f"{path}[<a member>]", v) for v in members]
-                elif isinstance(value, dict):
-                    for k, v in itertools.islice(value.items(), budget):
-                        if type(k) in (str, int):
-                            children.append((f"{path}[{k!r}]", v))
-                        else:
-                            children.append((f"{path}[<a key>]", k))
-                            children.append((f"{path}[<that key>]", v))
-                elif isinstance(value, functools.partial):
-                    # Guard.create_fn is a partial whose arguments the pickler walks.
-                    children.append((f"{path}.func", value.func))
-                    children += [
-                        (f"{path}.args[{i}]", v) for i, v in enumerate(value.args)
-                    ]
-                    children += [
-                        (f"{path}.keywords[{k!r}]", v)
-                        for k, v in value.keywords.items()
-                    ]
-                elif isinstance(value, types.FunctionType):
-                    # A function a guard is rooted at is pickled by value,
-                    # defaults, kwdefaults and closure cells included (its
-                    # __dict__ is walked below like any other), so a failure
-                    # behind one of those has to be reachable from here.
-                    children += [
-                        (f"{path}.__defaults__[{i}]", v)
-                        for i, v in enumerate(value.__defaults__ or ())
-                    ]
-                    children += [
-                        (f"{path}.__kwdefaults__[{k!r}]", v)
-                        for k, v in (value.__kwdefaults__ or {}).items()
-                    ]
-                    for i, (name, cell) in enumerate(
-                        zip(value.__code__.co_freevars, value.__closure__ or ())
-                    ):
-                        try:
-                            contents = cell.cell_contents
-                        except ValueError:  # an empty cell
-                            continue
-                        # A pasteable accessor, annotated with the variable name.
-                        accessor = f"{path}.__closure__[{i}].cell_contents  # {name}"
-                        children.append((accessor, contents))
-                elif isinstance(value, types.MethodType):
-                    # A guard can be rooted at a bound method; the reducer
-                    # carries its function and receiver.
-                    children.append((f"{path}.__func__", value.__func__))
-                    children.append((f"{path}.__self__", value.__self__))
-            except Exception:
-                pass
-            try:
-                instance_dict = _instance_dict(value)
-                if instance_dict is not None:
-                    children += [
-                        (f"{path}.{name}", child)
-                        for name, child in instance_dict.items()
-                        if not name.startswith("__")
-                    ]
-                # A slotted object (Guard is a slots dataclass) keeps its state
-                # in the slots along the MRO, with or without a __dict__ beside
-                # them; read like _instance_dict, so no user __getattr__ runs.
-                for klass in type(value).__mro__:
-                    slots = klass.__dict__.get("__slots__", ())
-                    for name in (slots,) if isinstance(slots, str) else slots:
-                        if name.startswith("__"):
-                            continue
-                        try:
-                            child = object.__getattribute__(value, name)
-                        except Exception:  # an unset slot, a raising descriptor
-                            continue
-                        children.append((f"{path}.{name}", child))
-            except Exception:
-                pass
-            children = children[:budget]
-            budget -= len(children)
-            queue.extend(children)
-    except Exception:
-        return ""
-    return ""
-
-
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -5204,8 +4895,6 @@ def pickle_guards_state(
     empty_values = {}
     missing_values = {}
     guard_tree_values = builder.guard_tree_values
-    pickler: GuardsStatePickler | None = None
-    scope_roots: list[tuple[str, Any]] | None = None
 
     # Anything raised while walking or dumping the state means a guarded value
     # cannot be serialized, which is a bypass (an error under
@@ -5244,32 +4933,13 @@ def pickle_guards_state(
                 ]
             )
         ):
-            # Snapshot the diagnostic's search roots before the pruning below
-            # empties global_scope: a value that also lives on a global is then
-            # still named by that global binding, which is what a user
-            # recognises even though the pruned scope itself is not in the
-            # artifact, rather than by a long path through the output graph.
-            # Only this branch needs it: with the scopes intact the walk reads
-            # them live. Best-effort like the walk itself: a scope whose read
-            # raises must not fail a good dump.
-            try:
-                scope_roots = _scope_roots(state.output_graph)
-            except Exception:
-                pass
             # Prune more values in AOT precompile when complex pickling
             # structure is not needed.
             state.output_graph.guard_on_key_order = set()
             state.output_graph.global_scope = {}
 
         pickler.dump(state)
-    except torch._dynamo.exc.PackageError as e:
-        # Raised by the reducer itself, so last_reduced IS the culprit. The path
-        # is appended in place and the same exception re-raised, so its
-        # traceback still ends in the refusing reducer.
-        last = pickler.last_reduced if pickler is not None else None
-        path = _offending_value_path(state, last, scope_roots)
-        if path:
-            e.args = (f"{e}{path}",)
+    except torch._dynamo.exc.PackageError:
         raise
     except RecursionError as e:
         # A deep (but finite) guarded object graph, or a __reduce__ that never
@@ -5285,14 +4955,8 @@ def pickle_guards_state(
         # asserts mid-iteration, subclasses assert in __tensor_flatten__, users
         # assert in __reduce__ and properties. Each is a legitimate limit of
         # what a package can carry, reported as a bypass rather than failing
-        # the compile. Name the original type so the reason stays diagnosable
-        # in the bypass message, and the PATH to the offending value, because a
-        # type alone ("cannot pickle 'generator' object") is not actionable in
-        # a model with a thousand-frame guard tree.
-        last = pickler.last_reduced if pickler is not None else None
-        raise torch._dynamo.exc.PackageError(
-            f"{type(e).__name__}: {e}{_offending_value_path(state, last, scope_roots)}"
-        ) from e
+        # the compile.
+        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
     return buf.getvalue()
 
 
