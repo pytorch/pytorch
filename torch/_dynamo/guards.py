@@ -4249,6 +4249,37 @@ def _is_shared_constant(value: Any) -> bool:
     return FunctionPicklerBase._is_literal(value)
 
 
+def _instance_dict(obj: Any) -> dict[str, Any] | None:
+    """obj.__dict__ via object.__getattribute__: a user __getattr__ or
+    __getattribute__ never runs (a type-level __dict__ property still does, and
+    only its AttributeError is absorbed); None when there is no instance dict."""
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _pickles_by_default(obj: Any) -> bool:
+    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``
+    (judged from the type's own hooks; the copyreg dispatch table is not consulted).
+
+    Attribute pruning is only sound for that protocol. A custom __reduce_ex__
+    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
+    __getnewargs__(_ex) reads attributes no guard named and gets the sentinel
+    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned).
+    """
+    cls = type(obj)
+    return (
+        cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
+        and not hasattr(cls, "__setstate__")
+        and not hasattr(cls, "__getnewargs__")
+        and not hasattr(cls, "__getnewargs_ex__")
+    )
+
+
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
 # breaks the module itself: __getattr__ indexes the three dicts for every name
 # outside __dict__, and __setattr__/__delattr__ index all four on any
@@ -4874,6 +4905,34 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and _instance_dict(obj) is not None
+            and not inspect.isfunction(obj)
+            and str(getattr(type(obj), "__module__", "")).partition(".")[0] != "torch"
+            and _pickles_by_default(obj)
+            and not pytree.is_constant_class(type(obj))
+            and not is_opaque_constant_type(type(obj))
+        ):
+            # Any object the guard tree reached, not just an nn.Module: a guarded
+            # train pipeline or dataloader wrapper was pickled whole, so one
+            # unguarded attribute several levels down (a live generator, a
+            # process group) took the entire frame with it. Deliberately LAST,
+            # so every specific reducer above (methods, cells, ops) gets first
+            # refusal; a by-name function falls through the isfunction branch
+            # and is excluded here, since its __dict__ is never serialized. A
+            # class (mappingproxy), a python module (its branch returns), an
+            # nn.Module and a Tensor (their own pickle protocol) never get here.
+            # Deliberately USER objects only: pruning is safe when nothing reads
+            # the pruned attribute on the way back, which does not hold for
+            # torch's structural types (a DTensorSpec's fields rebuild the spec
+            # although no guard names each one; a tensor subclass carries its
+            # spec in __dict__). A pytree-registered or opaque constant class is
+            # excluded for the same reason from the guard side: EQUALS_MATCH
+            # keeps the object itself and compares it by value at run time, so
+            # a pruned field would make the rebuilt guard miss forever.
+            self._prune_unguarded_attributes(obj)
+
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4908,21 +4967,24 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
 
-        Reaching a module through the guard tree does not mean its whole state
+        Reaching an object through the guard tree does not mean its whole state
         is needed, only the attributes a guard actually reads. The rest becomes
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
-        What the module itself reads back at load stays: the containers in
-        _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that the
-        module's __setstate__ is nn.Module's, since any other may read anything.
+        What the object itself reads back at load stays: for a module, the
+        containers in _NN_MODULE_STATE_ATTRS. Precondition: the callers have
+        checked that no custom __setstate__/__reduce__ reads a pruned attribute
+        at load (DDP qualifies because _unpickle_ddp_module rebuilds it through
+        nn.Module.__setstate__).
         """
-        for name, attr in obj.__dict__.items():
+        is_module = isinstance(obj, torch.nn.Module)
+        for name, attr in (_instance_dict(obj) or {}).items():
             if isinstance(attr, (torch.Tensor, torch.nn.Module)):
                 continue
-            if name in _NN_MODULE_STATE_ATTRS:
+            if is_module and name in _NN_MODULE_STATE_ATTRS:
                 continue
             if id(attr) in self.guard_tree_values:
                 continue
@@ -4930,6 +4992,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if _is_shared_constant(attr):
                 continue
+            # Registration is global and by id: an attribute pruned here is the
+            # sentinel wherever else the same object appears, including inside
+            # the state of a receiver excluded from pruning by _pickles_by_default.
+            # Only __dict__ is walked: a bystander in a __slots__ slot of a
+            # receiver that also has a __dict__ is still pickled. Known limits.
             self.missing_values[id(attr)] = attr
 
 
