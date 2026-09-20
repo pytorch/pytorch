@@ -248,6 +248,13 @@ void norm_kernel_tensor_iterator_impl(
       iter.dtype(0) == iter.input_dtype() &&
       (iter.input_dtype() == kFloat || iter.input_dtype() == kDouble ||
        iter.input_dtype() == kBFloat16)) {
+
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+    constexpr int64_t kAccVecs = 2;
+#else
+    constexpr int64_t kAccVecs = 1;
+#endif
+
     // If we can vectorize over the last dimension and the dtype
     // of the output is the same as that of the input,
     // then we go through the vectorised path.
@@ -260,20 +267,31 @@ void norm_kernel_tensor_iterator_impl(
 
           using Vec = Vectorized<scalar_t>;
           using fVec = Vectorized<acc_t>;
-          fVec scale_vec{acc_t(0)};
-          fVec ssq_vec{acc_t(0)};
-          acc_t scale_buf[fVec::size()];
-          acc_t ssq_buf[fVec::size()];
-          int64_t d = 0;
-          for (; d < size - (size % Vec::size()); d += Vec::size()) {
-            Vec data_vec = Vec::loadu(self_data + d);
-            norm_two_reduce_step(scale_vec, ssq_vec, data_vec);
+          constexpr int64_t kBlock = Vec::size() * kAccVecs;
+          constexpr int64_t kLanes = fVec::size() * kAccVecs;
+
+          fVec scale_vec[kAccVecs];
+          fVec ssq_vec[kAccVecs];
+          for (int64_t v = 0; v < kAccVecs; v++) {
+            scale_vec[v] = fVec{acc_t(0)};
+            ssq_vec[v] = fVec{acc_t(0)};
           }
-          scale_vec.store(scale_buf);
-          ssq_vec.store(ssq_buf);
+          acc_t scale_buf[kLanes];
+          acc_t ssq_buf[kLanes];
+          int64_t d = 0;
+          for (; d < size - (size % kBlock); d += kBlock) {
+            for (int64_t v = 0; v < kAccVecs; v++) {
+              Vec data_vec = Vec::loadu(self_data + d + v * Vec::size());
+              norm_two_reduce_step(scale_vec[v], ssq_vec[v], data_vec);
+            }
+          }
+          for (int64_t v = 0; v < kAccVecs; v++) {
+            scale_vec[v].store(scale_buf + v * fVec::size());
+            ssq_vec[v].store(ssq_buf + v * fVec::size());
+          }
           acc_t scale = scale_buf[0];
           acc_t ssq = ssq_buf[0];
-          for (int j = 1; j < fVec::size(); j++) {
+          for (int j = 1; j < kLanes; j++) {
             acc_t s2 = scale_buf[j], q2 = ssq_buf[j];
             if (scale == acc_t(0)) {
               scale = s2; ssq = q2;
@@ -287,6 +305,8 @@ void norm_kernel_tensor_iterator_impl(
                 scale = s2;
               }
             }
+          
+
           }
           for (; d < size; d++) {
             acc_t ax = std::abs(acc_t(self_data[d]));
