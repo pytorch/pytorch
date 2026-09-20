@@ -183,40 +183,73 @@ _EFFECTFUL_TARGETS = [
 # other way of binding a module-level name is rejected by that allowlist rather than by a
 # guard per binder form. ``call`` is the rename target throughout, and none of these is
 # exec'd, so free names in them (``flag``, ``deco``, ...) stay undefined.
+# Module shapes namespace_module_names must refuse, each with a fragment of the expected
+# message specific enough that no OTHER guard's message could satisfy it: the guard's own
+# wording plus the line it names, so the parametrization really discriminates (the three
+# walrus shapes sit on lines 1, 2 and 3 for exactly that reason).
 _UNSUPPORTED_SHAPES = {
-    "compound": ("if flag: kernel = 1\ndef call(a): return kernel\n", "['kernel']"),
+    "compound": (
+        "if flag: kernel = 1\ndef call(a): return kernel\n",
+        "module-level If on line 1 binds ['kernel']",
+    ),
     "import_rebind": (
         "if flag:\n    import torch\n    torch = 1\ndef call(a): return torch\n",
-        "['torch']",
+        "module-level If on line 1 binds ['torch']",
     ),
-    "walrus_value": ("total = (n := 5)\ndef call(a): return n\n", "walrus"),
-    "walrus_decorator": ("@deco(n := 1)\ndef call(a): return n\n", "walrus"),
+    "walrus_value": (
+        "total = (n := 5)\ndef call(a): return n\n",
+        "on line 1 binds a name with a walrus",
+    ),
+    "walrus_decorator": (
+        "@deco(n := 1)\ndef call(a): return n\n",
+        "on line 2 binds a name with a walrus",
+    ),
     "walrus_class_base": (
-        "class R(B := object): pass\ndef call(a): return R\n",
-        "walrus",
+        "\n\nclass R(B := object): pass\ndef call(a): return R\n",
+        "on line 3 binds a name with a walrus",
     ),
-    "match": ("match flag:\n    case [a]: pass\ndef call(x): return a\n", "Match"),
-    "attribute_target": ("cfg.flag = 1\ndef call(a): return cfg\n", "plain name"),
+    "match": (
+        "match flag:\n    case [a]: pass\ndef call(x): return a\n",
+        "module-level Match on line 1 binds ['a']",
+    ),
+    "attribute_target": (
+        "cfg.flag = 1\ndef call(a): return cfg\n",
+        "on line 1 does not store into a plain name",
+    ),
+    # MPS codegen's real line: async_compile.metal returns None and the compiled kernel is
+    # injected later under the STRING, so a renamed reader would still read None.
+    "string_bound_kernel": (
+        "generated_kernel_0 = async_compile.metal('generated_kernel_0', 'k', [])\n"
+        "def call(a): return generated_kernel_0\n",
+        "registers ['generated_kernel_0'] as a string literal",
+    ),
+    "string_bound_setattr": (
+        "setattr(cfg, 'call', 1)\ndef call(a): return a\n",
+        "calls setattr(), which binds a name given as a string",
+    ),
     "opaque_binder_suffix": (
         "def call(a): return a\ndef helper(call_s0): return call(3)\n",
-        "['call_s0']",
+        "already uses ['call_s0']",
     ),
     "class_body_store": (
         "def call(a): return a\nclass R:\n    call = print\n    alias = call\n",
-        "rebinds ['call']",
+        "rebinds ['call'] and reads it there",
     ),
-    "header_off_def_line": ("def \\\ncall(a): return a\n", "on its own line"),
+    "header_off_def_line": (
+        "def \\\ncall(a): return a\n",
+        "header of 'call' is not on its own line 1",
+    ),
     "imported_and_assigned": (
         "from math import sqrt\nsqrt = 1\ndef call(a): return sqrt\n",
-        "imported and assigned",
+        "['sqrt'] are both imported and assigned",
     ),
     "nested_global": (
         "weight = None\ndef call():\n    global weight\n    weight = 1\n    return weight\n",
-        "rebinds ['weight']",
+        "rebinds ['weight'] and reads it there",
     ),
     "suffix_taken": (
         "def call_s0(a): return a\ndef call(a): return call_s0(a)\n",
-        "already uses",
+        "already uses ['call_s0']",
     ),
 }
 
@@ -872,8 +905,10 @@ class TestAOTCompileToPython(TestCase):
         # only aliases, which are never renamed; a comprehension is a scope of its own, so a
         # class-body one over the target renames its binder and loads together; real
         # graph_partition codegen puts a ``def call`` in ``class Runner`` beside a
-        # module-level ``call`` and never reads bare ``call`` in the class body; and a
-        # decorated def is renamed at its ``def`` line, not its decorator's.
+        # module-level ``call`` and never reads bare ``call`` in the class body; a decorated
+        # def is renamed at its ``def`` line, not its decorator's; and a scope holding the
+        # suffixed name but never reading the target captures nothing, so it must not trip
+        # the clash guard.
         accepted = {
             "if flag:\n    from torch import empty_strided\nelse:\n"
             "    from torch import empty_permuted as empty_strided\n"
@@ -884,6 +919,8 @@ class TestAOTCompileToPython(TestCase):
             "call = R().call\n": "    def call(self, a): return a",
             "def deco(f): return f\n@deco\n"
             "def call(a): return a\n": "@deco_s0\ndef call_s0(a): return a",
+            "def call(a): return a\n"
+            "def other(call_s0): return 1\n": "def other_s0(call_s0): return 1",
         }
         for src, expected in accepted.items():
             with self.subTest(expected):
@@ -902,6 +939,19 @@ class TestAOTCompileToPython(TestCase):
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
         x = torch.randn(5, 4)
         src, _cache = _compose(m, x)
+        # Graph partition is on by default, so this real output already carries the
+        # partitioned shape the docstring claims to handle -- a ``class Runner`` with a
+        # ``def call`` method beside the module-level ``call = runner.call`` -- rather than
+        # the accepted-shapes fixture being its only coverage. Pin that.
+        runners = [
+            n
+            for n in ast.parse(src).body
+            if isinstance(n, ast.ClassDef) and n.name == "Runner"
+        ]
+        self.assertEqual(len(runners), 1)
+        methods = [n.name for n in runners[0].body if isinstance(n, ast.FunctionDef)]
+        self.assertIn("call", methods)
+        self.assertIn("\ncall = runner.call\n", src)
         first, second = namespace_module_names([src, src])
         ns: dict[str, object] = {}
         exec(first + "\n" + second, ns)
