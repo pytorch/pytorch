@@ -262,10 +262,14 @@ def _resolve_global(
     return emit_value(obj, imports)
 
 
-# Statement / expression kinds reused below. ``_SCOPE_NODES`` are scopes of their own: a
-# name bound in one is not bound in the scope holding it. ``_NAMED_BINDERS`` carry their
-# name as a bare ``str`` (None for ``case _``). ``_MODULE_LEVEL`` is the allowlist of
-# module-level shapes Inductor's codegen emits -- see ``namespace_module_names``.
+# Statement / expression kinds reused below. ``_DEFS`` / ``_IMPORTS`` / ``_COMPS`` are the
+# def-or-class, import and comprehension kinds; ``_SCOPE_NODES`` are the scopes of their own
+# (a name bound in one is not bound in the scope holding it) and ``_NAMED_BINDERS`` the nodes
+# carrying their name as a bare ``str`` (None for ``case _``). ``_MODULE_LEVEL`` is the
+# allowlist of module-level shapes verified against the wrapper codegen as it is TODAY --
+# ``PythonWrapperCodegen.write_header`` / ``write_constant`` / ``add_meta_once`` /
+# ``write_async_compile_wait`` / ``generate_after_suffix`` -- not a promise about future
+# codegen: anything outside it raises, see ``namespace_module_names``.
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _IMPORTS = (ast.Import, ast.ImportFrom)
 _COMPS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
@@ -943,7 +947,13 @@ def _scope_bindings(node: ast.AST) -> tuple[set[str], set[str]]:
     binding, each carrying its name as a bare ``str`` no such rewrite can follow: an
     ``ast.arg`` parameter, the ``.name`` of a ``_NAMED_BINDERS`` node, an import alias, the
     ``.rest`` of a mapping pattern, a ``global`` / ``nonlocal``. ``with ... as``, ``for``
-    and comprehension targets are ``ast.Name`` stores and need no case of their own."""
+    and comprehension targets are ``ast.Name`` stores and need no case of their own.
+
+    One walk (``_same_scope_nodes``) serves both intents this file needs: pass a SCOPE node
+    for that scope's own bindings, or a module-level statement for the bindings it
+    contributes to module scope -- a def nested in an ``if`` contributes its name, which is
+    what would collide, and not its body, which binds elsewhere.
+    """
     opaque: set[str] = set()
     stored: set[str] = set()
     for child in _same_scope_nodes(node):
@@ -962,6 +972,44 @@ def _scope_bindings(node: ast.AST) -> tuple[set[str], set[str]]:
         elif isinstance(child, ast.MatchMapping) and child.rest is not None:
             opaque.add(child.rest)
     return opaque, stored
+
+
+# Calls that bind into a namespace keyed by a runtime ``str``, which no rewrite of ``ast.Name``
+# nodes follows. A ``globals()[...]`` / ``sys.modules[...]`` store needs no entry here: it is
+# already refused as a target that is not a plain name.
+_STRING_BINDERS = ("setattr", "exec", "eval")
+
+
+def _string_bound_name(node: ast.stmt, targets: set[str]) -> str | None:
+    """How a statement evaluating in module scope binds a module-level name through a runtime
+    ``str`` rather than through an ``ast.Name`` the rewrite renames, or None if it does not.
+
+    Two shapes. A ``_STRING_BINDERS`` call can bind any name at all. And ``AsyncCompile.metal``
+    only REGISTERS its kernel -- it returns None, and the compiled function is injected by the
+    later ``async_compile.wait(globals())`` under the kernel name it was handed as a string
+    literal, so renaming the assignment and every reader would leave them reading None at the
+    first call. Every other ``async_compile`` registrar either returns the kernel or returns a
+    future that ``wait`` replaces under the SAME key it read, so a string argument matching a
+    target is inert there and must not raise.
+    """
+    for child in _enclosing_scope_nodes(node):
+        if not isinstance(child, ast.Call):
+            continue
+        if isinstance(child.func, ast.Name) and child.func.id in _STRING_BINDERS:
+            return f"calls {child.func.id}(), which binds a name given as a string"
+        if isinstance(child.func, ast.Attribute) and child.func.attr == "metal":
+            literals = {
+                a.value
+                for a in child.args
+                if isinstance(a, ast.Constant) and isinstance(a.value, str)
+            }
+            registered = sorted(literals & targets)
+            if registered:
+                return (
+                    f"registers {registered} as a string literal with a kernel compiler "
+                    "that injects it into the namespace under that string"
+                )
+    return None
 
 
 def namespace_module_names(sources: Sequence[str]) -> list[str]:
@@ -990,13 +1038,21 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
     rewrite can enumerate and every shape whose bindings are NOT enumerated is one whose
     names would still collide. A compound statement is the single exception, accepted while
     it binds nothing but import aliases (never renamed anyway), so a version-conditional
-    import is a no-op rather than a failed capture. Four further shapes raise: a name both
-    imported and assigned at module level, whose import line is not renamed; a nested scope
-    that rebinds a target with a binder the rewrite cannot follow, or a class body that
-    stores one whose other readers are attributes, while also reading it there (see
-    ``_scope_bindings``); a target whose suffixed name the module -- counting those opaque
-    binders -- already uses; and a def / class header the rename cannot locate on the
-    statement's own line.
+    import is a no-op rather than a failed capture. Five further shapes raise: a statement
+    that binds a module-level name through a runtime string instead of an ``ast.Name``, whose
+    binding is invisible here and would be left behind under the old name (see
+    ``_string_bound_name``); a name both imported and assigned at module level, whose import
+    line is not renamed; a nested scope that rebinds a target with a binder the rewrite cannot
+    follow, or a class body that stores one whose other readers are attributes, while also
+    reading it there (see ``_scope_bindings``); a target whose suffixed name the module -- or
+    a scope of it that reads a target -- already uses; and a def / class header the rename
+    cannot locate on the statement's own line.
+
+    A source with no module-level definitions has an empty ``targets`` and is returned
+    UNCHANGED: there is nothing to make disjoint, and no slot suffix appears in it, so a
+    caller keying on ``call_s<slot>`` must not assume one. Run this AFTER
+    ``_compose_standalone_module``, whose ``call`` is then the composed entry that gets
+    renamed, together with the ``_inner_call = call`` splice inside it.
     """
     out: list[str] = []
     for slot, source in enumerate(sources):
@@ -1059,28 +1115,48 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
         if not targets:
             out.append(source)
             continue
+        for node in tree.body:
+            through_str = _string_bound_name(node, targets)
+            if through_str is not None:
+                raise NotImplementedError(
+                    f"namespace_module_names: the module-level statement on line "
+                    f"{node.lineno} {through_str}, which no rename of an ast.Name node "
+                    "follows, so that binding would be left behind under the old name."
+                )
         suffix = f"_s{slot}"
+        # Each nested scope paired with its own bindings and the names it reads, computed
+        # ONCE: both guards below want them, and ``ast.walk`` over wrapper-sized source is
+        # not free.
+        scopes = [
+            (
+                node,
+                _scope_bindings(node),
+                {
+                    n.id
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                },
+            )
+            for node in ast.walk(tree)
+            if isinstance(node, _SCOPE_NODES)
+        ]
         # Every name the module uses, counting bindings that are no ``ast.Name``: a
         # parameter, nested def / class or local import named ``<target><suffix>`` would
-        # otherwise be invisible here and capture every renamed load in its scope.
+        # otherwise be invisible here and capture every renamed load in its scope. Only
+        # scopes that READ a target count: a same-named binder in a scope that never reads
+        # one captures nothing, so raising on it would fail the capture for nothing.
         used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
         used |= defined | imported
-        scopes = [n for n in ast.walk(tree) if isinstance(n, _SCOPE_NODES)]
-        for scope in scopes:
-            used |= set().union(*_scope_bindings(scope))
+        for _node, (opaque, stored), read in scopes:
+            if read & targets:
+                used |= opaque | stored
         clash = sorted(n + suffix for n in targets if n + suffix in used)
         if clash:
             raise NotImplementedError(
                 f"namespace_module_names: module already uses {clash}, so suffixing with "
                 f"{suffix!r} would collapse two distinct names."
             )
-        for scope in scopes:
-            read = {
-                n.id
-                for n in ast.walk(scope)
-                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
-            }
-            opaque, stored = _scope_bindings(scope)
+        for scope, (opaque, stored), read in scopes:
             # A class-body store binds an ATTRIBUTE, whose readers are ``Attribute`` nodes
             # the rewrite leaves alone, so a renamed ``Runner_s0.call_s0`` would no longer
             # answer to ``Runner_s0.call``. Elsewhere an ``ast.Name`` store is renamed with
