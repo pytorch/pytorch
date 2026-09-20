@@ -4280,6 +4280,11 @@ def _pickles_by_default(obj: Any) -> bool:
     )
 
 
+# Module prefixes of the DTensor structural types the attribute pruner leaves
+# alone (see _prune_unguarded_attributes).
+_DTENSOR_MODULES = ("torch.distributed.tensor", "torch.distributed.device_mesh")
+
+
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
 # breaks the module itself: __getattr__ indexes the three dicts for every name
 # outside __dict__, and __setattr__/__delattr__ index all four on any
@@ -4980,6 +4985,13 @@ class GuardsStatePickler(FunctionPicklerBase):
             if callable(attr):
                 continue
             if _is_shared_constant(attr):
+                continue
+            if str(getattr(type(attr), "__module__", "")).startswith(_DTENSOR_MODULES):
+                # A DTensor structural value (a Placement, a DeviceMesh) may be
+                # the very object a DTensorSpec elsewhere in the state rebuilds
+                # itself from, and pruning it by id would put the sentinel
+                # there. Only those: any other torch-typed bystander (a
+                # GradScaler whose __getstate__ asserts) stays prunable.
                 continue
             # Registration is global and by id: an attribute pruned here is the
             # sentinel wherever else the same object appears, including inside

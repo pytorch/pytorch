@@ -1548,6 +1548,28 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump({"o": obj})
         self.assertEqual(load_guards_state(buf.getvalue())["o"].a, [1])
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_an_unguarded_dtensor_placement_is_not_pruned(self):
+        # An unguarded Placement on a guarded holder can be the same object a
+        # DTensorSpec elsewhere in the state rebuilds itself from; pruning it by
+        # id would poison that spec, so DTensor structural values stay. Every
+        # other torch-typed bystander is still pruned: a GradScaler's
+        # __getstate__ asserts mid-iteration, and pruning is what spares the frame.
+        from torch.distributed.tensor.placement_types import Shard
+
+        shard = Shard(0)
+        h = _HolderWithGenerator()
+        h.placement, h.scaler = shard, torch.amp.GradScaler()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(h): h, id(h.cfg): h.cfg}, {}, {}, {}, buf).dump(
+            {"h": h, "shared": shard}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertIsInstance(out["h"].it, _Missing)
+        self.assertIsInstance(out["h"].scaler, _Missing)
+        self.assertIs(out["h"].placement, out["shared"])
+        self.assertEqual(out["shared"], shard)
+
     def test_torch_namespace_objects_are_pickled_whole(self):
         # type(obj).__module__ == "torch" is torch's namespace too, so the
         # exclusion must not stop at "torch."; the wrapper's config dict stays.
