@@ -20,26 +20,16 @@ here, with that tooling, rather than beside the serializer's pre-check in
 ``guards.py``: it is the capture's policy over that pre-check, not part of it.
 Everything here is internal; the filter alone is unprefixed because the capture
 session passes it as the default a caller may name. ``PrecompileSession``, the
-multi-graph Dynamo capture session that drives it, is added here; the
-``torch.compiler.precompile.capture(..., tracer=DynamoTracer())`` entry point
-that reaches it lands later in this stack, so nothing under ``torch/`` calls
-into the session yet.
+multi-graph Dynamo capture session that drives it, is added here; the public
+entry point that reaches it lands later in this stack, so nothing under
+``torch/`` calls into the session yet.
 
 Capture is by execution, and the caller drives it: the session hands back a
 callable, the caller invokes it with real inputs inside their own loop, and
 every frame Dynamo produces is recorded. Runtime guards stay intact during
 capture; ``guard_filter_fn`` applies only to the serialized copy.
 
-    with torch.compiler.precompile.capture(
-        step, artifact_path="m.py", cache_path="m.cache", backend="inductor"
-    ) as cap:
-        y1 = cap(model, x1)  # runs step(model, x1), returns its result
-        y2 = cap(model, x2)  # exercises another variant
-
-    # later, in a fresh process
-    compiled = torch.compiler.precompile.load("m.py", "m.cache")
-    with compiled, torch.no_grad():
-        compiled(model, x1)
+``precompile_capture`` below is the entry point that starts one here.
 
 The caller's calls ARE the capture: each ``cap(...)`` runs the callable for
 real, returns its result, and records every frame, break continuation and
@@ -923,9 +913,10 @@ class _AllowEmptyGraphsCallback(CatchErrorsWrapper):
 
     An uncovered no-op branch must become a guarded variant rather than Dynamo's
     ordinary eager-only SkipFrame, or one fallback call permanently skips that
-    frame for the rest of the process. Patched here as well as in
-    _capture_config so the package's own frames get it even when the callback
-    runs outside a capture-config scope.
+    frame for the rest of the process. The flag rides on the callback that
+    converts those frames, so it holds for every frame this callback sees;
+    _capture_config patches the same flag around each call the session makes,
+    which today is the only way one is reached.
     """
 
     def __call__(
@@ -992,7 +983,16 @@ def _entry_fn_of(fn: object) -> Callable[..., object]:
 
 
 class _PrecompileBackend:
-    """Give one explicit session its own Dynamo cache identity."""
+    """One session's own object wrapped around the inner backend.
+
+    It is not what gives the session a distinct cache identity: CacheEntry
+    stores get_backend(backend), which follows every _torchdynamo_orig_backend
+    link (torch/csrc/dynamo/cache_entry.cpp), so the entry ends up holding the
+    same inner eager/inductor function every other session gets; the isolation
+    comes from isolate_recompiles=True in _optimize_isolated. What the wrapper
+    provides is a per-session object on the compile path, for bookkeeping that
+    has to count or hold what the inner backend was handed.
+    """
 
     def __init__(self, backend: str) -> None:
         inner = torch._dynamo.lookup_backend(backend)
@@ -1101,8 +1101,8 @@ class PrecompileSession:
                 # output_graph short-circuits an empty graph to noop_graph_call
                 # without filing anything under its id, which the bytecode still
                 # names. Record the no-op so the served frame dispatches to it
-                # rather than running eager. Here rather than in
-                # _collect_backends: teardown clears cached_backends first.
+                # rather than running eager. Done here rather than at
+                # render time because _release clears cached_backends first.
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
