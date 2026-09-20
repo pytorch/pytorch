@@ -936,10 +936,12 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
 
     Shapes the rewrite cannot express raise NotImplementedError rather than emit a
     silently wrong module, like the other guards on unrecognized Inductor codegen here: a
-    module-level compound statement that binds a name (only top-level definitions and
-    assignments are enumerated), a nested scope that rebinds a target with an opaque
-    binder it also reads (see ``_scope_binders``), and a target whose suffixed name the
-    module already uses.
+    module-level compound statement that binds a name other than an import alias, or a
+    module-level walrus (only top-level definitions and assignments are enumerated); a
+    name both imported and assigned at module level; a nested scope that rebinds a target
+    with an opaque binder it also reads, or a class body that stores one (see
+    ``_scope_binders``); a target whose suffixed name the module -- including any opaque
+    binder in it -- already uses; and a def / class header the rename cannot locate.
     """
     out: list[str] = []
     for slot, source in enumerate(sources):
@@ -947,6 +949,10 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
         imported: set[str] = set()
         defined: set[str] = set()
         headers: list[tuple[int, str]] = []
+        # Unlike _module_level_names, a del'd name is deliberately NOT subtracted below:
+        # Inductor's ``async_compile = AsyncCompile()`` / ``del async_compile`` pair has to
+        # be renamed TOGETHER, and the del target is an ``ast.Name`` the walk further down
+        # rewrites anyway.
         for node in tree.body:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 imported |= _imported_names(node)
@@ -956,21 +962,33 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
                 # A def / class name is a bare ``str`` with no position of its own, so its
                 # header is located textually below.
                 headers.append((node.lineno, node.name))
-            elif isinstance(node, ast.Delete):
-                # Unlike _module_level_names, a del'd name is deliberately NOT subtracted:
-                # Inductor's ``async_compile = AsyncCompile()`` / ``del async_compile``
-                # pair has to be renamed TOGETHER, and the del target is an ``ast.Name``
-                # the walk below rewrites anyway.
-                pass
+            elif any(isinstance(c, ast.NamedExpr) for c in _same_scope_nodes(node)):
+                raise NotImplementedError(
+                    "namespace_module_names: a module-level walrus binds a name that is "
+                    "not enumerated as a target (unrecognized inductor codegen), so it "
+                    "would still collide across spliced modules."
+                )
             elif any(isinstance(c, ast.stmt) for c in _same_scope_nodes(node)):
-                opaque, stored = _scope_binders(node)
-                if opaque | stored:
+                bound = set().union(*_scope_binders(node))
+                for child in _same_scope_nodes(node):
+                    # A conditional import binds only import aliases, and those are
+                    # excluded from ``targets`` anyway: a no-op, not an error.
+                    if isinstance(child, (ast.Import, ast.ImportFrom)):
+                        bound -= _imported_names(child)
+                if bound:
                     raise NotImplementedError(
                         "namespace_module_names: a module-level compound statement binds "
-                        f"{sorted(opaque | stored)} (unrecognized inductor codegen); only "
-                        "top-level definitions and assignments are renamed, so those "
-                        "names would still collide across spliced modules."
+                        f"{sorted(bound)} (unrecognized inductor codegen); only top-level "
+                        "definitions and assignments are renamed, so those names would "
+                        "still collide across spliced modules."
                     )
+        both = sorted(defined & imported)
+        if both:
+            raise NotImplementedError(
+                f"namespace_module_names: {both} are both imported and assigned at module "
+                "level; the assignment is this module's own binding, but the import line "
+                "is not renamed, so the name would still collide across spliced modules."
+            )
         targets = defined - imported
         if not targets:
             out.append(source)
@@ -978,6 +996,12 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
         suffix = f"_s{slot}"
         used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
         used |= defined | imported
+        for scope in ast.walk(tree):
+            # An opaque binder named ``<target><suffix>`` (a parameter, a nested def /
+            # class, a local import) is no ``ast.Name``, so it is invisible above -- and it
+            # would capture every renamed load in its scope.
+            if isinstance(scope, _SCOPE_NODES):
+                used |= _scope_binders(scope)[0]
         clash = sorted(n + suffix for n in targets if n + suffix in used)
         if clash:
             raise NotImplementedError(
@@ -988,14 +1012,21 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
             if not isinstance(scope, _SCOPE_NODES):
                 continue
             read = {n.id for n in ast.walk(scope) if isinstance(n, ast.Name)}
-            shadowed = _scope_binders(scope)[0] & targets & read
+            opaque, stored = _scope_binders(scope)
+            shadowed = opaque & read
+            if isinstance(scope, ast.ClassDef):
+                # A class-body store binds an ATTRIBUTE, whose readers are ``Attribute``
+                # nodes the rewrite leaves alone, so a renamed ``Runner_s0.call_s0`` would
+                # no longer answer to ``Runner_s0.call``.
+                shadowed |= stored
+            shadowed &= targets
             if shadowed:
                 raise NotImplementedError(
                     f"namespace_module_names: a nested scope rebinds {sorted(shadowed)} "
-                    "with an opaque binder (parameter, except-as, nested def / class, "
-                    "local import or global) and reads the name there; renaming the "
-                    "module-level definition would turn that local read into a renamed "
-                    "global one."
+                    "with a binder the rewrite cannot follow -- an opaque one (parameter, "
+                    "except-as, nested def / class, local import or global) that the scope "
+                    "also reads, or a class-body store read as an attribute; renaming the "
+                    "module-level definition would not rename that binding with it."
                 )
         # ``col_offset`` is a UTF-8 BYTE offset, so spans are spliced in bytes.
         edits: dict[int, list[tuple[int, int, bytes]]] = {}
@@ -1015,10 +1046,15 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
             found = re.search(
                 rb"\b" + re.escape(name.encode()) + rb"\b", lines[lineno - 1].encode()
             )
-            if found is not None:
-                edits.setdefault(lineno, []).append(
-                    (found.start(), found.end(), (name + suffix).encode())
+            if found is None:
+                raise NotImplementedError(
+                    f"namespace_module_names: the header of {name!r} is not on its own "
+                    f"line {lineno} (unrecognized inductor codegen); every call site would "
+                    "be renamed with the definition left behind."
                 )
+            edits.setdefault(lineno, []).append(
+                (found.start(), found.end(), (name + suffix).encode())
+            )
         for lineno, spans in edits.items():
             raw = lines[lineno - 1].encode()
             for begin, finish, text in sorted(spans, reverse=True):
