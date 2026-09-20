@@ -1945,14 +1945,16 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             self.assertEqual(set(observed), {training})
             # The outcome, not just the flag: a lazy backward leaves the bundle
             # unwritten until the first .backward() call, so a capture that
-            # never makes one files no artifact and says so.
+            # never makes one files no artifact and records that it did not.
+            # The message lists the plausible causes rather than diagnosing
+            # one, so this pins the fact of the error, not a diagnosis.
             self.assertEqual(bool(session._backend_artifacts), training)
             if training:
                 self.assertEqual(session._capture_errors, [])
             else:
                 (recorded,) = session._capture_errors
                 self.assertIn("recorded no artifact", recorded)
-                self.assertIn("training=True", recorded)
+                self.assertIn("the usual causes are", recorded)
         self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
 
     def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
@@ -2051,6 +2053,31 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             for _ in range(2):
                 with self.assertRaisesRegex(ValueError, "boom"):
                     cap(torch.ones(2), True)
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+
+    def test_recording_an_error_runs_under_the_session_lock(self):
+        import threading
+
+        # The once-only dedup is a check-then-add on shared state, so it has to
+        # hold _state: holding it from here must stall a recording thread.
+        session = self._session(_session_raises)
+        started = threading.Event()
+        done = threading.Event()
+
+        def record():
+            started.set()
+            session._record_capture_error(ValueError("boom"))
+            done.set()
+
+        worker = threading.Thread(target=record)
+        with session._state:
+            worker.start()
+            started.wait()
+            self.assertFalse(done.wait(0.5))
+            self.assertEqual(session._capture_errors, [])
+        worker.join()
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+        session._record_capture_error(ValueError("boom"))
         self.assertEqual(session._capture_errors, ["ValueError: boom"])
 
     def test_eager_backends_survive_exit_for_the_render(self):
