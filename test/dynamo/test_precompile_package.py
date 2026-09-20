@@ -1954,14 +1954,16 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             self.assertEqual(set(observed), {training})
             # The outcome, not just the flag: a lazy backward leaves the bundle
             # unwritten until the first .backward() call, so a capture that
-            # never makes one files no artifact and says so.
+            # never makes one files no artifact and records that it did not.
+            # The message lists the plausible causes rather than diagnosing
+            # one, so this pins the fact of the error, not a diagnosis.
             self.assertEqual(bool(session._backend_artifacts), training)
             if training:
                 self.assertEqual(session._capture_errors, [])
             else:
                 (recorded,) = session._capture_errors
                 self.assertIn("recorded no artifact", recorded)
-                self.assertIn("training=True", recorded)
+                self.assertIn("the usual causes are", recorded)
         self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
 
     def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
@@ -2060,6 +2062,31 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             for _ in range(2):
                 with self.assertRaisesRegex(ValueError, "boom"):
                     cap(torch.ones(2), True)
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+
+    def test_recording_an_error_runs_under_the_session_lock(self):
+        import threading
+
+        # The once-only dedup is a check-then-add on shared state, so it has to
+        # hold _state: holding it from here must stall a recording thread.
+        session = self._session(_session_raises)
+        started = threading.Event()
+        done = threading.Event()
+
+        def record():
+            started.set()
+            session._record_capture_error(ValueError("boom"))
+            done.set()
+
+        worker = threading.Thread(target=record)
+        with session._state:
+            worker.start()
+            started.wait()
+            self.assertFalse(done.wait(0.5))
+            self.assertEqual(session._capture_errors, [])
+        worker.join()
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+        session._record_capture_error(ValueError("boom"))
         self.assertEqual(session._capture_errors, ["ValueError: boom"])
 
     def test_eager_backends_survive_exit_for_the_render(self):
@@ -2424,6 +2451,37 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertEqual(_normalize(raw), masked)
         # Idempotent, or a re-normalized slot would spell itself differently.
         self.assertEqual(_normalize(masked), masked)
+
+    @parametrize(
+        "part,masked",
+        [
+            # A number or a bool IS the form of a check; a string, a container
+            # display, a keys list and a containment argument are its data.
+            ("L['self'].n == 3", "L['self'].n == 3"),
+            ("L['self'].prompt == 'a secret prompt'", "L['self'].prompt == <str>"),
+            ("L['self'].tags == {'alpha'}", "L['self'].tags == <set>"),
+            (
+                "list(dict.keys(L['x'])) == ['alpha']",
+                "list(dict.keys(L['x'])) == <list>",
+            ),
+            ("set.__contains__(L['x'], 'alpha')", "set.__contains__(L['x'], <str>)"),
+            # The member a getattr names -- and TENSOR_MATCH's dimension marking
+            # through it -- is what the check is about rather than its data.
+            (
+                "hasattr(L['x'], '_dynamo_dynamic_indices') == False",
+                "hasattr(L['x'], '_dynamo_dynamic_indices') == False",
+            ),
+            # A data-shaped subscript key is masked, one that reads as a name is not.
+            ("L['self'].cfg['/home/u/secret'] == 3", "L['self'].cfg[<str>] == 3"),
+            ("L['self']._modules['fc1'].weight", "L['self']._modules['fc1'].weight"),
+            # No expression at all, so nothing can be masked and the part goes.
+            ("top_saved_tensors_hooks ids == (11, 12)", ""),
+        ],
+    )
+    def test_a_rendered_check_keeps_its_form_and_not_its_data(self, part, masked):
+        from torch._dynamo.precompile_package import _render_code
+
+        self.assertEqual(_render_code([part]), (masked,) if masked else ())
 
     def test_the_rendered_report_is_stable_and_names_every_class(self):
         # Driven by a real capture, so the golden pins the recording path too --
