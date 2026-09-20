@@ -352,9 +352,9 @@ def _batch_chunked_kernel(
 
     loss = _make_zeros((), acc_dtype, device)
     grad_input = _make_empty(input.shape, dtype, device, when=compute_input_grad)
-    # Tier 0: the accumulator is fully written by the first chunk (beta=0
-    # below), so zeroing it first is a (V, D) write nothing reads. The
-    # empty-batch early return has no first chunk, so it keeps the zeros.
+    # The accumulator is fully written by the first chunk (beta=0 below), so
+    # zeroing it first is a (C, F) write nothing reads. The empty-batch early
+    # return has no first chunk, so it keeps the zeros.
     _make_accumulator = _make_empty if num_batches > 0 else _make_zeros
     grad_linear_weight = _make_accumulator(
         linear_weight.shape, dtype, device, when=compute_linear_weight_grad
@@ -463,7 +463,7 @@ def _batch_chunked_kernel(
         if compute_linear_weight_grad:
             # The first chunk WRITES the accumulator (beta=0), which is why it
             # is not zeroed above: that fill plus this chunk's read of it were
-            # (V, D) of traffic nothing consumed.
+            # (C, F) of traffic nothing consumed.
             if start == 0:
                 torch.mm(g.t(), input_chunk, out=grad_linear_weight)
             else:
