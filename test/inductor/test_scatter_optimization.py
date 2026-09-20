@@ -11,8 +11,10 @@ from torch._inductor import config, metrics
 from torch._inductor.fx_passes.reduced_atomic_contention import (
     _accumulation_dtype,
     _compute_num_partitions,
+    _evaluate_candidate,
     _widen_bytes,
     ScatterCandidate,
+    ScatterPassContext,
 )
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import TestCase
@@ -686,9 +688,39 @@ class TestPartitionedScatterOpt(TestCase):
         # 4M values at fp32, plus the 2 bytes/element a bf16 output cannot cover.
         self.assertEqual(_widen_bytes(wider), 18_000_000)
 
+    @config.patch(
+        partitioned_scatter_min_index_size=1,
+        partitioned_scatter_min_contention_ratio=0.0,
+    )
+    def test_scatter_widening_uses_full_source_size(self):
+        """scatter permits src to be larger than index, and the rewrite widens all
+        of src even though only the index-shaped prefix participates."""
+        graph = torch.fx.Graph()
+        input_node = graph.placeholder("input")
+        index_node = graph.placeholder("index")
+        values_node = graph.placeholder("values")
+        output_node = graph.call_function(
+            torch.ops.aten.scatter_add.default,
+            (input_node, 0, index_node, values_node),
+        )
+
+        input_node.meta["val"] = torch.empty(
+            4, 4, dtype=torch.bfloat16, device="meta"
+        )
+        index_node.meta["val"] = torch.empty(2, 4, dtype=torch.int64, device="meta")
+        values_node.meta["val"] = torch.empty(
+            100, 4, dtype=torch.bfloat16, device="meta"
+        )
+
+        candidate = _evaluate_candidate(
+            output_node, force=False, ctx=ScatterPassContext()
+        )
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.values_numel, values_node.meta["val"].numel())
+
     def test_compute_num_partitions_traffic_cap(self):
-        """P <= writes_per_slot, so the expanded buffer never moves more traffic
-        than the scatter itself. Applies when memory is not the bottleneck."""
+        """P <= writes_per_slot caps each expanded-buffer phase at the scatter's
+        traffic. The min partition count takes precedence below that floor."""
         available = 10**12  # effectively unlimited
 
         # writes_per_slot=256 → cap=256, min(256, max_p=128) = 128

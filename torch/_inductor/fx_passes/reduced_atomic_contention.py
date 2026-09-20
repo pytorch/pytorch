@@ -104,7 +104,7 @@ class ScatterCandidate:
     output_size: int
     index_size: int
     scatter_dim_size: int
-    # Upper bound on the scattered values' numel, exact for the index_put family.
+    # Number of elements in the values tensor converted to acc_dtype.
     values_numel: int
     contention_ratio: float
     dtype: torch.dtype
@@ -182,24 +182,35 @@ def _evaluate_candidate(
 
     if is_scatter_reduce or is_index_add:
         scatter_dim, index_node = output_node.args[1], output_node.args[2]
+        values_node = output_node.args[3]
         mask_node = None
-        if not isinstance(scatter_dim, int) or not isinstance(index_node, fx.Node):
+        if (
+            not isinstance(scatter_dim, int)
+            or not isinstance(index_node, fx.Node)
+            or not isinstance(values_node, fx.Node)
+        ):
             _record_skip(ctx, "no_meta", node_name)
             return None
     else:
         # pyrefly: ignore [bad-index]
         indices_pos, mask_pos = _SCATTER_ARGS[output_node.target]
         mask_node = output_node.args[mask_pos] if mask_pos is not None else None
+        values_pos = 3 if output_node.target is _MASKED_INDEX_PUT_TARGET else 2
+        values_node = output_node.args[values_pos]
         scatter_dim, index_node = _extract_scatter_dim_and_index(
             output_node.args[indices_pos]
         )
         if scatter_dim is None or index_node is None:
             _record_skip(ctx, "multi_index", node_name)
             return None
+        if not isinstance(values_node, fx.Node):
+            _record_skip(ctx, "no_meta", node_name)
+            return None
 
     input_meta = _get_tensor_meta(input_node)
     index_meta = _get_tensor_meta(index_node)
-    if not input_meta or not index_meta:
+    values_meta = _get_tensor_meta(values_node)
+    if not input_meta or not index_meta or not values_meta:
         _record_skip(ctx, "no_meta", node_name)
         return None
 
@@ -222,6 +233,7 @@ def _evaluate_candidate(
         return None
 
     output_size = _resolve_numel(input_meta["numel"])
+    values_numel = _resolve_numel(values_meta["numel"])
     # index_put writes one row per index element; a values-shaped scatter index
     # only writes a slot once per position along scatter_dim.
     if is_scatter_reduce:
@@ -232,11 +244,11 @@ def _evaluate_candidate(
     else:
         index_size = _resolve_numel(index_meta["numel"])
 
-    if output_size is None or index_size is None:
+    if output_size is None or index_size is None or values_numel is None:
         _record_skip(ctx, "dynamic_no_hint", node_name)
         return None
 
-    if output_size == 0 or index_size == 0:
+    if output_size == 0 or index_size == 0 or values_numel == 0:
         _record_skip(ctx, "zero_size", node_name)
         return None
 
@@ -277,7 +289,7 @@ def _evaluate_candidate(
         output_size=output_size,
         index_size=index_size,
         scatter_dim_size=scatter_dim_size,
-        values_numel=index_size * (output_size // scatter_dim_size),
+        values_numel=values_numel,
         contention_ratio=contention_ratio,
         dtype=input_meta["dtype"],
         acc_dtype=acc_dtype,
@@ -401,12 +413,12 @@ def _compute_num_partitions(
     """
     Return the largest power-of-2 P in [min_p, max_p] satisfying:
       1. Memory: output_size * element_bytes * (P - 1) <= available_bytes
-      2. Traffic cap (skipped when force=True): P <= writes_per_slot, where
-         writes_per_slot = index_size / scatter_dim_size. The expanded buffer
-         costs P * output_bytes to zero-fill plus the same to reduce, against the
-         scatter's own index_size * row_bytes, so the overhead ratio is exactly
-         P / writes_per_slot. Capping it at 1x also lands near the point where
-         extra partitions stop being written at all.
+      2. Per-phase traffic cap (skipped when force=True):
+         P <= writes_per_slot, where writes_per_slot =
+         index_size / scatter_dim_size. The expanded buffer costs
+         P * output_bytes in each of the zero-fill and reduction phases, so
+         each phase is capped at the scatter's index_size * row_bytes traffic.
+         The min_p floor takes precedence when writes_per_slot < min_p.
 
     Returns 0 if min_p doesn't fit. Power-of-2 is required by the bitwise-AND
     partition assignment.
