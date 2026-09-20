@@ -1552,7 +1552,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
         def outer():
             cell = in_cell
-            empty: threading.RLock  # referenced by fn, never assigned: an empty cell
+            if lock is None:
+                empty = 1  # never runs, so the `empty` cell fn closes over stays EMPTY
 
             def fn(x, *, kw=lock):
                 return cell, empty
@@ -1597,18 +1598,41 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         from torch._dynamo.guards import _offending_value_path
 
         lock, tag = threading.Lock(), threading.Lock()
-        holder = types.SimpleNamespace(cfg={"a": [1, (2, lock)]}, tags={tag})
+        member = _HolderWithGenerator()  # hashable, unlike SimpleNamespace
+        member.it = tag
+        holder = types.SimpleNamespace(cfg={"a": [1, (2, lock)]}, tags={member})
         graph = types.SimpleNamespace(local_scope={"h": holder}, global_scope={})
         state = types.SimpleNamespace(output_graph=graph)
         self.assertIn(
             "local_scope['h'].cfg['a'][1][1]", _offending_value_path(state, lock)
         )
+        # A set has no index; the placeholder composes with what hangs below it.
         self.assertIn(
-            "a member of local_scope['h'].tags", _offending_value_path(state, tag)
+            "local_scope['h'].tags[<a member>].it", _offending_value_path(state, tag)
         )
-        # A huge container is fanned out to a bound, and the walk still ends.
-        graph.local_scope["big"] = [0] * 10**6
-        self.assertEqual(_offending_value_path(state, object()), "")
+        # Fan-out is bounded per container: past the bound a value is not named.
+        far = threading.Lock()
+        graph.local_scope["big"] = [0] * 30000 + [far]
+        self.assertEqual(_offending_value_path(state, far), "")
+        graph.local_scope["big"] = [0] * 30 + [far]
+        self.assertIn("local_scope['big'][30]", _offending_value_path(state, far))
+
+    def test_a_reducer_refusal_names_its_path_too(self):
+        # A PackageError the reducer raises itself (a guard reads a weakref) is
+        # re-raised with the path appended: there last_reduced is exact.
+        referent = _HolderWithGenerator()
+        ref = weakref.ref(referent)
+        graph = types.SimpleNamespace(
+            guards=[], local_scope={"w": ref}, global_scope={}, guard_on_key_order=set()
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(ref): ref}, value_guarded_containers={}
+        )
+        with self.assertRaisesRegex(
+            PackageError,
+            r"a guard reads a ReferenceType.*\n  reached via: local_scope\['w'\]$",
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
 
     def test_an_object_whose_getstate_raises_is_named_itself(self):
         # The C pickler consults reducer_override for the object right before
