@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
+import inspect
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
 from torch._inductor.codegen.flydsl.flydsl_aot import (
+    _normalize_stream_abi,
     compile_launcher,
     define_aot_kernel,
     FlyDSLAOTArtifact,
@@ -33,6 +35,7 @@ from torch._inductor.codegen.flydsl.user_defined_kernel import (
     decompose_functional_wrapper,
     lower_flydsl_kernel,
 )
+from torch._inductor.compile_fx import _recursive_post_grad_passes
 from torch._inductor.fx_passes.post_grad import _has_flydsl_kernel_wrapper
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.utils import IndentedBuffer
@@ -273,6 +276,92 @@ class FlyDSLInductorTest(TestCase):
 
         torch.testing.assert_close(out, inp * 3)
 
+    def test_python_launcher_injects_hidden_stream(self):
+        class Stream:
+            def __init__(self, value=None) -> None:
+                self.value = value
+
+        class EagerLauncher:
+            def __init__(self) -> None:
+                self.func = self.launch
+                self.stream = None
+
+            def launch(self, out, inp, stream=Stream(None)) -> None:
+                self.stream = stream
+                out.copy_(inp)
+
+            def __call__(self, out, inp, stream=Stream(None)) -> None:
+                self.launch(out, inp, stream)
+
+        eager_launcher = EagerLauncher()
+        stream_parameter = inspect.Parameter(
+            "stream",
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            annotation=Stream,
+            default=Stream(None),
+        )
+        captured = TraceableFlyDSLLauncher(
+            eager_launcher,
+            (0,),
+            signature=inspect.signature(lambda out, inp: None),
+            stream_parameter=(2, stream_parameter),
+            stream_type=Stream,
+        )
+        launcher = FlyDSLPythonLauncher(
+            captured.launcher_idx,
+            flydsl_launcher_side_table.add_call_spec({}),
+        )
+        inp = torch.arange(4, dtype=torch.float32)
+        out = torch.empty_like(inp)
+
+        launcher.run(out, inp, stream=1234)
+
+        torch.testing.assert_close(out, inp)
+        self.assertIsInstance(eager_launcher.stream, Stream)
+        self.assertEqual(1234, eager_launcher.stream.value)
+
+    def test_python_launcher_rejects_non_default_implicit_stream(self):
+        class EagerLauncher:
+            def __init__(self) -> None:
+                self.func = self.launch
+
+            def launch(self, out, inp) -> None:
+                out.copy_(inp)
+
+            def __call__(self, out, inp) -> None:
+                self.launch(out, inp)
+
+        captured = TraceableFlyDSLLauncher(EagerLauncher(), (0,))
+        launcher = FlyDSLPythonLauncher(
+            captured.launcher_idx,
+            flydsl_launcher_side_table.add_call_spec({}),
+        )
+
+        with (
+            mock.patch.object(
+                torch.cuda,
+                "default_stream",
+                return_value=SimpleNamespace(cuda_stream=1234),
+            ),
+            self.assertRaisesRegex(RuntimeError, "non-default stream"),
+        ):
+            launcher.run(torch.empty(1), torch.empty(1), stream=5678)
+
+    def test_normalize_hidden_stream_abi(self):
+        stream_parameter = inspect.Parameter(
+            "stream",
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        abi = (
+            {"kind": "tensor_data", "arg_index": 0},
+            {"kind": "stream", "arg_index": 2},
+            {"kind": "scalar", "arg_index": 3},
+        )
+
+        normalized = _normalize_stream_abi(abi, (2, stream_parameter))
+
+        self.assertEqual([0, None, 2], [slot["arg_index"] for slot in normalized])
+
     def _functional_graph(self, *, keep_original: bool) -> torch.fx.GraphModule:
         captured = torch.library.wrap_flydsl(
             _launcher,
@@ -292,6 +381,31 @@ class FlyDSLInductorTest(TestCase):
             return (result, out) if keep_original else result
 
         return make_fx(f, tracing_mode="fake")(torch.randn(8))
+
+    @requires_flydsl
+    def test_lite_mode_decomposes_functional_wrapper(self):
+        graph_module = self._functional_graph(keep_original=False)
+
+        with config.patch({"use_post_grad_passes": False}):
+            _recursive_post_grad_passes(graph_module)
+        graph_module.graph.lint()
+
+        self.assertEqual(
+            [],
+            graph_module.graph.find_nodes(
+                op="call_function",
+                target=flydsl_kernel_wrapper_functional,
+            ),
+        )
+        self.assertEqual(
+            1,
+            len(
+                graph_module.graph.find_nodes(
+                    op="call_function",
+                    target=flydsl_kernel_wrapper_mutation,
+                )
+            ),
+        )
 
     @requires_flydsl
     def test_reinplace_removes_clone_for_fresh_output(self):
@@ -550,12 +664,14 @@ class FlyDSLInductorTest(TestCase):
                     Owner.launcher,
                     ("out", 256, 8),
                     signature=registration.signature,
+                    stream_parameter=registration.stream_parameter,
                     bound_self=owner,
                 ),
                 mock.call(
                     Owner.launcher,
                     ("out", 512, 8),
                     signature=registration.signature,
+                    stream_parameter=registration.stream_parameter,
                     bound_self=owner,
                 ),
             ],

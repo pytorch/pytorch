@@ -13,6 +13,7 @@ from pathlib import Path
 
 import torch
 from torch._higher_order_ops.flydsl_kernel_wrap import flydsl_kernel_wrapper_mutation
+from torch._inductor import config
 from torch._inductor.codegen.flydsl.flydsl_utils import runtime_available
 from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
 from torch.autograd import DeviceType
@@ -96,6 +97,26 @@ class FlyDSLAOTIEndToEndTest(TestCase):
             result.returncode,
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
+
+    def test_vector_add_runs_with_post_grad_passes_disabled(self):
+        lhs = torch.randn(1024, device="cuda", dtype=torch.float32)
+        rhs = torch.randn_like(lhs)
+
+        with config.patch(
+            {
+                "fallback_by_default": True,
+                "use_post_grad_passes": False,
+            }
+        ):
+            compiled = torch.compile(VectorAddModel(), fullgraph=True)
+            actual = compiled(lhs, rhs)
+            torch.testing.assert_close(actual, lhs + rhs)
+
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                stream_actual = compiled(lhs, rhs)
+            stream.synchronize()
+            torch.testing.assert_close(stream_actual, lhs + rhs)
 
     def test_vector_add_runs_from_package(self):
         lhs = torch.randn(1024, device="cuda", dtype=torch.float32)

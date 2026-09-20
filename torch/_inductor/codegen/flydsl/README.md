@@ -18,14 +18,14 @@ For capture and AOTI packaging:
 - The launcher returns `None` and writes results to explicit tensor arguments.
 - Output and workspace tensors are allocated by PyTorch code and passed to the
   launcher. This lets Export and Inductor model their lifetimes and mutations.
-- Mutated tensors are declared through `mutates_args`. If it is omitted, every
-  runtime tensor argument is conservatively treated as mutated.
+- Mutated tensors must be declared explicitly through `mutates_args`.
 - `Constexpr` and FlyDSL type parameters are normal launcher arguments, but are
   captured as specialization values and omitted from the runtime ABI.
 - Runtime arguments must be graphable PyTorch values. The supported AOT ABI
   covers tensors, pointers, numeric scalars, and an implicit stream.
-- The launcher must not declare a FlyDSL `Stream` parameter. AOTI supplies the
-  scheduler's current stream when invoking the compiled launcher.
+- A launcher may declare one defaulted FlyDSL `Stream` parameter. It is hidden
+  from the captured API and AOTI supplies the scheduler's current stream when
+  invoking the compiled launcher. Callers must not pass a stream themselves.
 
 `torch.library.wrap_flydsl()` creates a traceable launcher:
 
@@ -100,7 +100,6 @@ flowchart TD
         R --> SO
     end
 
-    O --> S
     W --> S
     FH --> D
     A --> M
@@ -246,13 +245,16 @@ system libraries.
 
 - FlyDSL is an optional dependency. Common PyTorch and Inductor imports do not
   import it; availability is checked only when FlyDSL is selected or wrapped.
-- Captured-launcher AOT requires FlyDSL 0.2.3 or newer, a ROCm-enabled PyTorch
+- Captured-launcher AOT requires FlyDSL 0.3.x, a ROCm-enabled PyTorch
   build, and at least one tensor launcher argument.
 - The launcher must return `None`; outputs and workspaces must be explicit
   tensor arguments.
-- Explicit FlyDSL stream parameters are unsupported. Eager calls through a
-  wrapped launcher currently require the default stream, while AOTI calls use
-  the scheduler's current stream.
+- Required and caller-supplied FlyDSL stream parameters are unsupported. One
+  defaulted stream parameter may be declared as an internal injection point.
+  Eager calls through a wrapped launcher currently require the default stream,
+  while compiled launchers use the scheduler's current stream. Python-wrapper
+  execution without a declared stream parameter is also limited to the default
+  stream until FlyDSL exposes an out-of-band implicit-stream override.
 - Mutated tensor aliases that require independent functionalization clones are
   unsupported.
 - Custom or composite FlyDSL JIT arguments without a declarative ABI are

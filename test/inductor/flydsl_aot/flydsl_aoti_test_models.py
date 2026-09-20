@@ -71,11 +71,13 @@ def _vector_add_launcher(
     rhs: fx.Tensor,
     elements: fx.Int32,
     block_dim: fx.Constexpr[int],
+    stream: fx.Stream = fx.Stream(None),
 ):
     grid = (elements + block_dim - 1) // block_dim
     _vector_add_kernel(lhs, rhs, out, block_dim).launch(
         grid=(grid, 1, 1),
         block=(block_dim, 1, 1),
+        stream=stream,
     )
 
 
