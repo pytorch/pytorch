@@ -11,7 +11,6 @@ import expecttest
 
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_ARM64,
@@ -794,10 +793,10 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda(self, device):
+    def test_profiler_experimental_tree_cuda(self):
         with torch.profiler.profile(profile_memory=True) as p:
-            weight = torch.ones(1, device=device, requires_grad=True)
-            x = torch.ones(1, device=device)
+            weight = torch.ones(1, device="cuda", requires_grad=True)
+            x = torch.ones(1, device="cuda")
             y = torch.add(weight, x)
             loss = torch.pow(y, 2)
             loss.backward()
@@ -891,11 +890,11 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda_with_stream(self, device):
+    def test_profiler_experimental_tree_cuda_with_stream(self):
         streams = [torch.cuda.Stream() for _ in range(3)]
         results = []
         with torch.profiler.profile(profile_memory=True) as p:
-            x = torch.ones((4, 4), device=device)
+            x = torch.ones((4, 4), device="cuda")
             for stream in streams:
                 with torch.cuda.stream(stream):
                     results.append(torch.tanh(x) - x)
@@ -950,16 +949,16 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda_detailed(self, device):
+    def test_profiler_experimental_tree_cuda_detailed(self):
         # Do lazy imports ahead of time to avoid it showing up in the tree
         import torch.nested._internal.nested_tensor
 
-        model = torch.nn.modules.Linear(1, 1, device=device)
+        model = torch.nn.modules.Linear(1, 1, device="cuda")
         model.train()
         opt = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 
         def step():
-            x = torch.ones((1, 1), device=device)
+            x = torch.ones((1, 1), device="cuda")
             loss = model(x)
             loss.backward()
             opt.step()
@@ -1156,8 +1155,6 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
-
-instantiate_device_type_tests(TestProfilerTreeCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
