@@ -35,7 +35,12 @@ from torch._dynamo.guards import (
     GuardsStatePickler,
     pickle_guards_state,
 )
-from torch._dynamo.package import CompilePackage, DynamoCache, load_guards_state
+from torch._dynamo.package import (
+    _PRUNED_VALUE_PID,
+    CompilePackage,
+    DynamoCache,
+    load_guards_state,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -1360,6 +1365,32 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             GuardsStatePickler({id(fake): fake}, {}, {}, {}, io.BytesIO()).dump(
                 {"t": fake}
             )
+
+    def test_loader_turns_the_pruned_persistent_id_into_the_missing_sentinel(self):
+        # Every occurrence loads as ONE shared _Missing: the sentinel carries
+        # nothing but its reason, so distinct pruned values need not stay distinct.
+        class Pruning(pickle.Pickler):
+            def persistent_id(self, obj):
+                return _PRUNED_VALUE_PID if isinstance(obj, bytearray) else None
+
+        buf = io.BytesIO()
+        Pruning(buf).dump([bytearray(b"a"), bytearray(b"b"), 1])
+        out = load_guards_state(buf.getvalue())
+        self.assertIsInstance(out[0], _Missing)
+        self.assertIs(out[0], out[1])
+        self.assertEqual(out[2], 1)
+
+    def test_loader_rejects_a_foreign_persistent_id(self):
+        class Foreign(pickle.Pickler):
+            def persistent_id(self, obj):
+                return "foo" if obj == "X" else None
+
+        buf = io.BytesIO()
+        Foreign(buf).dump(["X"])
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError, "unknown guards state persistent id 'foo'"
+        ):
+            load_guards_state(buf.getvalue())
 
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
