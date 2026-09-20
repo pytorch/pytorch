@@ -1,18 +1,21 @@
 # Owner(s): ["oncall: pt2"]
 import copy
+import errno
 import io
 import os
 import pickle
+import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
-from torch._precompile import PrecompileError
+from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
@@ -100,6 +103,177 @@ class TestPrecompile(TestCase):
         # Keyword-only: three str fields in a row would otherwise transpose silently.
         with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
             GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc mod.fn", False)
+
+    def test_summary_pickle_and_hash(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # A fully populated summary round-trips through pickle (which resolves
+        # the class through its __module__) and hashes equal to its copy.
+        risky = (("ID_MATCH", "self.act"),)
+        policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        summary = PrecompileSummary(
+            frames=3,
+            resume_functions=1,
+            guarded_codes=4,
+            backend_graphs=3,
+            bypassed=("gen",),
+            truncated=("loop (m.py:12)",),
+            uncovered_frames=("helper",),
+            wont_generalize=("n",),
+            dropped_guards=(("HASATTR", "m"),) + risky,
+            kept_guards=(("EQUALS_MATCH", "n"), ("TENSOR_MATCH", "x")),
+            risky_dropped_guards=risky,
+            policy_dropped_guards=(policy,),
+            dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
+            capture_errors=("RuntimeError: boom",),
+        )
+        clone = pickle.loads(pickle.dumps(summary))
+        self.assertEqual(clone, summary)
+        self.assertEqual(hash(clone), hash(summary))
+        # Every clause at once: the notes come first and the shouted frame
+        # failures last, so a failure never sits between two notes.
+        self.assertExpectedInline(
+            str(summary),
+            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (2 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+        )
+        # Keyword-only: four leading ints would otherwise transpose silently.
+        with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
+            PrecompileSummary(3, 1, 4, 3)
+
+    def test_summary_guard_lists_aggregate_over_frames(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # Two frames' guards on the builtin len are one slot (the producer
+        # normalizes the per-compile counter out of the builtins-dict key). One
+        # frame's caller filter rejected it and the drop told that frame's
+        # variants apart, so it is risky (the risky-drop lint waives a builtin
+        # read the ordinary way); the other frame's invariance policy dropped
+        # it, which the policy may do to a BUILTIN_MATCH: the slot sits in all
+        # three lists.
+        # The relations hold per frame and the type checks nothing, so the
+        # report still constructs and counts the slot once.
+        act = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        check = "___check_obj_id(G['__builtins_dict___<n>']['len'], <id>), type=<class 'builtin_function_or_method'>"
+        summary = PrecompileSummary(
+            frames=2,
+            resume_functions=0,
+            guarded_codes=2,
+            backend_graphs=2,
+            dropped_guards=(act,),
+            risky_dropped_guards=(act,),
+            policy_dropped_guards=(act,),
+            dropped_guard_code=(act + (check,),),
+        )
+        self.assertEqual(summary.dropped_guard_types, {"BUILTIN_MATCH": 1})
+        self.assertExpectedInline(
+            str(summary),
+            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'BUILTIN_MATCH': 1} (0 kept), RISKY drops ["BUILTIN_MATCH G['__builtins_dict___<n>']['len']"], 1 policy-dropped guard""",
+        )
+
+    def test_summary_complete_requires_every_term(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        def summary(**kw):
+            base = dict(frames=1, resume_functions=0, guarded_codes=1, backend_graphs=1)
+            base.update(kw)
+            return PrecompileSummary(**base)
+
+        self.assertTrue(summary().complete)
+        self.assertFalse(summary(backend_graphs=0).complete)
+        self.assertFalse(summary(guarded_codes=0).complete)
+        self.assertFalse(summary(capture_errors=("boom",)).complete)
+        self.assertFalse(summary(bypassed=("f",)).complete)
+        self.assertFalse(summary(truncated=("f",)).complete)
+        self.assertFalse(summary(uncovered_frames=("f",)).complete)
+        # Coverage only: the guard fields never make a capture incomplete.
+        risky = (("ID_MATCH", "self.act"),)
+        flagged = summary(dropped_guards=risky, risky_dropped_guards=risky)
+        self.assertTrue(flagged.complete)
+        pinned = summary(wont_generalize=("n",), kept_guards=(("EQUALS_MATCH", "n"),))
+        self.assertTrue(pinned.complete)
+
+    def test_summary_digest_and_guard_type_counts(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # The fixtures list slots sorted; the tallies render in first-appearance
+        # order. A value-pinned source is one a kept value-equality guard
+        # on a bare name pins, so each such fixture keeps that guard too.
+        policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        plain = PrecompileSummary(
+            frames=2,
+            resume_functions=1,
+            guarded_codes=3,
+            backend_graphs=2,
+            dropped_guards=(
+                ("HASATTR", "m"),
+                ("ID_MATCH", "G['fn']"),
+                ("ID_MATCH", "G['g']"),
+            ),
+            kept_guards=(
+                ("EQUALS_MATCH", "scale"),
+                ("TENSOR_MATCH", "x"),
+                ("TYPE_MATCH", "x"),
+            ),
+            policy_dropped_guards=(policy,),
+            # For programmatic consumers: the digest below does not mention it.
+            dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
+            wont_generalize=("scale",),
+        )
+        self.assertEqual(plain.dropped_guard_types, {"HASATTR": 1, "ID_MATCH": 2})
+        kept = {"EQUALS_MATCH": 1, "TENSOR_MATCH": 1, "TYPE_MATCH": 1}
+        self.assertEqual(plain.kept_guard_types, kept)
+        self.assertExpectedInline(
+            str(plain),
+            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 2} (3 kept), 1 policy-dropped guard, 1 value-pinned source""",
+        )
+        # No optional clause: kept guards show up only beside the drops.
+        clean = PrecompileSummary(
+            frames=1,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            kept_guards=(("TENSOR_MATCH", "x"),),
+        )
+        self.assertExpectedInline(
+            str(clean),
+            """1 frame (0 from graph breaks), 1 guarded code, 1 backend graph""",
+        )
+        # The risky slots are dropped slots too; the digest names them whole,
+        # since a dropped ID_MATCH and its HASATTR companion share a source.
+        # Only the first non-empty line of the first capture error is shown.
+        risky = (("HASATTR", "self.act"), ("ID_MATCH", "self.act"))
+        bad = PrecompileSummary(
+            frames=3,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            bypassed=("gen",),
+            truncated=("loop (m.py:12)",),
+            uncovered_frames=("helper",),
+            dropped_guards=risky,
+            risky_dropped_guards=risky,
+            capture_errors=("\nRuntimeError: boom\nHint: do not.",),
+        )
+        self.assertExpectedInline(
+            str(bad),
+            """3 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+        )
+        # The list clauses stop at five entries and count the rest, so the
+        # digest stays one line however many frames a model has.
+        wide = PrecompileSummary(
+            frames=8,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            uncovered_frames=tuple(f"f{i}" for i in range(7)),
+            dropped_guards=risky,
+            risky_dropped_guards=risky,
+            capture_errors=("RuntimeError: boom", "TypeError: bad", "ValueError: no"),
+        )
+        self.assertExpectedInline(
+            str(wide),
+            """8 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 7 UNCOVERED: ['f0', 'f1', 'f2', 'f3', 'f4'] +2 more, 3 CAPTURE ERRORS: 'RuntimeError: boom' +2 more""",
+        )
 
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
@@ -2222,6 +2396,413 @@ class TestPrecompile(TestCase):
             op = torch.ops.quantized.mlprecompile_unbacked_no_meta
             with self.assertRaises(UnsupportedOperatorException):
                 _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
+
+
+class _FilesModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        return torch.relu(self.lin(x))
+
+
+def _files_fn(model, x):
+    return model(x)
+
+
+@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileCaptureFiles(TestCase):
+    """The on-disk artifact pair writer, through its failure shapes."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.artifact = os.path.join(self.dir, "m.py")
+        self.cache = os.path.join(self.dir, "m.cache")
+        self.model = _FilesModel()
+        self.x = torch.randn(2, 4)
+
+    def _leftovers(self):
+        return sorted(n for n in os.listdir(self.dir) if n not in ("m.py", "m.cache"))
+
+    def _read(self, path):
+        with open(path, "rb") as f:
+            return f.read()
+
+    def _rewrite_raises(self, exc_type, regex, backend="inductor"):
+        # Rewrite the same paths from a freshly rendered pair, expecting the write to fail
+        # with the patched-in exception.
+        python_code, cache = _precompile_pair(
+            _files_fn, self.model, self.x, backend=backend
+        )
+        with self.assertRaisesRegex(exc_type, regex):
+            _write_artifact(self.artifact, self.cache, python_code, cache)
+
+    def _write_pair(self):
+        # The "previous artifact" the recovery tests want on disk, with both halves' bytes.
+        python_code, cache = _precompile_pair(
+            _files_fn, self.model, self.x, backend="eager"
+        )
+        _write_artifact(self.artifact, self.cache, python_code, cache)
+        return self._read(self.artifact), self._read(self.cache)
+
+    def _assert_serves(self):
+        # Both halves of what a writer test wants: no scratch file or backup left behind,
+        # and the named pair reading back and serving.
+        self.assertEqual(self._leftovers(), [])
+        python_code, cache = torch._precompile._read_artifact(self.artifact, self.cache)
+        f = torch.compiler.precompile.load(python_code, cache)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def _assert_kept_backup(self, before, logs):
+        # The previous source survived as the only leftover, a .bak the warning names.
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        # The warning names that file and the one rename that recovers from either shape.
+        joined = "\n".join(logs.output)
+        self.assertIn(leftovers[0], joined)
+        self.assertIn("moved back over the first path", joined)
+
+    def _replacing(self, *names, exc, after=False, once=True, by_src=False):
+        """Patch os.replace so a rename INTO one of ``names`` (or OUT of one, with
+        ``by_src``) raises ``exc``: before performing it, or (``after``) once it has,
+        which is where a KeyboardInterrupt lands. ``once`` fails only the first one."""
+        real, fired = os.replace, []
+
+        def replace(src, dst):
+            if (src if by_src else dst) not in names or (once and fired):
+                return real(src, dst)
+            fired.append(dst)
+            if after:
+                real(src, dst)
+            raise exc
+
+        return mock.patch("os.replace", replace)
+
+    def test_a_failed_cache_rename_restores_the_previous_pair(self):
+        # The first rename landed, so the undo renames the backup back over the new source,
+        # which consumes the .bak and leaves the trailing unlink a no-op. The other shape, a
+        # failing FIRST rename with the artifact still the hard-linked previous source, is
+        # the read-only-first-rename test below.
+        before = self._write_pair()
+        with self._replacing(self.cache, exc=OSError("disk full")):
+            self._rewrite_raises(OSError, "disk full")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    @parametrize("half", ("artifact", "cache"))
+    def test_a_failed_rename_on_a_first_write_leaves_nothing_named(self, half):
+        # No previous pair to restore, so the undo takes the new artifact back out from under
+        # its name: a first write cannot leave a named source with no cache beside it.
+        no_space = OSError(errno.ENOSPC, "no space left")
+        with self._replacing(getattr(self, half), exc=no_space):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(OSError, "no space left", backend="eager")
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_double_failure_without_hard_links_keeps_the_previous_source(self):
+        # No hard links, so the previous source was MOVED to the backup; the rename into place
+        # then fails AND so does the undo, so the backup holds its only copy.
+        before = self._write_pair()[0]
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with self._replacing(self.artifact, exc=OSError("disk full"), once=False):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    self._rewrite_raises(OSError, "disk full")
+        self.assertFalse(os.path.exists(self.artifact))
+        self._assert_kept_backup(before, logs)
+
+    def test_a_zero_inode_double_failure_keeps_the_previous_source(self):
+        # st_ino is a file identifier only when NON-zero, and it is 0 on a FAT/exFAT mount, a
+        # CIFS mount with noserverino, or Windows without FILE_ID_INFO -- the filesystems the
+        # move-aside fallback exists for. Every name here is in one directory, so st_dev alone
+        # called the old cache the new one: the undo read that as a completed write, restored
+        # nothing, reported nothing, and unlinked the .bak holding the previous source's only
+        # copy. The shape: no hard links, so the source is moved aside, the artifact rename
+        # lands, the CACHE rename fails, and the restore rename fails too.
+        before = self._write_pair()[0]
+        real_stat, real_replace, installs = os.stat, os.replace, []
+
+        def no_ino(path, **kwargs):
+            st = real_stat(path, **kwargs)
+            return os.stat_result((st.st_mode, 0) + tuple(st)[2:])
+
+        def replace(src, dst):
+            if dst == self.cache or (dst == self.artifact and installs):
+                raise OSError("disk full")
+            if dst == self.artifact:
+                installs.append(dst)
+            return real_replace(src, dst)
+
+        no_links = OSError(errno.EXDEV, "no hard links")
+        with mock.patch("os.stat", no_ino), mock.patch("os.link", side_effect=no_links):
+            with mock.patch("os.replace", replace):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    with self.assertRaisesRegex(OSError, "disk full"):
+                        _write_artifact(self.artifact, self.cache, "new", b"new-cache")
+        # The first rename did land, so the new source is under the name and the previous one
+        # is recoverable only from the .bak the report names.
+        self.assertEqual(self._read(self.artifact), b"new")
+        self._assert_kept_backup(before, logs)
+
+    def test_an_eperm_moves_aside_a_source_the_caller_owns(self):
+        # EPERM is the errno the fallback sees most in practice (fs.protected_hardlinks), so
+        # an owned source on a filesystem without hard links rewrites like any other.
+        self._write_pair()
+        with mock.patch("os.link", side_effect=OSError(errno.EPERM, "not permitted")):
+            self._write_pair()
+        self._assert_serves()
+
+    def test_an_eperm_on_a_source_the_caller_does_not_own_propagates(self):
+        # The same errno is what fs.protected_hardlinks=1 (a Linux default) raises for a
+        # source the caller does not own, and chattr +i for one it cannot write, on a
+        # filesystem that DOES have hard links: moving that file aside would take it out from
+        # under its name. st_uid is never -1, so this euid owns nothing (create=True because
+        # Windows has no geteuid, where the ownership test does not run).
+        before = self._write_pair()
+        with mock.patch("os.link", side_effect=OSError(errno.EPERM, "not permitted")):
+            with mock.patch.object(os, "geteuid", return_value=-1, create=True):
+                with self.assertRaisesRegex(OSError, "not permitted"):
+                    _write_artifact(self.artifact, self.cache, "new", b"new-cache")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_a_link_error_outside_the_set_propagates(self):
+        # An os.link failure that is not about hard-link support says nothing about a move
+        # being safe, so it propagates with the previous pair untouched.
+        before = self._write_pair()
+        with mock.patch("os.link", side_effect=OSError(errno.EIO, "io error")):
+            with self.assertRaisesRegex(OSError, "io error"):
+                _write_artifact(self.artifact, self.cache, "new", b"new-cache")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    def test_a_read_only_first_rename_leaves_the_previous_pair_intact(self):
+        # A read-only remount: the artifact rename fails, and so would the undo. The backup is
+        # a hard LINK, so the name still IS the previous source: nothing to undo, no report.
+        before = self._write_pair()
+        read_only = OSError(errno.EROFS, "read-only file system")
+        with self._replacing(self.artifact, self.cache, exc=read_only, once=False):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(OSError, "read-only file system")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    def test_a_first_write_that_cannot_be_undone_warns_about_the_orphan(self):
+        # A FIRST write whose cache rename failed and whose undo then failed leaves a named
+        # artifact with no matching cache beside it, the state the report exists to announce.
+        real_unlink = os.unlink
+        no_space = OSError(errno.ENOSPC, "no space left")
+
+        def unlink(path):
+            if path == self.artifact:
+                raise OSError(errno.EPERM, "cannot unlink")
+            return real_unlink(path)
+
+        with self._replacing(self.cache, exc=no_space), mock.patch("os.unlink", unlink):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                self._rewrite_raises(OSError, "no space left", backend="eager")
+        self.assertTrue(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertTrue(
+            any("no cache beside it matches" in m for m in logs.output), logs.output
+        )
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupted_undo_keeps_the_previous_source(self):
+        # The undo can be cut short by a KeyboardInterrupt rather than an OSError, and the
+        # rename is then just as undone; without hard links the backup is the only source.
+        before = self._write_pair()[0]
+        real_replace = os.replace
+        installs = []
+
+        def replace(src, dst):
+            if dst != self.artifact:
+                return real_replace(src, dst)
+            installs.append(src)
+            if len(installs) == 1:
+                raise OSError("disk full")
+            raise KeyboardInterrupt("interrupted during the undo")
+
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with mock.patch("os.replace", replace):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertFalse(os.path.exists(self.artifact))
+        self._assert_kept_backup(before, logs)
+
+    def test_an_interrupt_after_the_move_aside_restores_the_name(self):
+        # Taking the backup has that window too: without hard links the previous source is
+        # MOVED aside, so an interrupt after os.replace returned leaves the artifact NAME
+        # gone -- a flag set after that call left the caller's path empty, silently.
+        before = self._write_pair()
+        cut = KeyboardInterrupt("interrupted after the move aside")
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with self._replacing(self.artifact, exc=cut, after=True, by_src=True):
+                with self.assertNoLogs("torch._precompile", level="WARNING"):
+                    self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupt_after_the_hard_link_drops_the_backup(self):
+        # The same window on the hard-link path: the .bak is already a link to the previous
+        # source, and a flag that read "no backup" skipped the cleanup and left it pinning
+        # that inode forever. The named pair is untouched, so it just goes.
+        before = self._write_pair()
+        real_link = os.link
+
+        def link(src, dst):
+            real_link(src, dst)
+            raise KeyboardInterrupt("interrupted after the hard link")
+
+        with mock.patch("os.link", link):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupt_after_the_first_rename_restores_the_previous_source(self):
+        # A KeyboardInterrupt is raised at the bytecode after os.replace RETURNED, so the
+        # first rename can have landed with a flag that records it still unset. Reading that
+        # flag called this a write that never started and unlinked the backup -- with hard
+        # links, the previous source's last link.
+        before = self._write_pair()
+        before_ino = os.stat(self.artifact).st_ino
+        cut = KeyboardInterrupt("interrupted after the first rename")
+        with self._replacing(self.artifact, exc=cut, after=True):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(os.stat(self.artifact).st_ino, before_ino)
+        self._assert_serves()
+
+    def test_an_interrupt_after_the_second_rename_keeps_the_new_pair(self):
+        # The same window one rename later: both halves are already under their names, so the
+        # write SUCCEEDED and there is nothing to undo -- undoing anyway puts the previous
+        # source back beside the new cache, an unloadable pair.
+        before = self._write_pair()
+        cut = KeyboardInterrupt("interrupted after the second rename")
+        with self._replacing(self.cache, exc=cut, after=True):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertNotEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    def test_a_zero_inode_cache_half_in_that_window_keeps_the_new_pair(self):
+        # Blindness is a property of each NAME's filesystem, and the two are independent
+        # arguments: here the artifact has inodes and the cache does not. Reading one flag
+        # off the artifact half left the cache half with neither read -- no inode match,
+        # and no temp fallback either -- so the same window called a finished write
+        # incomplete and restored the previous source beside the new cache, a pair ``load``
+        # refuses on the sha256 with the previous cache already overwritten.
+        before = self._write_pair()
+        real_stat = os.stat
+
+        def no_cache_ino(path, **kwargs):
+            st = real_stat(path, **kwargs)
+            if not str(path).startswith(self.cache):
+                return st
+            return os.stat_result((st.st_mode, 0) + tuple(st)[2:])
+
+        cut = KeyboardInterrupt("interrupted after the second rename")
+        with mock.patch("os.stat", no_cache_ino):
+            with self._replacing(self.cache, exc=cut, after=True):
+                with self.assertNoLogs("torch._precompile", level="WARNING"):
+                    self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertNotEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    def test_an_interrupt_among_the_probes_keeps_the_previous_source(self):
+        # The undo's own reads have that window: an interrupt between the backup read (the
+        # True below) and the flag saying the reads RAN dropped the previous source's .bak.
+        before = self._write_pair()[0]
+        cut = mock.patch("os.path.lexists", side_effect=[True, KeyboardInterrupt()])
+        with self._replacing(self.cache, exc=OSError(errno.ENOSPC, "no space")), cut:
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                with self.assertRaises(KeyboardInterrupt):
+                    _write_artifact(self.artifact, self.cache, "new", b"new-cache")
+        kept = [self._read(os.path.join(self.dir, n)) for n in self._leftovers()]
+        self.assertEqual(kept, [before])
+
+    def test_an_interrupt_after_the_undos_rename_reports_nothing(self):
+        # The undo's OWN os.replace has that window too: the previous source is back under
+        # its name and the .bak it came from is consumed, while the flag that records the
+        # undo still reads False. Reporting off that flag named a gone .bak.
+        before = self._write_pair()
+        before_ino = os.stat(self.artifact).st_ino
+        real_replace = os.replace
+        installs = []
+
+        def replace(src, dst):
+            if dst == self.cache:
+                raise OSError(errno.ENOSPC, "no space left")
+            real_replace(src, dst)
+            if installs:
+                raise KeyboardInterrupt("interrupted after the undo's rename")
+            installs.append(dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(os.stat(self.artifact).st_ino, before_ino)
+        self._assert_serves()
+
+    def test_an_interrupt_after_the_undos_unlink_reports_nothing(self):
+        # The same window on a FIRST write, whose undo unlinks the orphan artifact instead:
+        # the file the report would name is already gone, so there is nothing to announce.
+        real_unlink = os.unlink
+        no_space = OSError(errno.ENOSPC, "no space left")
+
+        def unlink(path):
+            real_unlink(path)
+            if path == self.artifact:
+                raise KeyboardInterrupt("interrupted after the undo's unlink")
+
+        with self._replacing(self.cache, exc=no_space), mock.patch("os.unlink", unlink):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted", backend="eager")
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_a_failed_temp_fsync_leaves_no_scratch_files(self):
+        # The fsync of a scratch file is NOT best effort: unflushed bytes would be renamed
+        # into place, so it propagates -- with every scratch file removed and both named
+        # halves untouched, which is why this one rewrites a previous pair.
+        before = self._write_pair()
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EIO, "fsync failed")
+            return real_fsync(fd)
+
+        with mock.patch("os.fsync", fsync):
+            self._rewrite_raises(OSError, "fsync failed", backend="eager")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_unreadable_or_undecodable_half_is_a_precompile_error(self):
+        # Both of the reader's failures: a half that will not open, and a readable half that
+        # is not the source (the two paths passed the wrong way round).
+        self._write_pair()
+        read = torch._precompile._read_artifact
+        missing = os.path.join(self.dir, "gone.py")
+        with self.assertRaises(PrecompileError) as cm:
+            read(missing, self.cache)
+        self.assertIn("could not read the artifact pair", str(cm.exception))
+        # The message renders both paths with !r, and a Windows path's repr doubles its
+        # backslashes, so compare against the repr rather than the raw string.
+        self.assertIn(repr(missing), str(cm.exception))
+        self.assertIsInstance(cm.exception.__cause__, FileNotFoundError)
+        with self.assertRaises(PrecompileError) as cm:
+            read(self.cache, self.artifact)
+        self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
