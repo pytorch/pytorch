@@ -15573,7 +15573,6 @@ if __name__ == '__main__':
             # Check that backward does not cause a hard error
             outs[0].sum().backward()
 
-    @onlyAccelerator
     @skipMPS
     @skipCUDAIfNoCudnn
     @set_default_dtype(torch.double)
@@ -16222,7 +16221,6 @@ if __name__ == '__main__':
 
     @skipMPS
     @onlyAccelerator
-    @largeTensorTest("2GB")
     def test_sync_batchnorm_accuracy(self, device):
         # The target of this test is to test the functionality and accuracy of
         #   those single-device kernels used in SyncBatchNorm
@@ -16764,11 +16762,13 @@ class TestNNCUDA(NNTestCase):
 
     @skipCUDAIfNoCudnn
     @set_default_dtype(torch.double)
-    @parametrize_test('train', [True, False])
-    def test_RNN_change_dropout(self, device, train):
-        for dev in ('cpu', device):
-            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu').to(dev)
-            input = torch.rand(3, 2, 100, device=dev)
+    def test_RNN_change_dropout(self, device):
+        for train, cuda in product((True, False), repeat=2):
+            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
+            input = torch.rand(3, 2, 100)
+            if cuda:
+                input.data = input.data.cuda()
+                rnn.cuda()
 
             if train:
                 rnn.train()
