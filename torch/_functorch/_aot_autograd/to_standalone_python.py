@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 
     from torch.fx import GraphModule
 
+
 # Serializes compile_to_python: the wrapper-source capture is thread-local, but the
 # AOTAutograd capture pass and the inner inductor compile swap process-global cache state
 # (see the THREADING note on compile_to_python), so concurrent compiles must not overlap.
@@ -261,23 +262,41 @@ def _resolve_global(
     return emit_value(obj, imports)
 
 
+def _imported_names(node: ast.Import | ast.ImportFrom) -> set[str]:
+    """Names an import statement binds."""
+    return {a.asname or a.name.split(".")[0] for a in node.names}
+
+
+def _assigned_names(node: ast.stmt) -> set[str]:
+    """Names a module-level statement binds by definition or assignment (imports
+    excluded, see ``_imported_names``): a def / class name, or an assignment's targets
+    walked so tuple / list / starred unpacking (``a, b = ...`` / ``first, *rest = ...``)
+    is covered and not just bare-name targets. Shared by ``_module_level_names`` and
+    ``namespace_module_names`` so the two do not drift."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {node.name}
+    if isinstance(node, ast.Assign):
+        return {
+            x.id for t in node.targets for x in ast.walk(t) if isinstance(x, ast.Name)
+        }
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return {node.target.id}
+    return set()
+
+
 def _module_level_names(tree: ast.Module) -> set[str]:
     """Names bound at module scope by a parsed module. Used to seed ``_reserve`` so an
     inlined wrapper's def name or hoisted global (chain wrapper or orchestration) cannot
-    silently shadow a top-level name the inner Inductor module already binds."""
+    silently shadow a top-level name the inner Inductor module already binds.
+
+    Enumerates bindings with ``_assigned_names``, like ``namespace_module_names``; the one
+    deliberate difference is ``del``, subtracted here and kept there (see that function).
+    """
     names: set[str] = set()
     for n in tree.body:
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(n.name)
-        elif isinstance(n, ast.Assign):
-            # Walk each target so tuple/list/starred unpacking (``a, b = ...`` /
-            # ``first, *rest = ...``) is covered, not just bare-name targets.
-            for t in n.targets:
-                names.update(x.id for x in ast.walk(t) if isinstance(x, ast.Name))
-        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
-            names.add(n.target.id)
-        elif isinstance(n, (ast.Import, ast.ImportFrom)):
-            names.update(a.asname or a.name.split(".")[0] for a in n.names)
+        names |= _assigned_names(n)
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            names |= _imported_names(n)
         elif isinstance(n, ast.Delete):
             # Inductor's inner module does ``async_compile = AsyncCompile()`` then
             # ``del async_compile`` at module scope; a del'd name does not survive, so it
@@ -858,6 +877,42 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     return False
 
 
+_SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+
+
+def _same_scope_nodes(node: ast.AST) -> Iterator[ast.AST]:
+    """Every descendant of ``node`` belonging to the SAME scope, i.e. without entering a
+    nested def / class / lambda, each of which binds in a scope of its own."""
+    for child in ast.iter_child_nodes(node):
+        yield child
+        if not isinstance(child, _SCOPE_NODES):
+            yield from _same_scope_nodes(child)
+
+
+def _scope_binders(node: ast.AST) -> tuple[set[str], set[str]]:
+    """``(opaque, stored)`` names bound in ``node``'s own scope. An ``opaque`` name is
+    bound by a node that carries it as a bare ``str`` -- a nested def / class name, an
+    ``ast.arg`` parameter, ``except E as e``, an import alias, ``global`` / ``nonlocal``
+    -- and so is invisible to a rewrite that edits ``ast.Name`` nodes; a ``stored`` name
+    is bound by an ``ast.Name`` store or delete, which such a rewrite does see."""
+    opaque: set[str] = set()
+    stored: set[str] = set()
+    for child in _same_scope_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            opaque.add(child.name)
+        elif isinstance(child, (ast.Import, ast.ImportFrom)):
+            opaque |= _imported_names(child)
+        elif isinstance(child, ast.arg):
+            opaque.add(child.arg)
+        elif isinstance(child, ast.ExceptHandler) and child.name is not None:
+            opaque.add(child.name)
+        elif isinstance(child, (ast.Global, ast.Nonlocal)):
+            opaque.update(child.names)
+        elif isinstance(child, ast.Name) and not isinstance(child.ctx, ast.Load):
+            stored.add(child.id)
+    return opaque, stored
+
+
 def namespace_module_names(sources: Sequence[str]) -> list[str]:
     """Suffix every top-level name each module DEFINES, per module.
 
@@ -873,8 +928,18 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
     Rewriting is driven by AST positions rather than a text match, which is what
     keeps three lookalikes out of it: an attribute (``runner.call`` is an
     ``Attribute``, not a ``Name``), a nested binding (``def call`` inside
-    ``class Runner`` is not module-level), and an import (``async_compile`` is
-    both a local binding and part of ``torch._inductor.async_compile``).
+    ``class Runner`` is not module-level), and an import (the generated header's
+    ``from torch._inductor.async_compile import AsyncCompile`` binds ``AsyncCompile``,
+    which this module does not define -- while the sibling ``async_compile =
+    AsyncCompile()`` IS ours, and is renamed together with the later
+    ``del async_compile``).
+
+    Shapes the rewrite cannot express raise NotImplementedError rather than emit a
+    silently wrong module, like the other guards on unrecognized Inductor codegen here: a
+    module-level compound statement that binds a name (only top-level definitions and
+    assignments are enumerated), a nested scope that rebinds a target with an opaque
+    binder it also reads (see ``_scope_binders``), and a target whose suffixed name the
+    module already uses.
     """
     out: list[str] = []
     for slot, source in enumerate(sources):
@@ -884,25 +949,56 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
         headers: list[tuple[int, str]] = []
         for node in tree.body:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
-                for alias in node.names:
-                    imported.add((alias.asname or alias.name).split(".")[0])
-            elif isinstance(
-                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-            ):
-                defined.add(node.name)
+                imported |= _imported_names(node)
+                continue
+            defined |= _assigned_names(node)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                # A def / class name is a bare ``str`` with no position of its own, so its
+                # header is located textually below.
                 headers.append((node.lineno, node.name))
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        defined.add(target.id)
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                defined.add(node.target.id)
+            elif isinstance(node, ast.Delete):
+                # Unlike _module_level_names, a del'd name is deliberately NOT subtracted:
+                # Inductor's ``async_compile = AsyncCompile()`` / ``del async_compile``
+                # pair has to be renamed TOGETHER, and the del target is an ``ast.Name``
+                # the walk below rewrites anyway.
+                pass
+            elif any(isinstance(c, ast.stmt) for c in _same_scope_nodes(node)):
+                opaque, stored = _scope_binders(node)
+                if opaque | stored:
+                    raise NotImplementedError(
+                        "namespace_module_names: a module-level compound statement binds "
+                        f"{sorted(opaque | stored)} (unrecognized inductor codegen); only "
+                        "top-level definitions and assignments are renamed, so those "
+                        "names would still collide across spliced modules."
+                    )
         targets = defined - imported
         if not targets:
             out.append(source)
             continue
         suffix = f"_s{slot}"
-        edits: dict[int, list[tuple[int, int, str]]] = {}
+        used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        used |= defined | imported
+        clash = sorted(n + suffix for n in targets if n + suffix in used)
+        if clash:
+            raise NotImplementedError(
+                f"namespace_module_names: module already uses {clash}, so suffixing with "
+                f"{suffix!r} would collapse two distinct names."
+            )
+        for scope in ast.walk(tree):
+            if not isinstance(scope, _SCOPE_NODES):
+                continue
+            read = {n.id for n in ast.walk(scope) if isinstance(n, ast.Name)}
+            shadowed = _scope_binders(scope)[0] & targets & read
+            if shadowed:
+                raise NotImplementedError(
+                    f"namespace_module_names: a nested scope rebinds {sorted(shadowed)} "
+                    "with an opaque binder (parameter, except-as, nested def / class, "
+                    "local import or global) and reads the name there; renaming the "
+                    "module-level definition would turn that local read into a renamed "
+                    "global one."
+                )
+        # ``col_offset`` is a UTF-8 BYTE offset, so spans are spliced in bytes.
+        edits: dict[int, list[tuple[int, int, bytes]]] = {}
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Name)
@@ -910,22 +1006,24 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
                 and node.end_col_offset is not None
             ):
                 edits.setdefault(node.lineno, []).append(
-                    (node.col_offset, node.end_col_offset, node.id + suffix)
+                    (node.col_offset, node.end_col_offset, (node.id + suffix).encode())
                 )
         lines = source.split("\n")
         for lineno, name in headers:
             if name not in targets:
                 continue
-            found = re.search(rf"\b{re.escape(name)}\b", lines[lineno - 1])
+            found = re.search(
+                rb"\b" + re.escape(name.encode()) + rb"\b", lines[lineno - 1].encode()
+            )
             if found is not None:
                 edits.setdefault(lineno, []).append(
-                    (found.start(), found.end(), name + suffix)
+                    (found.start(), found.end(), (name + suffix).encode())
                 )
         for lineno, spans in edits.items():
-            line = lines[lineno - 1]
+            raw = lines[lineno - 1].encode()
             for begin, finish, text in sorted(spans, reverse=True):
-                line = line[:begin] + text + line[finish:]
-            lines[lineno - 1] = line
+                raw = raw[:begin] + text + raw[finish:]
+            lines[lineno - 1] = raw.decode()
         out.append("\n".join(lines))
     return out
 
