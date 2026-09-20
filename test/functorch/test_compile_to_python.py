@@ -842,6 +842,149 @@ class TestAOTCompileToPython(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "already uses"):
             namespace_module_names([src])
 
+    def test_namespace_module_names_raises_when_an_opaque_binder_takes_the_suffix(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # ``call_s0`` is only ever an ``ast.arg`` here, so it is no ``ast.Name`` the clash
+        # set can see -- yet renaming ``call`` makes the body call the parameter.
+        src = textwrap.dedent(
+            """
+            def call(args):
+                return args
+            def helper(call_s0):
+                return call(3)
+            """
+        )
+        with self.assertRaisesRegex(NotImplementedError, "already uses"):
+            namespace_module_names([src])
+
+    def test_namespace_module_names_raises_on_a_class_body_store(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # A class-body store is read as ``Runner.call``, an attribute the rewrite leaves
+        # alone, so renaming the store would break every reader.
+        src = textwrap.dedent(
+            """
+            def call(args):
+                return args
+            class Runner:
+                call = staticmethod(print)
+            """
+        )
+        with self.assertRaisesRegex(NotImplementedError, "class-body store"):
+            namespace_module_names([src])
+
+    def test_namespace_module_names_raises_on_a_module_level_walrus(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # ``n`` is bound in the assignment's VALUE, which _assigned_names does not walk.
+        src = textwrap.dedent(
+            """
+            total = (n := 5)
+            def call(args):
+                return n + total
+            """
+        )
+        with self.assertRaisesRegex(NotImplementedError, "walrus"):
+            namespace_module_names([src])
+
+    def test_namespace_module_names_raises_when_a_name_is_imported_and_assigned(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # The surviving binding is the module's own, but the import line is not renamed.
+        src = textwrap.dedent(
+            """
+            from math import sqrt
+            sqrt = 1
+            def call(args):
+                return sqrt
+            """
+        )
+        with self.assertRaisesRegex(NotImplementedError, "imported and assigned"):
+            namespace_module_names([src])
+
+    def test_namespace_module_names_leaves_a_conditional_import_alone(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # A compound statement that binds only import aliases needs no rename at all
+        # (imports are excluded from the targets), so it must not trip the guard.
+        src = textwrap.dedent(
+            """
+            import sys
+            if sys.version_info >= (3, 12):
+                from torch import empty_strided
+            else:
+                from torch import empty_permuted as empty_strided
+            def call(args):
+                return empty_strided
+            """
+        )
+        (renamed,) = namespace_module_names([src])
+        self.assertIn("def call_s0(args):", renamed)
+        self.assertIn("    from torch import empty_strided\n", renamed)
+        self.assertIn("    return empty_strided\n", renamed)
+
+    def test_namespace_module_names_raises_when_a_header_is_not_on_its_own_line(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # A def name is located textually on ``node.lineno``; a continuation puts it on the
+        # next line, and renaming only the call sites would leave the definition behind.
+        src = "def \\\ncall(args):\n    return args\n"
+        with self.assertRaisesRegex(NotImplementedError, "is not on its own line"):
+            namespace_module_names([src])
+
+    def test_namespace_module_names_renames_a_decorated_def(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # ``FunctionDef.lineno`` is the ``def`` line, not the decorator's.
+        src = textwrap.dedent(
+            """
+            def deco(f):
+                return f
+            @deco
+            def call(args):
+                return args
+            """
+        )
+        (renamed,) = namespace_module_names([src])
+        self.assertIn("@deco_s0\ndef call_s0(args):", renamed)
+        ns: dict[str, object] = {}
+        exec(renamed, ns)
+        self.assertEqual(ns["call_s0"]([1]), [1])
+
+    def test_namespace_module_names_splices_by_utf8_byte_offset(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # ``col_offset`` is a UTF-8 BYTE offset, so non-ASCII text earlier on a line that
+        # carries a rename shifts it: slicing that line by code point cuts in the wrong
+        # place and corrupts the module.
+        accent = "\u00e9" * 3
+        src = (
+            "def kernel(x):\n    return x\ndef call(args):\n"
+            f'    label = "{accent}"; return kernel(args[0])\n'
+        )
+        (renamed,) = namespace_module_names([src])
+        self.assertIn(f'    label = "{accent}"; return kernel_s0(args[0])\n', renamed)
+        ns: dict[str, object] = {}
+        exec(renamed, ns)
+        self.assertEqual(ns["call_s0"]([2]), 2)
+
 
 @instantiate_parametrized_tests
 class TestComposerHelpers(TestCase):
