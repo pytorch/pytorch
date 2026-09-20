@@ -1934,13 +1934,40 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             torch._dynamo.reset()
             observed.clear()
             session = self._session(
-                _SessionStep(), training=training, guard_filter_fn=spy
+                _SessionStep(),
+                backend="inductor",
+                training=training,
+                guard_filter_fn=spy,
             )
             with session as cap:
                 cap(torch.randn(3, 4))
             self.assertTrue(observed)
             self.assertEqual(set(observed), {training})
+            # The outcome, not just the flag: a lazy backward leaves the bundle
+            # unwritten until the first .backward() call, so a capture that
+            # never makes one files no artifact at all.
+            self.assertEqual(bool(session._backend_artifacts), training)
         self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
+
+    def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        def reads_one_symbolic_size(x):
+            x.size(0)
+            return None
+
+        # Dynamic shapes put a sym_size_int node in the graph, so the frame is
+        # compiled; pruning then empties it and output_graph substitutes
+        # noop_graph_call, filing nothing under the id the bytecode names.
+        session = self._session(reads_one_symbolic_size, dynamic=True)
+        with session as cap:
+            self.assertIsNone(cap(torch.randn(3, 4)))
+        (backend_id,) = session._package.cache_entry().backend_ids
+        self.assertIs(session._package.cached_backends[backend_id], noop_graph_call)
+        artifact = session._backend_artifacts[backend_id]
+        self.assertIsInstance(artifact, EagerCacheArtifact)
+        self.assertIs(artifact.content, noop_graph_call)
 
     def test_capture_config_restores_every_patch_when_the_body_unwinds(self):
         import torch._functorch.config as functorch_config
