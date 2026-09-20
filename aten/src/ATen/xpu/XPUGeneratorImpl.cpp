@@ -4,9 +4,13 @@
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/XPUGraph.h>
 #include <ATen/xpu/XPUGraphsUtils.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/CallOnce.h>
+#include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
+#include <memory>
+#include <vector>
 
 constexpr uint64_t PHILOX_ROUND_SIZE = 4;
 
@@ -86,12 +90,32 @@ void XPUGeneratorState::increase(uint64_t increment) {
 }
 
 void XPUGeneratorCaptureState::initialize() {
+  if (is_initialized()) {
+    return;
+  }
+
+  static auto& allocation_queues =
+      *new std::vector<std::unique_ptr<sycl::queue>>(c10::xpu::device_count());
+  static std::mutex allocation_mutex;
+  std::lock_guard<std::mutex> lock(allocation_mutex);
+  auto device = c10::xpu::current_device();
+  auto& queue = allocation_queues[device];
+  if (!queue) {
+    queue = std::make_unique<sycl::queue>(
+        c10::xpu::get_device_context(),
+        c10::xpu::get_raw_device(device),
+        sycl::property_list{sycl::property::queue::in_order{}});
+  }
+  auto stream = c10::xpu::getStreamFromExternal(queue.get(), device);
+  c10::StreamGuard stream_guard(stream);
   c10::InferenceMode inference_guard(false);
   auto options = at::TensorOptions().device(at::kXPU).dtype(at::kLong);
   seed_extragraph_ = at::empty({1}, options);
   offset_extragraph_ = at::empty({1}, options);
   seed_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
   offset_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
+  stream.synchronize();
+  offset_intragraph_ = 0;
 }
 
 void XPUGeneratorCaptureState::increase(uint64_t increment) {
@@ -112,6 +136,7 @@ uint64_t XPUGeneratorCaptureState::finalize() {
 void XPUGeneratorCaptureState::setup_for_replay(
     uint64_t seed,
     uint64_t offset) {
+  TORCH_INTERNAL_ASSERT(is_initialized(), "Capture state not initialized");
   seed_extragraph_.fill_(static_cast<int64_t>(seed));
   offset_extragraph_.fill_(static_cast<int64_t>(offset));
   auto stream = c10::xpu::getCurrentXPUStream();

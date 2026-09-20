@@ -17,6 +17,9 @@ struct XPUGeneratorCaptureState : public c10::intrusive_ptr_target {
   at::TensorBase seed_extragraph_;
   at::TensorBase offset_extragraph_;
 
+  bool is_initialized() const {
+    return seed_extragraph_.defined();
+  }
   void initialize();
   void increase(uint64_t increment);
   uint64_t finalize();
