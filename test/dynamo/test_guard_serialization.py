@@ -3,6 +3,7 @@
 import builtins
 import collections
 import dataclasses
+import enum
 import functools
 import io
 import itertools
@@ -32,6 +33,7 @@ from torch._dynamo.guards import (
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    pickle_guards_state,
 )
 from torch._dynamo.package import CompilePackage, DynamoCache, load_guards_state
 from torch._dynamo.precompile_context import PrecompileContext
@@ -1182,9 +1184,78 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         self.assertEqual(ref.check(inputs), loaded.check(inputs))
 
 
+class _ModuleWithDtypeAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dt = torch.float32
+        self.dev = torch.device("cpu")
+        self.dots = ...
+        self.empty = ()
+
+
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
+
+    def test_an_unguarded_interned_singleton_is_not_pruned(self):
+        # Pruning is keyed by id(): an unguarded module attribute holding
+        # torch.float32 registered the one dtype object as missing, and every
+        # tensor pickled after it then carried the sentinel as its dtype.
+        m = _ModuleWithDtypeAttr()
+        t = torch.randn(2)
+        buf = io.BytesIO()
+        state = {"m": m, "t": t, "dots": ..., "empty": ()}
+        GuardsStatePickler({id(m): m, id(t): t}, {}, {}, {}, buf).dump(state)
+        out = load_guards_state(buf.getvalue())
+        self.assertIs(out["m"].dt, torch.float32)
+        self.assertEqual(out["m"].dev, torch.device("cpu"))
+        self.assertEqual(out["t"].dtype, torch.float32)
+        # Ellipsis (a code constant of every `x[...]`) and () are shared too.
+        self.assertIs(out["dots"], ...)
+        self.assertEqual(out["empty"], ())
+
+    def test_a_non_literal_subclass_instance_is_still_pruned(self):
+        # The skip is by exact type: an IntEnum member is an int but not a
+        # shared literal, so an unguarded one still prunes to the sentinel.
+        class Color(enum.IntEnum):
+            RED = 1
+
+        m = _ModuleWithDtypeAttr()
+        m.color = Color.RED
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump({"m": m})
+        self.assertIsInstance(load_guards_state(buf.getvalue())["m"].color, _Missing)
+
+    def test_an_unguarded_interned_singleton_local_is_not_pruned(self):
+        # The other registration site: pickle_guards_state marks every
+        # unguarded local-scope leaf as missing, so a bare dtype local poisoned
+        # the tensors' dtype the same way.
+        # A class is shared the same way: torch.Tensor is the pytype of every
+        # tensor payload, and the leaf loop has no callable filter. A <locals>
+        # class cannot be pickled by name, so it stays pruned.
+        class Local:
+            pass
+
+        t = torch.randn(2)
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={
+                "dt": torch.float32,
+                "cfg": {"cls": torch.Tensor, "local": Local},
+                "t": t,
+            },
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(t): t}, value_guarded_containers={}
+        )
+        state = types.SimpleNamespace(output_graph=graph)
+        out = load_guards_state(pickle_guards_state(state, builder)).output_graph
+        self.assertIs(out.local_scope["dt"], torch.float32)
+        self.assertIs(out.local_scope["cfg"]["cls"], torch.Tensor)
+        self.assertIsInstance(out.local_scope["cfg"]["local"], _Missing)
+        self.assertEqual(out.local_scope["t"].dtype, torch.float32)
 
     def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
