@@ -4292,9 +4292,18 @@ def _is_torch_type(cls: type) -> bool:
     )
 
 
-# Module prefixes of the DTensor structural types the attribute pruner leaves
-# alone (see _keeps_attribute).
-_DTENSOR_MODULES = ("torch.distributed.tensor", "torch.distributed.device_mesh")
+@functools.cache
+def _dtensor_structural_types() -> tuple[type, ...]:
+    """The DTensor structural types the attribute pruner leaves alone (see
+    _keeps_attribute): the Placement hierarchy, user subclasses included, the
+    mesh and its layout, and the spec a DTensor rebuilds itself from."""
+    if not torch.distributed.is_available():
+        return ()
+    from torch.distributed.device_mesh import _MeshLayout, DeviceMesh
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+    from torch.distributed.tensor.placement_types import Placement
+
+    return (Placement, DeviceMesh, _MeshLayout, DTensorSpec, TensorMeta)
 
 
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
@@ -5001,13 +5010,15 @@ class GuardsStatePickler(FunctionPicklerBase):
             return True
         if id(attr) in self.guard_tree_values or callable(attr):
             return True
-        if str(getattr(type(attr), "__module__", "")).startswith(_DTENSOR_MODULES):
+        if isinstance(attr, _dtensor_structural_types()):
             # A DTensor structural value (a Placement, a DeviceMesh) may be the
             # very object a DTensorSpec elsewhere in the state rebuilds itself
             # from: on a module it is registered by id and would become the
-            # sentinel there, and a user object keeps it readable. Only those:
-            # any other torch-typed bystander (a GradScaler whose __getstate__
-            # asserts) stays prunable.
+            # sentinel there, and a user object keeps it readable. By class, so
+            # a user Placement subclass counts and a stateful object that merely
+            # lives under torch.distributed.tensor does not; any other
+            # torch-typed bystander (a GradScaler whose __getstate__ asserts)
+            # stays prunable.
             return True
         return _is_shared_constant(attr)
 

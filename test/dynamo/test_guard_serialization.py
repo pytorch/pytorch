@@ -1190,6 +1190,11 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
 
 
 if torch.distributed.is_available():
+    from torch.distributed.tensor.placement_types import Partial as _Partial
+
+    class _ScaledPartial(_Partial):
+        # A user Placement subclass, as torchtitan defines them.
+        pass
 
     class _PyBackend(torch._C._distributed_c10d.Backend):
         # A Python backend, as torch/distributed/_nccl4py/backend.py defines one.
@@ -1664,6 +1669,23 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out["h"].scaler, _Missing)
         self.assertIs(out["h"].placement, out["shared"])
         self.assertEqual(out["shared"], shard)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_an_unguarded_placement_subclass_on_a_module_is_not_pruned(self):
+        # The module path registers pruned attributes by id, so without the
+        # exemption the shared placement would be the sentinel in the spec too;
+        # the exemption is by class, so a user Placement subclass is covered.
+        placement = _ScaledPartial()
+        m = torch.nn.Module()
+        m.placement, m.scaler = placement, torch.amp.GradScaler()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump(
+            {"m": m, "shared": placement}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertIsInstance(out["m"].scaler, _Missing)
+        self.assertIs(out["m"].placement, out["shared"])
+        self.assertIsInstance(out["shared"], _ScaledPartial)
 
     def test_torch_namespace_objects_are_pickled_whole(self):
         # type(obj).__module__ == "torch" is torch's namespace too, so the
