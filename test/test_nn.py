@@ -15571,6 +15571,7 @@ if __name__ == '__main__':
             outs[0].sum().backward()
 
     @onlyAccelerator
+    @skipMPS
     @skipCUDAIfNoCudnn
     @set_default_dtype(torch.double)
     @parametrize_test('train', [True, False])
@@ -15609,6 +15610,7 @@ if __name__ == '__main__':
         self.assertEqual(hy.data[0][0][0], 10)
         self.assertEqual(hy.data[1][0][0], output_val)
 
+    @skipMPS
     @skipCUDAIfNoCudnn
     @set_default_dtype(torch.double)
     @parametrize_test('bidirectional', [True, False])
