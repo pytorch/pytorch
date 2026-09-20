@@ -1377,10 +1377,14 @@ class Module:
                     non_blocking,
                 )
             except NotImplementedError as e:
-                if str(e) == "Cannot copy out of meta tensor; no data!":
+                message = str(e)
+                base_message = "Cannot copy out of meta tensor; no data!"
+                if message.startswith(base_message):
+                    diagnostic_suffix = message[len(base_message) :]
                     raise NotImplementedError(
-                        f"{e} Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() "
-                        f"when moving module from meta to a different device."
+                        f"{base_message} Please use torch.nn.Module.to_empty() instead of "
+                        f"torch.nn.Module.to() when moving module from meta to a different device."
+                        f"{diagnostic_suffix}"
                     ) from None
                 else:
                     raise
@@ -1785,7 +1789,7 @@ class Module:
     # torchrec tests the code consistency with the following code
     # fmt: off
     def _call_impl(self, *args, **kwargs):
-        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        forward_call = (self._slow_forward if torch._C._is_tracing() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
