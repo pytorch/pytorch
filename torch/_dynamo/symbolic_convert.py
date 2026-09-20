@@ -2283,7 +2283,15 @@ class InstructionTranslatorBase(
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "mtia", "xpu"):
+        if device is None or device.type == "cpu":
+            return
+
+        # The emission relies on torch.accelerator stream APIs, whose device
+        # validation lives in torch/accelerator/_utils.py; devices other than
+        # the current accelerator (e.g. meta/lazy tensors, or a backend without
+        # accelerator hooks) have no stream state to synchronize.
+        acc = torch.accelerator.current_accelerator()
+        if acc is None or acc.type != device.type:
             return
 
         node = var.proxy.node
