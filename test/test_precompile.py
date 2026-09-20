@@ -407,11 +407,12 @@ class TestPrecompile(TestCase):
 
     def test_precompile_error_result_defaults_to_sentinel(self):
         # Nothing ran before an ordinary refusal, so the default is the sentinel, not
-        # None: a training step that ends in .backward() returns None for real.
-        from torch._precompile import _NO_RESULT
-
+        # None: a training step that ends in .backward() returns None for real. The
+        # public test for it is the comparison against the class default.
         err = PrecompileError("refused")
-        self.assertIs(err.result, _NO_RESULT)
+        self.assertIs(err.result, PrecompileError.result)
+        self.assertIsNotNone(err.result)
+        self.assertEqual(repr(err.result), "<precompile: nothing ran>")
         err.result = None
         self.assertIsNone(err.result)
 
@@ -764,11 +765,10 @@ class TestPrecompile(TestCase):
         # the entry frame (x, which rows() captures), and a module global the
         # entry reads (_MULTIGRAPH_SCALE, guarded by EQUALS_MATCH).
         import inspect
-        import types
         from unittest import mock
 
         from torch import _precompile_driver as driver
-        from torch._dynamo.package import CompilePackage, SerializedCode
+        from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
         from torch._precompile import _b64, _multigraph_frames, _serving_mode
@@ -828,10 +828,11 @@ class TestPrecompile(TestCase):
         }
         exec(inspect.getsource(driver._build_multigraph_forward), ns)
         build = ns["_build_multigraph_forward"]
-        # The first load is usually in the process that captured, where Dynamo's
-        # closure factory for the continuation still holds its resume name: the
-        # same continuation, so the load is permitted and serves.
-        self.assertEqual(build()(model, x), expected)
+        # In the process that captured, the live compile of step still holds the
+        # continuation's resume name: the load refuses, before seeding anything,
+        # and sends the user to a fresh process (which the scrub below stands for).
+        with self.assertRaisesRegex(PrecompileError, "fresh process"):
+            build()
         # A serving process never traced, so the names Dynamo minted into this
         # module during capture must not be what makes the guards pass; the
         # driver binds the same names, so the cleanup drops those too.
@@ -870,23 +871,23 @@ class TestPrecompile(TestCase):
         # refused on the resume name and the live one keeps serving; the rows
         # below scrub the live artifact first.
         self.assertEqual(build()(model, x), expected)
-        # An untagged holder that is not the same continuation (a user binding,
-        # a compile of another frame) refuses: rebinding would repoint its LOAD_GLOBAL.
+        # An untagged holder (a user binding, a live compile) refuses: rebinding
+        # would repoint its LOAD_GLOBAL.
         resume_name = frames[1]["resume_names"][0]
         with mock.patch.dict(scope, {resume_name: lambda *args: None}):
             with self.assertRaisesRegex(PrecompileError, resume_name):
                 build()
-        # A plain function over the record's code (a live compile of a closure-free
-        # continuation) is the same continuation: permitted and rebound.
-        code = SerializedCode.to_code_object(frames[1]["code"])
-        same = types.FunctionType(code, scope, closure=(types.CellType(),))
-        with mock.patch.dict(scope, {resume_name: same}):
-            self.assertEqual(build()(model, x), expected)
-        other = _b64({f"{k}_other": v for k, v in backends.items()})
-        # Two artifacts of one capture differ only in _BACKENDS: the tag covers both.
-        with mock.patch.dict(ns, {"_BACKENDS": other}):
-            with self.assertRaisesRegex(PrecompileError, "'__resume_at_"):
+        # Two artifacts of one capture keep the backend ids and differ only in
+        # _BACKENDS (here: the subgraphs rotated across the ids): the tag covers
+        # both, and the refusal precedes any seeding, so the live artifact's
+        # subgraph bindings are untouched and it still serves its own answer.
+        subgraphs = list(backends.values())
+        twin = _b64(dict(zip(backends, subgraphs[1:] + subgraphs[:1])))
+        with mock.patch.dict(ns, {"_BACKENDS": twin}):
+            with self.assertRaisesRegex(PrecompileError, "only one standalone"):
                 build()
+        self.assertEqual(forward(model, x), expected)
+        other = _b64({f"{k}_other": v for k, v in backends.items()})
         trivial = [frames[0], {**frames[1], "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
             with mock.patch.dict(ns, {"_BACKENDS": other}):
