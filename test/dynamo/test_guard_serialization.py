@@ -1246,6 +1246,14 @@ class _SlottedHolder:
         self.extra = [1]
 
 
+class _AttrDict(dict):
+    pass
+
+
+class _TaggedList(list):
+    pass
+
+
 class _RebuiltFromNewargs:
     def __init__(self, a):
         self.a = a
@@ -1629,6 +1637,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump({"o": obj})
         out = load_guards_state(buf.getvalue())["o"]
         self.assertEqual((out.tag, out.extra), ("slot", [1]))
+
+    def test_dict_and_list_subclasses_are_pickled_whole(self):
+        # Their items ride the reduce tuple, not __dict__, and neither type has a
+        # hook to screen for; the layout check keeps them off the pruning path.
+        cfg, tags = _AttrDict(a=1), _TaggedList([1, 2])
+        cfg.tag, tags.name = "t", "n"
+        buf = io.BytesIO()
+        GuardsStatePickler({id(cfg): cfg, id(tags): tags}, {}, {}, {}, buf).dump(
+            {"cfg": cfg, "tags": tags}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertEqual((dict(out["cfg"]), out["cfg"].tag), ({"a": 1}, "t"))
+        self.assertEqual((list(out["tags"]), out["tags"].name), ([1, 2], "n"))
 
     def test_object_rebuilt_from_newargs_is_pickled_whole(self):
         # __getnewargs__ feeds cls.__new__ through the same pickler, so a pruned
