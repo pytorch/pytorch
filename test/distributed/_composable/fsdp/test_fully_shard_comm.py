@@ -55,6 +55,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
+    run_subtests,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
@@ -1941,8 +1942,13 @@ class TestFullyShardSymmMem(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    @parametrize("sum_reduction", [True, False])
-    def test_fully_shard_symm_mem(self, device, sum_reduction: bool):
+    def test_fully_shard_symm_mem(self, device):
+        run_subtests(
+            {"sum_reduction": [True, False]},
+            self._test_fully_shard_symm_mem,
+        )
+
+    def _test_fully_shard_symm_mem(self, sum_reduction: bool):
         torch.manual_seed(42 + self.rank)
         device = torch.device("cuda", self.rank)
         torch.cuda.set_device(device)
@@ -1969,9 +1975,6 @@ class TestFullyShardSymmMem(MultiProcContinuousTest):
 
         run()
         torch.cuda.synchronize(device)
-
-
-instantiate_parametrized_tests(TestFullyShardSymmMem)
 
 
 class TestFullyShardForceSumReduction(FSDPTest):
@@ -2230,6 +2233,7 @@ instantiate_device_type_tests(
     globals(),
     only_for=["cuda"],
 )
+
 
 instantiate_device_type_tests(
     TestFullyShardSymmMem,
