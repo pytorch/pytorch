@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: profiler"]
-"""Tests for CUPTI PM sampling (``torch.profiler._cupti.pm_sampling``).
+"""Tests for CUPTI PM sampling (``torch.profiler._cuspy.pm_sampling``).
 
 Covers the PmSampler sizing (decode-image = process-wide look-back / interval, capped), metric
 selection + non-empty enforcement, and discovery -- exercised through real CUPTI PM sampling
@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 # pm_sampling imports the cupti module at load, so only import it when cupti-python is present;
 # every test that uses these is gated on TEST_CUPTI_PM_SAMPLING (which implies TEST_CUPTI_PYTHON).
 if TEST_CUPTI_PYTHON:
-    from torch.profiler._cupti.pm_sampling import (
+    from torch.profiler._cuspy.pm_sampling import (
         _DEFAULT_LOOKBACK_WINDOW_NS,
         _DEFAULT_SAMPLING_INTERVAL_NS,
         PmSampler,
@@ -116,7 +116,7 @@ class TestPmSamplingWindowSizing(TestCase):
         self.assertEqual(cfg["lookback_window_ns"], 2_000_000_000)
         self.assertTrue(cfg["configured"])
         # first-come-first-serve: a second configure() is ignored (and warns).
-        with self.assertLogs("torch.profiler._cupti.pm_sampling", level="WARNING"):
+        with self.assertLogs("torch.profiler._cuspy.pm_sampling", level="WARNING"):
             PmSampler.configure(sampling_interval_ms=0.1)
         self.assertEqual(PmSampler.get_config()["sampling_interval_ns"], 500_000)
 
@@ -212,7 +212,7 @@ class TestPmSamplingWindowSizing(TestCase):
             self.skipTest("profiler host could not enumerate metrics on this chip")
         sampler = PmSampler(torch.cuda.current_device())
         with self.assertLogs(
-            "torch.profiler._cupti.pm_sampling", level="WARNING"
+            "torch.profiler._cuspy.pm_sampling", level="WARNING"
         ) as cm:
             handle = sampler.add_consumer(["not__a_real_metric.avg"])
             self.addCleanup(handle.detach)
