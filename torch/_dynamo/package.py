@@ -28,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
@@ -128,12 +128,13 @@ class _Missing:
         return _Missing()
 
 
-# The persistent id GuardsStatePickler.persistent_id emits for a pruned value the
-# C pickler never routes through reducer_override; _GuardsStateUnpickler turns it
-# back into _Missing. Any other persistent id in a guards state is a bug. An
-# artifact is only ever read by the torch that wrote it (SystemInfo's
+# The one persistent id a guards state may carry: a guards-state pickler emits it
+# for a pruned value that the C pickler saves by type (an exact builtin
+# container) without ever consulting reducer_override, and _GuardsStateUnpickler
+# turns it back into _Missing. Any other persistent id in a guards state is a
+# bug. An artifact is only ever read by the torch that wrote it (SystemInfo's
 # check_compatibility runs before load_guards_state), so no reader from before
-# persistent_id existed sees one.
+# this id existed sees one.
 _PRUNED_VALUE_PID = "pruned"
 
 
@@ -499,12 +500,16 @@ class _GuardedCodeCacheEntry:
 
 
 class _GuardsStateUnpickler(pickle.Unpickler):
-    # One sentinel for every pruned container, aliases and distinct ones alike
-    # (reducer_override's memo would keep distinct ones distinct; a _Missing
-    # carries nothing but its reason, so collapsing them loses nothing).
-    _pruned = _Missing(_PRUNED_VALUE_PID)
+    def __init__(self, file: IO[bytes]) -> None:
+        super().__init__(file)
+        # One sentinel per load for every pruned container, aliases and distinct
+        # ones alike (reducer_override's memo would keep distinct ones distinct;
+        # a _Missing carries nothing but its reason, so collapsing them loses
+        # nothing). Per load rather than per process: loaded values are keyed
+        # by id elsewhere, and one artifact's sentinel has no business in another.
+        self._pruned = _Missing(_PRUNED_VALUE_PID)
 
-    def persistent_load(self, pid: Any) -> Any:
+    def persistent_load(self, pid: str) -> _Missing:
         if pid != _PRUNED_VALUE_PID:
             raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
         return self._pruned
