@@ -272,7 +272,8 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   int64_t num_labels = log_probs.size(2);
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // at this point, this is log of empty sum
 
-  // The admin bits. Lengths are trusted from the forward, but target values are
+  // The admin bits. The length lists are size-checked by the CPU entry point
+  // and their values are trusted from the forward, but target values are
   // revalidated below: autograd can reach the backward with a saved targets
   // tensor mutated after the forward (e.g. through .data, which does not bump
   // the version counter) and direct callers of the op bypass the forward.
@@ -483,6 +484,9 @@ std::tuple<Tensor, Tensor> ctc_loss_tensor(const Tensor& log_probs, const Tensor
 
 Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                              const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
+  int64_t batch_size = log_probs.size(1);
+  TORCH_CHECK((int64_t) input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
+  TORCH_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
   return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_backward_cpu", [&] {
       if (targets.scalar_type() == kLong) {
         return ctc_loss_backward_cpu_template<scalar_t,kLong>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);

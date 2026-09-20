@@ -2611,6 +2611,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             torch.nn.functional.ctc_loss(
                 log_probs, targets, torch.tensor([5, 5]), torch.tensor([3, 2]), reduction="sum")
 
+        # malformed length lists must be rejected like the forward does, so the
+        # target-value check cannot index past the per-batch offsets
+        log_probs = torch.randn(5, 1, 6)
+        targets = torch.tensor([[1, 2]])
+        neg_log_likelihood, log_alpha = torch._ctc_loss(log_probs, targets, [5], [2], 0, False)
+        with self.assertRaisesRegex(RuntimeError, "target_lengths must be of size batch_size"):
+            torch.ops.aten._ctc_loss_backward(
+                torch.ones(1), log_probs, targets, [5], [2, 2], neg_log_likelihood, log_alpha, 0, False)
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
