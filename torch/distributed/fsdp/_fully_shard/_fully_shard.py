@@ -18,7 +18,6 @@ from ._fsdp_api import (
     MixedPrecisionPolicy,
     OffloadPolicy,
     ReduceScatter,
-    ReduceScatterInput,
 )
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
@@ -710,7 +709,7 @@ class FSDPModule:
                     fsdp_param_group._all_gather_output_fn = fn
 
     def set_reduce_scatter_input_fn(
-        self, fn: Callable[..., ReduceScatterInput], *, recurse: bool = True
+        self, fn: Callable, *, recurse: bool = True
     ) -> None:
         r"""Set the function that prepares reduce-scatter inputs.
 
