@@ -1656,7 +1656,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         graph._guards.inner.add(guard)
         state = types.SimpleNamespace(output_graph=graph)
         self.assertIn(
-            "state.output_graph._guards.inner[0].create_fn.args[0].lock",
+            "list(state.output_graph._guards.inner)[0].create_fn.args[0].lock",
             _offending_value_path(state, internal.lock),
         )
         # Reachable both ways: the short, readable scope path still wins, so
