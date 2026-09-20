@@ -250,9 +250,7 @@ class CudaReproTests(TestCase):
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
     )
-    @skipIfXpu(
-        msg="XPU SDPA falls back to math under EFFICIENT_ATTENTION"
-    )
+    @skipIfXpu(msg="XPU SDPA falls back to math under EFFICIENT_ATTENTION")
     def test_effn_attn_uniform_zero_bias(self):
         batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
 
