@@ -222,7 +222,7 @@ class RendezvousSettings:
     timeout: RendezvousTimeout
     keep_alive_interval: timedelta
     keep_alive_max_attempt: int
-    cas_backoff_max_seconds: float
+    cas_backoff_max_seconds: float = 0.0
 
 
 @dataclass(eq=True, order=True, frozen=True)
@@ -662,12 +662,11 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
                         f"The node '{self._node}' has a stale state and failed to sync its local "
                         f"changes with other nodes in the rendezvous '{self._settings.run_id}'."
                     )
+                    if self._settings.cas_backoff_max_seconds > 0:
+                        _delay(seconds=(0, self._settings.cas_backoff_max_seconds))
 
                 self._record(message=msg)
                 logger.debug(msg)
-
-                if has_set is False and self._settings.cas_backoff_max_seconds > 0:
-                    _delay(seconds=(0, self._settings.cas_backoff_max_seconds))
 
             self._state = self._state_holder.state
 
@@ -1027,7 +1026,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         timeout: RendezvousTimeout | None = None,
         keep_alive_interval: int = 5,
         keep_alive_max_attempt: int = 3,
-        cas_backoff_max_seconds: float = 0.3,
+        cas_backoff_max_seconds: float = 0.0,
     ):
         """Create a new :py:class:`DynamicRendezvousHandler`.
 
@@ -1096,7 +1095,9 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         delay = settings.cas_backoff_max_seconds
         if not math.isfinite(delay) or delay < 0:
-            raise ValueError("cas_backoff_max_seconds must be finite and non-negative.")
+            raise ValueError(
+                f"cas_backoff_max_seconds ({delay}) must be finite and non-negative."
+            )
 
         self._this_node = node
 
@@ -1435,9 +1436,8 @@ def create_handler(
     |                         | heartbeat is expected to complete                    |
     +-------------------------+------------------------------------------------------+
     | cas_backoff_max_seconds | Maximum random delay after a failed state write, in  |
-    |                         | seconds. Defaults to 0.3; zero disables backoff.     |
-    |                         | Must be finite and non-negative. Sampled delays      |
-    |                         | below 10 milliseconds are skipped.                   |
+    |                         | seconds. Defaults to 0.0, which disables backoff.      |
+    |                         | Must be finite and non-negative.                     |
     +-------------------------+------------------------------------------------------+
     """
     try:
@@ -1458,11 +1458,12 @@ def create_handler(
                 "You passed 'keep_alive_max_attempt=None' as a rendezvous configuration option"
             )
 
+        cas_backoff_max_seconds = params.get("cas_backoff_max_seconds", 0.0)
         try:
-            cas_backoff_max_seconds = float(params.get("cas_backoff_max_seconds", 0.3))
+            cas_backoff_max_seconds = float(cas_backoff_max_seconds)
         except (TypeError, ValueError) as exc:
             raise ValueError(
-                "cas_backoff_max_seconds must be a finite, non-negative number."
+                f"cas_backoff_max_seconds({cas_backoff_max_seconds!r}) is not a valid float value."
             ) from exc
 
         return DynamicRendezvousHandler.from_backend(
