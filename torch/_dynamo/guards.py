@@ -4820,6 +4820,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # A symbolic scalar cannot be rebuilt against the ShapeEnv the
+            # guards refer to. Unguarded, it is pruned like any other bystander;
+            # guarded, the package is refused.
+            if id(obj) not in self.guard_tree_values:
+                return _Missing, ("symbolic scalar",)
             raise torch._dynamo.exc.PackageError(
                 f"Cannot serialize {type(obj).__name__} {obj} (node: {obj.node})"
             )
@@ -4972,6 +4977,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             if callable(attr):
                 continue
             if _is_shared_constant(attr):
+                continue
+            if str(getattr(type(attr), "__module__", "")).partition(".")[0] == "torch":
+                # The receiver rule, applied to values: a torch structural
+                # object (a Placement, a DeviceMesh) may be the very object a
+                # DTensorSpec elsewhere in the state rebuilds itself from, and
+                # pruning it by id would put the sentinel there.
                 continue
             self.missing_values[id(attr)] = attr
 
