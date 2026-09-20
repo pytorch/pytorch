@@ -17548,6 +17548,24 @@ fn
         self.assertEqual(res, t.sin())
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_list_mutation(self):
+        def fn(t):
+            state = []
+            class C:
+                def close(self):
+                    state.append(1)
+            C().close()
+            return t + len(state), tuple(state)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        for value in (0.0, 2.0):
+            t = torch.tensor(value)
+            expected = (t + 1, (1,))
+            self.assertEqual(fn(t), expected)
+            self.assertEqual(compiled_fn(t), expected)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return___build_class__(self):
         @torch.compile(fullgraph=True, backend="eager")
         def fn(t):
