@@ -2182,6 +2182,170 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # Nothing pinned: nothing to report, whatever the frames say.
         self.assertEqual(_wont_generalize({("TENSOR_MATCH", "x")}, guard_sets), ())
 
+    def test_varying_guard_slots_are_the_differing_and_present_in_some_ones(self):
+        from torch._dynamo.precompile_package import _varying_guard_slots
+        from torch.compiler._precompile_types import GuardFact
+
+        def fact(guard_type, source, code=(), value="", enforced=True):
+            return GuardFact(
+                guard_type=guard_type,
+                source=source,
+                code=code,
+                value=value,
+                enforced=enforced,
+            )
+
+        x_f32 = fact("TENSOR_MATCH", "L['x']", value="dtype=float32")
+        x_f16 = fact("TENSOR_MATCH", "L['x']", value="dtype=float16")
+        flag = fact("CONSTANT_MATCH", "L['flag']", code=("L['flag'] == 1",))
+        fn_id = fact("ID_MATCH", "G['fn']", value="is mod.fn", enforced=False)
+        # Same check as fn_id, only the filter's verdict differs.
+        fn_id_kept = fact("ID_MATCH", "G['fn']", value="is mod.fn")
+        frame = ("forward", "m.py", 12)
+
+        self.assertEqual(_varying_guard_slots({}), frozenset())
+        # One variant discriminates nothing.
+        self.assertEqual(
+            _varying_guard_slots({frame: [frozenset({x_f32, flag, fn_id})]}),
+            frozenset(),
+        )
+        varying = _varying_guard_slots(
+            {frame: [frozenset({x_f32, fn_id}), frozenset({x_f16, flag, fn_id_kept})]}
+        )
+        self.assertEqual(
+            varying,
+            frozenset({("TENSOR_MATCH", "L['x']"), ("CONSTANT_MATCH", "L['flag']")}),
+        )
+        # Frames are never compared with each other: the same slot pinned to
+        # different values in two frames is invariant within each.
+        other = ("torch_dynamo_resume_in_forward_at_14", "m.py", 14)
+        self.assertEqual(
+            _varying_guard_slots(
+                {frame: [frozenset({x_f32})], other: [frozenset({x_f16})]}
+            ),
+            frozenset(),
+        )
+        # One HASATTR per attribute, all on the parent source: two facts on one
+        # slot inside a variant are that variant's rendering of it, and the slot
+        # varies only when the variants' renderings differ (here by code alone).
+        has_w = fact("HASATTR", "L['mod']", code=("hasattr(L['mod'], 'weight')",))
+        has_b = fact("HASATTR", "L['mod']", code=("hasattr(L['mod'], 'bias')",))
+        both = frozenset({has_w, has_b})
+        self.assertEqual(_varying_guard_slots({frame: [both]}), frozenset())
+        self.assertEqual(_varying_guard_slots({frame: [both, both]}), frozenset())
+        self.assertEqual(
+            _varying_guard_slots({frame: [frozenset({has_w}), frozenset({has_b})]}),
+            frozenset({("HASATTR", "L['mod']")}),
+        )
+
+    def test_summarize_reads_the_frame_lists_off_the_entry(self):
+        from torch._dynamo.package import (
+            _DynamoCacheEntry,
+            _DynamoCodeCacheEntry,
+            _GuardedCodeCacheEntry,
+            SerializedCode,
+            SourceInfo,
+        )
+        from torch._dynamo.precompile_package import _summarize
+        from torch.compiler._precompile_types import GuardFact
+
+        def entry(
+            code,
+            guarded=0,
+            backend_ids=(),
+            bypassed=False,
+            entered=True,
+            install_to_global=False,
+        ):
+            serialized = SerializedCode.from_code_object(code)
+            return _DynamoCodeCacheEntry(
+                python_code=serialized,
+                python_module=__name__,
+                function_names=[],
+                guarded_codes=[
+                    _GuardedCodeCacheEntry(guards_state=b"", dynamo_code=serialized)
+                    for _ in range(guarded)
+                ],
+                import_sources={},
+                backend_ids=list(backend_ids),
+                code_source=None,
+                install_to_global=install_to_global,
+                has_compile_id=entered,
+                bypassed=bypassed,
+            )
+
+        # Three distinct code objects that share the name every nn.Module has.
+        class A:
+            def forward(self):
+                pass
+
+        class B:
+            def forward(self):
+                pass
+
+        class C:
+            def forward(self):
+                pass
+
+        def helper():
+            pass
+
+        def resume():
+            pass
+
+        # A save-time bypass (from_cache_entry) leaves the entry's backend ids
+        # in place; install() loads none of them, so they are not counted.
+        codes = [
+            entry(A.forward.__code__, guarded=1, backend_ids=["__compiled_fn_1"]),
+            entry(B.forward.__code__),
+            entry(C.forward.__code__),
+            entry(helper.__code__, bypassed=True, backend_ids=["__compiled_fn_2"]),
+            # Generated but never executed: no compile id, so not a gap.
+            entry(resume.__code__, entered=False, install_to_global=True),
+        ]
+        info = SourceInfo(inlined_sources=set())
+        cache = _DynamoCacheEntry(codes=codes, source_info=info, device_type="cpu")
+        fn_id, flag = ("ID_MATCH", "G['fn']"), ("HASATTR", "mod")
+        mode, torch_mod = ("EQUALS_MATCH", "mode"), ("MODULE_MATCH", "G['torch']")
+        has_bias, is_torch = "hasattr(L['mod'], 'bias')", "G['torch'] is torch"
+        pinned_mode = GuardFact(
+            guard_type="EQUALS_MATCH",
+            source="mode",
+            code=("L['mode'] == 1",),
+            value="",
+            enforced=True,
+        )
+        summary = _summarize(
+            cache,
+            dropped={fn_id, flag},
+            kept={mode, ("TENSOR_MATCH", "x")},
+            policy_dropped={torch_mod},
+            risky={fn_id},
+            truncated=frozenset({"forward (m.py:3)"}),
+            capture_errors=("boom",),
+            guard_sets={("forward", "m.py", 3): [frozenset({pinned_mode})]},
+            # One rendering per dropped slot, from either drop list; fn_id has none.
+            dropped_code={flag: has_bias, torch_mod: is_torch},
+        )
+        # One bare co_name per frame: two uncovered forwards stay two, and the
+        # frame lists are drawn from the frames the count covers.
+        self.assertEqual(summary.frames, 5)
+        self.assertEqual(summary.resume_functions, 1)
+        self.assertEqual(summary.guarded_codes, 1)
+        self.assertEqual(summary.backend_graphs, 1)
+        self.assertEqual(summary.bypassed, ("helper",))
+        self.assertEqual(summary.uncovered_frames, ("forward", "forward"))
+        self.assertFalse(summary.complete)
+        self.assertEqual(summary.dropped_guards, (flag, fn_id))
+        self.assertEqual(summary.kept_guards, (mode, ("TENSOR_MATCH", "x")))
+        self.assertEqual(summary.policy_dropped_guards, (torch_mod,))
+        self.assertEqual(summary.risky_dropped_guards, (fn_id,))
+        self.assertEqual(
+            summary.dropped_guard_code, ((*flag, has_bias), (*torch_mod, is_torch))
+        )
+        self.assertEqual(summary.wont_generalize, ("mode",))
+        self.assertEqual(summary.capture_errors, ("boom",))
+
 
 instantiate_parametrized_tests(TestPrecompilePackage)
 
