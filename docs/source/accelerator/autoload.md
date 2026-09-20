@@ -111,6 +111,47 @@ Device modules that instead expose `Scheduling`, `PythonWrapperCodegen`, and
 the codegen classes eagerly at `import torch`. A device that is already registered
 (for example eagerly from `_autoload`) skips the hook entirely.
 
+### Lazy PrivateUse1 DeviceInterface Registration
+
+Dynamo and Inductor use a `DeviceInterface` to access device runtime operations
+without depending on a specific accelerator. A PrivateUse1 backend can register
+this interface directly with `register_interface_for_device`, but doing so from
+the backend package requires importing Dynamo and makes every `import torch` pay
+Dynamo's import cost. As an alternative, define a `get_device_interface` method
+on the device module class passed to `torch._register_device_module`. The
+no-argument hook must return the `DeviceInterface` class itself, not an instance:
+
+```python
+class MyDeviceModule:
+    # ... other device module APIs (is_available, device_count, ...)
+
+    @staticmethod
+    def get_device_interface():
+        # Imported only when Dynamo first needs its device registry.
+        from my_backend._dynamo import MyDeviceInterface
+
+        return MyDeviceInterface
+
+
+torch.utils.rename_privateuse1_backend("my_device")
+torch._register_device_module("my_device", MyDeviceModule)
+```
+
+Dynamo discovers and invokes this hook when `init_device_reg()` first
+initializes its device-interface registry. It registers the returned class for
+the bare backend name
+(``"my_device"``); callers pass that device type rather than an indexed name
+such as ``"my_device:0"``. A backend that already registered an interface
+directly with `register_interface_for_device` skips the device-module hook. A
+missing hook or a `None` return silently opts out. If the hook raises or
+returns anything other than a `DeviceInterface` subclass, PyTorch emits a
+warning and does not retry the hook in that process.
+
+Concurrent first callers wait for the in-flight hook to finish. A same-thread
+registry lookup made re-entrantly by the hook is a no-op until the hook returns;
+the hook must therefore not require its own interface to be visible while it is
+being constructed.
+
 ## Result
 
 After setting up the entry point and backend, build and install your backend. Now, we can use the new accelerator without explicitly importing it.

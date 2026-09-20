@@ -16,7 +16,9 @@ specialized implementations for each hardware backend's unique features.
 """
 
 import inspect
+import threading
 import time
+import warnings
 from collections import namedtuple
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -752,6 +754,8 @@ class TpuInterface(DeviceInterface):
 
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
+_device_initialization_lock = threading.RLock()
+_device_initialization_in_progress = False
 
 
 def register_interface_for_device(
@@ -768,6 +772,13 @@ def register_interface_for_device(
     an explicit ``import torch_npu``-style import, both of which precede any
     import of inductor. Registering later is not supported and will not be
     reflected in the snapshot.
+
+    A privateuse1 backend may register its interface directly before Inductor
+    is imported. As an alternative that does not require importing Dynamo from
+    the backend package, it may expose ``get_device_interface()`` on its
+    registered device module. ``init_device_reg()`` discovers and invokes that
+    hook when Dynamo first initializes this registry; see
+    ``rename_privateuse1_backend`` for the hook contract.
     """
     if isinstance(device, torch.device):
         device = device.type
@@ -793,13 +804,61 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     return device_interfaces.items()
 
 
-def init_device_reg() -> None:
-    global _device_initialized
-    register_interface_for_device("cuda", CudaInterface)
-    register_interface_for_device("xpu", XpuInterface)
-    register_interface_for_device("mtia", MtiaInterface)
-    register_interface_for_device("cpu", CpuInterface)
-    register_interface_for_device("mps", MpsInterface)
-    register_interface_for_device("tpu", TpuInterface)
+def _register_interface_for_privateuse1() -> None:
+    backend = torch._C._get_privateuse1_backend_name()
+    if backend == "privateuseone" or backend in device_interfaces:
+        return
+    from torch.utils.backend_registration import _get_custom_mod_func
 
-    _device_initialized = True
+    try:
+        get_device_interface_fn = _get_custom_mod_func("get_device_interface")
+    except RuntimeError:
+        # No backend module or hook means the backend opted out of lazy
+        # DeviceInterface registration.
+        return
+
+    try:
+        interface = get_device_interface_fn()
+    except Exception as exc:
+        warnings.warn(
+            f"get_device_interface() for backend '{backend}' raised {exc!r}; "
+            "skipping registration."
+        )
+        return
+
+    if not (isinstance(interface, type) and issubclass(interface, DeviceInterface)):
+        if interface is not None:
+            warnings.warn(
+                f"get_device_interface() for backend '{backend}' returned "
+                f"{interface!r} which is not a DeviceInterface subclass; "
+                "skipping registration."
+            )
+        return
+    register_interface_for_device(backend, interface)
+
+
+def init_device_reg() -> None:
+    global _device_initialized, _device_initialization_in_progress
+    if _device_initialized:
+        return
+
+    # The privateuse1 hook may import Dynamo/Inductor code that re-enters this
+    # function. The RLock lets that same thread observe the in-progress flag
+    # and return, while concurrent threads wait for the complete registry.
+    with _device_initialization_lock:
+        if _device_initialized or _device_initialization_in_progress:
+            return
+        _device_initialization_in_progress = True
+        try:
+            register_interface_for_device("cuda", CudaInterface)
+            register_interface_for_device("xpu", XpuInterface)
+            register_interface_for_device("mtia", MtiaInterface)
+            register_interface_for_device("cpu", CpuInterface)
+            register_interface_for_device("mps", MpsInterface)
+            register_interface_for_device("tpu", TpuInterface)
+
+            _register_interface_for_privateuse1()
+
+            _device_initialized = True
+        finally:
+            _device_initialization_in_progress = False

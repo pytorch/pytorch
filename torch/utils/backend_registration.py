@@ -112,6 +112,18 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (5) ``set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'foo') -> None``
         Sets the random number generator state of the specified "foo" device.
 
+    Note(dynamo): As an alternative to importing ``torch._dynamo`` and calling
+    ``register_interface_for_device()`` directly, BackendModule may define an
+    optional ``get_device_interface() -> type[DeviceInterface]`` no-arg
+    callable. It must return the ``DeviceInterface`` class, not an instance.
+    Dynamo invokes it once, when its device-interface registry is first needed,
+    and registers the class for the privateuse1 backend's bare device name.
+    This lets ``import torch`` avoid importing Dynamo solely for interface
+    registration. A missing hook or ``None`` return opts out silently; an
+    exception or invalid return emits a warning and skips registration for the
+    rest of the process. See ``docs/source/accelerator/autoload.md`` for
+    details.
+
     Note(inductor): To defer the Inductor integration of the device out of import
     time, BackendModule may define an optional ``_inductor_backend_init`` no-arg
     callable. Inductor invokes it on each torch.compile / ``compile_fx()`` /
