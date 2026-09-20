@@ -7,6 +7,8 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace_native.h>
+#include <ATen/ops/pow.h>
 #include <ATen/ops/range_native.h>
 #include <array>
 #include <cmath>
@@ -72,6 +74,15 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
       }
     });
   }
+}
+
+// float32 interpolation stays within one unit under 2^20; above it neighbours
+// collapse, e.g. every element of linspace(2^40, 2^40 + 8) rounds to 2^40.
+bool linspace_fits_float(int64_t start, int64_t end, int64_t steps) {
+  constexpr int64_t max_magnitude = 1 << 20;
+  constexpr int64_t max_exact_index = 1 << std::numeric_limits<float>::digits;
+
+  return std::max(start, end) < max_magnitude && std::min(start, end) > -max_magnitude && steps <= max_exact_index;
 }
 
 } // anonymous namespace
@@ -156,27 +167,133 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     return result;
   }
 
-  float s = 0, e = 0;
-  if (isIntegralType(result.scalar_type(), /*includeBool=*/false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(result.scalar_type(), "linspace_mps", [&]() {
-      s = static_cast<float>(start.to<scalar_t>());
-      e = static_cast<float>(end.to<scalar_t>());
+  const auto dtype = result.scalar_type();
+  bool use_integral_kernel = false;
+  std::array<uint64_t, 4> integral_params{};
+  std::array<float, 3> vals{};
+  if (dtype == ScalarType::Long || dtype == ScalarType::Int) {
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "linspace_mps", [&]() {
+      const int64_t s = static_cast<int64_t>(start.to<scalar_t>());
+      const int64_t e = static_cast<int64_t>(end.to<scalar_t>());
+      use_integral_kernel = !linspace_fits_float(s, e, steps);
+      if (use_integral_kernel) {
+        const uint64_t distance = e >= s ? static_cast<uint64_t>(e) - static_cast<uint64_t>(s)
+                                         : static_cast<uint64_t>(s) - static_cast<uint64_t>(e);
+        const uint64_t denominator = static_cast<uint64_t>(steps - 1);
+        integral_params = {
+            static_cast<uint64_t>(s), static_cast<uint64_t>(e), distance / denominator, distance % denominator};
+      }
     });
-  } else {
-    s = start.to<float>();
-    e = end.to<float>();
   }
-  const std::array<float, 3> vals{s, (e - s) / static_cast<float>(steps - 1), e};
+  if (!use_integral_kernel) {
+    float s = 0, e = 0;
+    if (isIntegralType(dtype, /*includeBool=*/false)) {
+      AT_DISPATCH_INTEGRAL_TYPES(dtype, "linspace_mps", [&]() {
+        s = static_cast<float>(start.to<scalar_t>());
+        e = static_cast<float>(end.to<scalar_t>());
+      });
+    } else {
+      s = start.to<float>();
+      e = end.to<float>();
+    }
+    vals = {s, (e - s) / static_cast<float>(steps - 1), e};
+  }
 
   auto stream = getCurrentMPSStream();
   auto encoder = stream->commandEncoder();
   const auto tname = scalarToMetalTypeString(result);
+  const auto kernel_prefix = use_integral_kernel ? "linspace_integral_" : "linspace_";
 
   if (result.is_contiguous() || result.dim() == 1) {
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
     const auto abs_stride = stride < 0 ? -stride : stride;
     const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
-    auto pso = lib.getPipelineStateForFunc("linspace_" + tname + (use32 ? "_i32" : "_i64"));
+    auto pso = lib.getPipelineStateForFunc(kernel_prefix + tname + (use32 ? "_i32" : "_i64"));
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        [encoder setComputePipelineState:pso];
+        if (use32) {
+          std::array<int32_t, 2> p{int32_t(steps), int32_t(stride)};
+          if (use_integral_kernel) {
+            mtl_setArgs(encoder, result, integral_params, p);
+          } else {
+            mtl_setArgs(encoder, result, vals, p);
+          }
+        } else {
+          std::array<int64_t, 2> p{steps, stride};
+          if (use_integral_kernel) {
+            mtl_setArgs(encoder, result, integral_params, p);
+          } else {
+            mtl_setArgs(encoder, result, vals, p);
+          }
+        }
+        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+      }
+    });
+  } else {
+    auto pso = lib.getPipelineStateForFunc(use_integral_kernel ? "linspace_integral_strided_" + tname
+                                                               : "linspace_strided_" + tname);
+    const auto ndim = static_cast<int>(result.dim());
+    // offset_from_thread_index treats dim 0 as innermost; pass reversed.
+    const std::vector<int64_t> sizes(result.sizes().rbegin(), result.sizes().rend());
+    const std::vector<int64_t> strides(result.strides().rbegin(), result.strides().rend());
+    const auto steps32 = static_cast<uint32_t>(steps);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        [encoder setComputePipelineState:pso];
+        if (use_integral_kernel) {
+          mtl_setArgs(encoder, result, integral_params, steps32, ndim, sizes, strides);
+        } else {
+          mtl_setArgs(encoder, result, vals, steps32, ndim, sizes, strides);
+        }
+        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+      }
+    });
+  }
+  return result;
+}
+
+Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
+  using namespace mps;
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (result.numel() != steps) {
+    result.resize_({steps});
+  }
+  if (steps == 0) {
+    return result;
+  }
+  if (steps == 1) {
+    result.fill_(std::pow(base, start.to<double>()));
+    return result;
+  }
+
+  // Integer dtypes would require float64-precision pow to match CPU/CUDA's
+  // truncated output; MPS is limited to float32, which gives off-by-one results
+  // on exact integer powers (10**3 -> 999.9994 -> 999). Rather than return
+  // silently-wrong values, we don't claim integer support. See #137635.
+  TORCH_CHECK_NOT_IMPLEMENTED(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+                              "logspace is not implemented for integral dtypes on MPS");
+
+  if (isComplexType(result.scalar_type())) {
+    linspace_out_mps(start, end, steps, result);
+    result.copy_(at::pow(base, result));
+    return result;
+  }
+
+  float s = start.to<float>();
+  float e = end.to<float>();
+
+  const std::array<float, 4> vals{s, (e - s) / static_cast<float>(steps - 1), e, static_cast<float>(base)};
+
+  auto stream = getCurrentMPSStream();
+  auto encoder = stream->commandEncoder();
+  const auto tname = scalarToMetalTypeString(result);
+  if (result.is_contiguous() || result.dim() == 1) {
+    const auto stride = result.is_contiguous() ? 1 : result.stride(0);
+    const auto abs_stride = stride < 0 ? -stride : stride;
+    const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
+    auto pso = lib.getPipelineStateForFunc("logspace_" + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         [encoder setComputePipelineState:pso];
@@ -191,9 +308,8 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       }
     });
   } else {
-    auto pso = lib.getPipelineStateForFunc("linspace_strided_" + tname);
+    auto pso = lib.getPipelineStateForFunc("logspace_strided_" + tname);
     const auto ndim = static_cast<int>(result.dim());
-    // offset_from_thread_index treats dim 0 as innermost; pass reversed.
     const std::vector<int64_t> sizes(result.sizes().rbegin(), result.sizes().rend());
     const std::vector<int64_t> strides(result.strides().rbegin(), result.strides().rend());
     const auto steps32 = static_cast<uint32_t>(steps);

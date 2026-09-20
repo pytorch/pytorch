@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/xpu/Sleep.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/XPUGraphsUtils.h>
@@ -9,6 +10,7 @@
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
@@ -267,6 +269,47 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
   Py_RETURN_NONE;
 }
 
+namespace {
+
+void removeStorageDeleterFns(
+    const std::vector<c10::StorageImpl*>& stale_live_storages,
+    std::unordered_set<void*> definitely_stale_pointers) {
+  for (c10::StorageImpl* stale_storage : stale_live_storages) {
+    auto ptr = stale_storage->data_ptr().get();
+    auto allocated_pointer = definitely_stale_pointers.find(ptr);
+    TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
+    auto t = c10::xpu::XPUCachingAllocator::get();
+    bool succeeded = stale_storage->mutable_data_ptr().compare_exchange_deleter(
+        t->raw_deleter(), &c10::detail::deleteNothing);
+
+    TORCH_CHECK(
+        succeeded,
+        "Unexpected deleter function on storage, could not swap function");
+  }
+}
+
+void addStorageDeleterFns(
+    std::vector<c10::StorageImpl*>& storages_to_add_deleters_to,
+    c10::xpu::XPUCachingAllocator::CheckpointDelta& delta) {
+  std::unordered_map<void*, c10::StorageImpl*> storages;
+  for (auto& storage : storages_to_add_deleters_to) {
+    storages[storage->data_ptr().get()] = storage;
+  }
+
+  for (auto& data_ptr : delta.dataptrs_allocd) {
+    auto storage_pair = storages.find(data_ptr.get());
+    if (storage_pair != storages.end()) {
+      auto ctx = storage_pair->second->data_ptr().get_context();
+      TORCH_CHECK(ctx == nullptr, " Not expecting deleter function");
+      storage_pair->second->set_data_ptr_noswap(std::move(data_ptr));
+    } else {
+      data_ptr.release_context();
+    }
+  }
+}
+
+} // namespace
+
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
@@ -347,9 +390,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(has_subgroup_2d_block_io)
 
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
-#if SYCL_COMPILER_VERSION >= 20260000
       .def_readonly("is_integrated_gpu", &DeviceProp::is_integrated_gpu)
-#endif
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       // TODO: Expose cache size by level when available from SYCL
       .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
@@ -386,12 +427,12 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
                    << ", has_atomic64=" << prop.has_atomic64
-#if SYCL_COMPILER_VERSION >= 20260000
-                   << ", is_integrated_gpu=" << prop.is_integrated_gpu
-#endif
-                   << ')';
+                   << ", is_integrated_gpu=" << prop.is_integrated_gpu << ")";
             return std::move(stream).str();
           });
+  m.def("_xpu_isHistoryEnabled", []() {
+    return c10::xpu::XPUCachingAllocator::isHistoryEnabled();
+  });
 }
 
 static void registerXpuPluggableAllocator(PyObject* module) {
@@ -409,6 +450,11 @@ static void registerXpuPluggableAllocator(PyObject* module) {
       std::shared_ptr<
           torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator>>(
       m, "_XPUPluggableAllocator");
+
+  py::class_<
+      c10::xpu::XPUCachingAllocator::AllocatorState,
+      std::shared_ptr<c10::xpu::XPUCachingAllocator::AllocatorState>>(
+      m, "_xpu_XPUAllocator_AllocatorState");
 
   m.def("_xpu_getAllocator", []() {
     return py::cast(torch::xpu::XPUPluggableAllocator::getCurrentAllocator());
@@ -429,6 +475,117 @@ static void registerXpuPluggableAllocator(PyObject* module) {
     return torch::xpu::XPUPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
   });
+  m.def(
+      "_xpu_getCheckpointState",
+      [](c10::DeviceIndex device, c10::xpu::MempoolId_t id) {
+        return c10::xpu::XPUCachingAllocator::getCheckpointState(device, id);
+      });
+  m.def(
+      "_construct_XPU_Tensor_From_Storage_And_Metadata",
+      [](py::dict& metadata, c10::Storage storage) {
+        TORCH_CHECK(
+            storage.device_type() == c10::DeviceType::XPU,
+            "Expected XPU storage");
+        auto dtype =
+            scalarTypeToTypeMeta(toScalarType(metadata["dtype"].ptr()));
+        constexpr c10::DispatchKeySet xpu_dispatch_keys(c10::DispatchKey::XPU);
+        at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
+            std::move(storage), xpu_dispatch_keys, dtype);
+        tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+            metadata["size"].cast<std::vector<int64_t>>(),
+            metadata["stride"].cast<std::vector<int64_t>>());
+        tensor.unsafeGetTensorImpl()->set_storage_offset(
+            metadata["storage_offset"].cast<int64_t>());
+        return tensor;
+      });
+  m.def("_xpu_has_standard_deleter", [](size_t storage_impl_ptr) {
+    auto* storage_impl = reinterpret_cast<c10::StorageImpl*>(storage_impl_ptr);
+    if (storage_impl->device_type() != c10::DeviceType::XPU) {
+      return false;
+    }
+    auto* allocator = c10::xpu::XPUCachingAllocator::get();
+    return storage_impl->data_ptr().get_deleter() == allocator->raw_deleter();
+  });
+  m.def("_xpu_free_and_remove_deleter", [](size_t storage_impl_ptr) {
+    auto* storage_impl = reinterpret_cast<c10::StorageImpl*>(storage_impl_ptr);
+    TORCH_CHECK(
+        storage_impl->device_type() == c10::DeviceType::XPU,
+        "Expected XPU storage");
+    auto* allocator = c10::xpu::XPUCachingAllocator::get();
+    auto* data_ptr = storage_impl->data_ptr().get();
+    bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
+        allocator->raw_deleter(), c10::detail::deleteNothing);
+    TORCH_CHECK(succeeded, "Expected standard deleter");
+    allocator->raw_delete(data_ptr);
+  });
+  m.def(
+      "_xpu_checkPoolLiveAllocations",
+      [](c10::DeviceIndex device,
+         at::xpu::MempoolId_t mempool_id,
+         const py::set& expected_live_allocations) {
+        std::unordered_set<void*> allocations;
+        allocations.reserve(expected_live_allocations.size());
+        for (auto& elem : expected_live_allocations) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
+        }
+        return c10::xpu::XPUCachingAllocator::checkPoolLiveAllocations(
+            device, mempool_id, allocations);
+      });
+
+  m.def(
+      "_xpu_setCheckpointPoolState",
+      [](c10::DeviceIndex device,
+         std::shared_ptr<c10::xpu::XPUCachingAllocator::AllocatorState> pps,
+         const std::vector<size_t>& stale_storages_ptr,
+         const std::vector<size_t>& storages_to_add_deleters_to_ptr = {}) {
+        std::unordered_set<c10::StorageImpl*> ptr_set;
+        // iterate on std::vector for determinism
+        std::vector<c10::StorageImpl*> ptrs;
+        for (size_t ptr_int : stale_storages_ptr) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
+          if (!ptr_set.count(ptr)) {
+            ptrs.push_back(ptr);
+            ptr_set.insert(ptr);
+          }
+        }
+        auto delta = c10::xpu::XPUCachingAllocator::setCheckpointPoolState(
+            device, std::move(pps));
+        auto& freed_pointers = delta.ptrs_freed;
+
+        std::unordered_set<void*> allocd_set;
+        for (auto& data_ptr : delta.dataptrs_allocd) {
+          allocd_set.insert(data_ptr.get());
+        }
+        std::unordered_set<void*> freed_pointer_set;
+        size_t definite_freed_count = 0;
+        for (void* ptr : freed_pointers) {
+          if (!allocd_set.count(ptr)) {
+            definite_freed_count += 1;
+          }
+          freed_pointer_set.insert(ptr);
+        }
+        // that block has already been freed,
+        // so even those this will error, so too will the allocator
+        // when the corresponding tensor dies because there is no
+        // live tensor corresponding to it
+        TORCH_CHECK(
+            ptr_set.size() >= definite_freed_count,
+            "Any stale tensors which are being manually freed"
+            " must be passed to set checkpoint");
+
+        removeStorageDeleterFns(ptrs, freed_pointer_set);
+        std::vector<c10::StorageImpl*> storages_to_add_deleters_to;
+        storages_to_add_deleters_to.reserve(
+            storages_to_add_deleters_to_ptr.size());
+        for (size_t ptr_int : storages_to_add_deleters_to_ptr) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          storages_to_add_deleters_to.push_back((c10::StorageImpl*)ptr_int);
+        }
+
+        addStorageDeleterFns(storages_to_add_deleters_to, delta);
+      });
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
@@ -444,6 +601,11 @@ static void bindGetDeviceProperties(PyObject* module) {
 
 static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  m.def("_xpu_xpuCachingAllocator_raw_delete", [](uintptr_t mem_ptr) {
+    py::gil_scoped_release no_gil;
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::xpu::XPUCachingAllocator::raw_delete(reinterpret_cast<void*>(mem_ptr));
+  });
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
     py::gil_scoped_release no_gil;
     return at::getDeviceAllocator(at::kXPU)->getMemoryInfo(device_index);
@@ -464,6 +626,7 @@ static void initXpuMethodBindings(PyObject* module) {
       [](c10::DeviceIndex device, c10::DeviceIndex peer) {
         return at::xpu::canDeviceAccessPeer(device, peer);
       });
+  m.def("_xpu_sleep", [](uint64_t cycles) { at::xpu::sleep(cycles); });
   m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
     return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
   });
@@ -567,6 +730,7 @@ static void initXpuMethodBindings(PyObject* module) {
     py::str segment_unmap_s = "segment_unmap";
     py::str snapshot_s = "snapshot";
     py::str oom_s = "oom";
+    py::str annotate_s = "annotate";
     py::str device_free_s = "device_free";
 
     using c10::CachingDeviceAllocator::TraceEntry;
@@ -581,6 +745,7 @@ static void initXpuMethodBindings(PyObject* module) {
         {TraceEntry::SEGMENT_UNMAP, segment_unmap_s},
         {TraceEntry::SNAPSHOT, snapshot_s},
         {TraceEntry::OOM, oom_s},
+        {TraceEntry::ANNOTATE, annotate_s},
     };
 
     auto action_to_str = [&](TraceEntry::Action action) {
@@ -664,13 +829,10 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
-  if (!m)
-    throw python_error();
+  TORCH_CHECK_PYTHON(m);
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
-    if (PyObject_SetAttrString(m, name, v) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(PyObject_SetAttrString(m, name, v) >= 0);
   };
 
   auto num_gpus = c10::xpu::device_count();

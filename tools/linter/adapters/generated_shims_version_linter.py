@@ -13,7 +13,6 @@ import ast
 import json
 import logging
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from tools.linter.adapters._stable_shim_utils import (
     LintMessage,
     LintSeverity,
     merge_base_with_main,
+    read_file_at_revision,
 )
 
 
@@ -114,20 +114,7 @@ def _read_at_merge_base(filename: str) -> str | None:
     None if the file did not exist at that point. Raises if git operations fail.
     """
     merge_base = merge_base_with_main()
-
-    # `git show <ref>:<path>` requires <path> relative to the repo root;
-    # lintrunner may pass `filename` as an absolute path.
-    rel_path = Path(filename).resolve().relative_to(REPO_ROOT).as_posix()
-    result = subprocess.run(
-        ["git", "show", f"{merge_base}:{rel_path}"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    if result.returncode != 0:
-        # File didn't exist at merge-base; treat all current entries as new.
-        return None
-    return result.stdout
+    return read_file_at_revision(merge_base, filename, cwd=REPO_ROOT)
 
 
 def _msg(filename: str, line: int, name: str, description: str) -> LintMessage:

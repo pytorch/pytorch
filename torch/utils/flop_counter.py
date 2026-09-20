@@ -169,12 +169,12 @@ def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     return m * n * 2 * k
 
 @register_flop_formula(aten.addmm)
-def addmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def addmm_flop(self_shape, a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for addmm."""
     return mm_flop(a_shape, b_shape)
 
 @register_flop_formula(aten.bmm)
-def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def bmm_flop(a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for the bmm operation."""
     # Inputs should be a list of length 2.
     # Inputs contains the shapes of two tensor.
@@ -189,7 +189,7 @@ def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     return flop
 
 @register_flop_formula(aten.baddbmm)
-def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def baddbmm_flop(self_shape, a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for the baddbmm operation."""
     # Inputs should be a list of length 3.
     # Inputs contains the shapes of three tensors.
@@ -396,6 +396,7 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
 
 @register_flop_formula([aten._scaled_dot_product_efficient_attention,
                         aten._scaled_dot_product_flash_attention,
+                        aten._scaled_dot_product_flash_attention_for_cpu,
                         aten._scaled_dot_product_cudnn_attention])
 def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention."""
@@ -479,7 +480,7 @@ def _unpack_efficient_attention_nested_shapes(
     max_seqlen_k,
 ) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
-    Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
+    Given inputs to an efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
     each batch element.
 
@@ -629,6 +630,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
 
 @register_flop_formula([aten._scaled_dot_product_efficient_attention_backward,
                         aten._scaled_dot_product_flash_attention_backward,
+                        aten._scaled_dot_product_flash_attention_for_cpu_backward,
                         aten._scaled_dot_product_cudnn_attention_backward])
 def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention backward."""
@@ -833,9 +835,11 @@ flop_registry = {
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
     aten._scaled_dot_product_flash_attention: sdpa_flop,
+    aten._scaled_dot_product_flash_attention_for_cpu: sdpa_flop,
     aten._scaled_dot_product_cudnn_attention: sdpa_flop,
     aten._scaled_dot_product_efficient_attention_backward: sdpa_backward_flop,
     aten._scaled_dot_product_flash_attention_backward: sdpa_backward_flop,
+    aten._scaled_dot_product_flash_attention_for_cpu_backward: sdpa_backward_flop,
     aten._scaled_dot_product_cudnn_attention_backward: sdpa_backward_flop,
     aten._flash_attention_forward: _flash_attention_forward_flop,
     aten._efficient_attention_forward: _efficient_attention_forward_flop,

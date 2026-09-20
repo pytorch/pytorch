@@ -1,10 +1,14 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import unittest
 
 import torch
 import torch.fx
+from torch._dynamo.graph_region_tracker import get_global_state_key
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph_and_tracker
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
+from torch.testing._internal.common_utils import recover_orig_fp32_precision
 from torch.utils._pytree import tree_map
 
 
@@ -188,6 +192,7 @@ class GraphRegionTrackerTests(TestCase):
             """[[['_foreach_add', 'getitem', 'getitem_1', 'sum_1', 'add'], ['_foreach_add_1', 'getitem_2', 'getitem_3', 'sum_2', 'add_1'], ['_foreach_add_2', 'getitem_4', 'getitem_5', 'sum_3', 'add_2'], ['_foreach_add_3', 'getitem_6', 'getitem_7', 'sum_4', 'add_3']]]""",
         )
 
+    @recover_orig_fp32_precision
     def test_mismatched_global_state(self):
         def inner_fn(x, y):
             x1 = x * 1
@@ -251,6 +256,16 @@ class GraphRegionTrackerTests(TestCase):
                 self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
                 """[[['add_4', 'mul_2', 'sum_3', 'add_6'], ['add_5', 'mul_3', 'sum_4', 'add_7']], [['add', 'mul', 'sum_1', 'add_2'], ['add_1', 'mul_1', 'sum_2', 'add_3']]]""",
             )
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    def test_bfx9_global_state_key(self):
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        ieee_key = get_global_state_key()
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        self.assertNotEqual(get_global_state_key(), ieee_key)
 
     def test_mutation_tracking_simple(self):
         def fn(x, y, z):

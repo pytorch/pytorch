@@ -1,6 +1,9 @@
 # Owner(s): ["module: inductor"]
+import collections
+import inspect
 import multiprocessing
 import os
+import pickle
 import queue
 import sys
 import tempfile
@@ -9,7 +12,7 @@ import traceback
 import unittest
 import warnings
 from concurrent.futures import Future
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 from torch._inductor import config
@@ -20,7 +23,11 @@ from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import ensure_nv_universal_gemm_available, fresh_cache
+from torch._inductor.utils import (
+    ensure_nv_universal_gemm_available,
+    fresh_cache,
+    is_big_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -94,6 +101,37 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
 )
 
 
+class TestNVGemmPickling(TestCase):
+    @unittest.skipIf(
+        not ensure_nv_universal_gemm_available(),
+        "NVIDIA Universal GEMM (cutlass.operators) library not available",
+    )
+    def test_scaled_operand_constraints_pickle_round_trip(self):
+        import cutlass
+        from cutlass.operators import ScaleMode, ScaleSwizzleMode
+        from cutlass.operators.metadata import (
+            DenseTensorConstraints,
+            ScaledOperandConstraints,
+        )
+
+        import torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils  # noqa: F401
+
+        quantized = DenseTensorConstraints(cutlass.Float16, (1, 0), 16)
+        scale = DenseTensorConstraints(cutlass.Float32, (1,), 4)
+        constraints = ScaledOperandConstraints(
+            quantized,
+            scale,
+            ScaleMode.Blockwise1x16,
+            ScaleSwizzleMode.Swizzle32x4x4,
+        )
+
+        restored = pickle.loads(pickle.dumps(constraints))
+        self.assertEqual(restored.quantized, quantized)
+        self.assertEqual(restored.scale, scale)
+        self.assertEqual(restored.mode, ScaleMode.Blockwise1x16)
+        self.assertEqual(restored.swizzle, ScaleSwizzleMode.Swizzle32x4x4)
+
+
 def _daemon_compile_worker(q, worker_start_method):
     try:
         with config.patch(
@@ -132,6 +170,88 @@ def _forked_daemon_compile_worker(q):
 
 @instantiate_parametrized_tests
 class TestAsyncCompile(TestCase):
+    @requires_gpu()
+    @requires_triton()
+    def test_template_kernel_single_submission(self):
+        if not is_big_gpu():
+            self.skipTest("Need big GPU for Triton mm templates")
+        # Template kernels are submitted eagerly to the warm pool and again from
+        # the wrapper; both submissions must carry the same source so the second
+        # is a cache hit instead of a second compile racing on the cache file.
+        sources = collections.defaultdict(set)
+        original = AsyncCompile.triton
+
+        def spy(self_, kernel_name, source_code, device_str="cuda"):
+            sources[kernel_name].add(source_code)
+            return original(self_, kernel_name, source_code, device_str)
+
+        a = torch.randn(256, 512, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(512, 256, device=GPU_TYPE, dtype=torch.float16)
+        with (
+            config.patch(
+                compile_threads=8,
+                max_autotune=True,
+                max_autotune_gemm_backends="TRITON",
+            ),
+            patch.object(AsyncCompile, "triton", spy),
+            fresh_cache(),
+        ):
+            shutdown_compile_workers()
+            AsyncCompile.wait_pool_ready()
+            self.assertTrue(AsyncCompile.use_process_pool())
+            torch.compile(lambda x, y: torch.mm(x, y) * 2)(a, b)
+        template_kernels = [k for k in sources if k.startswith("triton_tem_")]
+        self.assertTrue(template_kernels)
+        for kernel_name in template_kernels:
+            self.assertEqual(len(sources[kernel_name]), 1, kernel_name)
+
+    def test_flydsl_returns_kernel_wrapper(self):
+        source = """
+def test_flydsl_loader_main(value, stream):
+    return value, stream
+"""
+        with (
+            patch(
+                "torch._inductor.codegen.flydsl.flydsl_utils.runtime_available",
+                return_value=True,
+            ),
+            config.patch(compile_threads=1),
+            fresh_cache(),
+        ):
+            kernel = AsyncCompile().flydsl("test_flydsl_loader", source)
+
+        self.assertEqual(kernel.run(41, stream=7), (41, 7))
+        self.assertIsNotNone(kernel.kernel_path)
+
+    def test_flydsl_rejects_unavailable_runtime(self):
+        with patch(
+            "torch._inductor.codegen.flydsl.flydsl_utils.runtime_available",
+            return_value=False,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "FlyDSL runtime is unavailable"):
+                AsyncCompile().flydsl("test_flydsl_loader", "")
+
+    def test_flydsl_clears_stale_worker_cache_env(self):
+        process_pool = Mock()
+        with (
+            patch(
+                "torch._inductor.codegen.flydsl.flydsl_utils.runtime_available",
+                return_value=True,
+            ),
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=process_pool),
+            patch("torch._inductor.async_compile._compile_start"),
+            patch.dict(os.environ),
+        ):
+            os.environ.pop("FLYDSL_RUNTIME_CACHE_DIR", None)
+            AsyncCompile().flydsl("test_flydsl_loader", "")
+
+        worker, *worker_args = process_pool.submit.call_args.args
+        bound_args = inspect.signature(worker).bind(*worker_args)
+        extra_env = bound_args.arguments["extra_env"]
+        self.assertIn("FLYDSL_RUNTIME_CACHE_DIR", extra_env)
+        self.assertIsNone(extra_env["FLYDSL_RUNTIME_CACHE_DIR"])
+
     def _run_daemon_compile_worker(self, worker_start_method):
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
@@ -1340,7 +1460,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
     @unittest.skipIf(
         not ensure_nv_universal_gemm_available(),
-        "NVIDIA Universal GEMM (cutlass_api) library not available",
+        "NVIDIA Universal GEMM (cutlass.operators) library not available",
     )
     def test_nv_universal_gemm_subprocess_precompile_skips_bad_fork(self):
         """NV Universal GEMM precompile skips compile in bad-fork workers."""

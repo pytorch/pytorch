@@ -7,9 +7,12 @@ import torch._dynamo
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestContextVars(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_with_constructor_default(self):
         cv = contextvars.ContextVar("precision", default="fp32")
 
