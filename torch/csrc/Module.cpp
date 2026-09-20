@@ -2879,8 +2879,8 @@ Call this whenever a new thread is created in order to propagate values from
       [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
         for (auto index : indices) {
           auto t = tensors[index].cast<at::Tensor>();
-          auto data_ptr = data_ptrs[index].cast<int64_t>();
-          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+          auto data_ptr = data_ptrs[index].cast<uintptr_t>();
+          if (reinterpret_cast<uintptr_t>(t.data_ptr()) != data_ptr) {
             return false;
           }
         }

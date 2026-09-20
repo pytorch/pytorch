@@ -33,7 +33,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
-_CUDAGRAPH_SUPPORTED_DEVICE_TYPES = frozenset(OrderedSet(["cuda"]))
+_CUDAGRAPH_SUPPORTED_DEVICE_TYPES = frozenset(OrderedSet(["cuda", "xpu"]))
 
 
 def cudagraph_trees_generation_cloning() -> Literal["user_visible"] | None:
