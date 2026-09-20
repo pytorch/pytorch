@@ -4281,6 +4281,17 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._missing_cache: dict[str, _Missing] = {}
         self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
+        # Elements of a container carried verbatim (a value-guarded __defaults__
+        # tuple, see _keep_container_verbatim) must stay real even when an
+        # unguarded attribute is the very same object and registers it mid-dump.
+        self._verbatim_elements: set[int] = set()
+        stack = list(value_guarded_containers.values())
+        while stack:
+            for element in stack.pop():
+                if type(element) is tuple:
+                    stack.append(element)
+                else:
+                    self._verbatim_elements.add(id(element))
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4628,9 +4639,12 @@ class GuardsStatePickler(FunctionPicklerBase):
     # Everything else in missing_values stays on the reducer_override path.
     _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
-    # pyrefly: ignore [bad-override]
-    def persistent_id(self, obj: Any) -> str | None:
-        if type(obj) in self._PRUNED_CONTAINER_TYPES and id(obj) in self.missing_values:
+    def persistent_id(self, obj: Any) -> int | str | None:
+        if (
+            type(obj) in self._PRUNED_CONTAINER_TYPES
+            and id(obj) in self.missing_values
+            and id(obj) not in self._verbatim_elements
+        ):
             return _PRUNED_VALUE_PID
         return None
 
