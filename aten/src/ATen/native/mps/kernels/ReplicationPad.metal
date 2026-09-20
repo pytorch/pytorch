@@ -125,6 +125,223 @@ INSTANTIATE_CONSTANT_PAD_ND(bool);
 INSTANTIATE_CONSTANT_PAD_ND(float2);
 INSTANTIATE_CONSTANT_PAD_ND(half2);
 
+template <typename idx_t>
+inline idx_t reflect_index(idx_t pos, idx_t size) {
+  const idx_t last = size - 1;
+  pos = pos < 0 ? -pos : pos;
+  const idx_t past_end = pos - last;
+  return last - (past_end < 0 ? -past_end : past_end);
+}
+
+// Output positions along one dim whose gradient flows into input position x.
+template <bool reflection, typename idx_t>
+struct PadBackwardRange;
+
+template <typename idx_t>
+struct PadBackwardRange<true, idx_t> {
+  idx_t count = 0;
+  idx_t indices[3];
+
+  PadBackwardRange(
+      idx_t x,
+      idx_t input_size,
+      idx_t output_size,
+      idx_t pad_left) {
+    const idx_t center = x + pad_left;
+    const idx_t left = pad_left - x;
+    const idx_t right = pad_left + 2 * (input_size - 1) - x;
+    if (center >= 0 && center < output_size) {
+      indices[count++] = center;
+    }
+    if (x > 0 && left >= 0 && left < output_size) {
+      indices[count++] = left;
+    }
+    if (x < input_size - 1 && right >= 0 && right < output_size) {
+      indices[count++] = right;
+    }
+  }
+
+  idx_t operator[](idx_t index) const {
+    return indices[index];
+  }
+};
+
+template <typename idx_t>
+struct PadBackwardRange<false, idx_t> {
+  idx_t first = 0;
+  idx_t count = 0;
+
+  PadBackwardRange(
+      idx_t x,
+      idx_t input_size,
+      idx_t output_size,
+      idx_t pad_left) {
+    const idx_t center = x + pad_left;
+    first = x == 0 ? 0 : max(center, idx_t(0));
+    const idx_t end =
+        x == input_size - 1 ? output_size : min(center + 1, output_size);
+    count = max(end - first, idx_t(0));
+  }
+
+  idx_t operator[](idx_t index) const {
+    return first + index;
+  }
+};
+
+// Where this thread sits in the tensor it writes (result) and the base offset
+// of the matching channel/batch in the tensor it reads (source).
+template <typename idx_t>
+struct PadPosition {
+  idx_t y;
+  idx_t z;
+  idx_t source_base;
+  idx_t result_base;
+};
+
+template <typename idx_t>
+inline PadPosition<idx_t> pad_position(
+    uint3 tid,
+    uint depth,
+    uint channels,
+    constant ::c10::metal::array<idx_t, 5>& source_strides,
+    constant ::c10::metal::array<idx_t, 5>& result_strides) {
+  const idx_t y = tid.y;
+  const idx_t z = tid.z % depth;
+  const uint outer = tid.z / depth;
+  const idx_t channel = safe_mod(outer, channels);
+  const idx_t batch = outer / channels;
+  return {
+      y,
+      z,
+      channel * source_strides[3] + batch * source_strides[4],
+      y * result_strides[1] + z * result_strides[2] +
+          channel * result_strides[3] + batch * result_strides[4]};
+}
+
+template <typename T, typename idx_t, uint ndim, bool reflection>
+kernel void pad_forward(
+    device const T* input,
+    device T* output,
+    constant PadParams<idx_t>& params,
+    uint3 tid [[thread_position_in_grid]],
+    uint3 grid [[threads_per_grid]]) {
+  const uint depth = ndim == 3 ? uint(params.output_sizes[2]) : 1;
+  const auto position = pad_position<idx_t>(
+      tid,
+      depth,
+      uint(params.channels),
+      params.input_strides,
+      params.output_strides);
+  for (uint i = 0; i < ILP_PER_THREAD; ++i) {
+    const idx_t x = idx_t(tid.x) + idx_t(i) * idx_t(grid.x);
+    if (x >= params.output_sizes[0]) {
+      break;
+    }
+    const idx_t pos[3] = {x, position.y, position.z};
+    idx_t input_offset = position.source_base;
+    for (uint dim = 0; dim < ndim; ++dim) {
+      idx_t input_pos = pos[dim] - params.left_pad[dim];
+      if IF_CONSTEXPR (reflection) {
+        input_pos = reflect_index(input_pos, params.input_sizes[dim]);
+      } else {
+        input_pos = clamp(input_pos, idx_t(0), params.input_sizes[dim] - 1);
+      }
+      input_offset += input_pos * params.input_strides[dim];
+    }
+    output[position.result_base + x * params.output_strides[0]] =
+        input[input_offset];
+  }
+}
+
+template <typename T, typename idx_t, uint ndim, bool reflection>
+kernel void pad_backward(
+    device const T* grad_output,
+    device T* grad_input,
+    constant PadParams<idx_t>& params,
+    uint3 tid [[thread_position_in_grid]],
+    uint3 grid [[threads_per_grid]]) {
+  const uint depth = ndim == 3 ? uint(params.input_sizes[2]) : 1;
+  const auto position = pad_position<idx_t>(
+      tid,
+      depth,
+      uint(params.channels),
+      params.output_strides,
+      params.input_strides);
+  const PadBackwardRange<reflection, idx_t> ys(
+      ndim >= 2 ? position.y : 0,
+      ndim >= 2 ? params.input_sizes[1] : 1,
+      ndim >= 2 ? params.output_sizes[1] : 1,
+      ndim >= 2 ? params.left_pad[1] : 0);
+  const PadBackwardRange<reflection, idx_t> zs(
+      position.z,
+      ndim == 3 ? params.input_sizes[2] : 1,
+      ndim == 3 ? params.output_sizes[2] : 1,
+      ndim == 3 ? params.left_pad[2] : 0);
+  for (uint i = 0; i < ILP_PER_THREAD; ++i) {
+    const idx_t x = idx_t(tid.x) + idx_t(i) * idx_t(grid.x);
+    if (x >= params.input_sizes[0]) {
+      break;
+    }
+    const PadBackwardRange<reflection, idx_t> xs(
+        x, params.input_sizes[0], params.output_sizes[0], params.left_pad[0]);
+    // Each input element owns its gradient; accumulate in float without
+    // atomics.
+    opmath_t<T> sum = 0;
+    for (idx_t iz = 0; iz < zs.count; ++iz) {
+      const idx_t z_offset =
+          position.source_base + zs[iz] * params.output_strides[2];
+      for (idx_t iy = 0; iy < ys.count; ++iy) {
+        const idx_t y_offset = z_offset + ys[iy] * params.output_strides[1];
+        for (idx_t ix = 0; ix < xs.count; ++ix) {
+          sum += opmath_t<T>(
+              grad_output[y_offset + xs[ix] * params.output_strides[0]]);
+        }
+      }
+    }
+    grad_input[position.result_base + x * params.input_strides[0]] = T(sum);
+  }
+}
+
+#define INSTANTIATE_PAD(DTYPE, IDX, SUFFIX, NDIM, REFLECT, MODE, PASS)     \
+  template [[host_name(#MODE "_pad" #NDIM "d_" #PASS "_" #DTYPE #SUFFIX)]] \
+  kernel void pad_##PASS<DTYPE, IDX, NDIM, REFLECT>(                       \
+      device const DTYPE*,                                                 \
+      device DTYPE*,                                                       \
+      constant PadParams<IDX>&,                                            \
+      uint3,                                                               \
+      uint3)
+
+#define INSTANTIATE_PAD_DIM(DTYPE, IDX, SUFFIX, NDIM, PASS)          \
+  INSTANTIATE_PAD(DTYPE, IDX, SUFFIX, NDIM, true, reflection, PASS); \
+  INSTANTIATE_PAD(DTYPE, IDX, SUFFIX, NDIM, false, replication, PASS)
+
+#define INSTANTIATE_PAD_IDX(DTYPE, IDX, SUFFIX, PASS)             \
+  INSTANTIATE_PAD(DTYPE, IDX, SUFFIX, 1, true, reflection, PASS); \
+  INSTANTIATE_PAD_DIM(DTYPE, IDX, SUFFIX, 2, PASS);               \
+  INSTANTIATE_PAD_DIM(DTYPE, IDX, SUFFIX, 3, PASS)
+
+#define INSTANTIATE_PAD_DTYPE(DTYPE, PASS)     \
+  INSTANTIATE_PAD_IDX(DTYPE, int, _i32, PASS); \
+  INSTANTIATE_PAD_IDX(DTYPE, long, _i64, PASS)
+
+INSTANTIATE_PAD_DTYPE(float, forward);
+INSTANTIATE_PAD_DTYPE(half, forward);
+INSTANTIATE_PAD_DTYPE(bfloat, forward);
+INSTANTIATE_PAD_DTYPE(float2, forward);
+INSTANTIATE_PAD_DTYPE(half2, forward);
+INSTANTIATE_PAD_DTYPE(long, forward);
+INSTANTIATE_PAD_DTYPE(int, forward);
+INSTANTIATE_PAD_DTYPE(short, forward);
+INSTANTIATE_PAD_DTYPE(char, forward);
+INSTANTIATE_PAD_DTYPE(uchar, forward);
+INSTANTIATE_PAD_DTYPE(bool, forward);
+
+INSTANTIATE_PAD_DTYPE(float, backward);
+INSTANTIATE_PAD_DTYPE(half, backward);
+INSTANTIATE_PAD_DTYPE(bfloat, backward);
+INSTANTIATE_PAD_DTYPE(float2, backward);
+INSTANTIATE_PAD_DTYPE(half2, backward);
+
 template <typename T>
 kernel void replication_pad1d_forward(
     constant T* input [[buffer(0)]],

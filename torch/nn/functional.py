@@ -3865,20 +3865,27 @@ def linear_cross_entropy(
 
     .. note::
         **Out-of-range class indices on a fused backend.** A ``target``
-        outside :math:`[0, C)` is a caller error. On the reference and
-        chunked paths it surfaces as an indexing error, because those
-        paths index with it. A fused backend kernel -- selected
-        automatically when one is available for the shapes and dtypes at
-        hand -- does not index through the dispatcher and does not pay for
-        a device-to-host check on every call, so it reports the same error
-        as ``nan`` in that row's loss and gradients instead of raising.
-        Rows with valid targets are unaffected. If an exception is wanted,
-        for example while testing, run the chunked path without the
-        backend kernel by disabling it
-        (``torch.backends.python_native.cutedsl.disabled()``) or validate
-        ``target`` before the call. In deployment an out-of-range target
-        is assumed to be very unlikely, since the reference path would
-        already be failing on it.
+        outside :math:`[0, C)` is a caller error. Where the path indexes
+        with it -- the reference path, and the chunked path whenever no
+        fused backend kernel is selected -- it surfaces as an indexing
+        error. A fused backend kernel, selected automatically when one is
+        available for the shapes and dtypes at hand, does not index
+        through the dispatcher and does not pay for a device-to-host check
+        on every call, so it reports the error as ``nan`` instead of
+        raising.
+
+        That ``nan`` is not confined to the offending row.
+        ``grad_input`` is the one output that stays row-local;
+        ``grad_linear_weight`` and ``grad_linear_bias`` are reductions over
+        rows, so a single out-of-range target makes both of them, and the
+        returned loss, entirely ``nan`` for the whole call. A class
+        ``weight`` is the exception: that path indexes ``weight`` with the
+        target and raises as it always did.
+
+        Because the failure is silent, it is worth running a new program
+        once with the fused backends off -- ``TORCH_DISABLE_NATIVE_JIT=1``
+        in the environment, no source change -- where an out-of-range
+        target raises instead.
 
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
@@ -5572,8 +5579,8 @@ def grid_sample(
     which are used to interpolate the output value ``output[n, :, h, w]``.
     In the case of 5D inputs, ``grid[n, d, h, w]`` specifies the
     ``x``, ``y``, ``z`` pixel locations for interpolating
-    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
-    ``bilinear`` interpolation method to sample the input pixels.
+    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest``,
+    ``bilinear`` or ``bicubic`` interpolation method to sample the input pixels.
 
     :attr:`grid` specifies the sampling pixel locations normalized by the
     :attr:`input` spatial dimensions. Therefore, it should have most values in
@@ -5612,10 +5619,11 @@ def grid_sample(
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
-            Note: ``mode='bicubic'`` supports only 4-D input.
             When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
-            the interpolation mode will legitimately be bilinear.
+            the interpolation mode will legitimately be bilinear. Likewise
+            ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
+            extended over the third axis; CPU and CUDA, ROCm included, implement the 5-D case.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -7275,7 +7283,8 @@ def scaled_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         output_dtype: dtype used for the output tensor
-        contraction_dim: describe which dimensions are :math:`K` in the matmul.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 

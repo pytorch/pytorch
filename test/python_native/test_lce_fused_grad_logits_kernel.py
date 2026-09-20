@@ -139,10 +139,19 @@ class TestFusedGradLogitsKernel(TestCase):
     def test_aliased_g_shares_the_logits_storage(self, dtype, num_rows, V):
         """`g` written into the logits' own bytes, which is what makes a chunk
         cost one buffer instead of two. `g[n, j]` occupies `z[n, j // 2]`, so
-        the kernel must order its writes against its reads; a stale read shows
-        up as a wrong value here. An element left unwritten would hold
-        reinterpreted fp32 bytes, so matching the reference everywhere also
-        proves full coverage -- the aliased buffer is its own sentinel.
+        the kernel must order its writes against its reads. An element left
+        unwritten would hold reinterpreted fp32 bytes, so matching the
+        reference everywhere also proves full coverage -- the aliased buffer is
+        its own sentinel.
+
+        The ordering, though, is checked only probabilistically: a missing
+        barrier is a data race, and this sees a symptom rather than the bug.
+        Removing the barrier fails 2-3 of these ten cases, varying run to run,
+        and only ever the ones whose `V` runs past a single staging group --
+        4097 and 32000 at the default knobs. The small-`V` cases pass a
+        barrier-less kernel, so they are not what guards it. A deterministic
+        check would need `compute-sanitizer --tool racecheck`, too slow to keep
+        in this suite.
 
         The kernel takes `g`'s layout from the caller and orders its writes
         either way, so this and the separate-buffer tests above exercise one
@@ -160,6 +169,35 @@ class TestFusedGradLogitsKernel(TestCase):
         self.assertEqual(g, want_g)
         self.assertEqual(log_row_sum, want_log_row_sum, atol=1e-4, rtol=1e-5)
         # Read before any write could occupy its bytes.
+        self.assertEqual(shifted_target, want_shifted)
+
+    @parametrize("num_rows, V", [(4, 4097), (8, 12289)])
+    def test_aliased_g_at_the_same_width_as_the_logits(self, num_rows, V):
+        """The fp16 production layout: an fp16 buffer aliased by an fp16 `g`,
+        so `g[n, j]` lands exactly on `z[n, j]` rather than halfway back.
+
+        The aliased test above is always 2:1, because `_inputs` builds an fp32
+        buffer, so `(fp16, fp16)` is a compile key nothing else reaches and the
+        layout production uses at fp16 is exercised nowhere.
+
+        This is NOT the write-ordering test. At 1:1 the byte mapping is the
+        identity, so a thread overwrites only what it read itself and the
+        barrier is not load-bearing -- removing it leaves these cases passing
+        while some of the 2:1 ones fail. What this pins is that the 1:1 key
+        compiles and computes the right values, across several staging
+        groups."""
+        logits, row_scale, target = _inputs(num_rows, V, logits_dtype=torch.float16)
+        source = logits.clone()
+        _, log_row_sum, shifted_target = _outputs(num_rows, V, torch.float16)
+        g = logits.view(torch.float16).narrow(1, 0, V)
+        self.kernel.fused_grad_logits_into(
+            g, log_row_sum, shifted_target, logits, row_scale, target
+        )
+        want_g, want_log_row_sum, want_shifted = _reference(
+            source, row_scale, target, torch.float16
+        )
+        self.assertEqual(g, want_g)
+        self.assertEqual(log_row_sum, want_log_row_sum, atol=1e-4, rtol=1e-5)
         self.assertEqual(shifted_target, want_shifted)
 
     def test_monotonic_rows_rescale_every_element(self):
@@ -331,7 +369,10 @@ class TestFusedGradLogitsKernel(TestCase):
         "meta, message",
         [
             ({"threads_per_block": 100}, "multiple of 32"),
-            ({"threads_per_block": 2048}, "multiple of 32"),
+            # A multiple of 32 on both sides of the range, so each one can only
+            # be reported by the bound it crosses.
+            ({"threads_per_block": 2048}, r"in \[32, 1024\]"),
+            ({"threads_per_block": 0}, r"in \[32, 1024\]"),
             ({"tiles_per_stage": 0}, "at least 1"),
             ({"tiles_pre_stage": 4}, "unknown meta parameters"),
         ],
