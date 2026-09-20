@@ -518,7 +518,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/FlightRecorder.cpp",
-    "torch/csrc/distributed/fsdp/CollectiveCopy.cpp",
     "torch/csrc/distributed/c10d/hooks/FlightRecorderHook.cpp",
     "torch/csrc/distributed/c10d/hooks/NanCheckHook.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
@@ -578,6 +577,7 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.cpp",
     "torch/csrc/distributed/c10d/HashStore.cpp",
+    "torch/csrc/distributed/fsdp/CollectiveCopy.cpp",
     "torch/csrc/distributed/rpc/agent_utils.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/profiler/remote_profiler_manager.cpp",
@@ -773,8 +773,6 @@ libtorch_cuda_core_sources = [
 
 # These files are the only ones that are supported on Windows.
 libtorch_cuda_distributed_base_sources = [
-    "torch/csrc/distributed/fsdp/CollectiveCopyCUDA.cpp",
-    "torch/csrc/distributed/fsdp/CollectiveCopyKernels.cu",
     "torch/csrc/distributed/c10d/reducer_cuda.cpp",
 ]
 
@@ -820,6 +818,8 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
+    "torch/csrc/distributed/fsdp/CollectiveCopyCUDA.cpp",
+    "torch/csrc/distributed/fsdp/CollectiveCopyKernels.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
 ]
 

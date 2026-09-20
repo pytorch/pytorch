@@ -21,9 +21,15 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
+@unittest.skipIf(IS_WINDOWS, "FSDP2 is not supported on Windows")
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
     @parametrize("use_nonzero_dim", [False, True])
