@@ -1468,10 +1468,23 @@ class AutogradFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         return self.call_backward(tx, args, kwargs)
 
+    def _get_apply(
+        self: "AutogradFunctionVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        if self.source is not None:
+            source = AttrSource(self.source, "apply")
+        else:
+            source = None
+
+        result = GetAttrVariable(self, "apply", py_type=types.MethodType, source=source)
+
+        return result
+
     tp_methods = {
         "apply": Method(apply),
         "backward": Method(backward),
     }
+    tp_getset = {"apply": GetSet(_get_apply, unmodeled_setter)}
 
     def call_function(
         self,
@@ -1566,9 +1579,13 @@ class AutogradFunctionVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        getset = self.lookup_tp_getset_member(name)
+        if getset is not None:
+            result = getset.getter(self, tx)
+            if result is not None:
+                return result
+
         source = AttrSource(self.source, name) if self.source is not None else None
-        if name == "apply":
-            return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
         if source is None:
             return GetAttrVariable(self, name)
 
