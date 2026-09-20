@@ -1267,6 +1267,93 @@ class GraphModule(torch.nn.Module):
         x = torch.zeros(1)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
+    @parametrize("attr", ["__name__", "__qualname__"])
+    @parametrize("kind", ["direct", "nested", "container", "yielded", "renamed"])
+    def test_registered_iterator_polyfill_names(self, attr, kind):
+        def original(values):
+            iterator = iter(values)
+            if kind == "container":
+                return {"iterator": iterator}
+            if kind == "yielded":
+                return iter([iterator])
+            return iterator
+
+        def generate(values):
+            yield from values
+
+        def replacement(values):
+            def nested():
+                yield from values
+
+            if kind == "container":
+                return {"iterator": nested()}
+            if kind == "yielded":
+
+                def outer():
+                    yield nested()
+
+                return outer()
+            if kind == "renamed":
+                gen = nested()
+                gen.__name__ = "implementation_name"
+                gen.__qualname__ = "implementation_qualname"
+                return gen
+            return nested()
+
+        torch.compiler.substitute_in_graph(original)(
+            generate if kind == "direct" else replacement
+        )
+
+        def fn(x):
+            iterator = original([1, 2])
+            if kind == "container":
+                iterator = iterator["iterator"]
+            if kind == "yielded":
+                iterator = next(iterator)
+            return x + len(getattr(iterator, attr, "")), list(iterator)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_generator_passed_through_polyfill_keeps_names(self):
+        def original(value):
+            return value
+
+        @torch.compiler.substitute_in_graph(original)
+        def replacement(value):
+            return value
+
+        def generate():
+            yield 1
+
+        def fn(x):
+            gen = generate()
+            result = original(gen)
+            return x + len(result.__name__ + result.__qualname__), result is gen
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_generator_callback_in_polyfill_keeps_names(self):
+        def original(callback):
+            gen = callback()
+            return gen, gen.__name__
+
+        @torch.compiler.substitute_in_graph(original)
+        def replacement(callback):
+            gen = callback()
+            return gen, gen.__name__
+
+        def generate():
+            yield 1
+
+        def fn(x):
+            gen, name = original(generate)
+            return x + len(name + gen.__name__ + gen.__qualname__)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
     def test_renamed_generator_escapes_region(self):
         # Codegen cannot rebuild a generator, so the frame falls back to eager,
         # and the real generator must carry the rename afterwards.

@@ -1327,8 +1327,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         code: types.CodeType,
         f_globals: dict[str, Any],
         inline_tracer: "InliningGeneratorInstructionTranslator",
-        gi_name: VariableTracker,
-        gi_qualname: VariableTracker,
+        gi_name: VariableTracker | None,
+        gi_qualname: VariableTracker | None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1351,13 +1351,30 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def get_name(self) -> str:
         return self.get_code().co_name
 
+    def clear_name_snapshot(self, tx: "InstructionTranslatorBase") -> None:
+        self.gi_name = self.gi_qualname = None
+        # Generic getattr consults pending writes before the getset getter.
+        side_effects = tx.output.side_effects
+        pending = side_effects.store_attr_mutations.get(self)
+        if pending is not None:
+            for name in ("__name__", "__qualname__"):
+                if name in pending:
+                    del pending[name]
+                    del side_effects.attr_mutation_kinds[self][name]
+
     def _is_modeled(self) -> bool:
-        # Attributes are only modeled for generators created in the region. One
-        # with a source was passed in or came from a @contextmanager function,
-        # and codegen rebuilds it as a plain iterator at any graph break; one
-        # built from polyfill code stands in for a builtin such as enumerate,
-        # which has none of these attributes (only Dynamo's own polyfill modules
-        # are recognized). For both, the getters decline and writes graph-break.
+        if self.gi_name is None or self.gi_qualname is None:
+            unimplemented(
+                gb_type="Generator name from a polyfill",
+                context=str(self),
+                explanation="A polyfill's generator may represent a different iterator. "
+                "Its implementation's name cannot determine the original object's attributes.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
+        # Sourced generators can be rebuilt as plain iterators at graph breaks.
+        # Internal helpers called directly (without PolyfilledFunctionVariable)
+        # also implement non-generator iterators, such as itertools.repeat.
         module = self.f_globals.get("__name__", "")
         return self.source is None and not module.startswith(polyfills.__name__)
 
@@ -1482,6 +1499,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         tracer.frame_state = FrameState.FRAME_EXECUTING
 
+        num_generators = len(tx.output.local_generators)
         try:
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
@@ -1545,6 +1563,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if not tx.one_graph and not tx.error_on_graph_break:
                 e.msg += "\n\nSkipping frame due to graph break in a generator's next() call."
             raise
+        finally:
+            if self.gi_name is None:
+                # A suspended polyfill can create more implementation generators
+                # when resumed, including generators it yields to the caller.
+                for gen in tx.output.local_generators[num_generators:]:
+                    gen.clear_name_snapshot(tx)
 
     def gen_send_ex(
         self,
@@ -3737,11 +3761,19 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
-        return tx.inline_user_function_return(
-            traceable_function_variable,
-            list(args),
-            dict(kwargs),
-        )
+        num_generators = len(tx.output.local_generators)
+        try:
+            return tx.inline_user_function_return(
+                traceable_function_variable,
+                list(args),
+                dict(kwargs),
+            )
+        finally:
+            # These generators implement the polyfill, but the original function
+            # may return a different iterator type. Existing arguments keep their
+            # identity; newly created generators have no reliable name snapshot.
+            for gen in tx.output.local_generators[num_generators:]:
+                gen.clear_name_snapshot(tx)
 
     def call_method(
         self,
