@@ -6,6 +6,14 @@
 // Shared struct for Triton kernel compilation results.
 // Used by both cpp-wrapper JIT (filled at runtime via Python) and AOTInductor
 // (filled at compile time from a generated config header).
+struct LazyTmaDescriptorMetadata {
+  std::vector<int> block_size;
+  int elem_size;
+  int elem_type;
+  int swizzle;
+  bool fp4_padded;
+};
+
 struct LazyKernelCompileResult {
   std::string cubin_path;
   std::string mangled_name;
@@ -20,4 +28,5 @@ struct LazyKernelCompileResult {
   int config_index;
   int global_scratch;
   int profile_scratch;
+  std::vector<LazyTmaDescriptorMetadata> tensordesc_meta;
 };
