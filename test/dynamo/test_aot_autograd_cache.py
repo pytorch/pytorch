@@ -4735,6 +4735,19 @@ def _policy_no_hash(ctx, op, *args, **kwargs):
     return CheckpointPolicy.MUST_RECOMPUTE
 
 
+class _SACPolicyReceiver:
+    """A bound-method SAC context_fn whose policy lives on the receiver."""
+
+    def __init__(self, policy):
+        self.policy = policy
+
+    def ctx_fn(self):
+        return create_selective_checkpoint_contexts(self.policy)
+
+
+_SACPolicyReceiver.ctx_fn.cache_hash = "receiver_policy_v1"
+
+
 def _create_sac_ctx_fn(policy, cache_hash=None):
     """
     Helper to create a SAC context_fn with cache_hash set on the partial.
@@ -4858,6 +4871,42 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
 
             # Same function with RNG HOPs: miss stays at 1, hit increments to 1
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_sac_bound_method_context_fn_caches_per_receiver(self):
+        # A bound method reads cache_hash through to its function, and the
+        # receiver is pickled into the key with the graph module, so receivers
+        # selecting different policies get different entries.
+        def gn(x, y):
+            return torch.add(torch.mm(x, y), x)
+
+        @torch.compile(backend="inductor")
+        def fn_with_checkpoint(x, y, receiver):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=receiver.ctx_fn)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with fresh_cache():
+            fn_with_checkpoint(x, y, _SACPolicyReceiver(_policy_save_mm))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            torch._dynamo.reset()
+            fn_with_checkpoint(x, y, _SACPolicyReceiver(_policy_save_mm))
+            # Another receiver with the same policy: hit
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+            torch._dynamo.reset()
+            fn_with_checkpoint(x, y, _SACPolicyReceiver(_policy_save_add))
+            # A receiver selecting a different policy: miss, not a stale hit
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
