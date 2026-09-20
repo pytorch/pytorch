@@ -371,7 +371,7 @@ void nccl_put_signal(at::Tensor& tensor, const c10::intrusive_ptr<SymmetricMemor
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "window is nullptr");
-  auto offset = nccl_hdl->get_offset();
+  auto offset = nccl_hdl->get_window_offset();
   auto byte_size = tensor.numel() * tensor.element_size();
 
   // Get the NCCL communicator

@@ -16,13 +16,13 @@ namespace torch::headeronly {
 // passed to cuda.
 template <typename T>
 struct DefaultPtrTraits {
-  typedef T* PtrType;
+  using PtrType = T*;
 };
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename T>
 struct RestrictPtrTraits {
-  typedef T* __restrict__ PtrType;
+  using PtrType = T* __restrict__;
 };
 #endif
 
@@ -50,7 +50,7 @@ template <
     typename index_t = int64_t>
 class TensorAccessorBase {
  public:
-  typedef typename PtrTraits<T>::PtrType PtrType;
+  using PtrType = typename PtrTraits<T>::PtrType;
 
   C10_HOST_DEVICE TensorAccessorBase(
       PtrType data_,
@@ -95,7 +95,7 @@ template <
 class TensorAccessor
     : public TensorAccessorBase<ArrayRefCls, T, N, PtrTraits, index_t> {
  public:
-  typedef typename PtrTraits<T>::PtrType PtrType;
+  using PtrType = typename PtrTraits<T>::PtrType;
 
   C10_HOST_DEVICE TensorAccessor(
       PtrType data_,
@@ -136,7 +136,7 @@ template <
 class TensorAccessor<ArrayRefCls, T, 1, PtrTraits, index_t>
     : public TensorAccessorBase<ArrayRefCls, T, 1, PtrTraits, index_t> {
  public:
-  typedef typename PtrTraits<T>::PtrType PtrType;
+  using PtrType = typename PtrTraits<T>::PtrType;
 
   C10_HOST_DEVICE TensorAccessor(
       PtrType data_,
@@ -171,7 +171,7 @@ template <
     typename index_t = int64_t>
 class GenericPackedTensorAccessorBase {
  public:
-  typedef typename PtrTraits<T>::PtrType PtrType;
+  using PtrType = typename PtrTraits<T>::PtrType;
   C10_HOST GenericPackedTensorAccessorBase(
       PtrType data_,
       const index_t* sizes_,
@@ -234,7 +234,7 @@ class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<
                                         PtrTraits,
                                         index_t> {
  public:
-  typedef typename PtrTraits<T>::PtrType PtrType;
+  using PtrType = typename PtrTraits<T>::PtrType;
 
   C10_HOST GenericPackedTensorAccessor(
       PtrType data_,
@@ -324,7 +324,7 @@ class GenericPackedTensorAccessor<
           PtrTraits,
           index_t> {
  public:
-  typedef typename PtrTraits<T>::PtrType PtrType;
+  using PtrType = typename PtrTraits<T>::PtrType;
   C10_HOST GenericPackedTensorAccessor(
       PtrType data_,
       const index_t* sizes_,

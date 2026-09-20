@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
+    validate_test_name,
 )
 
 
@@ -209,7 +210,7 @@ log = logging.getLogger(__name__)
 #
 # The first instantiated test calls the original test_car() with the OpInfo
 #   for torch.add as its "op" argument, the string 'cpu' for its "device" argument,
-#   and the dtype torch.float32 for is "dtype" argument. The second instantiated
+#   and the dtype torch.float32 for its "dtype" argument. The second instantiated
 #   test calls the test_car() with the OpInfo for torch.sub, a CUDA device string
 #   like 'cuda:0' or 'cuda:1' for its "device" argument, and the dtype
 #   torch.int64 for its "dtype argument."
@@ -318,6 +319,37 @@ def _update_param_kwargs(param_kwargs, name, value):
     # Leave param_kwargs as-is when value is None.
 
 
+class Capability:
+    """Structured namespace of device capability identifiers.
+
+    Each constant is a ``"<category>.<name>"`` string. The inner classes group
+    them by category so tests can reference capabilities as
+    ``Capability.dtype.fp8`` instead of bare strings.
+
+    Tests declare requirements with :func:`requires_capabilities`::
+
+        @requires_capabilities(
+            Capability.dtype.fp8, Capability.attention.flash_attention
+        )
+        def test_foo(self, device): ...
+
+    Device test bases declare what they support by overriding
+    :meth:`DeviceTypeTestBase._capabilities` with the same constants as keys.
+    """
+
+    class dtype:
+        """Data type capabilities (fp8, bf16, etc.)."""
+
+        fp8 = "dtype.fp8"
+        bf16 = "dtype.bf16"
+
+    class attention:
+        """Attention backend capabilities."""
+
+        flash_attention = "attention.flash_attention"
+        mem_efficient_attention = "attention.mem_efficient_attention"
+
+
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
@@ -385,6 +417,19 @@ class DeviceTypeTestBase(TestCase):
     #   @ops-generated dtype variants and other parametrized arguments are
     #   ignored for now.
     test_exclusions: ClassVar[dict[str, Any] | None] = None
+
+    # Returns the capability map used by @requires_capabilities.
+    # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
+    # declare supported capabilities. This method evaluates the support checks.
+    @classmethod
+    def get_capabilities(cls) -> dict[str, bool]:
+        return {k: bool(fn()) for k, fn in cls._capabilities().items()}
+
+    # Returns a capability map from capability identifier to a callable that
+    # determines whether the current device supports it.
+    @classmethod
+    def _capabilities(cls) -> dict[str, Callable[[], bool]]:
+        return {}
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -717,6 +762,7 @@ class DeviceTypeTestBase(TestCase):
             test_name = (
                 f"{name}{test_suffix}{device_suffix}{_dtype_test_suffix(dtype_kwarg)}"
             )
+            validate_test_name(test_name)
 
             instantiate_test_helper(
                 cls=cls,
@@ -740,6 +786,15 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+    @classmethod
+    def _capabilities(cls):
+        return {
+            Capability.dtype.fp8: lambda: True,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: True,
+            Capability.attention.mem_efficient_attention: lambda: False,
+        }
+
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
@@ -752,6 +807,22 @@ class CUDATestBase(DeviceTypeTestBase):
 
     def has_cudnn(self):
         return not self.no_cudnn
+
+    @classmethod
+    def _capabilities(cls):
+        from torch.testing._internal.common_cuda import (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION,
+            PLATFORM_SUPPORTS_FP8,
+            PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            SM80OrLater,
+        )
+
+        return {
+            Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+            Capability.dtype.bf16: lambda: SM80OrLater,
+            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+            Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        }
 
     @classmethod
     def get_primary_device(cls):
@@ -829,10 +900,32 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+    @classmethod
+    def _capabilities(cls):
+        return {
+            Capability.dtype.fp8: lambda: False,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: False,
+            Capability.attention.mem_efficient_attention: lambda: False,
+        }
+
 
 class XPUTestBase(DeviceTypeTestBase):
     device_type = "xpu"
     primary_device: ClassVar[str]
+
+    @classmethod
+    def _capabilities(cls):
+        from torch.testing._internal.common_xpu import (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+        )
+
+        return {
+            Capability.dtype.fp8: lambda: True,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+            Capability.attention.mem_efficient_attention: lambda: True,
+        }
 
     @classmethod
     def get_primary_device(cls):
@@ -1086,6 +1179,49 @@ def get_desired_device_type_test_bases(
     )
 
 
+def requires_capabilities(*caps: str):
+    """Declare that a test method requires device capabilities.
+
+    Wraps the test to call ``type(self).get_capabilities()`` at runtime
+    and skip if any required capability is unsupported by the device.
+
+    Raises AssertionError if a capability is not declared in the
+    device's ``_capabilities()`` map.
+    """
+    caps_set = set(caps)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            device_caps = type(self).get_capabilities()
+
+            unsupported = set()
+            missing = set()
+            for c in caps_set:
+                if c in device_caps:
+                    if not device_caps[c]:
+                        unsupported.add(c)
+                else:
+                    missing.add(c)
+
+            if missing:
+                raise AssertionError(
+                    f"Device '{type(self).device_type}' has not declared capabilities: "
+                    f"{', '.join(sorted(missing))}. "
+                    f"Add them to {type(self).__name__}._capabilities()."
+                )
+            if unsupported:
+                raise unittest.SkipTest(
+                    f"Device '{type(self).device_type}' has unsupported capabilities: "
+                    f"{', '.join(sorted(unsupported))}"
+                )
+            return fn(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class. This function should be used instead of
@@ -1094,6 +1230,8 @@ def get_desired_device_type_test_bases(
 #
 # See note "Writing Test Templates"
 # TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
+
+
 def instantiate_device_type_tests(
     generic_test_class,
     scope,
@@ -1660,30 +1798,40 @@ def _has_sufficient_memory(device, size):
     return psutil.virtual_memory().available >= effective_size
 
 
+def _parse_size(size):
+    if isinstance(size, str):
+        if not size.endswith(("GB", "gb")):
+            raise AssertionError(f"only bytes or GB supported, got {size!r}")
+        return 1024**3 * int(size[:-2])
+    return size
+
+
+def _test_device(self, device):
+    if device is not None:
+        return device
+    if hasattr(self, "get_primary_device"):
+        return self.get_primary_device()
+    return self.device
+
+
 def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     """Skip test if the device has insufficient memory to run the test
 
-    size may be a number of bytes, a string of the form "N GB", or a callable
+    size is the test's total memory footprint, and may be a number of bytes, a
+    string of the form "N GB", or a callable. It is not a per-allocation limit;
+    for that see `largeMPSBufferTest`.
 
     If the test is a device generic test, available memory on the primary device will be checked.
     It can also be overridden by the optional `device=` argument.
     In other tests, the `device=` argument needs to be specified.
     """
-    if isinstance(size, str):
-        if not size.endswith(("GB", "gb")):
-            raise AssertionError(f"only bytes or GB supported, got {size!r}")
-        size = 1024**3 * int(size[:-2])
+    size = _parse_size(size)
 
     def inner(fn):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
             size_bytes: int = size(self, *args, **kwargs) if callable(size) else size
-            _device = device
-            if _device is None:
-                if hasattr(self, "get_primary_device"):
-                    _device = self.get_primary_device()
-                else:
-                    _device = self.device
+            _device = _test_device(self, device)
 
             # If this is running with GPU cpp_wrapper, the autotuning step will generate
             # an additional array of the same size as the input.
@@ -1691,6 +1839,36 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
                 size_bytes *= 2
             if not _has_sufficient_memory(_device, size_bytes):
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
+
+            return fn(self, *args, **kwargs)
+
+        return dep_fn
+
+    return inner
+
+
+def largeMPSBufferTest(size, device=None):
+    """Skip test if MPS cannot allocate a single buffer of the given size
+
+    Unlike `largeTensorTest`, size is the largest *individual* allocation the
+    test makes, checked against the device's maxBufferLength (a hard cap the
+    MPS allocator enforces regardless of how much memory is free). Tests that
+    need both a large footprint and a large single buffer should use both
+    decorators. This is a no-op on non-MPS devices.
+    """
+    size = _parse_size(size)
+
+    def inner(fn):
+        @wraps(fn)
+        def dep_fn(self, *args, **kwargs):
+            _device = _test_device(self, device)
+            if torch.device(_device).type == "mps":
+                size_bytes = size(self, *args, **kwargs) if callable(size) else size
+                # The allocator's check is strict, so match it with >=.
+                if size_bytes >= torch._C._mps_maxBufferLength():
+                    raise unittest.SkipTest(
+                        f"Needs MPS maxBufferLength > {size_bytes} bytes"
+                    )
 
             return fn(self, *args, **kwargs)
 
@@ -2047,6 +2225,10 @@ def expectedFailureCUDA(fn):
     return expectedFailure("cuda")(fn)
 
 
+def expectedFailureIfRocm(fn):
+    return expectedFailure("cuda")(fn) if TEST_WITH_ROCM else fn
+
+
 def expectedFailureXPU(fn):
     return expectedFailure("xpu")(fn)
 
@@ -2069,6 +2251,17 @@ def expectedFailureMPS(fn):
 
 def expectedFailureMPSComplex(fn):
     return expectedFailure("mps", torch.complex64)(fn)
+
+
+def expectedFailureMPSPre27(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 27.0:
+        return expectedFailure("mps")(fn)
+    return fn
 
 
 def expectedFailureMPSPre15(fn):

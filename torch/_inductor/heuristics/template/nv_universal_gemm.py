@@ -154,15 +154,21 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             log.debug("No heuristic configs found, using first %d kernels", count)
             return kernels[:count]
 
-        # Match kernels to heuristic configs
-        matched: list[tuple] = []
+        # Match kernels to each distinct heuristic config at its best estimate.
+        config_runtimes: dict[ConfigKey, float] = {}
         for cfg in heuristic_configs:
             key = _make_config_key_from_heuristic(cfg)
+            config_runtimes[key] = min(
+                cfg.estimated_runtime, config_runtimes.get(key, float("inf"))
+            )
+
+        matched: list[tuple] = []
+        for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                matched.append((kernel, cfg.estimated_runtime))
+                matched.append((kernel, runtime))
 
         if not matched:
             log.debug(
@@ -217,6 +223,20 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (256, 256, 8, 2),
                     (256, 128, 2, 1),
                     (256, 128, 2, 2),
+                    # NVFP4 oracle-best configs (per-shape autotune winners over
+                    # an 83-shape LLM sweep) that nvMatmulHeuristics does not
+                    # propose; adding them lets autotune reach the oracle-best
+                    # config on 73/83 of those shapes.
+                    (128, 64, 1, 2),
+                    (128, 128, 1, 1),
+                    (128, 128, 1, 4),
+                    (128, 256, 1, 1),
+                    (256, 64, 2, 1),
+                    (256, 128, 4, 1),
+                    (256, 192, 2, 2),
+                    (256, 192, 4, 1),
+                    (256, 192, 4, 2),
+                    (256, 256, 4, 1),
                 ]
             )
             selected_keys = OrderedSet(

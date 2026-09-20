@@ -114,6 +114,22 @@ def _prepare_convolution_fusion_create(
             weight_size = prepacked_weight.transpose(0, 1).size()
         return weight_size
 
+    def _is_reordered_deconv_weight(weight):
+        current_node = V.graph.current_node
+        if current_node is not None and len(current_node.args) > 1:
+            weight_node = current_node.args[1]
+            if isinstance(weight_node, torch.fx.Node) and weight_node.target in (
+                torch.ops.mkldnn._reorder_convolution_transpose_weight,
+                torch.ops.mkldnn._reorder_convolution_transpose_weight.default,
+            ):
+                return True
+
+        try:
+            constant = V.graph.constants.get(weight.get_name())
+        except (AttributeError, KeyError, NotImplementedError):
+            constant = None
+        return isinstance(constant, torch.Tensor) and constant.is_mkldnn
+
     x.realize()
     weight.realize()
     if bias is not None:
@@ -141,10 +157,12 @@ def _prepare_convolution_fusion_create(
         if not isinstance(groups, (int, sympy.core.numbers.Integer)):
             raise AssertionError(f"expected groups to be int, got {type(groups)}")
         if transposed:
-            # When transposed, the size of the prepacked oneDNN weight is different
-            # from the PyTorch weight. We're not able to run aten conv with such
-            # size. We infer the output size from the input params here:
-            weight_size = _original_deconv_weight_size(weight_fake, groups)
+            if weight_fake.is_mkldnn or _is_reordered_deconv_weight(weight):
+                # Prepacked oneDNN deconv weights use [O, I, ...] storage, while
+                # PyTorch deconv weights use [I, O, ...].
+                weight_size = _original_deconv_weight_size(weight_fake, groups)
+            else:
+                weight_size = weight_fake.size()
             input_size = x_fake.size()
             output_size = _conv_input_size(
                 input_size,
@@ -192,7 +210,7 @@ def _prepare_convolution_fusion_create(
         output_stride: StrideType = FlexibleLayout.contiguous_strides(output_size)
     # Currently we don't support channel last for the situation that stride of input's batch dim is 0,
     # eg. input_size = (1, 1280, 64, 64), but input_stride=(0, 1, 81920, 1280).
-    # So we use NCHW hear instead.
+    # So we use NCHW here instead.
     # Different with cpu, cpu conv always use channels_last for convolution when weight is prepacked,
     # but xpu does not do the prepack, so the problem exposed here is only for xpu.
     # TODO support channels_last for such zero stride input.
@@ -457,7 +475,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
-        # Due to constrain of op.call, other (Tensor&) should be at input[0]
+        # Due to constraint of op.call, other (Tensor&) should be at input[0]
         self.device_type = get_device_type(inputs[0])
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
 
