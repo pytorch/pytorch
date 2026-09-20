@@ -761,7 +761,7 @@ class TestPrecompile(TestCase):
         # The standalone driver rebuilds each frame's f_locals for the guard
         # check, so the shapes it has to bind are all here: a keyword-only
         # default the call omits, *args, a continuation closing over a cell of
-        # the entry frame (x, which rows() captures), and a module global the
+        # the entry frame (y, which rows() captures), and a module global the
         # entry reads (_MULTIGRAPH_SCALE, guarded by EQUALS_MATCH).
         import inspect
         from unittest import mock
@@ -777,7 +777,10 @@ class TestPrecompile(TestCase):
             torch._dynamo.graph_break()
 
             def rows():
-                return x.shape[0]
+                # Not x: a captured argument keeps a fast-local slot beside the
+                # continuation's free var, and on 3.13+ the LOAD_FAST closure
+                # load reads that slot, which Dynamo dropped, skipping the frame.
+                return y.shape[0]
 
             return y + rows() + len(rest)
 
