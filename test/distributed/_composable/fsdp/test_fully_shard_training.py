@@ -29,6 +29,7 @@ from torch.distributed.fsdp import (
     share_comm_ctx,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_reduce_scatter_input_fn,
     foreach_all_gather,
     foreach_reduce,
 )
@@ -2575,6 +2576,8 @@ class TestFullyShardShareCommContext(FSDPTest):
             partial_reduce_output: torch.Tensor | None,  # only used for HSDP
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
+            *,
+            prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -2594,6 +2597,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
+                prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
             )
 
         with (
@@ -2610,6 +2614,18 @@ class TestFullyShardShareCommContext(FSDPTest):
         self.assertEqual(len(reduce_scatter_streams), 1)
         self.assertEqual(len(shared_comm_ctx._last_post_reduce_events), 0)
         check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardInference(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_inference(self):
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        fully_shard(model, shard_placement_fn=lambda _: Shard(1))
+        with torch.inference_mode():
+            model(torch.ones((2, 8), device=device_type))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
