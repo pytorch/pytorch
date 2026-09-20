@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorShape.h>
+#include <ATen/native/cuda/TensorShape.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/TypeCast.h>
 
@@ -43,6 +44,8 @@ namespace detail {
 static constexpr int64_t BLOCK_SIZE = 128;
 static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
+static_assert(BLOCK_SIZE == kCopyThreadsPerBlock);
+static_assert(BYTES_PER_BLOCK == kChunkCatBytesPerBlock);
 
 static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
@@ -835,5 +838,78 @@ Tensor& _chunk_cat_out_cuda(
   }
   return out;
 }
+
+namespace detail {
+
+void launch_split_with_sizes_copy(
+    ArrayRef<int64_t*> ptrs,
+    int64_t num_blocks,
+    int64_t num_chunk_groups,
+    int64_t src_stride,
+    int64_t num_chunks) {
+  dim3 blocks(num_blocks, num_chunk_groups, 1);
+  dim3 threads(BLOCK_SIZE, 1, 1);
+  split_with_sizes_copy_out_contiguous_no_cast_kernel<<<
+      blocks,
+      threads,
+      0,
+      at::cuda::getCurrentCUDAStream()>>>(
+      /*dst_base_addrs=*/reinterpret_cast<char**>(ptrs[0]),
+      /*src_base_addrs=*/reinterpret_cast<char**>(ptrs[1]),
+      /*split_chunk_sizes=*/ptrs[2],
+      /*block_idx_to_split_idx=*/ptrs[3],
+      /*blocks_cumsums=*/ptrs[4],
+      src_stride,
+      num_chunks);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename dst_t, typename src_t>
+static void launch_chunk_cat_typed(
+    const Tensor& out,
+    ArrayRef<int64_t*> ptrs,
+    dim3 blocks,
+    int64_t slice_size,
+    int64_t chunk_size) {
+  dim3 threads(BLOCK_SIZE, 1, 1);
+  chunk_cat_cuda_kernel<<<
+      blocks,
+      threads,
+      0,
+      at::cuda::getCurrentCUDAStream()>>>(
+      /*srcs=*/reinterpret_cast<src_t**>(ptrs[0]),
+      reinterpret_cast<dst_t*>(out.data_ptr()),
+      /*block_idx_to_tensor_idx=*/ptrs[1],
+      /*tensor_idx_to_start_tensor_bytes=*/ptrs[2],
+      /*start_block_idx_per_tensor_chunk=*/ptrs[3],
+      /*actual_tensor_sizes=*/ptrs[4],
+      /*pad_tensor_chunk_sizes=*/ptrs[5],
+      /*num_blocks_per_tensor_chunk=*/ptrs[6],
+      slice_size,
+      chunk_size,
+      sizeof(dst_t) / sizeof(src_t));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void launch_chunk_cat(
+    const Tensor& out,
+    ArrayRef<int64_t*> ptrs,
+    int64_t num_blocks_per_chunk,
+    int64_t num_chunks,
+    int64_t leading_dim,
+    int64_t slice_size,
+    int64_t chunk_size,
+    ScalarType src_dtype) {
+  dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
+  if (src_dtype == kBFloat16 && out.scalar_type() == kFloat) {
+    launch_chunk_cat_typed<float, BFloat16>(
+        out, ptrs, blocks, slice_size, chunk_size);
+  } else {
+    TORCH_INTERNAL_ASSERT(src_dtype == out.scalar_type());
+    launch_chunk_cat_typed<char, char>(out, ptrs, blocks, slice_size, chunk_size);
+  }
+}
+
+} // namespace detail
 
 } // namespace at::native
