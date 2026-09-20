@@ -20,6 +20,7 @@ from unittest import mock
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
 import torch
 import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
