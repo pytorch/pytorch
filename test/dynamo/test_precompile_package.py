@@ -1945,8 +1945,14 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             self.assertEqual(set(observed), {training})
             # The outcome, not just the flag: a lazy backward leaves the bundle
             # unwritten until the first .backward() call, so a capture that
-            # never makes one files no artifact at all.
+            # never makes one files no artifact and says so.
             self.assertEqual(bool(session._backend_artifacts), training)
+            if training:
+                self.assertEqual(session._capture_errors, [])
+            else:
+                (recorded,) = session._capture_errors
+                self.assertIn("recorded no artifact", recorded)
+                self.assertIn("training=True", recorded)
         self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
 
     def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):

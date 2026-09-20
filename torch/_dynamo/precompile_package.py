@@ -25,15 +25,11 @@ entry point that reaches it lands later in this stack, so nothing under
 ``torch/`` calls into the session yet.
 
 Capture is by execution, and the caller drives it: the session hands back a
-callable, the caller invokes it with real inputs inside their own loop, and
-every frame Dynamo produces is recorded. Runtime guards stay intact during
-capture; ``guard_filter_fn`` applies only to the serialized copy.
+callable, the caller invokes it with real inputs inside their own loop, each
+``cap(...)`` returns the callable's own result, and every frame, break
+continuation and guarded variant the call exercises is recorded.
 
 ``precompile_capture`` below is the entry point that starts one here.
-
-The caller's calls ARE the capture: each ``cap(...)`` runs the callable for
-real, returns its result, and records every frame, break continuation and
-guarded variant it exercises.
 
 Calls run with the grad mode the caller sets -- capture does not force
 ``no_grad()`` or ``enable_grad()``. ``training=True`` lowers the backward
@@ -41,14 +37,14 @@ eagerly so the artifact carries one and a served output can be backpropagated.
 No loss is needed for that: the joint trace synthesizes tangents from the
 forward outputs' own metadata.
 
-Live capture retains every runtime guard, so later examples trigger the same
-recompilations as ordinary ``torch.compile``. ``guard_filter_fn`` applies only
-to the serialized copy.
+``guard_filter_fn`` rides on the optimize context rather than on the
+serializer, so the guards it drops leave the live check too and a capture
+recompiles less often than ordinary ``torch.compile`` would.
 
-Capture is by execution: a resume function only exists once the frame ahead of
-it has actually run, so every variant must be exercised. Whatever you do not
-run is not in the artifact: it covers what was observed, not every possible
-input to the callable.
+A resume function only exists once the frame ahead of it has actually run, so
+every variant must be exercised. Whatever you do not run is not in the
+artifact: it covers what was observed, not every possible input to the
+callable.
 
 Know these before relying on an artifact in production:
 
@@ -997,12 +993,25 @@ class _PrecompileBackend:
     def __init__(self, backend: str) -> None:
         inner = torch._dynamo.lookup_backend(backend)
         self._torchdynamo_orig_backend = inner
+        # Named the way get_compiler_fn derives a name, because a wrapper object
+        # has none: without it the minifier repro, the compile log and
+        # BackendCompilerFailed all report an unknown backend.
+        self.compiler_name = getattr(inner, "compiler_name", backend)
         self.backend_ctx_ctor = getattr(
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
 
-    def __call__(self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor]) -> Any:
-        return self._torchdynamo_orig_backend(gm, inputs)
+    # Forwarded, as _TorchCompileWrapper and AotAutograd do, so the inner
+    # backend's one-time init still fires through the wrapper; read at fire time
+    # so the hook can be set after the session was built.
+    @property
+    def _dynamo_backend_init(self) -> Any | None:
+        return getattr(self._torchdynamo_orig_backend, "_dynamo_backend_init", None)
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor], **kwargs: Any
+    ) -> Any:
+        return self._torchdynamo_orig_backend(gm, inputs, **kwargs)
 
     def get_compiler_config(self) -> Any:
         getter = getattr(self._torchdynamo_orig_backend, "get_compiler_config", None)
@@ -1093,7 +1102,8 @@ class PrecompileSession:
             PrecompileContext,
         )
 
-        for backend_id in self._package.cache_entry().backend_ids:
+        backend_ids = self._package.cache_entry().backend_ids
+        for backend_id in backend_ids:
             artifact = PrecompileContext.take_artifact(backend_id)
             if artifact is not None:
                 self._backend_artifacts[backend_id] = artifact
@@ -1106,6 +1116,19 @@ class PrecompileSession:
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
+        if backend_ids and not self._backend_artifacts and self._backend != "eager":
+            # The bytecode names backend ids but nothing was filed under any of
+            # them, so the render has nothing to serve. A single id with no
+            # artifact is normal (an exercised empty resume frame compiles to
+            # nothing), and an eager capture is exempt: its backends stay on the
+            # package (see _release) instead of being filed here.
+            self._record_capture_error(
+                PackageError(
+                    "the capture recorded no artifact; a grad-enabled capture "
+                    "needs training=True, which lowers the backward eagerly "
+                    "instead of deferring it past the end of the capture"
+                )
+            )
 
     def _record_capture_error(self, error: BaseException) -> None:
         message = str(error)
@@ -1259,9 +1282,8 @@ def precompile_capture(
     the whole block, so every call reuses the variants the earlier ones
     produced.
 
-    Runtime guards remain intact during capture. ``guard_filter_fn`` applies
-    only to the serialized guard state, so every call observes the same
-    recompilation behavior as ordinary ``torch.compile``.
+    ``guard_filter_fn`` narrows ``default_guard_filter_fn``, and the guards it
+    drops leave the live check as well as the serialized copy.
     """
     return PrecompileSession(
         fn,
