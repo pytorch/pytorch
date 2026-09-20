@@ -74,7 +74,12 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
-from torch._dynamo.package import _Missing, FunctionPicklerBase, SerializedCode
+from torch._dynamo.package import (
+    _Missing,
+    _PRUNED_VALUE_PID,
+    FunctionPicklerBase,
+    SerializedCode,
+)
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -4275,6 +4280,20 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._missing_cache: dict[str, _Missing] = {}
         self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
+        # Elements of a container carried verbatim (a value-guarded __defaults__
+        # tuple, see _keep_container_verbatim) must stay real even when an
+        # unguarded attribute is the very same object and registers it mid-dump.
+        self._verbatim_elements: set[int] = set()
+        stack = list(value_guarded_containers.values())
+        while stack:
+            for element in stack.pop():
+                if id(element) in self._verbatim_elements:
+                    continue
+                self._verbatim_elements.add(id(element))
+                if type(element) in (list, tuple, set, frozenset):
+                    stack.append(element)
+                elif type(element) is dict:
+                    stack.append(list(element.values()))
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4610,6 +4629,26 @@ class GuardsStatePickler(FunctionPicklerBase):
             type_params=type_params,
             globals_snapshot=snapshot,
         )
+
+    # The C pickler saves an exact builtin container by type, before it ever
+    # consults reducer_override, so a pruned ``self.its = [generator]`` was
+    # still walked and still failed. persistent_id is asked about every object
+    # first, so it is the one hook that can substitute those. Only the MUTABLE
+    # exact containers: the compiler folds a constant tuple or frozenset into
+    # one object shared across a module, so an unguarded ``self.dims = (0, 1)``
+    # can be the very object in another function's co_consts or in a guarded
+    # __defaults__, and substituting it by id would put the sentinel there.
+    # Everything else in missing_values stays on the reducer_override path.
+    _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
+
+    def persistent_id(self, obj: Any) -> int | str | None:
+        if (
+            type(obj) in self._PRUNED_CONTAINER_TYPES
+            and id(obj) in self.missing_values
+            and id(obj) not in self._verbatim_elements
+        ):
+            return _PRUNED_VALUE_PID
+        return None
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
