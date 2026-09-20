@@ -7,6 +7,11 @@ Algorithm:
   2. Scatter into an expanded buffer of size P * dim_size along scatter_dim
   3. Reshape to [..., P, dim_size, ...] and sum across partitions
   4. Add result to the original input
+
+When partitioned_scatter_fp32_accumulation is enabled, narrow floating-point
+partials are accumulated in fp32 and rounded once at the output. This improves
+accuracy but can differ numerically from eager's narrow atomic accumulation and
+uses additional temporary memory.
 """
 
 import logging
@@ -52,10 +57,10 @@ _SCATTER_ARGS = {
     _MASKED_INDEX_PUT_TARGET: (2, 1),
 }
 
-# index_add only decomposes into index_put for some dtypes; below fp32 it reaches
-# the post-grad graph intact, so match it directly.
+# index_add may reach the post-grad graph intact for bf16 on platforms without
+# native bf16 atomic add, so match it directly.
 #   index_add(self, dim, index, source, *, alpha=1)
-_INDEX_ADD_TARGET = aten.index_add.default
+_INDEX_ADD_TARGETS = (aten.index_add.default, aten.index_add_.default)
 
 # Same atomic_add store via the scatter_reduce_ lowering, but with an explicit
 # dim and a values-shaped index.
@@ -64,8 +69,11 @@ _INDEX_ADD_TARGET = aten.index_add.default
 #   scatter(self, dim, index, src, *, reduce)
 _SCATTER_REDUCE_TARGETS = (
     aten.scatter_add.default,
+    aten.scatter_add_.default,
     aten.scatter_reduce.two,
+    aten.scatter_reduce_.two,
     aten.scatter.reduce,
+    aten.scatter_.reduce,
 )
 
 
@@ -74,7 +82,7 @@ def _is_summing_scatter(node: fx.Node) -> bool:
     untouched slots at their original value, which scatter-into-zeros cannot."""
     if node.kwargs.get("include_self", True) is not True:
         return False
-    if node.target is aten.scatter_add.default:
+    if node.target in (aten.scatter_add.default, aten.scatter_add_.default):
         return True
     reduce = node.kwargs.get("reduce")
     if reduce is None and len(node.args) > 4:
@@ -173,7 +181,7 @@ def _evaluate_candidate(
     rejection is recorded under its own skip reason."""
     node_name = output_node.name
     is_scatter_reduce = output_node.target in _SCATTER_REDUCE_TARGETS
-    is_index_add = output_node.target is _INDEX_ADD_TARGET
+    is_index_add = output_node.target in _INDEX_ADD_TARGETS
 
     input_node = output_node.args[0]
     if not isinstance(input_node, fx.Node):
@@ -321,7 +329,7 @@ def _scan_candidates(graph: fx.Graph, ctx: ScatterPassContext) -> None:
         elif node.target in _SCATTER_REDUCE_TARGETS:
             if not _is_summing_scatter(node):
                 continue
-        elif node.target is _INDEX_ADD_TARGET:
+        elif node.target in _INDEX_ADD_TARGETS:
             # alpha scales the source; the rewrite adds it unscaled.
             if node.kwargs.get("alpha", 1) != 1:
                 continue
@@ -850,11 +858,12 @@ def _build_pattern_pass(ctx: ScatterPassContext) -> PatternMatcherPass:
         indices = [None] * scatter_dim + [index_node]
         _create_replacement(match, ctx, input_tensor, indices, values)
 
-    register_graph_pattern(
-        CallFunction(_INDEX_ADD_TARGET, Arg(), Ignored(), Ignored(), Arg()),
-        extra_check=extra_check,
-        pass_dict=patterns,  # type: ignore[arg-type]
-    )(index_add_replacement)
+    for target in _INDEX_ADD_TARGETS:
+        register_graph_pattern(
+            CallFunction(target, Arg(), Ignored(), Ignored(), Arg()),
+            extra_check=extra_check,
+            pass_dict=patterns,  # type: ignore[arg-type]
+        )(index_add_replacement)
 
     def scatter_reduce_replacement(match: Match, input_tensor, values) -> None:
         _create_scatter_reduce_replacement(match, ctx, input_tensor, values)
@@ -863,11 +872,34 @@ def _build_pattern_pass(ctx: ScatterPassContext) -> PatternMatcherPass:
     # candidate; reduce/include_self were already vetted by _is_summing_scatter.
     for scatter_pattern in (
         CallFunction(aten.scatter_add.default, Arg(), Ignored(), Ignored(), Arg()),
+        CallFunction(aten.scatter_add_.default, Arg(), Ignored(), Ignored(), Arg()),
         CallFunction(
             aten.scatter_reduce.two, Arg(), Ignored(), Ignored(), Arg(), Ignored()
         ),
         CallFunction(
+            aten.scatter_reduce.two,
+            Arg(),
+            Ignored(),
+            Ignored(),
+            Arg(),
+            reduce=Ignored(),
+        ),
+        CallFunction(
+            aten.scatter_reduce_.two, Arg(), Ignored(), Ignored(), Arg(), Ignored()
+        ),
+        CallFunction(
+            aten.scatter_reduce_.two,
+            Arg(),
+            Ignored(),
+            Ignored(),
+            Arg(),
+            reduce=Ignored(),
+        ),
+        CallFunction(
             aten.scatter.reduce, Arg(), Ignored(), Ignored(), Arg(), reduce=Ignored()
+        ),
+        CallFunction(
+            aten.scatter_.reduce, Arg(), Ignored(), Ignored(), Arg(), reduce=Ignored()
         ),
     ):
         register_graph_pattern(
@@ -879,7 +911,7 @@ def _build_pattern_pass(ctx: ScatterPassContext) -> PatternMatcherPass:
     return patterns
 
 
-def _log_summary(ctx: ScatterPassContext, num_matches: int) -> None:
+def _log_summary(ctx: ScatterPassContext) -> None:
     if ctx.n_candidates == 0:
         return
 
@@ -924,7 +956,7 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
     # (relatively expensive) memory profile entirely.
     _scan_candidates(graph, ctx)
     if not ctx.candidates:
-        _log_summary(ctx, 0)
+        _log_summary(ctx)
         return graph
 
     # Stage 2: build the memory profile and run the pattern matcher.
@@ -932,7 +964,7 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
     patterns = _build_pattern_pass(ctx)
     num_matches = patterns.apply(graph)
 
-    _log_summary(ctx, num_matches)
+    _log_summary(ctx)
 
     if num_matches > 0:
         graph.lint()

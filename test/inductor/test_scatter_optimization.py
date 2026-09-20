@@ -382,21 +382,21 @@ class TestPartitionedScatterOpt(TestCase):
 
     @config.patch(partitioned_scatter_fp32_accumulation=True)
     def test_index_add_low_precision(self):
-        """index_add only decomposes into index_put for some dtypes; below fp32 it
-        reaches the pass as aten.index_add, with its own (possibly negative) dim."""
+        """On platforms without bf16 atomic add, index_add reaches the pass
+        directly. Other platforms still exercise the equivalent index_put path."""
         torch.manual_seed(42)
-        N, n, D = 8192, 8, 4
+        B, N, n, D = 2, 8192, 8, 4
 
         def f(out, idx, vals):
             return (
-                out.index_add(0, idx, vals),
-                out.clone().index_add_(0, idx, vals),
+                out.index_add(1, idx, vals),
+                out.clone().index_add_(1, idx, vals),
                 out.index_add(-2, idx, vals),
             )
 
         idx = torch.randint(0, 4, (N,), dtype=torch.int64)
-        vals = torch.randn(N, D, dtype=torch.bfloat16)
-        out = torch.zeros(n, D, dtype=torch.bfloat16)
+        vals = torch.randn(B, N, D, dtype=torch.bfloat16)
+        out = torch.zeros(B, n, D, dtype=torch.bfloat16)
 
         with torch.no_grad():
             # bf16 eager stagnates once a slot outgrows the addend's ulp, so it is
@@ -409,6 +409,32 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
         for e, a in zip(expected, actual):
             self.assertEqual(e, a.float(), atol=1e-1, rtol=1e-2)
+
+    def test_inplace_index_and_scatter_add_graph_inputs(self):
+        """Mutating overloads on graph inputs are eligible, not only functionalized
+        clone-and-mutate forms."""
+        torch.manual_seed(43)
+        B, N, n, D = 2, 8192, 8, 4
+
+        def f(index_out, scatter_out, idx, scatter_idx, vals):
+            index_out.index_add_(1, idx, vals)
+            scatter_out.scatter_add_(1, scatter_idx, vals)
+            return index_out, scatter_out
+
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+        scatter_idx = idx.view(1, N, 1).expand(B, N, D)
+        vals = torch.randn(B, N, D)
+        outs = (torch.zeros(B, n, D), torch.zeros(B, n, D))
+
+        with torch.no_grad():
+            expected = f(*(out.clone() for out in outs), idx, scatter_idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                *(out.clone() for out in outs), idx, scatter_idx, vals
+            )
+
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 2)
+        for e, a in zip(expected, actual):
+            self.assertEqual(e, a, atol=1e-1, rtol=1e-2)
 
     def test_index_add_alpha_not_matched(self):
         """alpha scales the source, which the rewrite does not carry. Same inputs
@@ -500,16 +526,22 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             reference = f(out.double(), idx, vals.double())
 
-        counters.clear()
-        torch._dynamo.reset()
-        with torch.no_grad():
-            actual = torch.compile(f, backend="inductor", fullgraph=True)(
-                out.bfloat16(), idx, vals.bfloat16()
-            )
-        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
-        self.assertEqual(actual.dtype, torch.bfloat16)
-        rel_error = ((actual.double() - reference).norm() / reference.norm()).item()
-        self.assertLess(rel_error, 1e-2)
+        def rel_error(fp32_acc):
+            counters.clear()
+            torch._dynamo.reset()
+            with (
+                config.patch(partitioned_scatter_fp32_accumulation=fp32_acc),
+                torch.no_grad(),
+            ):
+                actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                    out.bfloat16(), idx, vals.bfloat16()
+                )
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+            self.assertEqual(actual.dtype, torch.bfloat16)
+            return ((actual.double() - reference).norm() / reference.norm()).item()
+
+        # Measured 6.2e-1 native against 2.1e-3 promoted on MI308X.
+        self.assertLess(rel_error(True), rel_error(False) / 10)
 
     def test_accuracy_int32_exact(self):
         """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""
@@ -704,9 +736,7 @@ class TestPartitionedScatterOpt(TestCase):
             (input_node, 0, index_node, values_node),
         )
 
-        input_node.meta["val"] = torch.empty(
-            4, 4, dtype=torch.bfloat16, device="meta"
-        )
+        input_node.meta["val"] = torch.empty(4, 4, dtype=torch.bfloat16, device="meta")
         index_node.meta["val"] = torch.empty(2, 4, dtype=torch.int64, device="meta")
         values_node.meta["val"] = torch.empty(
             100, 4, dtype=torch.bfloat16, device="meta"

@@ -1324,10 +1324,12 @@ partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
 # does. fp32 costs 2x the expanded buffer, an fp32 copy of the values, and a median
 # 25% of the optimized kernel time on MI308X (0% where the kernel is already bound on
 # the scatter itself, up to 65% on the index_add family).
-partitioned_scatter_fp32_accumulation: bool = True
+partitioned_scatter_fp32_accumulation: bool = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FP32_ACCUMULATION", "1") == "1"
+)
 
 # Bypass the heuristic skip gates (min_index_size, min_contention_ratio, and the
-# diminishing-returns cap on num_partitions). Correctness gates and the hard memory
+# traffic cap on num_partitions). Correctness gates and the hard memory
 # budget are still enforced. Useful for benchmarking or skewed-index workloads where
 # static estimates undercount real contention.
 # Enable via: TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE=1
