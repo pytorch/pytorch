@@ -8,6 +8,7 @@ import functools
 import importlib.machinery
 import importlib.util
 import itertools
+import math
 import os
 import re
 import site
@@ -95,17 +96,21 @@ def _pre_check_accepts(entry):
     )
 
 
+_OWN = GlobalSource(__name__)
 _BUILTINS_DICT = GlobalSource("__builtins_dict___0")
 _HERE = _stack(__file__)
 _ELSEWHERE = _stack(F.__file__)
 
 
-def _entry(source, value, guard_type="ID_MATCH", derived=()):
+def _entry(
+    source, value, guard_type="ID_MATCH", derived=(), has_value=True, user_stack=None
+):
     guard = Guard(source, getattr(GuardBuilder, guard_type))
+    guard.user_stack = user_stack
     guard.guard_types = list(derived) or None
     return GuardFilterEntry(
         name=strip_local_scope(source.name),
-        has_value=True,
+        has_value=has_value,
         value=value,
         guard_type=guard_type,
         derived_guard_types=tuple(derived),
@@ -165,6 +170,46 @@ _NOT_LIBRARY_MODULES = {
     # A frozen spec vouches only for a name the frozen table has.
     "frozen_spec_under_a_non_frozen_name": ("graphlib", {"__spec__": importlib.machinery.ModuleSpec("graphlib", importlib.machinery.FrozenImporter, origin="frozen")}, None),
     "shadowed_descendant_of_a_located_parent": ("collections.abc", {"__file__": os.path.join(_STDLIB_ROOT, "site-packages", "abc.py")}, None),
+}  # fmt: skip
+
+
+class _Ops:
+    @staticmethod
+    def op(x):
+        return x
+
+
+# Rows: risky?, source, value, _entry keywords. The trusted namespaces are the
+# torch, stdlib and own-module globals the test builds through _module_namespaces;
+# G['impl'] is an aliased user module and G['config'] a config module, neither
+# trusted. Every risky row was once a silent wrong answer on a serving machine.
+_RISKY_DROP_CASES = {
+    "torch_namespace_read": (False, AttrSource(GlobalSource("F"), "gelu"), F.gelu, {}),
+    "stdlib_namespace_read": (False, AttrSource(GlobalSource("math"), "sqrt"), math.sqrt, {}),
+    "dynamo_import_alias_read": (False, AttrSource(GlobalSource("__import_torch"), "relu"), torch.relu, {}),
+    "trusted_module_itself": (False, GlobalSource("F"), F, {}),
+    "own_module_def_read_as_namespace": (False, AttrSource(_OWN, "_user_op"), _user_op, {}),
+    "own_module_def_under_another_name": (True, AttrSource(_OWN, "act"), _user_op, {}),
+    "own_module_def_lifted_off_a_class": (True, AttrSource(_OWN, "op"), _Ops.op, {}),
+    # mypkg/__init__.py did `from .impl_b import _user_op`: the same def, owned by mypkg.impl_b.
+    "reexport_from_another_module": (True, AttrSource(GlobalSource("mypkg"), "_user_op"), types.FunctionType(_user_op.__code__, {"__name__": "mypkg.impl_b"}), {}),
+    "aliased_user_module": (True, AttrSource(GlobalSource("impl"), "op"), _user_op, {}),
+    "config_module_attribute": (True, AttrSource(GlobalSource("config"), "attn_impl"), _user_op, {}),
+    "module_in_attribute": (True, AttrSource(AttrSource(LocalSource("self"), "ns"), "gelu"), F.gelu, {}),
+    "instance_attribute": (True, AttrSource(LocalSource("self"), "act"), F.gelu, {}),
+    "builtin_in_a_slot": (True, AttrSource(LocalSource("self"), "act"), abs, {}),
+    "builtin_read_ordinary": (False, DictGetItemSource(_BUILTINS_DICT, "len"), len, {}),
+    "user_code_injected_into_builtins": (True, DictGetItemSource(_BUILTINS_DICT, "op"), _user_op, {}),
+    "registry_keyed_by_builtin_name": (True, DictGetItemSource(GlobalSource("_OPS"), "len"), len, {}),
+    "dict_lookup": (True, DictGetItemSource(GlobalSource("DISPATCH"), "act"), _user_op, {}),
+    "global_bound_to_own_def": (False, GlobalSource("_user_op"), _user_op, {"user_stack": _HERE}),
+    "global_bound_to_torch_def": (False, GlobalSource("silu"), F.silu, {}),
+    "global_alias_of_a_def": (True, GlobalSource("act"), _user_op, {"user_stack": _HERE}),
+    "cross_module_from_import": (True, GlobalSource("_user_op"), _user_op, {"user_stack": _ELSEWHERE}),
+    "closure_cell": (True, LocalSource("fn"), _user_op, {}),
+    "value_unreadable": (True, AttrSource(_OWN, "x"), None, {"has_value": False}),
+    "nested_resume_function": (False, GetItemSource(LocalSource("__nested_resume_fns"), 0), _user_op, {}),
+    "nested_frame_value": (True, GetItemSource(GetItemSource(LocalSource("__nested_frame_values"), 0), 1), _user_op, {}),
 }  # fmt: skip
 
 
@@ -1754,6 +1799,72 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         self.assertIs(namespaces["G['__import_torch']"], torch)
         self.assertIs(namespaces["G['mypkg'].layers"], layers)
+
+    @parametrize("shape", sorted(_RISKY_DROP_CASES))
+    def test_risky_drop_decision_table(self, shape):
+        risky, source, value, kw = _RISKY_DROP_CASES[shape]
+        entry = _entry(source, value, **kw)
+        modules = [
+            (GlobalSource("F"), F),
+            (GlobalSource("math"), math),
+            (_OWN, sys.modules[__name__]),
+            (GlobalSource("mypkg"), types.ModuleType("mypkg")),
+            (GlobalSource("impl"), types.ModuleType("mypkg.impl_b")),
+            (GlobalSource("config"), torch._dynamo.config),
+        ]
+        entries = [_entry(s, m) for s, m in modules] + [entry]
+        namespaces = precompile_package._module_namespaces(entries)
+        self.assertEqual(precompile_package._is_risky_drop(entry, namespaces), risky)
+
+    def test_risky_drop_sees_the_slot_behind_a_nested_resume(self):
+        # With nested_graph_breaks the callee's locals reach the caller's resume
+        # frame as positional entries of L['__nested_frame_values'][0] rather
+        # than as L['act']; a slot
+        # filled by a call config could repoint must be flagged either way,
+        # and the def read inside pick() waived either way.
+        def pick():
+            return _user_op
+
+        def flat(x):
+            act = pick()
+            torch._dynamo.graph_break()
+            return act(x * 2)
+
+        def callee(y):
+            act = pick()
+            torch._dynamo.graph_break()
+            return act(y)
+
+        def nested(x):
+            z = x * 2
+            return callee(z) + z
+
+        for fn, nested_graph_breaks, root in (
+            (flat, False, "L['act']"),
+            (nested, True, "L['__nested_frame_values']["),
+        ):
+            seen = []
+
+            def record(entries):
+                seen.extend(entries)
+                return [True] * len(entries)
+
+            with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+                compiled = torch.compile(
+                    fn, backend="eager", options={"guard_filter_fn": record}
+                )
+                compiled(torch.ones(2))
+            namespaces = precompile_package._module_namespaces(seen)
+            is_risky = precompile_package._is_risky_drop
+            verdicts = {
+                e.orig_guard.originating_source.name: is_risky(e, namespaces)
+                for e in seen
+                if e.value is _user_op
+            }
+            risky = [name for name, flagged in verdicts.items() if flagged]
+            self.assertEqual(verdicts["G['_user_op']"], False, verdicts)
+            self.assertEqual(len(risky), 1, verdicts)
+            self.assertTrue(risky[0].startswith(root), verdicts)
 
     def test_guard_policy_classification_is_total(self):
         # A guard type in no set is KEPT, so a drop policy can only ever
