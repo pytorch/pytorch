@@ -388,11 +388,11 @@ def _inductor_forward(*args):
 def _build_multigraph_forward():
     """Reconstruct a multi-graph artifact and return the runnable ``forward``.
 
-    A capture with graph breaks or several specializations is not one graph, so
-    unlike the single-graph drivers this one has to DISPATCH. Dynamo produced,
-    per frame, one transformed bytecode plus one guard tree per variant; the
-    artifact carries those verbatim (_FRAMES) and this rebuilds them into a
-    dispatcher per frame.
+    A capture with several specializations is not one graph, so unlike the
+    single-graph drivers this one has to DISPATCH. Dynamo produced, per frame,
+    one transformed bytecode plus one guard tree per variant; the artifact
+    carries those verbatim (_FRAMES) and this rebuilds the entry frame's
+    variants into a dispatcher.
 
     Deliberately standalone: nothing is installed onto the running program's
     code objects and no frame evaluator is involved. A frame's dispatcher
@@ -401,15 +401,9 @@ def _build_multigraph_forward():
     The rebuilt bytecode runs, and the guards check, the LIVE globals of the
     module each frame was compiled in, as CompilePackage.install has it; the
     only names bound there are ones Dynamo minted while tracing: that module's
-    import aliases and builtins dict key, the artifact's compiled subgraphs under
-    their backend ids (every one, into each module opened) and the resume
-    functions, bound the way install binds them. A continuation is reached the
-    way Dynamo emits it -- the entry bytecode does LOAD_GLOBAL on the resume
-    name -- so binding the resume dispatcher under that name in the module is
-    all the wiring the graph-break path needs. A resume name held there by
-    anything but this artifact (another standalone artifact, a live compile, a
-    user binding) refuses the load before anything is seeded; a load refused
-    for another reason partway through leaves the names it had already seeded.
+    import aliases and builtins dict key, and the artifact's compiled subgraphs
+    under their backend ids (every one, into each module opened), bound the way
+    install binds them.
 
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
@@ -417,7 +411,6 @@ def _build_multigraph_forward():
     hear about.
     """
     import base64
-    import hashlib
     import importlib
     import inspect
     import pickle
@@ -492,10 +485,6 @@ def _build_multigraph_forward():
         _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
         for _backend_id, _artifact in backends.items()
     }
-    # Resume names come from a per-process counter (backend ids carry a uuid), so
-    # another artifact or a live compile can hold one this artifact mints; the
-    # tag hashes both channels so two artifacts of one capture differ.
-    tag = hashlib.sha256((_FRAMES + _BACKENDS).encode()).hexdigest()[:16]
 
     def _seed(scope, name, value):
         # A pre-reset compile's CleanupHook may still own the name; it must not
@@ -509,9 +498,7 @@ def _build_multigraph_forward():
     # copy, and a global the frame writes lands where the module reads it.
     # Only names Dynamo minted while tracing are bound into it (every backend id
     # of the artifact, plus that module's import aliases and builtins key),
-    # never the artifact's own, so nothing here shadows a user global. A module
-    # is opened only for a frame with variants; a record with none is dead and
-    # never imports its module.
+    # never the artifact's own, so nothing here shadows a user global.
     scopes = {}
 
     def _scope(frame):
@@ -539,10 +526,6 @@ def _build_multigraph_forward():
         if not frame["variants"]:
             # Nothing to dispatch, for one of two reasons the coverage-gap
             # error below would misdiagnose: adding examples fixes neither.
-            # _serving_mode sends a capture that reaches such a frame to
-            # installed serving, so in a standalone artifact the record is dead
-            # unless it is the entry; a dead continuation must still bind its
-            # resume names, so its refusal is deferred to a call.
             if frame["bypassed"]:
                 cause = (
                     "was BYPASSED during capture (its guards could not be "
@@ -553,19 +536,10 @@ def _build_multigraph_forward():
             else:
                 cause = "produced no guarded code (Dynamo ran it eager as trivial)"
                 advice = ""
-            msg = (
+            raise _PrecompileError(
                 f"precompile: {target.co_name!r} {cause}, so the artifact has no "
                 f"variant of it to serve and no example can cover it.{advice}"
             )
-            if is_entry:
-                raise _PrecompileError(msg)
-
-            # Bound under a resume name, so the frame ahead calls it with its
-            # live locals; the diagnosis needs none of them.
-            def refuse(*_args, **_kwargs):
-                raise _PrecompileError(msg)
-
-            return refuse
         scope = _scope(frame)
         # A code object carries no defaults, so the entry gets them back from
         # the artifact; a defaulted parameter the call omits is otherwise absent
@@ -573,8 +547,8 @@ def _build_multigraph_forward():
         defaults = entry_binding.get("defaults") if is_entry else None
         kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
 
-        def _function(code, closure):
-            f = types.FunctionType(code, scope, target.co_name, defaults, closure)
+        def _function(code):
+            f = types.FunctionType(code, scope, target.co_name, defaults)
             if kwdefaults:
                 f.__kwdefaults__ = dict(kwdefaults)
             return f
@@ -606,25 +580,11 @@ def _build_multigraph_forward():
         # Calls are bound to f_locals the way Python binds them (keyword-only,
         # *args and **kwargs included); the transformed bytecode keeps the
         # frame's parameter layout, so the original code object describes it.
-        cells = tuple(types.CellType() for _ in target.co_freevars)
-        signature = inspect.signature(_function(target, cells or None))
+        signature = inspect.signature(_function(target))
+        bound = [(manager, _function(body)) for manager, body in variants]
 
-        def _dispatch_with(bound, closure, args, kwargs):
-            # Guards are written against the frame's locals: the free variables
-            # (a cell unbound at the graph break is absent, as it is from a real
-            # frame's f_locals), then the bound arguments.
-            f_locals = {}
-            for name, cell in zip(target.co_freevars, closure or ()):
-                try:
-                    f_locals[name] = cell.cell_contents
-                except ValueError:
-                    pass
-            f_locals.update(bind_locals(signature, *args, **kwargs))
-            # inspect.signature spells a comprehension's iterator ".N" as
-            # "implicitN"; the guards are rooted at the bytecode name.
-            for name in target.co_varnames[: target.co_argcount]:
-                if name.startswith("."):
-                    f_locals[name] = f_locals.pop("implicit" + name[1:])
+        def dispatch(*args, **kwargs):
+            f_locals = bind_locals(signature, *args, **kwargs)
             # A tag-safe root's fast path (GuardManager::check_nopybind) can
             # refuse without running its tree and disarms itself; check twice.
             for _ in range(2):
@@ -640,70 +600,14 @@ def _build_multigraph_forward():
                 f"an example covering it and recapture."
             )
 
-        def _bind(closure):
-            return [(manager, _function(body, closure)) for manager, body in variants]
-
-        if target.co_freevars:
-            # Dynamo binds a continuation that closes over locals as a FACTORY
-            # taking the closure tuple, and the frame ahead of it passes one.
-            def factory(closure):
-                bound = _bind(closure)
-
-                def dispatch(*args, **kwargs):
-                    return _dispatch_with(bound, closure, args, kwargs)
-
-                return dispatch
-
-            return factory
-
-        bound = _bind(None)
-
-        def dispatch(*args, **kwargs):
-            return _dispatch_with(bound, None, args, kwargs)
-
         return dispatch
 
     entry = None
-    if not any(_frame["is_entry"] for _frame in frames):
-        raise _PrecompileError("precompile: artifact has no entry frame")
-    # Checked over every frame before anything is seeded, so a refusal leaves
-    # the module as it was: a resume name is rebound only over this artifact's
-    # own dispatcher (a rebuild), never over another artifact's, a live
-    # compile's or a user's binding, whose LOAD_GLOBAL it would repoint.
-    opened = set()
     for _frame in frames:
-        module = _frame["python_module"]
-        if _frame["variants"]:
-            opened.add(module)
-        for _name in _frame["resume_names"] if module in opened else ():
-            existing = vars(_import(module)).get(_name)
-            other = getattr(existing, "__precompile_artifact__", None)
-            if existing is not None and other != tag:
-                what = f"precompile: {_name!r} in module {module!r}"
-                raise _PrecompileError(
-                    f"{what} is bound by artifact {other} and this artifact ({tag}) mints "
-                    f"the same resume name: only one standalone artifact per captured "
-                    f"module can serve continuations in a process."
-                    if other
-                    else f"{what} is a resume name this artifact ({tag}) mints and this "
-                    f"process already holds it (a live compile of the same function, or a "
-                    f"user binding); load the artifact in a fresh process."
-                )
-    for _frame in frames:
-        dispatcher = _make_dispatcher(_frame)
+        # A continuation is reached by LOAD_GLOBAL on its resume name from the
+        # frame ahead of it; nothing binds one yet, so only the entry is built.
         if _frame["is_entry"]:
-            entry = dispatcher
-        else:
-            dispatcher.__precompile_artifact__ = tag
-        # A continuation is reached by LOAD_GLOBAL from the frame ahead of it,
-        # in the module both were compiled in: Dynamo records a continuation
-        # under its parent's module, except under config.nested_graph_breaks
-        # (default False), where an inlined frame's continuation is recorded
-        # under the inlined function's module while the root frame's bytecode
-        # does the LOAD_GLOBAL. A dead record whose module no live frame opened
-        # has no frame left to name it, so it binds nothing.
-        scope = scopes.get(_frame["python_module"])
-        if scope is not None:
-            for _name in _frame["resume_names"]:
-                _seed(scope, _name, dispatcher)
+            entry = _make_dispatcher(_frame)
+    if entry is None:
+        raise _PrecompileError("precompile: artifact has no entry frame")
     return entry
