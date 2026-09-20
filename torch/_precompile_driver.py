@@ -408,8 +408,8 @@ def _build_multigraph_forward():
     name -- so binding the resume dispatcher under that name in the module is
     all the wiring the graph-break path needs. A load refused partway through
     leaves the names it had already seeded in that module; a load that would
-    rebind a resume name held there by anything else (a live torch.compile,
-    another standalone artifact) is refused.
+    rebind a resume name held there by anything but a compile of the same
+    continuation (another standalone artifact, a user binding) is refused.
 
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
@@ -493,21 +493,11 @@ def _build_multigraph_forward():
         for _backend_id, _artifact in backends.items()
     }
     # Resume names come from a per-process counter (backend ids carry a uuid), so
-    # a live torch.compile or another artifact can hold one this artifact mints;
-    # seeding a (tagged) dispatcher refuses any holder without this artifact's tag.
-    tag = hashlib.sha256(_FRAMES.encode()).hexdigest()[:16]
+    # another artifact or a live compile can hold one this artifact mints; the
+    # tag hashes both channels so two artifacts of one capture differ.
+    tag = hashlib.sha256((_FRAMES + _BACKENDS).encode()).hexdigest()[:16]
 
     def _seed(scope, name, value):
-        other = getattr(scope.get(name), "__precompile_artifact__", None)
-        strict = hasattr(value, "__precompile_artifact__")
-        if other != tag and (other or strict and name in scope):
-            holder = f"artifact {other}" if other else "a live compile or user binding"
-            raise _PrecompileError(
-                f"precompile: {name!r} in module {scope['__name__']!r} is bound by "
-                f"{holder} and this artifact ({tag}) mints the same resume name: only "
-                f"one standalone artifact per captured module can serve continuations "
-                f"in a process. Serve them from separate processes."
-            )
         # A pre-reset compile's CleanupHook may still own the name; it must not
         # delete this binding once that code object is collected.
         CleanupHook.disown(scope, name)
@@ -678,9 +668,10 @@ def _build_multigraph_forward():
         raise _PrecompileError("precompile: artifact has no entry frame")
     for _frame in frames:
         dispatcher = _make_dispatcher(_frame)
-        dispatcher.__precompile_artifact__ = tag
         if _frame["is_entry"]:
             entry = dispatcher
+        else:
+            dispatcher.__precompile_artifact__ = tag
         # A continuation is reached by LOAD_GLOBAL from the frame ahead of it,
         # in the module both were compiled in: Dynamo records a continuation
         # under its parent's module, except under config.nested_graph_breaks
@@ -690,6 +681,23 @@ def _build_multigraph_forward():
         # has no frame left to name it, so it binds nothing.
         scope = scopes.get(_frame["python_module"])
         if scope is not None:
+            # Permit an unbound name, this artifact's own dispatcher and a live
+            # compile of the same continuation (a function over the record's
+            # code, or Dynamo's closure factory holding it); refuse the rest.
+            code = SerializedCode.to_code_object(_frame["code"])
             for _name in _frame["resume_names"]:
+                existing = scope.get(_name)
+                other = getattr(existing, "__precompile_artifact__", None)
+                cells = getattr(existing, "__closure__", None) or ()
+                held = [getattr(existing, "__code__", None)]
+                held += [c.cell_contents for c in cells if c != types.CellType()]
+                by = f"artifact {other}" if other else "a live compile or user binding"
+                if not (existing is None or other == tag or code in held):
+                    raise _PrecompileError(
+                        f"precompile: {_name!r} in module {scope['__name__']!r} is bound by "
+                        f"{by} and this artifact ({tag}) mints the same resume name: only "
+                        f"one standalone artifact per captured module can serve continuations "
+                        f"in a process. Serve them from separate processes."
+                    )
                 _seed(scope, _name, dispatcher)
     return entry
