@@ -41,6 +41,32 @@ def skipIfNoAotLib(fn):
     )(fn)
 
 
+def _aot_topk_arch_supported() -> bool:
+    # Generated covers()/dispatch gate on shipped capabilities (gen_aot_lib
+    # _gate_for). topk ARCHS are sm_90/sm_90a/sm_100/sm_100a; SM12.x is not.
+    if not torch.cuda.is_available():
+        return False
+    import importlib.util
+
+    path = os.path.join(
+        os.path.dirname(torch.__file__), "_native", "ops", "topk", "aot.py"
+    )
+    spec = importlib.util.spec_from_file_location("_topk_aot_archs", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    major, minor = torch.cuda.get_device_capability()
+    tags = {f"sm_{major}{minor}", f"sm_{major}{minor}a"}
+    return bool(tags & set(mod.ARCHS))
+
+
+def skipIfNoAotTopkArch(fn):
+    """Routing/covers tests assume this GPU is in the AOT device gate."""
+    return unittest.skipUnless(
+        _aot_topk_arch_supported(),
+        "AOT topk kernels are sm_90/sm_100 only",
+    )(fn)
+
+
 def skipIfNoJitTopk(fn):
     """Both top-k routes require Hopper or newer."""
     capability = (
@@ -153,6 +179,7 @@ class TestNativeAotTopKDeclaration(TestCase):
 @skipIfNoCuteDSL
 class TestNativeAotTopK(TestCase):
     @skipIfNoAotLib
+    @skipIfNoAotTopkArch
     def test_covered_grid_routes_to_aot(self):
         cases = [
             {"dtype": dtype, "n": n, "k": k}
@@ -168,6 +195,7 @@ class TestNativeAotTopK(TestCase):
             self.assertEqual(r["index_dtype"], "torch.int64")
 
     @skipIfNoAotLib
+    @skipIfNoAotTopkArch
     def test_register_grid_routing(self):
         cases = [
             {"dtype": "float32", "n": n, "k": 16} for n in (64, 128, 256, 512, 1024)
@@ -185,6 +213,7 @@ class TestNativeAotTopK(TestCase):
             self.assertEqual(r["index_dtype"], "torch.int64")
 
     @skipIfNoAotLib
+    @skipIfNoAotTopkArch
     def test_dynamic_n_and_work_rungs_route_to_aot(self):
         shapes = (
             (64, 3072),
@@ -213,6 +242,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
 
     @skipIfNoAotLib
+    @skipIfNoAotTopkArch
     def test_deterministic_mode_routes_to_aot_bit_exact(self):
         # Det mode is on the grid, so its kernel must fire and match aten bit-exactly.
         # Probe values are torch.randn; ties are exercised in the next test.
@@ -245,6 +275,7 @@ class TestNativeAotTopK(TestCase):
             torch.use_deterministic_algorithms(prior)
 
     @skipIfNoAotLib
+    @skipIfNoAotTopkArch
     def test_out_variant_routes_to_aot(self):
         results = _run_probe(
             [{"dtype": "float32", "n": 4096, "k": 64, "out_variant": True}],
@@ -427,6 +458,7 @@ class TestNativeAotTopK(TestCase):
             mod.covered_axes(x, 64), mod.covered_axes(x, 64, -1, True, True)
         )
 
+    @skipIfNoAotTopkArch
     def test_covered_axes_selects_work_rungs(self):
         import importlib.util
         import os
@@ -456,6 +488,7 @@ class TestNativeAotTopK(TestCase):
         finally:
             torch.use_deterministic_algorithms(prior)
 
+    @skipIfNoAotTopkArch
     def test_flags_the_stub_declines_are_uncovered(self):
         # The stub takes only dim=last, largest and sorted; coverage must agree, or such
         # a call declines on both routes and lands on stock aten instead of the JIT one.
@@ -469,6 +502,7 @@ class TestNativeAotTopK(TestCase):
         # dim spelled as the last axis is the covered case, however it is written.
         self.assertTrue(aot_manifest.covers("topk", "CUDA", (x, 64), {"dim": 1}))
 
+    @skipIfNoAotTopkArch
     def test_manifest_covers_matches_grid(self):
         # CUDA tensors, because coverage includes the prelude's full-wave M gate, so
         # a CPU probe is always uncovered.
