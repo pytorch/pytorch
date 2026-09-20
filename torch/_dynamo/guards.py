@@ -5083,9 +5083,13 @@ def _offending_value_path(state: Any, target: Any) -> str:
             # lose its __dict__ children, so each read has its own try. Fan-out
             # draws on the shared budget BEFORE any path string is built.
             try:
-                if isinstance(value, (list, tuple, OrderedSet)):
+                if isinstance(value, (list, tuple)):
                     items = itertools.islice(enumerate(value), budget)
                     children = [(f"{path}[{i}]", v) for i, v in items]
+                elif isinstance(value, OrderedSet):
+                    # GuardsSet.inner; not subscriptable, so spell the accessor.
+                    items = itertools.islice(enumerate(value), budget)
+                    children = [(f"list({path})[{i}]", v) for i, v in items]
                 elif isinstance(value, (set, frozenset)):
                     members = itertools.islice(value, budget)
                     children = [(f"{path}[<a member>]", v) for v in members]
@@ -5144,18 +5148,19 @@ def _offending_value_path(state: Any, target: Any) -> str:
                         for name, child in instance_dict.items()
                         if not name.startswith("__")
                     ]
-                else:
-                    # A slotted object (Guard is a slots dataclass) has no
-                    # __dict__; its state lives in the slots along the MRO.
-                    for klass in type(value).__mro__:
-                        slots = klass.__dict__.get("__slots__", ())
-                        for name in (slots,) if isinstance(slots, str) else slots:
-                            try:
-                                children.append(
-                                    (f"{path}.{name}", getattr(value, name))
-                                )
-                            except AttributeError:  # an unset slot
-                                pass
+                # A slotted object (Guard is a slots dataclass) keeps its state
+                # in the slots along the MRO, with or without a __dict__ beside
+                # them; read like _instance_dict, so no user __getattr__ runs.
+                for klass in type(value).__mro__:
+                    slots = klass.__dict__.get("__slots__", ())
+                    for name in (slots,) if isinstance(slots, str) else slots:
+                        if name.startswith("__"):
+                            continue
+                        try:
+                            child = object.__getattribute__(value, name)
+                        except Exception:  # an unset slot, a raising descriptor
+                            continue
+                        children.append((f"{path}.{name}", child))
             except Exception:
                 pass
             children = children[:budget]
