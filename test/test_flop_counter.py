@@ -73,6 +73,21 @@ class TestFlopCounter(TestCase):
         with self.assertRaises(AssertionError):
             sdpa_flop_count(q_shape, k_bad, v_bad)
 
+    def test_sdpa_flop_count_zero_heads(self):
+        """A tensor with no heads is zero flops, not a division by zero."""
+        shape = (2, 0, 128, 64)
+        self.assertEqual(sdpa_flop_count(shape, shape, shape), 0)
+        self.assertEqual(sdpa_backward_flop_count(shape, shape, shape, shape), 0)
+
+    def test_sdpa_flop_count_query_heads_without_kv_heads(self):
+        """Query heads against no kv heads is incompatible, not a division by zero."""
+        q_shape = (2, 8, 128, 64)
+        kv_shape = (2, 0, 128, 64)
+        with self.assertRaises(AssertionError):
+            sdpa_flop_count(q_shape, kv_shape, kv_shape)
+        with self.assertRaises(AssertionError):
+            sdpa_backward_flop_count(q_shape, q_shape, kv_shape, kv_shape)
+
     def test_flop_counter_variety(self):
         mod = torch.nn.Linear(9, 10)
         with FlopCounterMode() as mode:

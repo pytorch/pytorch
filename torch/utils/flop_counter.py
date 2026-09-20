@@ -381,7 +381,14 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
             f"sdpa_flop_count: query/key/value shapes are incompatible: "
             f"q={query_shape}, k={key_shape}, v={value_shape}"
         )
-    if h_q < h_kv or h_q % h_kv != 0:
+    if h_kv == 0:
+        # No kv heads means nothing to broadcast; the bmms below already give
+        # zero flops, as they do for a zero sequence length or head dim.
+        if h_q != 0:
+            raise AssertionError(
+                f"sdpa_flop_count: query has {h_q} heads but key/value have none"
+            )
+    elif h_q < h_kv or h_q % h_kv != 0:
         raise AssertionError(
             f"sdpa_flop_count: query heads ({h_q}) must be a multiple of "
             f"key/value heads ({h_kv})"
@@ -608,7 +615,13 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
         raise AssertionError(
             "sdpa_backward_flop_count: batch/heads mismatch among tensors"
         )
-    if h_q < h_kv or h_q % h_kv != 0:
+    if h_kv == 0:
+        # See sdpa_flop_count: no kv heads is zero flops, not a division.
+        if h_q != 0:
+            raise AssertionError(
+                f"sdpa_backward_flop_count: query has {h_q} heads but key/value have none"
+            )
+    elif h_q < h_kv or h_q % h_kv != 0:
         raise AssertionError(
             f"sdpa_backward_flop_count: query heads ({h_q}) must be a multiple of "
             f"key/value heads ({h_kv})"
