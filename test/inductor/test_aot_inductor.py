@@ -4441,6 +4441,9 @@ class AOTInductorTestsTemplate:
 
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
+    @skipIfXpu(
+        msg="tests CUDA host-side TMA descriptor codegen; XPU descriptors are not CUtensorMap-based"
+    )
     def test_triton_kernel_tma_descriptor_1d(self, dynamic, tma_version):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -4503,6 +4506,9 @@ class AOTInductorTestsTemplate:
 
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
+    @skipIfXpu(
+        msg="tests CUDA host-side TMA descriptor codegen; XPU descriptors are not CUtensorMap-based"
+    )
     def test_triton_kernel_tma_descriptor_2d(self, dynamic, tma_version):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
