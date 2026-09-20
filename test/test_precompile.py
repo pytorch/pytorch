@@ -26,7 +26,7 @@ from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import _read_artifact, _write_artifact
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler import PrecompiledRunnable, PrecompileError
-from torch.compiler.precompile import DynamoTracer, MakeFxTracer
+from torch.compiler.precompile import Capture, DynamoTracer, MakeFxTracer
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -3194,7 +3194,7 @@ class TestPrecompile(TestCase):
 
 
 class TestPrecompilePublicSurface(TestCase):
-    """The public module surface and the report types: nothing here traces."""
+    """The public module surface: nothing here traces."""
 
     def test_tracer_annotations_resolve_after_the_re_home(self):
         # torch/compiler/precompile.py pre-resolves the two tracers' annotations before
@@ -3235,6 +3235,9 @@ class TestPrecompilePublicSurface(TestCase):
         for name in ("PrecompiledRunnable", "PrecompiledCallable"):
             self.assertIn(name, torch.compiler.__all__)
             self.assertEqual(getattr(torch.compiler, name).__module__, "torch.compiler")
+        self.assertIs(
+            torch.compiler.precompile.PrecompiledRunnable, PrecompiledRunnable
+        )
         # __all__ IS the frozen surface: pin it exactly, resolve every name through the
         # module (dropped or listed-but-missing fails here), and check the re-homed __module__.
         self.assertEqual(
@@ -3441,6 +3444,7 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_exit_writes_the_pair_and_load_serves_it(self):
         with self._capture() as cap:
             y = cap(self.model, self.x)
+        self.assertIsInstance(cap, Capture)
         self.assertEqual(y, self.model(self.x))
         self.assertTrue(os.path.exists(self.artifact) and os.path.exists(self.cache))
         # torch.compiler.precompile.load() EXECs source it did not produce, so it
@@ -3654,7 +3658,7 @@ class TestPrecompileCaptureFiles(TestCase):
         pairs = [(self.artifact, p) for p in spellings]
         pairs.append((os.fsencode(self.artifact), self.artifact))
         for artifact_path, cache_path in pairs:
-            with self.subTest(cache_path=cache_path):
+            with self.subTest(artifact_path=artifact_path, cache_path=cache_path):
                 with self.assertRaisesRegex(ValueError, "same file"):
                     self._capture(artifact_path=artifact_path, cache_path=cache_path)
                 with self.assertRaisesRegex(ValueError, "same file"):
@@ -4524,7 +4528,9 @@ class TestPrecompileCaptureFiles(TestCase):
         # A path the filesystem cannot open at all reaches the same diagnostic.
         with self.assertRaises(PrecompileError) as cm:
             torch.compiler.precompile.load("x" * 5000, self.cache)
-        self.assertEqual(cm.exception.__cause__.errno, errno.ENAMETOOLONG)
+        self.assertIsInstance(cm.exception.__cause__, OSError)
+        if sys.platform != "win32":  # Windows maps an over-long name to another errno
+            self.assertEqual(cm.exception.__cause__.errno, errno.ENAMETOOLONG)
 
     def test_transposed_paths_are_reported_as_precompile_errors(self):
         # load takes two same-typed positional paths, so the likeliest caller mistake is
