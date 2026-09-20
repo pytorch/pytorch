@@ -417,9 +417,15 @@ _LeafBounds = dict[int, tuple[int | None, int | None]] | None
 # boundary here.
 _NO_MARKS: Mapping[int, Any] = MappingProxyType({})
 
+
 # Default of PrecompileError.result. Distinct from None because None is a real return
 # (the documented training step ends in .backward()); the sentinel means nothing ran.
-_NO_RESULT: object = object()
+class _NoResult:
+    def __repr__(self) -> str:
+        return "<precompile: nothing ran>"
+
+
+_NO_RESULT = _NoResult()
 
 
 class PrecompileError(RuntimeError):
@@ -434,7 +440,8 @@ class PrecompileError(RuntimeError):
     ``result`` is what ``fn`` returned when the capture call that raised this had
     already run before the refusal fired, so the return value is not lost: ``None``
     means that call ran and returned ``None``. When nothing ran, ``result`` is a
-    private sentinel instead, never ``None``.
+    private sentinel instead, never ``None``; compare against
+    ``PrecompileError.result`` (the class default) to test for it.
     """
 
     # Re-exported in torch.compiler.__all__, so pickle and test_public_bindings
@@ -500,7 +507,7 @@ class Capture:
     ``fn`` returned -- and the artifact is written once, to the ``artifact_path``
     / ``cache_path`` files, when the block exits. How many calls the block takes
     depends on ``tracer``: the make_fx front-end takes exactly one and refuses a
-    second; the Dynamo front-end accumulates across calls.
+    second; the Dynamo front-end, when implemented, accumulates across calls.
     """
 
     def __enter__(self) -> Self:
@@ -539,8 +546,8 @@ class _MakeFxCapture(Capture):
     ) -> None:
         if isinstance(fn, functools.partial):
             raise PrecompileError(
-                "precompile cannot capture a partial. Pass the underlying function "
-                "and give its bound arguments as call arguments."
+                f"precompile cannot capture a partial of {fn.func!r}. Pass the "
+                "underlying function and give its bound arguments as call arguments."
             )
         if not isinstance(tracer, MakeFxTracer):
             raise PrecompileError(
