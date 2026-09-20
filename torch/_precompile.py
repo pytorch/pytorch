@@ -277,11 +277,7 @@ _NO_MARKS: Mapping[int, Any] = MappingProxyType({})
 # Default of PrecompileError.result. Distinct from None because None is a real return
 # (the documented training step ends in .backward()); the sentinel means nothing ran.
 class _NoResult:
-    def __repr__(self) -> str:
-        return "<precompile: nothing ran>"
-
-
-_NO_RESULT = _NoResult()
+    """Sentinel: the capture call never ran."""
 
 
 class PrecompileError(RuntimeError):
@@ -300,7 +296,7 @@ class PrecompileError(RuntimeError):
     ``PrecompileError.result`` (the class default) to test for it.
     """
 
-    result: object = _NO_RESULT
+    result: object = _NoResult
 
 
 @dataclasses.dataclass(frozen=True)
@@ -397,8 +393,9 @@ class _MakeFxCapture(Capture):
         training: bool,
     ) -> None:
         if isinstance(fn, functools.partial):
+            name = getattr(fn.func, "__qualname__", type(fn.func).__name__)
             raise PrecompileError(
-                f"precompile cannot capture a partial of {fn.func!r}. Pass the "
+                f"precompile cannot capture a partial of {name!r}. Pass the "
                 "underlying function and give its bound arguments as call arguments."
             )
         if not isinstance(tracer, MakeFxTracer):
@@ -1730,7 +1727,7 @@ class PrecompiledModule(PrecompiledRunnable):
         tracer: str = "make_fx",
         decompositions: dict | None = None,
     ) -> None:
-        # ``fn`` is the whole computation: an nn.Module, or a callable that takes the
+        # ``fn`` is the whole computation: a callable that takes the
         # module(s) it uses as positional arguments (e.g. ``lambda m, x: m(x)``, or a
         # training step that computes a loss and torch.autograd.grad); a module it
         # closed over instead would be baked in as constants (invariant 1).
