@@ -215,9 +215,10 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
         s = mS[row]
         if out_of_range:
             # Out-of-range target (see above): poison the row rather than
-            # return plausible numbers. Through `factor` this reaches every
-            # element of the gradient row as well as the loss term, so the
-            # failure cannot be read as a result.
+            # return plausible numbers. `s` carries it to the loss term
+            # directly and, through `factor`, to every element of the gradient
+            # row -- so the failure cannot be read as a result. Poisoning
+            # `factor` instead would leave the loss finite.
             s = Float32(Float32.nan)
         factor = s / row_sum
         if tidx == 0:
