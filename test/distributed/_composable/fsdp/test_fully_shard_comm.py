@@ -100,8 +100,7 @@ EventType = tuple[str, str, TrainingState]
 from torch.testing._internal.common_fsdp import get_devtype
 
 
-device_type = torch.device(get_devtype())
-device_module = torch.get_device_module(device_type)
+device_module = torch.get_device_module(get_devtype())
 
 
 class TestFSDPCommContext(TestCase):
@@ -164,7 +163,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type.type, 0)
+        return torch.device(self.device_type, 0)
 
     def _get_param_sizes(self) -> list[torch.Size]:
         # For world size 128, the fp32 all-gather and reduce-scatter testing
@@ -323,7 +322,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_reduce_scatter_fp16(self, device):
         param_sizes = self._get_param_sizes()
-        default_stream = torch.get_device_module(device_type).current_stream()
+        default_stream = torch.get_device_module(self.device_type).current_stream()
         stream = device_module.Stream()
         for reduce_scatter_stream in (default_stream, stream):
             self._test_reduce_scatter(
@@ -384,7 +383,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             all_reduce_grads=True,
             partial_reduce_output=None,
         )
-        torch.get_device_module(device_type).current_stream().wait_event(
+        torch.get_device_module(self.device_type).current_stream().wait_event(
             post_reduce_event
         )
 
@@ -414,7 +413,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
 
     @property
     def world_size(self) -> int:
-        return min(4, torch.get_device_module(device_type).device_count())
+        return min(4, torch.get_device_module(self.device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_communication_count(self, device):
@@ -446,7 +445,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         # We construct `num_blocks` plus 1 FSDP states/communication groups
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=self.device_type)
         with CommDebugMode() as fwd_comm_mode:
             loss = model(inp)
         fwd_comm_counts = fwd_comm_mode.get_comm_counts()
@@ -487,7 +486,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=self.device_type)
         with CommDebugMode() as fwd_comm_mode:
             loss = model(inp)
         fwd_comm_counts = fwd_comm_mode.get_comm_counts()
@@ -532,11 +531,11 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
         model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device_type)
+        ref_model = copy.deepcopy(model).to(self.device_type)
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
         mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
         mesh = init_device_mesh(
-            device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
         for module in model.modules():
             if isinstance(module, TransformerBlock):
@@ -553,7 +552,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         non_block_params = set(ref_model.parameters()) - block_params
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=self.device_type)
 
         for _ in range(10):
             ref_loss = ref_model(inp).sum()
@@ -582,7 +581,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
             param_dtype=param_dtype, reduce_dtype=reduce_dtype
         )
         model = nn.Sequential(*[MLP(16) for _ in range(3)])
-        ref_model = copy.deepcopy(model).to(device_type)
+        ref_model = copy.deepcopy(model).to(self.device_type)
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
         for mlp in model:
@@ -592,7 +591,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         model.set_gradient_divide_factor(divide_factor)
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
+        inp = torch.randn((4, 16), device=self.device_type, dtype=param_dtype)
 
         for _ in range(10):
             loss = model(inp).sum()
@@ -652,7 +651,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         model = copy.deepcopy(ref_model)
         mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
         mesh = init_device_mesh(
-            device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
@@ -677,7 +676,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=self.device_type)
         for _ in range(3):
             ref_loss = ref_model(inp).sum()
             ref_loss.backward()
@@ -713,7 +712,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         blocks[0].set_reduce_scatter_max_input_buffers(expected_max, recurse=False)
 
         # Resolution runs in lazy init on the first forward.
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=self.device_type)
         model(inp).sum().backward()
 
         comm_ctx = model._get_fsdp_state()._comm_ctx
@@ -761,7 +760,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
     ):
         torch.manual_seed(42)
         model_args = ModelArgs()
-        model = Transformer(model_args).to(device_type)
+        model = Transformer(model_args).to(self.device_type)
         if set_reshard_after_forward is None:
             fully_shard_fn = fully_shard
         else:
@@ -784,7 +783,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
             )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=self.device_type)
         with CommDebugMode() as fwd_comm_mode:
             loss = model(inp)
         fwd_comm_counts = fwd_comm_mode.get_comm_counts()
@@ -821,7 +820,7 @@ class TestFullyShardPrefetch(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return min(4, torch.get_device_module(device_type).device_count())
+        return min(4, torch.get_device_module(self.device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_backward_prefetch(self, device):
@@ -995,7 +994,7 @@ class TestFullyShardPrefetch(FSDPTest):
         fully_shard(model[1].lin1, reshard_after_forward=reshard_after_forward)
         fully_shard(model[1].lin2, reshard_after_forward=reshard_after_forward)
         fully_shard(model, reshard_after_forward=reshard_after_forward)
-        inp = torch.randn((4, dim), device=device_type.type)
+        inp = torch.randn((4, dim), device=self.device_type)
         events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
@@ -1274,7 +1273,7 @@ class TestFullyShardPrefetch(FSDPTest):
             0,
             model_args.vocab_size,
             (2, model_args.max_seq_len),
-            device=device_type.type,
+            device=self.device_type,
         )
 
         def set_backward_prefetch(model: Transformer) -> None:
@@ -1498,7 +1497,7 @@ class TestFullyShardPrefetch(FSDPTest):
             0,
             model_args.vocab_size,
             (2, model_args.max_seq_len),
-            device=device_type.type,
+            device=self.device_type,
         )
         with (
             patch_unshard(unshard_with_record),
@@ -1579,7 +1578,7 @@ class TestFullyShardPrefetch(FSDPTest):
         post_backward_with_record = self._get_post_backward_with_record(
             FSDPParamGroup.post_backward, events
         )
-        inp = torch.randn((2, 16), device=device_type.type)
+        inp = torch.randn((2, 16), device=self.device_type)
         with (
             patch_unshard(unshard_with_record),
             patch_post_backward(post_backward_with_record),
@@ -1625,7 +1624,7 @@ class TestFullyShardPrefetch(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_backward_misprefetch(self, device):
         torch.manual_seed(42)
-        model = MLP(dim=16, device=device_type)
+        model = MLP(dim=16, device=self.device_type)
         ref_model = copy.deepcopy(model)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         fully_shard(model.in_proj)
@@ -1639,7 +1638,7 @@ class TestFullyShardPrefetch(FSDPTest):
         model.in_proj.set_modules_to_backward_prefetch([model.out_proj])
 
         torch.manual_seed(self.rank + 1)
-        inp = torch.randn((2, 16), device=device_type.type)
+        inp = torch.randn((2, 16), device=self.device_type)
         for _ in range(3):
             ref_optim.zero_grad()
             ref_loss = ref_model(inp).sum()
@@ -1674,7 +1673,7 @@ class TestFullyShardPrefetch(FSDPTest):
             0,
             model_args.vocab_size,
             (2, model_args.max_seq_len),
-            device=device_type.type,
+            device=self.device_type,
         )
         return model, optim, inp
 
@@ -1726,7 +1725,7 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return min(torch.get_device_module(device_type).device_count(), 2)
+        return min(torch.get_device_module(self.device_type).device_count(), 2)
 
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/149349")
     @skip_if_lt_x_gpu(2)
@@ -1781,10 +1780,10 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
                     self.mlps.mlp3.unshard(async_op=True)
                 return self.mlps([y1, y2, y3], [work1, work2, work3])
 
-        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
         batch_size, dim = 2, 8
         torch.manual_seed(42)
-        ref_model = replicate(ReduceModel(dim, mesh).to(device_type))
+        ref_model = replicate(ReduceModel(dim, mesh).to(self.device_type))
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         torch.manual_seed(42)
         model = ReduceModel(dim, mesh)
@@ -1792,10 +1791,10 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
         fully_shard(model.mlps.mlp2, reshard_after_forward=False)
         fully_shard(model.mlps.mlp3, reshard_after_forward=False)
         fully_shard(model.mlps)
-        replicate(model.to(device_type))
+        replicate(model.to(self.device_type))
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((batch_size, dim), device=device_type.type)
+        inp = torch.randn((batch_size, dim), device=self.device_type)
         for _ in range(10):
             losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
@@ -2064,7 +2063,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
     @skip_if_lt_x_gpu(4)
     def test_fully_shard_force_sum_both_reductions(self, device):
         mesh = init_device_mesh(
-            device_type.type, (2, self.world_size // 2), mesh_dim_names=("ddp", "fsdp")
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("ddp", "fsdp")
         )
 
         torch.manual_seed(42)
@@ -2144,11 +2143,11 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
                     divisions.append(func)
                 return func(*args, **(kwargs or {}))
 
-        model = nn.Linear(8, 4, bias=False, device=device_type)
-        fully_shard(model, mesh=init_device_mesh(device_type.type, (1,)))
+        model = nn.Linear(8, 4, bias=False, device=get_devtype())
+        fully_shard(model, mesh=init_device_mesh(get_devtype(), (1,)))
         if divide_factor is not None:
             model.set_gradient_divide_factor(divide_factor)
-        inp = torch.ones(3, 8, device=device_type)
+        inp = torch.ones(3, 8, device=get_devtype())
         loss = model(inp).sum()
         with RecordDivisions():
             loss.backward()
@@ -2160,16 +2159,16 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         from torch.distributed.distributed_c10d import ReduceOp
 
         model = nn.Linear(1024, 1025)
-        ref_model = copy.deepcopy(model).to(device_type)
+        ref_model = copy.deepcopy(model).to(get_devtype())
         ref_optim = torch.optim.Adam(ref_model.parameters())
         fully_shard(
             model,
-            mesh=init_device_mesh(device_type.type, (1,)),
+            mesh=init_device_mesh(get_devtype(), (1,)),
             reshard_after_forward=False,
         )
         optim = torch.optim.Adam(model.parameters())
 
-        inp = torch.randn(1025, 1024, device=device_type.type)
+        inp = torch.randn(1025, 1024, device=get_devtype())
         for _ in range(3):
             ref_optim.zero_grad()
             ref_loss = ref_model(inp).sum()
