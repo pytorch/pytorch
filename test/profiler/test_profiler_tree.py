@@ -96,11 +96,11 @@ class ProfilerTree:
         """
 
         @functools.wraps(f)
-        def begin_unit_test_marker(self, replicates=3, **kwargs):
+        def begin_unit_test_marker(self, replicates=3):
             try:
                 for i in range(replicates):
                     self.tree_replicate = i
-                    out = f(self, **kwargs)
+                    out = f(self)
                     if self.tree_replicate is None:
                         break
                 return out
