@@ -4825,6 +4825,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # A symbolic scalar cannot be rebuilt against the ShapeEnv the
+            # guards refer to. Unguarded, it is pruned like any other bystander;
+            # guarded, the package is refused.
+            if id(obj) not in self.guard_tree_values:
+                return _Missing, ("symbolic scalar",)
             raise torch._dynamo.exc.PackageError(
                 f"Cannot serialize {type(obj).__name__} {obj} (node: {obj.node})"
             )
@@ -4978,6 +4983,12 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if _is_shared_constant(attr):
                 continue
+            if str(getattr(type(attr), "__module__", "")).partition(".")[0] == "torch":
+                # The receiver rule, applied to values: a torch structural
+                # object (a Placement, a DeviceMesh) may be the very object a
+                # DTensorSpec elsewhere in the state rebuilds itself from, and
+                # pruning it by id would put the sentinel there.
+                continue
             self.missing_values[id(attr)] = attr
 
 
@@ -5011,9 +5022,9 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-# Children the diagnostic walk queues per container; with the visit bound below
-# it keeps a huge state from turning a bypass into a stall.
-_WALK_FAN_OUT = 20000
+# One budget for the diagnostic walk: objects visited and children queued in
+# total, so a huge state cannot turn a bypass into a stall or an allocation.
+_WALK_BUDGET = 20000
 
 
 def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
@@ -5065,10 +5076,8 @@ def _offending_value_path(
             roots = _scope_roots(state.output_graph)
         queue = collections.deque([*roots, ("state", state)])
         seen: set[int] = set()
-        # Higher than the scope-only walk needed: the whole guard state is
-        # orders of magnitude larger, and this runs once, on a path that is
-        # already raising.
-        for _ in range(200000):
+        budget = _WALK_BUDGET
+        for _ in range(_WALK_BUDGET):
             if not queue:
                 break
             path, value = queue.popleft()
@@ -5085,16 +5094,16 @@ def _offending_value_path(
             # Per node: one object whose container read raises (a dict subclass,
             # a container mutated concurrently) must not end the whole walk nor
             # lose its __dict__ children, so each read has its own try. Fan-out
-            # is bounded per container BEFORE any path string is built.
+            # draws on the shared budget BEFORE any path string is built.
             try:
                 if isinstance(value, (list, tuple, OrderedSet)):
-                    items = itertools.islice(enumerate(value), _WALK_FAN_OUT)
+                    items = itertools.islice(enumerate(value), budget)
                     children = [(f"{path}[{i}]", v) for i, v in items]
                 elif isinstance(value, (set, frozenset)):
-                    members = itertools.islice(value, _WALK_FAN_OUT)
+                    members = itertools.islice(value, budget)
                     children = [(f"{path}[<a member>]", v) for v in members]
                 elif isinstance(value, dict):
-                    for k, v in itertools.islice(value.items(), _WALK_FAN_OUT):
+                    for k, v in itertools.islice(value.items(), budget):
                         if type(k) in (str, int):
                             children.append((f"{path}[{k!r}]", v))
                         else:
@@ -5162,6 +5171,8 @@ def _offending_value_path(
                                 pass
             except Exception:
                 pass
+            children = children[:budget]
+            budget -= len(children)
             queue.extend(children)
     except Exception:
         return ""
@@ -5229,12 +5240,14 @@ def pickle_guards_state(
 
         pickler.dump(state)
     except torch._dynamo.exc.PackageError as e:
-        # Raised by the reducer itself, so last_reduced IS the culprit; the
-        # message already says what, only the path is added.
+        # Raised by the reducer itself, so last_reduced IS the culprit. The path
+        # is appended in place and the same exception re-raised, so its
+        # traceback still ends in the refusing reducer.
         last = pickler.last_reduced if pickler is not None else None
-        raise torch._dynamo.exc.PackageError(
-            f"{e}{_offending_value_path(state, last, scope_roots)}"
-        ) from e
+        path = _offending_value_path(state, last, scope_roots)
+        if path:
+            e.args = (f"{e}{path}",)
+        raise
     except RecursionError as e:
         # A deep (but finite) guarded object graph, or a __reduce__ that never
         # memoizes, overflows the recursion limit inside dump: a serialization
