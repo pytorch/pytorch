@@ -2450,10 +2450,10 @@ class InstructionTranslatorBase(
             # where importing again would run the module body inside the trace
             # or, for None, raise out of guard construction. A memo still cold
             # for such a name imports all the same, as it did before.
-            memo = _import_module(module_name)
+            imported = _import_module(module_name)
             entry = sys.modules.get(module_name)
             live = entry is not None
-            value = entry if live else memo
+            value = entry if live else imported
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope
