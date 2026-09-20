@@ -1250,6 +1250,34 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             load_guards_state(buf.getvalue())["t"].dispatch_keys.raw_repr(), real_keys
         )
 
+    def test_retained_grad_non_leaf_survives_pickle(self):
+        # A plain non-leaf's .grad is None (and reading it warns), but a
+        # RETAINED-grad non-leaf -- which torch.optim explicitly permits as a
+        # param -- has a real .grad that a guard can chain through; safe_grad
+        # reads it without the warning and must not drop it.
+        base = torch.randn(4, requires_grad=True)
+        x = base * 1
+        x.retain_grad()
+        x.sum().backward()
+        grad = x.grad
+        self.assertIsNotNone(grad)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x, id(grad): grad}, {}, {}, {}, buf).dump(x)
+        out = load_guards_state(buf.getvalue())
+        self.assertIsNotNone(out.grad)
+        self.assertEqual(out.grad.shape, grad.shape)
+
+    def test_an_unguarded_grad_loads_as_none(self):
+        # The .grad of a guarded leaf is a tensor the guard tree may not reach;
+        # it is pruned to the sentinel, and assigning that to .grad raises.
+        x = torch.randn(4, requires_grad=True)
+        x.sum().backward()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump(x)
+        out = load_guards_state(buf.getvalue())
+        self.assertIsNone(out.grad)
+        self.assertEqual(out.shape, x.shape)
+
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
         # torch.float32 registered the one dtype object as missing, and every
