@@ -6,6 +6,21 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
 
 
+_GPU_DEVICE_TYPES: set[str] = {"cuda", "xpu"}
+
+
+def register_gpu_device(device_type: str) -> None:
+    _GPU_DEVICE_TYPES.add(device_type)
+
+
+def _graph_device_types() -> set[str]:
+    device_types = set(_GPU_DEVICE_TYPES)
+    private_backend = torch._C._get_privateuse1_backend_name()
+    if private_backend != "privateuseone" and private_backend not in device_types:
+        device_types.add(private_backend)
+    return device_types
+
+
 # flattens with support for slices
 # Note: a better way to do this would
 # be register/unregister slices as pytree nodes
@@ -97,6 +112,8 @@ def _graph_device_type(graph: Graph | None) -> str:
         flat, _ = tree_flatten(node.meta[key])
         return flat
 
+    device_types = _graph_device_types()
+
     for node in graph.nodes:
         for key in ("val", "example_value"):
             for obj in _flatten_meta(node, key):
@@ -104,7 +121,7 @@ def _graph_device_type(graph: Graph | None) -> str:
 
         # Check for device conversions
         if node.op == "call_method":
-            for gpu in ["cuda", "xpu"]:
+            for gpu in device_types:
                 if node.target == gpu:
                     return gpu
                 if node.target == "to" and gpu in node.args:
