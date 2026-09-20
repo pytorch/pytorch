@@ -1496,19 +1496,26 @@ class PrecompileSession:
             # package (see _release) instead of being filed here.
             self._record_capture_error(
                 PackageError(
-                    "the capture recorded no artifact; a grad-enabled capture "
-                    "needs training=True, which lowers the backward eagerly "
-                    "instead of deferring it past the end of the capture"
+                    "the capture recorded no artifact; the usual causes are a "
+                    "grad-enabled capture without training=True, which leaves "
+                    "the backward lowering deferred past the end of the "
+                    "capture, caches turned off through force_disable_caches, "
+                    "and a backend that files nothing"
                 )
             )
 
     def _record_capture_error(self, error: BaseException) -> None:
         message = str(error)
         key = (type(error), message)
-        if key in self._recorded_exception_keys:
-            return
-        self._recorded_exception_keys.add(key)
-        self._capture_errors.append(f"{type(error).__name__}: {message}")
+        # Under _state: the check-then-add IS the once-only invariant, so two
+        # concurrent calls raising the same exception must not both append. No
+        # caller holds _state when it gets here, and a Condition's default lock
+        # is an RLock, so a later re-entrant caller would not deadlock either.
+        with self._state:
+            if key in self._recorded_exception_keys:
+                return
+            self._recorded_exception_keys.add(key)
+            self._capture_errors.append(f"{type(error).__name__}: {message}")
 
     def _release(self) -> None:
         # The compiled variants stay in the entry's ordinary Dynamo cache, as
