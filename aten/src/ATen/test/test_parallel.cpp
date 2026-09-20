@@ -96,6 +96,7 @@ TEST(TestParallel, Exceptions) {
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
     at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+      // @allow-raw-throw: ASSERT_THROW below requires a plain std::runtime_error
       throw std::runtime_error("exception");
     }),
     std::runtime_error);
@@ -104,6 +105,7 @@ TEST(TestParallel, Exceptions) {
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
     at::parallel_for(0, 1, 1000, [&](int64_t begin, int64_t end) {
+      // @allow-raw-throw: ASSERT_THROW below requires a plain std::runtime_error
       throw std::runtime_error("exception");
     }),
     std::runtime_error);
