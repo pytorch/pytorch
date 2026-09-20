@@ -833,9 +833,14 @@ def foreach_reduce_scatter_copy_in(
     num_leading_dims: list[int],
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    torch.ops.fsdp._chunk_cat_with_prefixes_(
-        reduce_scatter_input, unsharded_grads, num_leading_dims, world_size
-    )
+    if any(num_leading_dims):
+        torch.ops.fsdp._chunk_cat_with_prefixes_(
+            reduce_scatter_input, unsharded_grads, num_leading_dims, world_size
+        )
+    else:
+        torch.ops.fsdp.chunk_cat(
+            unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+        )
 
 
 def _get_all_gather_input_metadatas(
