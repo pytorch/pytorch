@@ -4287,10 +4287,13 @@ class GuardsStatePickler(FunctionPicklerBase):
         stack = list(value_guarded_containers.values())
         while stack:
             for element in stack.pop():
-                if type(element) is tuple:
+                if id(element) in self._verbatim_elements:
+                    continue
+                self._verbatim_elements.add(id(element))
+                if type(element) in (list, tuple, set, frozenset):
                     stack.append(element)
-                else:
-                    self._verbatim_elements.add(id(element))
+                elif type(element) is dict:
+                    stack.append(list(element.values()))
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
