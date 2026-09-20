@@ -234,18 +234,15 @@ class TestFullyShardIgnoreParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_ddp_A_fsdp_B_ddp_C(self, device):
         default_pg = dist.distributed_c10d._get_default_group()
-        # A bare device type (without index) resolves to each rank's current
-        # device, while the injected `device` is the primary device on every rank.
-        device_type = torch.device(device).type
-        mesh = init_device_mesh(device_type, mesh_shape=(default_pg.size(),))
+        mesh = init_device_mesh(self.device_type, mesh_shape=(default_pg.size(),))
 
-        ref_model, ref_inp = _generate_model_and_input(device_type)
+        ref_model, ref_inp = _generate_model_and_input(self.device_type)
 
         ref_model = DDP(ref_model, process_group=default_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         ref_name_to_param_map, _ = _find_name_param_mappings(ref_model, "")
 
-        test_model, test_inp = _generate_model_and_input(device_type)
+        test_model, test_inp = _generate_model_and_input(self.device_type)
 
         # Computes the mappings before applying FSDP and DDP
         test_name_to_param_map, _ = _find_name_param_mappings(test_model, "")
