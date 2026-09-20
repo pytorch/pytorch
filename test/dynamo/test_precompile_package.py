@@ -1952,8 +1952,14 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             self.assertEqual(set(observed), {training})
             # The outcome, not just the flag: a lazy backward leaves the bundle
             # unwritten until the first .backward() call, so a capture that
-            # never makes one files no artifact at all.
+            # never makes one files no artifact and says so.
             self.assertEqual(bool(session._backend_artifacts), training)
+            if training:
+                self.assertEqual(session._capture_errors, [])
+            else:
+                (recorded,) = session._capture_errors
+                self.assertIn("recorded no artifact", recorded)
+                self.assertIn("training=True", recorded)
         self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
 
     def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
@@ -2127,6 +2133,8 @@ _HOOK_SLOT = ("CLOSURE_MATCH", "G['_SESSION_HOOK']")
 
 _PINNED_PROMPT = "p" * 80
 _PINNED_PATH = "/home/someone/secret_weights.pt"
+_PINNED_NAME = "alpha-secret"
+_PINNED_TAG = "tag-secret"
 
 
 class _SessionPinsValues(torch.nn.Module):
@@ -2143,6 +2151,27 @@ class _SessionPinsValues(torch.nn.Module):
         return x * self.n if self.on and self.prompt and self.path else x
 
 
+class _SessionPinsContainers(torch.nn.Module):
+    """Values a check renders as a container display, a keys list or a key."""
+
+    def __init__(self):
+        super().__init__()
+        self.names = [_PINNED_NAME]
+        self.tags = {_PINNED_TAG}
+        self.cfg = {_PINNED_PATH: 3}
+        self.keys = {_PINNED_PROMPT: 1}
+
+    def forward(self, x):
+        # The literal rather than the global on purpose: a containment check is
+        # rendered as SET_CONTAINS only when Dynamo knows the item while
+        # tracing, and that is the rendering which embeds it with repr.
+        if self.names[0] and "tag-secret" in self.tags:
+            x = x + 1
+        if list(self.keys.keys()) == [_PINNED_PROMPT]:
+            x = x * 2
+        return x + self.cfg[_PINNED_PATH]
+
+
 class _ReprRaises:
     def __repr__(self):
         raise RuntimeError("no repr for you")
@@ -2153,6 +2182,13 @@ class _ReprRaisesNumber(float):
 
     def __repr__(self):
         raise RuntimeError("no repr for you")
+
+
+class _FakeCompile:
+    """The frame being compiled, as the recording filter reads it."""
+
+    def __init__(self, python_code):
+        self.python_code = python_code
 
 
 def _fact(guard_type, source, code=(), value="", enforced=True):
@@ -2325,10 +2361,10 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         # PrecompileSummary.dropped_guard_code.
         session = self._session(_SessionReadsAttr())
         slot = ("EQUALS_MATCH", "n")
-        session._record_dropped_code(slot, ["L['n'] == 3"], "3")
-        session._record_dropped_code(slot, ["L['n'] == 4"], "4")
+        session._record_dropped_code(slot, ["L['n'] == 3"])
+        session._record_dropped_code(slot, ["L['n'] == 4"])
         self.assertEqual(session._dropped_guard_code[slot], "L['n'] == 3")
-        session._record_dropped_code(("TENSOR_MATCH", "x"), [], "")
+        session._record_dropped_code(("TENSOR_MATCH", "x"), [])
         self.assertNotIn(("TENSOR_MATCH", "x"), session._dropped_guard_code)
 
     def test_a_guarded_value_renders_as_its_shape_or_its_type_only(self):
@@ -2367,10 +2403,11 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
             ("G['__builtins_dict___14']['len']", "G['__builtins_dict___<n>']['len']"),
             ("__compiled_fn_3_0(L['x'])", "__compiled_fn_<n>(L['x'])"),
             ("G['_140234567891_c0'].weight", "G['_<id>_c<n>'].weight"),
-            (
-                "top_saved_tensors_hooks ids == (11, 12)",
-                "top_saved_tensors_hooks ids == (<ids>)",
-            ),
+            # A subscript key that reads as an attribute name tells two slots of
+            # one dict apart; anything else is the guarded data.
+            ("L['self']._modules['fc1'].weight", "L['self']._modules['fc1'].weight"),
+            ("L['self'].cfg['/home/u/secret']", "L['self'].cfg[<str>]"),
+            ("L['self'].cfg['%s']" % ("p" * 80), "L['self'].cfg[<str>]"),
             # Narrower than an address: a real name, left alone.
             ("G['_12345_c0'].weight", "G['_12345_c0'].weight"),
             # A hex literal in a check is not an address; masking it would make
@@ -2421,7 +2458,7 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
 # 1 frame(s), 2 compilation(s)
 
 frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 invariant, 3 varying, 3 undetermined
-  invariant [enforced] torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None
+  invariant [enforced] <AUTOGRAD_SAVED_TENSORS_HOOKS>
   invariant [enforced] utils_device.CURRENT_DEVICE == None
   invariant [enforced] <DETERMINISTIC_ALGORITHMS>
   invariant [enforced] <GRAD_MODE>
@@ -2470,6 +2507,138 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 i
         report = self._report(session)
         self.assertNotIn(_PINNED_PROMPT, report)
         self.assertNotIn(_PINNED_PATH, report)
+
+    def test_a_check_renders_container_and_key_shapes_not_their_contents(self):
+        # The shapes a value takes inside a check that are not a bare repr: a
+        # container display, a keys list, a containment argument, and the key
+        # interpolated into the guard's own NAME by GetItemSource.
+        session = self._session(_SessionPinsContainers())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        (frame,) = session.invariants()
+        rendered = {
+            (f.guard_type, f.source): precompile_package._render_fact(f)
+            for f in frame.invariant + frame.varying + frame.undetermined
+        }
+        for slot, line in [
+            (
+                ("CONSTANT_MATCH", "self.names[0]"),
+                "[enforced] L['self'].names[0] == <str> <str> on self.names[0]",
+            ),
+            (
+                ("CONSTANT_MATCH", "self.tags"),
+                "[enforced] L['self'].tags == <set> <set> on self.tags",
+            ),
+            (
+                ("SET_CONTAINS", "self.tags"),
+                "[enforced] set.__contains__(L['self'].tags, <str>) <set> on self.tags",
+            ),
+            (
+                ("DICT_KEYS_MATCH", "self.keys"),
+                "[enforced] len(L['self'].keys) == 1 ; "
+                "list(dict.keys(L['self'].keys)) == <list> <dict> on self.keys",
+            ),
+            # A data-shaped key is masked in the name the report prints, so the
+            # slot reads as one slot of that dict rather than as the key.
+            (
+                ("EQUALS_MATCH", "self.cfg[<str>]"),
+                "[enforced] L['self'].cfg[<str>] == 3 3 on self.cfg[<str>]",
+            ),
+        ]:
+            self.assertEqual(rendered[slot], line)
+        report = self._report(session)
+        for pinned in (_PINNED_PROMPT, _PINNED_PATH, _PINNED_NAME, _PINNED_TAG):
+            self.assertNotIn(pinned, report)
+
+    def test_a_check_that_is_not_an_expression_renders_as_its_type_only(self):
+        # The saved-tensors-hooks guard renders prose ("top_saved_tensors_hooks
+        # ids == (11, 12)"), which cannot be masked structurally, so the fact
+        # keeps nothing rather than the ids.
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        (frame,) = session.invariants()
+        (hooks,) = [
+            f
+            for f in frame.invariant + frame.varying + frame.undetermined
+            if f.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS"
+        ]
+        self.assertEqual(hooks.code, ())
+        self.assertEqual(
+            precompile_package._render_fact(hooks),
+            "[enforced] <AUTOGRAD_SAVED_TENSORS_HOOKS>",
+        )
+
+    def test_two_frames_dropping_a_same_named_slot_are_not_risky(self):
+        # entry.name is frame-local, so the same name in two frames is two
+        # slots: one fingerprint table for both would read a rebind that never
+        # happened, and the default gate would refuse a valid artifact.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            lambda es: ([False] * len(es), [False] * len(es))
+        )
+        slot = ("CLOSURE_MATCH", "fn")
+        keys = {}
+        # Held for the length of the test: a frame key ends in an address, and a
+        # freed one is reused.
+        alive = []
+        for fn in (_hook_double, _hook_increment):
+            compiling = _FakeCompile(fn.__code__)
+            alive.append(compiling)
+            session._package._current_entry = compiling
+            code = compiling.python_code
+            keys[fn] = (
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                id(compiling),
+            )
+            record([_entry(LocalSource("fn"), fn, "CLOSURE_MATCH")])
+        self.assertIn(slot, session._dropped_guards)
+        self.assertEqual(session._value_varying_slots(), set())
+        # A second value in ONE frame is the variation the rail exists for, and
+        # it belongs to that frame alone: _current_entry is still the second
+        # frame's, so the first frame's slot still held.
+        record([_entry(LocalSource("fn"), _hook_double, "CLOSURE_MATCH")])
+        self.assertEqual(session._value_varying_slots(), {slot})
+        varying = session._value_varying_slots
+        self.assertEqual(varying(keys[_hook_increment]), {slot})
+        self.assertEqual(varying(keys[_hook_double]), set())
+
+    def test_a_guard_nothing_checks_is_not_enforced_however_the_filter_votes(self):
+        # FSDP_TRAINING_STATE's GuardBuilder body is `pass` and GlobalStateGuard
+        # snapshots no training state, so the default filter keeping it does not
+        # make it a condition anything rechecks at load time. Not risky either:
+        # no filter decision dropped it.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            lambda es: ([True] * len(es), [True] * len(es))
+        )
+        record([_entry(LocalSource("self"), None, "FSDP_TRAINING_STATE")])
+        slot = ("FSDP_TRAINING_STATE", "self")
+        self.assertIn(slot, session._dropped_guards)
+        self.assertNotIn(slot, session._kept_guards)
+        self.assertEqual(session._risky_dropped_guards, set())
+
+    def test_a_no_op_marker_is_enforced_only_with_the_leaf_that_checks_it(self):
+        # GRAD_MODE's own check is `pass`: GLOBAL_STATE's leaf is what compares
+        # the flag, so a filter that drops GLOBAL_STATE drops the check too,
+        # whatever it voted on the marker.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            lambda es: (
+                [e.guard_type != "GLOBAL_STATE" for e in es],
+                [True] * len(es),
+            )
+        )
+        record(
+            [
+                _entry(LocalSource("x"), None, "GLOBAL_STATE"),
+                _entry(LocalSource("x"), None, "GRAD_MODE"),
+            ]
+        )
+        self.assertIn(("GRAD_MODE", "x"), session._dropped_guards)
+        self.assertNotIn(("GRAD_MODE", "x"), session._kept_guards)
 
     def test_a_dropped_slot_whose_value_changed_between_variants_is_risky(self):
         # Through the DEFAULT filter, with no custom one to make the drop risky
@@ -2522,6 +2691,21 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 i
         self.assertEqual(print_of(torch.ones(2, 4)), print_of(torch.rand(2, 4)))
         self.assertNotEqual(print_of(torch.ones(2, 4)), print_of(torch.ones(3, 4)))
         self.assertEqual(print_of(3, has_value=False), 0)
+        # A callable fingerprints on where it was DEFINED rather than on its
+        # address: two distinct functions differ, and one minted per call -- a
+        # closure, a functools.partial -- is not a rebind of the slot.
+        self.assertNotEqual(print_of(_hook_double), print_of(_hook_increment))
+
+        def minted():
+            def inner(y):
+                return y
+
+            return inner
+
+        # Both held, because an address freed by the first is reused by the
+        # second and identity would then call two objects one.
+        first, second = minted(), minted()
+        self.assertEqual(print_of(first), print_of(second))
 
     def test_a_guard_the_config_turns_into_a_no_op_is_not_enforced(self):
         # EMPTY_NN_MODULE_HOOKS_DICT passes the serializer pre-check, so the
