@@ -212,6 +212,12 @@ class TestAccelerator(TestCase):
         ):
             event1.elapsed_time(event2)
 
+    def test_empty_host_cache(self):
+        # Must not dereference the empty registry slot on a backend that
+        # registers no host allocator (MPS), called before any allocation as
+        # in https://github.com/pytorch/pytorch/issues/197561
+        torch.accelerator.empty_host_cache()
+
     def test_memory_stats(self):
         # Ensure that device allocator is initialized
         acc = torch.accelerator.current_accelerator()

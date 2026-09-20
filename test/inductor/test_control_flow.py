@@ -1408,6 +1408,22 @@ class WhileLoopTests(TestCase):
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
     @requires_gpu
+    def test_while_loop_cpp_wrapper(self):
+        def fn(x):
+            def cond_fn(a):
+                return a.sum() > 100
+
+            def body_fn(a):
+                return (a * 0.5,)
+
+            return torch.while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.full((4,), 26.0, device=GPU_TYPE, dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})(x)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     @parametrize("autograd", [False, True])
