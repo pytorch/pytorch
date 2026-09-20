@@ -842,10 +842,11 @@ class TestPrecompile(TestCase):
         # the entry frame (x, which rows() captures), and a module global the
         # entry reads (_MULTIGRAPH_SCALE, guarded by EQUALS_MATCH).
         import inspect
+        import types
         from unittest import mock
 
         from torch import _precompile_driver as driver
-        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.package import CompilePackage, SerializedCode
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
         from torch._precompile import _b64, _multigraph_frames, _serving_mode
@@ -881,17 +882,6 @@ class TestPrecompile(TestCase):
             for backend_id, backend in package.cached_backends.items()
         }
         torch._dynamo.reset()
-        # A serving process never traced, so the names Dynamo minted into this
-        # module during capture must not be what makes the guards pass; the
-        # driver binds the same names, so the cleanup drops those too.
-        scope = step.__globals__
-        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
-
-        def scrub():
-            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
-
-        removed = scrub()
-        self.addCleanup(lambda: (scrub(), scope.update(removed)))
         # The records name this module, which is __main__ under a script run and
         # the driver refuses that; serve them from an importable alias of it.
         module = "precompile_test_captured_module"
@@ -916,6 +906,21 @@ class TestPrecompile(TestCase):
         }
         exec(inspect.getsource(driver._build_multigraph_forward), ns)
         build = ns["_build_multigraph_forward"]
+        # The first load is usually in the process that captured, where Dynamo's
+        # closure factory for the continuation still holds its resume name: the
+        # same continuation, so the load is permitted and serves.
+        self.assertEqual(build()(model, x), expected)
+        # A serving process never traced, so the names Dynamo minted into this
+        # module during capture must not be what makes the guards pass; the
+        # driver binds the same names, so the cleanup drops those too.
+        scope = step.__globals__
+        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
+
+        def scrub():
+            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
+
+        removed = scrub()
+        self.addCleanup(lambda: (scrub(), scope.update(removed)))
         forward = build()
         self.assertEqual(forward(model, x), expected)
         self.assertEqual(forward(model, x, scale=2.0), expected)
@@ -943,15 +948,25 @@ class TestPrecompile(TestCase):
         # refused on the resume name and the live one keeps serving; the rows
         # below scrub the live artifact first.
         self.assertEqual(build()(model, x), expected)
-        # A live torch.compile binds its resume function, untagged, under a name
-        # this artifact also mints: the build must refuse, not rebind it.
+        # An untagged holder that is not the same continuation (a user binding,
+        # a compile of another frame) refuses: rebinding would repoint its LOAD_GLOBAL.
         resume_name = frames[1]["resume_names"][0]
         with mock.patch.dict(scope, {resume_name: lambda *args: None}):
             with self.assertRaisesRegex(PrecompileError, resume_name):
                 build()
+        # A plain function over the record's code (a live compile of a closure-free
+        # continuation) is the same continuation: permitted and rebound.
+        code = SerializedCode.to_code_object(frames[1]["code"])
+        same = types.FunctionType(code, scope, closure=(types.CellType(),))
+        with mock.patch.dict(scope, {resume_name: same}):
+            self.assertEqual(build()(model, x), expected)
+        other = _b64({f"{k}_other": v for k, v in backends.items()})
+        # Two artifacts of one capture differ only in _BACKENDS: the tag covers both.
+        with mock.patch.dict(ns, {"_BACKENDS": other}):
+            with self.assertRaisesRegex(PrecompileError, "'__resume_at_"):
+                build()
         trivial = [frames[0], {**frames[1], "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
-            other = _b64({f"{k}_other": v for k, v in backends.items()})
             with mock.patch.dict(ns, {"_BACKENDS": other}):
                 with self.assertRaisesRegex(PrecompileError, "'__resume_at_"):
                     build()
