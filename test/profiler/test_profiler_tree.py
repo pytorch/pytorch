@@ -947,10 +947,10 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
         )
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self):
         # Do lazy imports ahead of time to avoid it showing up in the tree
