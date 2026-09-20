@@ -2047,7 +2047,6 @@ def add(x, y):
             self.assertIs(fn.__globals__[alias], module)
         finally:
             sys.modules.pop(name, None)
-            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             # The memo outlives the sys.modules entry: a same-process rerun would
             # otherwise resolve this run's module from it.
