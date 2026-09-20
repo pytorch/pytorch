@@ -940,20 +940,23 @@ def _enclosing_scope_nodes(node: ast.stmt) -> Iterator[ast.AST]:
                 yield from _same_scope_nodes(item)
 
 
-def _scope_bindings(node: ast.AST) -> tuple[set[str], set[str]]:
-    """``(opaque, stored)``: every name bound in ``node``'s own scope, by one generic rule
-    -- whatever ``ast`` reports as a binding. ``stored`` is each ``ast.Name`` store or
-    delete, which a rewrite editing ``ast.Name`` nodes follows; ``opaque`` is every other
-    binding, each carrying its name as a bare ``str`` no such rewrite can follow: an
-    ``ast.arg`` parameter, the ``.name`` of a ``_NAMED_BINDERS`` node, an import alias, the
-    ``.rest`` of a mapping pattern, a ``global`` / ``nonlocal``. ``with ... as``, ``for``
-    and comprehension targets are ``ast.Name`` stores and need no case of their own.
+def _scope_bindings(node: ast.AST) -> tuple[set[str], set[str], set[str]]:
+    """``(declared, opaque, stored)``: every name bound in ``node``'s own scope, by one
+    generic rule -- whatever ``ast`` reports as a binding. ``stored`` is each ``ast.Name``
+    store or delete, which a rewrite editing ``ast.Name`` nodes follows; ``declared`` is a
+    ``global`` / ``nonlocal`` name, which is a bare ``str`` AND rebinds an OUTER scope's
+    name rather than this scope's; ``opaque`` is every other binding, each carrying its
+    name as a bare ``str`` no such rewrite can follow: an ``ast.arg`` parameter, the
+    ``.name`` of a ``_NAMED_BINDERS`` node, an import alias, the ``.rest`` of a mapping
+    pattern. ``with ... as``, ``for`` and comprehension targets are ``ast.Name`` stores and
+    need no case of their own.
 
     One walk (``_same_scope_nodes``) serves both intents this file needs: pass a SCOPE node
     for that scope's own bindings, or a module-level statement for the bindings it
     contributes to module scope -- a def nested in an ``if`` contributes its name, which is
     what would collide, and not its body, which binds elsewhere.
     """
+    declared: set[str] = set()
     opaque: set[str] = set()
     stored: set[str] = set()
     for child in _same_scope_nodes(node):
@@ -965,32 +968,40 @@ def _scope_bindings(node: ast.AST) -> tuple[set[str], set[str]]:
         elif isinstance(child, _IMPORTS):
             opaque |= _imported_names(child)
         elif isinstance(child, (ast.Global, ast.Nonlocal)):
-            opaque.update(child.names)
+            declared.update(child.names)
         elif isinstance(child, _NAMED_BINDERS):
             if child.name is not None:
                 opaque.add(child.name)
         elif isinstance(child, ast.MatchMapping) and child.rest is not None:
             opaque.add(child.rest)
-    return opaque, stored
+    return declared, opaque, stored
 
 
 # Calls that bind into a namespace keyed by a runtime ``str``, which no rewrite of ``ast.Name``
 # nodes follows. A ``globals()[...]`` / ``sys.modules[...]`` store needs no entry here: it is
 # already refused as a target that is not a plain name.
-_STRING_BINDERS = ("setattr", "exec", "eval")
+_STRING_BINDERS = ("setattr", "exec")
 
 
 def _string_bound_name(node: ast.stmt, targets: set[str]) -> str | None:
     """How a statement evaluating in module scope binds a module-level name through a runtime
     ``str`` rather than through an ``ast.Name`` the rewrite renames, or None if it does not.
 
-    Two shapes. A ``_STRING_BINDERS`` call can bind any name at all. And ``AsyncCompile.metal``
+    Two shapes. A ``_STRING_BINDERS`` call can bind any name at all (``eval`` is NOT one:
+    it evaluates an expression and binds nothing, so refusing it would only fail captures).
+    And ``AsyncCompile.metal``
     only REGISTERS its kernel -- it returns None, and the compiled function is injected by the
     later ``async_compile.wait(globals())`` under the kernel name it was handed as a string
     literal, so renaming the assignment and every reader would leave them reading None at the
     first call. Every other ``async_compile`` registrar either returns the kernel or returns a
     future that ``wait`` replaces under the SAME key it read, so a string argument matching a
     target is inert there and must not raise.
+
+    Only bindings written INSIDE the module are visible here, which makes one shape a
+    non-goal rather than a guard: ``write_constant``'s ``{name} = None  # {hashed}`` is
+    filled in from outside by ``PyCodeCache.load_by_key_path(attrs=...)`` under the
+    unrenamed name, and the hash that would identify it lives in a comment ``ast`` discards,
+    so a name the host rebinds after exec is the caller's contract, not this rewrite's.
     """
     for child in _enclosing_scope_nodes(node):
         if not isinstance(child, ast.Call):
@@ -1042,9 +1053,9 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
     that binds a module-level name through a runtime string instead of an ``ast.Name``, whose
     binding is invisible here and would be left behind under the old name (see
     ``_string_bound_name``); a name both imported and assigned at module level, whose import
-    line is not renamed; a nested scope that rebinds a target with a binder the rewrite cannot
-    follow, or a class body that stores one whose other readers are attributes, while also
-    reading it there (see ``_scope_bindings``); a target whose suffixed name the module -- or
+    line is not renamed; a nested scope that rebinds a target through a ``global`` /
+    ``nonlocal``, stores one in a class body whose readers are attributes, or reads one it
+    also binds opaquely (see ``_scope_bindings``); a target whose suffixed name the module -- or
     a scope of it that reads a target -- already uses; and a def / class header the rename
     cannot locate on the statement's own line.
 
@@ -1066,7 +1077,7 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
         # rewrites anyway.
         for node in tree.body:
             if not isinstance(node, _MODULE_LEVEL):
-                opaque, stored = _scope_bindings(node)
+                declared, opaque, stored = _scope_bindings(node)
                 aliases: set[str] = set()
                 for child in _same_scope_nodes(node):
                     if isinstance(child, _IMPORTS):
@@ -1074,7 +1085,7 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
                 # Import aliases are excluded from ``targets`` anyway, so a statement
                 # binding only those needs no rename; a name that is BOTH an alias and
                 # stored (``import foo`` then ``foo = wrap(foo)``) does, so keep ``stored``.
-                bound = sorted(stored | (opaque - aliases))
+                bound = sorted(stored | ((declared | opaque) - aliases))
                 if bound:
                     raise NotImplementedError(
                         f"namespace_module_names: the module-level "
@@ -1147,28 +1158,39 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
         # one captures nothing, so raising on it would fail the capture for nothing.
         used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
         used |= defined | imported
-        for _node, (opaque, stored), read in scopes:
+        for _node, (declared, opaque, stored), read in scopes:
             if read & targets:
-                used |= opaque | stored
+                used |= declared | opaque | stored
         clash = sorted(n + suffix for n in targets if n + suffix in used)
         if clash:
             raise NotImplementedError(
                 f"namespace_module_names: module already uses {clash}, so suffixing with "
                 f"{suffix!r} would collapse two distinct names."
             )
-        for scope, (opaque, stored), read in scopes:
-            # A class-body store binds an ATTRIBUTE, whose readers are ``Attribute`` nodes
-            # the rewrite leaves alone, so a renamed ``Runner_s0.call_s0`` would no longer
-            # answer to ``Runner_s0.call``. Elsewhere an ``ast.Name`` store is renamed with
-            # its loads and stays consistent -- including a comprehension's own target.
-            bound = opaque | stored if isinstance(scope, ast.ClassDef) else opaque
-            shadowed = sorted(bound & read & targets)
+        for scope, (declared, opaque, stored), read in scopes:
+            # Two of the three are hazards whether or not that scope READS the target,
+            # because the rewrite renames something there. A ``global`` / ``nonlocal``
+            # rebinds the module-level name, and ``ast.Global`` carries a bare ``str``: the
+            # store under it is renamed while the declaration is not, so the write lands on
+            # a function LOCAL and module-level ``<target>`` keeps its old value. A
+            # class-body store binds an ATTRIBUTE and IS renamed, so ``Runner_s0.call_s0``
+            # no longer answers to the ``Runner_s0.call`` its external readers spell (they
+            # are ``Attribute`` nodes outside this body, hence never in ``read``).
+            # ``opaque`` is the reverse: nothing renames it, so it only breaks the loads
+            # this scope renames on top of it -- a class-body ``def call`` beside a
+            # module-level one is fine, which is graph_partition's shape. An ``ast.Name``
+            # store in a non-class scope is renamed with its loads and stays consistent,
+            # including a comprehension's own target.
+            shadowed = (declared & targets) | (opaque & read & targets)
+            if isinstance(scope, ast.ClassDef):
+                shadowed |= stored & targets
             if shadowed:
                 raise NotImplementedError(
-                    f"namespace_module_names: a nested scope rebinds {shadowed} and reads "
-                    "it there with a binder the rewrite cannot follow -- an opaque one "
-                    "(parameter, except-as, nested def / class, local import, global, match "
-                    "capture) or a class-body store also read as an attribute."
+                    f"namespace_module_names: a nested scope rebinds {sorted(shadowed)} "
+                    "with a binder the rewrite cannot follow -- a global / nonlocal "
+                    "declaration, a class-body store also read as an attribute, or an "
+                    "opaque binder (parameter, except-as, nested def / class, local import, "
+                    "match capture) whose name this scope also reads."
                 )
         # ``col_offset`` is a UTF-8 BYTE offset, so spans are spliced in bytes.
         edits: dict[int, list[tuple[int, int, bytes]]] = {}
