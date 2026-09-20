@@ -1699,9 +1699,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             {"m": m, "shared": placement}
         )
         out = load_guards_state(buf.getvalue())
-        self.assertIsInstance(out["m"].scaler, _Missing)
-        self.assertIs(out["m"].placement, out["shared"])
+        # The value assertions carry the test: pruning by id would load the
+        # sentinel on both sides, and identity alone would still hold.
+        self.assertEqual(out["m"].placement, placement)
         self.assertIsInstance(out["shared"], _ScaledPartial)
+        self.assertIs(out["m"].placement, out["shared"])
+        self.assertIsInstance(out["m"].scaler, _Missing)
 
     def test_torch_namespace_objects_are_pickled_whole(self):
         # type(obj).__module__ == "torch" is torch's namespace too, so the
