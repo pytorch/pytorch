@@ -11,7 +11,6 @@ import functools
 import json
 import os
 import signal
-import unittest
 import uuid
 from multiprocessing.pool import ThreadPool
 from typing import Any
@@ -35,13 +34,16 @@ from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
 from torch.distributed.elastic.rendezvous.api import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.distributed import get_free_port
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 def do_nothing():
     pass
 
 
-class WorkerStateTest(unittest.TestCase):
+class WorkerStateTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_is_running(self):
         for state in WorkerState:
             if state == WorkerState.HEALTHY or state == WorkerState.UNHEALTHY:
@@ -50,7 +52,9 @@ class WorkerStateTest(unittest.TestCase):
                 self.assertFalse(WorkerState.is_running(state))
 
 
-class WorkerGroupTest(unittest.TestCase):
+class WorkerGroupTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_worker_group_constructor(self):
         spec = WorkerSpec(
             role="test_trainer",
@@ -84,7 +88,9 @@ class WorkerGroupTest(unittest.TestCase):
         self.assertIsNone(worker_group.store)
 
 
-class RoleInstanceInfoTest(unittest.TestCase):
+class RoleInstanceInfoTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compare(self):
         agent_role1 = _RoleInstanceInfo("role", 1, 10)
         agent_role2 = _RoleInstanceInfo("role", 2, 10)
@@ -144,7 +150,7 @@ class TestAgent(SimpleElasticAgent):
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
         raise NotImplementedError("mock this method")
 
-    def _shutdown(self):
+    def _shutdown(self, death_sig=signal.SIGTERM, timeout=30):
         pass
 
 
@@ -158,8 +164,11 @@ def monres(state: WorkerState):
         return RunResult(state=state)
 
 
-class RecordWorkerEventsTest(unittest.TestCase):
+class RecordWorkerEventsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
+        super().setUp()
         self.spec = MagicMock()
         self.spec.role = "test_role"
         self.spec.get_entrypoint_name.return_value = "test_entrypoint"
@@ -275,8 +284,11 @@ class RecordWorkerEventsTest(unittest.TestCase):
         self.assertEqual(md["worker_pid"], [None])
 
 
-class ConstructEventTest(unittest.TestCase):
+class ConstructEventTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
+        super().setUp()
         # Create minimal spec and agent for testing
         self.spec = MagicMock()
         self.spec.role = "test_role"
@@ -398,7 +410,9 @@ class ConstructEventTest(unittest.TestCase):
         self.assertNotIn("exit_code", [None])
 
 
-class SimpleElasticAgentTest(unittest.TestCase):
+class SimpleElasticAgentTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_worker_spec(
         self,
         max_restarts=1,
@@ -484,6 +498,47 @@ class SimpleElasticAgentTest(unittest.TestCase):
         record_metrics_mock.assert_called_once()
         record_events_mock.assert_called_once()
         shutdown_mock.assert_called_once()
+
+    def test_exit_barrier_sets_and_clears_flag(self):
+        """Verify _in_exit_barrier is set before barrier and cleared after."""
+        spec = self._get_worker_spec(max_restarts=0)
+        agent = TestAgent(spec)
+        agent._worker_group.state = WorkerState.SUCCEEDED
+        agent._worker_group.group_world_size = 1
+        agent._store = MagicMock()
+
+        flag_during_barrier = []
+
+        def mock_barrier(**kwargs):
+            flag_during_barrier.append(agent._in_exit_barrier)
+
+        with patch(
+            "torch.distributed.elastic.utils.store.barrier",
+            side_effect=mock_barrier,
+        ):
+            agent._exit_barrier()
+
+        # Flag was True during barrier call
+        self.assertTrue(flag_during_barrier[0])
+        # Flag is False after barrier completes
+        self.assertFalse(agent._in_exit_barrier)
+
+    def test_exit_barrier_clears_flag_on_timeout(self):
+        """Verify _in_exit_barrier is cleared even if barrier times out."""
+        spec = self._get_worker_spec(max_restarts=0)
+        agent = TestAgent(spec)
+        agent._worker_group.state = WorkerState.SUCCEEDED
+        agent._worker_group.group_world_size = 1
+        agent._store = MagicMock()
+
+        with patch(
+            "torch.distributed.elastic.utils.store.barrier",
+            side_effect=Exception("wait timeout"),
+        ):
+            agent._exit_barrier()
+
+        # Flag must be cleared even on timeout
+        self.assertFalse(agent._in_exit_barrier)
 
     @patch("torch.distributed.elastic.agent.server.api.put_metric")
     def test_record_metrics_success_no_retries(self, put_metric_mock):

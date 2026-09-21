@@ -5,7 +5,7 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.sac_estimator import SACEstimator
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -25,7 +25,6 @@ class TestSACEstimator(TestCase):
         loss.backward()
         sace.pwlf_sac_tradeoff_curve(n_segments=2, save_tradeoff_graphs=False)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_transformer_sac_estimation(self):
         """Runs a basic GPT-2 model"""
@@ -50,7 +49,6 @@ class TestSACEstimator(TestCase):
             self._sac_estimation("operator-level-benchmark", model, inp)
             self._sac_estimation("operator-level-cost-model", model, inp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_simple_model_sac_estimation(self):
         """This test checks the correctness of view_ops, random_ops and inplace_ops"""

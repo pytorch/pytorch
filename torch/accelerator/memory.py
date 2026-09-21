@@ -2,12 +2,14 @@ from collections import OrderedDict
 from typing import Any
 
 import torch
+from torch.types import Device
 
-from ._utils import _device_t, _get_device_index
+from ._utils import _get_device_index
 
 
 __all__ = [
     "empty_cache",
+    "empty_host_cache",
     "get_memory_info",
     "max_memory_allocated",
     "max_memory_reserved",
@@ -21,7 +23,7 @@ __all__ = [
 
 def empty_cache() -> None:
     r"""Release all unoccupied cached memory currently held by the caching
-    allocator so that those can be used in other application.
+    allocator so that those can be used in other applications.
 
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
@@ -31,7 +33,26 @@ def empty_cache() -> None:
     torch._C._accelerator_emptyCache()
 
 
-def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
+def empty_host_cache() -> None:
+    r"""Release all unoccupied cached host (pinned) memory currently held by the host caching
+    allocator so that it can be used by other applications.
+
+    .. note:: This function is a no-op if the memory allocator for the current
+        :ref:`accelerator <accelerators>` has not been initialized.
+    """
+    torch._C._accelerator_emptyHostCache()
+
+
+def _flatten_stats(result: list[tuple[str, Any]], prefix: str, value: Any) -> None:
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            nested_prefix = f"{prefix}.{key}" if prefix else key
+            _flatten_stats(result, nested_prefix, nested_value)
+    else:
+        result.append((prefix, value))
+
+
+def memory_stats(device_index: Device = None, /) -> OrderedDict[str, Any]:
     r"""Return a dictionary of accelerator device memory allocator statistics for a given device index.
 
     The return value of this function is a dictionary of statistics, each of
@@ -98,21 +119,13 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
     stats = torch._C._accelerator_getDeviceStats(device_index)
     flat_stats = []
 
-    def flatten(prefix: str, value: Any) -> None:
-        if isinstance(value, dict):
-            for k, v in value.items():
-                nested_prefix = f"{prefix}.{k}" if prefix else k
-                flatten(nested_prefix, v)
-        else:
-            flat_stats.append((prefix, value))
-
-    flatten("", stats)
+    _flatten_stats(flat_stats, "", stats)
     flat_stats.sort()
     # pyrefly: ignore [no-matching-overload]
     return OrderedDict(flat_stats)
 
 
-def memory_allocated(device_index: _device_t = None, /) -> int:
+def memory_allocated(device_index: Device = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` device memory occupied by tensors
     in bytes for a given device index.
 
@@ -128,7 +141,7 @@ def memory_allocated(device_index: _device_t = None, /) -> int:
     return memory_stats(device_index).get("allocated_bytes.all.current", 0)
 
 
-def max_memory_allocated(device_index: _device_t = None, /) -> int:
+def max_memory_allocated(device_index: Device = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` maximum device memory occupied by tensors
     in bytes for a given device index.
 
@@ -148,7 +161,7 @@ def max_memory_allocated(device_index: _device_t = None, /) -> int:
     return memory_stats(device_index).get("allocated_bytes.all.peak", 0)
 
 
-def memory_reserved(device_index: _device_t = None, /) -> int:
+def memory_reserved(device_index: Device = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` device memory managed by the caching allocator
     in bytes for a given device index.
 
@@ -164,7 +177,7 @@ def memory_reserved(device_index: _device_t = None, /) -> int:
     return memory_stats(device_index).get("reserved_bytes.all.current", 0)
 
 
-def max_memory_reserved(device_index: _device_t = None, /) -> int:
+def max_memory_reserved(device_index: Device = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` maximum device memory managed by the caching allocator
     in bytes for a given device index.
 
@@ -184,7 +197,7 @@ def max_memory_reserved(device_index: _device_t = None, /) -> int:
     return memory_stats(device_index).get("reserved_bytes.all.peak", 0)
 
 
-def reset_accumulated_memory_stats(device_index: _device_t = None, /) -> None:
+def reset_accumulated_memory_stats(device_index: Device = None, /) -> None:
     r"""Reset the "accumulated" (historical) stats tracked by the current :ref:`accelerator<accelerators>`
     memory allocator for a given device index.
 
@@ -197,11 +210,13 @@ def reset_accumulated_memory_stats(device_index: _device_t = None, /) -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetAccumulatedStats(device_index)
 
 
-def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
+def reset_peak_memory_stats(device_index: Device = None, /) -> None:
     r"""Reset the "peak" stats tracked by the current :ref:`accelerator<accelerators>`
     memory allocator for a given device index.
 
@@ -214,11 +229,13 @@ def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetPeakStats(device_index)
 
 
-def get_memory_info(device_index: _device_t = None, /) -> tuple[int, int]:
+def get_memory_info(device_index: Device = None, /) -> tuple[int, int]:
     r"""Return the current device memory information for a given device index.
 
     Args:
@@ -233,4 +250,29 @@ def get_memory_info(device_index: _device_t = None, /) -> tuple[int, int]:
             The second value is the device's total hardware memory capacity.
     """
     device_index = _get_device_index(device_index, optional=True)
+    # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_getMemoryInfo(device_index)
+
+
+def _snapshot(device=None, augment_with_fx_traces: bool = False):
+    r"""Return a snapshot of the current :ref:`accelerator<accelerators>` memory allocator state.
+
+    Requires :func:`_record_memory_history` on the appropriate device module
+    (e.g., :func:`torch.cuda.memory._record_memory_history`) to have been called.
+
+    Args:
+        device: the device to snapshot. If not given, uses the current device.
+        augment_with_fx_traces (bool, optional): if True, augment stack traces
+            with FX graph information. Default: ``False``.
+
+    Returns:
+        dict: a dictionary containing memory allocator state information.
+    """
+    acc = torch.accelerator.current_accelerator()
+    if acc is not None and acc.type == "xpu":
+        return torch.xpu.memory._snapshot(
+            device, augment_with_fx_traces=augment_with_fx_traces
+        )
+    return torch.cuda.memory._snapshot(
+        device, augment_with_fx_traces=augment_with_fx_traces
+    )

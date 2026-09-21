@@ -61,7 +61,8 @@ def is_hand_written(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> bool:
 
 
 def override_test_values(arg_map: dict[str, str], op_name: str, index: int) -> None:
-    assert index == 0 or index == 1
+    if index not in (0, 1):
+        raise AssertionError(f"index must be 0 or 1, got {index}")
     if op_name == "addr":
         if index == 0:
             arg_map["self"] = "at::rand({6, 6})"

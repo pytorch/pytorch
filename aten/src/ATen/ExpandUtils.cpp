@@ -28,14 +28,17 @@ Container infer_size_impl(ArrayType a, ArrayType b) {
     auto sizeA = (dimA >= 0) ? a[dimA] : 1;
     auto sizeB = (dimB >= 0) ? b[dimB] : 1;
 
-    TORCH_CHECK(
-        sizeA == sizeB || sizeA == 1 || sizeB == 1,
-        "The size of tensor a (", sizeA,
-        ") must match the size of tensor b (", sizeB,
-        ") at non-singleton dimension ", i);
-
-      // 1s map to the other size (even 0).
-      expandedSizes[i] = sizeA == 1 ? sizeB : sizeA;
+    // If we know for sure one of them is 1, we are done.
+    // otherwise for unbacked we assume non-broadcasting path.
+    // Unbacked semantics should match python infer_size fake_impl.
+    if (!TORCH_GUARD_OR_FALSE(sym_eq(sizeA, 1)) && !TORCH_GUARD_OR_FALSE(sym_eq(sizeB, 1))) {
+      TORCH_MAYBE_SYM_CHECK(sym_eq(sizeA, sizeB),
+          "The size of tensor a (", sizeA,
+          ") must match the size of tensor b (", sizeB,
+          ") at non-singleton dimension ", i);
+    }
+    // 1s map to the other size (even 0).
+    expandedSizes[i] = TORCH_GUARD_OR_FALSE(sym_eq(sizeA, 1)) ? sizeB : sizeA;
   }
 
   return expandedSizes;

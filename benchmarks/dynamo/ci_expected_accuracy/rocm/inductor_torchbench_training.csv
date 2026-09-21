@@ -134,7 +134,6 @@ phlippe_resnet,pass,6
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,6
 
 
 
@@ -183,14 +182,6 @@ speech_transformer,pass,16
 
 
 squeezenet1_1,pass,6
-
-
-
-stable_diffusion_text_encoder,pass,5
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
 
 
 

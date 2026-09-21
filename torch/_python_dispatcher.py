@@ -8,7 +8,7 @@ import torch._C as C
 PythonDispatcher class is a thin python-binding to C++ dispatcher and it
 is designed to show how dispatcher precompute works. In particular,
 it shows for a certain op `foo`, what the computed dispatch table looks
-like after user register their kernels to certains dispatch keys.
+like after user register their kernels to certain dispatch keys.
 
 In the real C++ dispatcher we support many dispatch keys for different
 functionalities. For simplicity PythonDispatcher only supports dispatch
@@ -46,7 +46,7 @@ Usage:
   # print(dispatcher.registrations())
   # print(dispatcher.rawRegistrations())
   # print(dispatcher.rawDispatchTable())
-PythonDispatcher calls C++ dispatcher under the hood for to precompute dispatch table.
+PythonDispatcher calls C++ dispatcher under the hood to precompute dispatch table.
 This file only provides the simplified API for developers, relevant test code is located in
 test/test_dispatch.py
 """

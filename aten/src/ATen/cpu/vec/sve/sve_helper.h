@@ -4,7 +4,7 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256)
 
 // Define the data type of VLS(vector-length specific).
 typedef svbool_t vls_pred_t
@@ -77,4 +77,4 @@ typedef svfloat64_t vls_float64_t
 #define ALL_F64_TRUE_MASK svreinterpret_f64_s64(ALL_S64_TRUE_MASK)
 #define ALL_F64_FALSE_MASK svreinterpret_f64_s64(ALL_S64_FALSE_MASK)
 
-#endif // defined(CPU_CAPABILITY_SVE)
+#endif // defined(CPU_CAPABILITY_SVE256)

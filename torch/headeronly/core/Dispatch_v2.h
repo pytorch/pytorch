@@ -54,6 +54,11 @@
   torch::headeronly::ScalarType::UInt16,     \
       torch::headeronly::ScalarType::UInt32, \
       torch::headeronly::ScalarType::UInt64
+#define AT_OPAQUE_TYPES                                                       \
+  torch::headeronly::ScalarType::Byte, torch::headeronly::ScalarType::UInt16, \
+      torch::headeronly::ScalarType::UInt32,                                  \
+      torch::headeronly::ScalarType::UInt64,                                  \
+      torch::headeronly::ScalarType::ComplexDouble
 #define AT_INTEGRAL_TYPES_V2 \
   AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)
 #define AT_COMPLEX_TYPES                        \
@@ -66,6 +71,38 @@
 #define AT_ALL_TYPES AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_FLOATING_TYPES)
 #define AT_ALL_TYPES_AND_COMPLEX \
   AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_COMPLEX_TYPES)
+
+#define AT_ALL_SCALAR_TYPES_WITH_COMPLEX                                       \
+  torch::headeronly::ScalarType::Byte, torch::headeronly::ScalarType::Char,    \
+      torch::headeronly::ScalarType::Short,                                    \
+      torch::headeronly::ScalarType::Int, torch::headeronly::ScalarType::Long, \
+      torch::headeronly::ScalarType::Half,                                     \
+      torch::headeronly::ScalarType::Float,                                    \
+      torch::headeronly::ScalarType::Double,                                   \
+      torch::headeronly::ScalarType::ComplexHalf,                              \
+      torch::headeronly::ScalarType::BComplex32,                               \
+      torch::headeronly::ScalarType::ComplexFloat,                             \
+      torch::headeronly::ScalarType::ComplexDouble,                            \
+      torch::headeronly::ScalarType::Bool,                                     \
+      torch::headeronly::ScalarType::BFloat16,                                 \
+      torch::headeronly::ScalarType::Float8_e5m2,                              \
+      torch::headeronly::ScalarType::Float8_e4m3fn,                            \
+      torch::headeronly::ScalarType::Float8_e5m2fnuz,                          \
+      torch::headeronly::ScalarType::Float8_e4m3fnuz,                          \
+      torch::headeronly::ScalarType::Float8_e8m0fnu
+
+// Calls BODY(T, ScalarTypeToCPPTypeT<T>) for each ScalarType T in the variadic
+// list. Additional type lists can be appended after a comma. No trailing comma.
+// Example:
+//   AT_FORALL_SCALAR_TYPES_V2(
+//     AT_WRAP(BODY),
+//     AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX),
+//     ...)
+#define AT_FORALL_V2_CASE(enum_type, BODY) \
+  BODY(torch::headeronly::impl::ScalarTypeToCPPTypeT<enum_type>, enum_type)
+#define AT_FORALL_SCALAR_TYPES_V2(BODY, ...)             \
+  AT_EXPAND(AT_CONCAT(THO_AP, AT_NUM_ARGS(__VA_ARGS__))( \
+      AT_FORALL_V2_CASE, BODY, __VA_ARGS__))
 
 // Helper macros
 
@@ -81,24 +118,6 @@
 // Ensure we never have too many scalar types for the expansion here to
 // support.  To bump this, you must regenerate the macros below.
 static_assert(static_cast<int>(torch::headeronly::ScalarType::NumOptions) < 60);
-
-// Python code to regenerate generate code below:
-#if 0
-
-num_args = 60
-
-nums = ', '.join(str(i) for i in reversed(range(num_args+1)))
-args = ', '.join(f'_{i}' for i in range(1, num_args+1))
-
-print(f'#define AT_NUM_ARGS(...) AT_EXPAND(AT_NUM_ARGS_AUX(__VA_ARGS__, {nums}))')
-print(f'#define AT_NUM_ARGS_AUX({args}, N, ...) N')
-
-for i in range(1, num_args+1):
-    args = ', '.join(f'_{i}' for i in range(1, i+1))
-    cases = ' '.join([f'C(_{j}, N)' for j in range(1, i+1)])
-    print(f'#define THO_AP{i}(C, N, {args}) {cases}')
-
-#endif
 
 // Begin generated code
 // clang-format off

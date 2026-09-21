@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <functional>
 #include <iostream>
 #include <regex>
 
@@ -185,7 +186,7 @@ StringCordView::IteratorImpl& StringCordView::IteratorImpl::operator+=(
 
 size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
   return (
-      std::hash<uintptr_t>()(reinterpret_cast<uintptr_t>(key.source().get())) ^
+      std::hash<const void*>()(key.source().get()) ^
       std::hash<size_t>()(key.start()) ^ std::hash<size_t>()(key.end()));
 }
 
@@ -310,7 +311,7 @@ void SourceRange::print_with_context(
     if (!funcname.empty()) {
       out << ", in " << funcname;
     }
-    out << "\n";
+    out << '\n';
   }
   // print out initial context
   out << str.substr(begin_context, start() - begin_context);
@@ -327,7 +328,7 @@ void SourceRange::print_with_context(
       auto actual_line = str.substr(line_start, (line_end - line_start) + 1);
       out << actual_line;
       if (actual_line.back() != '\n') {
-        out << "\n";
+        out << '\n';
       }
 
       size_t empty_space = 0;
@@ -377,7 +378,7 @@ void SourceRange::print_with_context(
     auto line_substr = str.substr(line_end, end_context - line_end);
     out << line_substr;
     if (!line_substr.empty() && line_substr.back() != '\n') {
-      out << "\n";
+      out << '\n';
     }
   }
 }

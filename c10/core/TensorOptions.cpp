@@ -33,7 +33,7 @@ std::ostream& operator<<(std::ostream& stream, const TensorOptions& options) {
   } else {
     stream << "(nullopt)";
   }
-  stream << ")";
+  stream << ')';
 
   return stream;
 }

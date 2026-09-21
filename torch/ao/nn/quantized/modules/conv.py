@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
-from typing import ClassVar, Literal, Optional
+from typing import ClassVar, Literal
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -73,6 +73,8 @@ class _ConvNd(WeightedQuantizedModule):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
 
+        if out_channels <= 0:
+            raise ValueError(f"out_channels must be greater than 0, got {out_channels}")
         if in_channels % groups != 0:
             raise ValueError("in_channels must be divisible by groups")
         if out_channels % groups != 0:
@@ -247,9 +249,10 @@ class _ConvNd(WeightedQuantizedModule):
         if weight_post_process is None:
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        assert weight_post_process.dtype == torch.qint8, (
-            "Weight observer must have a dtype of qint8"
-        )
+        if weight_post_process.dtype != torch.qint8:
+            raise AssertionError(
+                f"Weight observer must have a dtype of qint8, got {weight_post_process.dtype}"
+            )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvNd
         qconv = cls(
@@ -290,23 +293,18 @@ class _ConvNd(WeightedQuantizedModule):
                     mod.bn.weight,
                     mod.bn.bias,
                 )
-            assert hasattr(mod, "activation_post_process"), (
-                "Input QAT module must have observer attached"
-            )
+            if not hasattr(mod, "activation_post_process"):
+                raise AssertionError("Input QAT module must have observer attached")
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
-            assert type(mod) is cls._FLOAT_MODULE, (
-                " nnq."
-                + cls.__name__
-                + ".from_float only works for "
-                + cls._FLOAT_MODULE.__name__
-                + " but got:"
-                + str(type(mod))
-            )
-            assert hasattr(mod, "qconfig"), (
-                "Input float module must have qconfig defined."
-            )
+            if type(mod) is not cls._FLOAT_MODULE:
+                raise AssertionError(
+                    f"nnq.{cls.__name__}.from_float only works for "
+                    f"{cls._FLOAT_MODULE.__name__} but got: {type(mod).__name__}"
+                )
+            if not hasattr(mod, "qconfig"):
+                raise AssertionError("Input float module must have qconfig defined.")
             activation_post_process = (
                 None
                 if not hasattr(mod, "activation_post_process")
@@ -386,10 +384,10 @@ class Conv1d(_ConvNd):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn1d
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU1d
-    _NNI_CONV_ADD_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _NNI_CONV_ADD_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = nniqat.ConvBn1d
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = nni.ConvReLU1d
+    _NNI_CONV_ADD_MODULE: ClassVar[type[nn.Module] | None] = None
+    _NNI_CONV_ADD_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -408,7 +406,7 @@ class Conv1d(_ConvNd):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        # pyrefly: ignore [bad-assignment]
+
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 
@@ -432,7 +430,7 @@ class Conv1d(_ConvNd):
     def _get_name(self):
         return "QuantizedConv1d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         if self.padding_mode == "zeros":
             self._packed_params = torch.ops.quantized.conv1d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups
@@ -520,8 +518,8 @@ class Conv2d(_ConvNd):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn2d
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU2d
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = nniqat.ConvBn2d
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = nni.ConvReLU2d
     _NNI_CONV_ADD_MODULE: ClassVar[type[nni.ConvAdd2d]] = nni.ConvAdd2d
     _NNI_CONV_ADD_RELU_MODULE: ClassVar[type[nni.ConvAddReLU2d]] = nni.ConvAddReLU2d
 
@@ -564,7 +562,7 @@ class Conv2d(_ConvNd):
     def _get_name(self):
         return "QuantizedConv2d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         if self.padding_mode == "zeros":
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups
@@ -650,10 +648,10 @@ class Conv3d(_ConvNd):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn3d
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU3d
-    _NNI_CONV_ADD_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _NNI_CONV_ADD_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = nniqat.ConvBn3d
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = nni.ConvReLU3d
+    _NNI_CONV_ADD_MODULE: ClassVar[type[nn.Module] | None] = None
+    _NNI_CONV_ADD_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -669,7 +667,8 @@ class Conv3d(_ConvNd):
         device=None,
         dtype=None,
     ):
-        assert padding_mode != "reflect", "Conv3d does not support reflection padding"
+        if padding_mode == "reflect":
+            raise AssertionError("Conv3d does not support reflection padding")
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
@@ -695,7 +694,7 @@ class Conv3d(_ConvNd):
     def _get_name(self):
         return "QuantizedConv3d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         if self.padding_mode == "zeros":
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups
@@ -808,15 +807,19 @@ class _ConvTransposeNd(_ConvNd):
             + ".from_float only works for "
             + cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
         )
-        assert type(mod) is cls._FLOAT_MODULE, msg
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined."
+        if type(mod) is not cls._FLOAT_MODULE:
+            raise AssertionError(msg)
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined.")
         weight_post_process = mod.qconfig.weight()  # type: ignore[operator, union-attr]
         weight_post_process(mod.weight)
-        assert weight_post_process.dtype == torch.qint8, (
-            "Weight observer must have a dtype of qint8"
-        )
+        if weight_post_process.dtype != torch.qint8:
+            raise AssertionError(
+                f"Weight observer must have a dtype of qint8, got {weight_post_process.dtype}"
+            )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvTransposeNd
+        # pyrefly: ignore [missing-argument]
         qconv = cls(
             mod.in_channels,
             mod.out_channels,
@@ -957,7 +960,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     def _get_name(self):
         return "QuantizedConvTranspose1d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
             w,
             b,
@@ -1080,7 +1083,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     def _get_name(self):
         return "QuantizedConvTranspose2d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
             w,
             b,
@@ -1205,7 +1208,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     def _get_name(self):
         return "QuantizedConvTranspose3d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose3d_prepack(
             w,
             b,

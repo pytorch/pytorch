@@ -43,7 +43,7 @@ class MPMCQueue {
 
   /**
    * Write to the queue if it is not full.
-   * @param in The value to write. For now we only support moveable types.
+   * @param in The value to write. For now we only support movable types.
    * @return true if the write succeeded, false if the queue is full.
    */
   bool writeIfNotFull(T in) {

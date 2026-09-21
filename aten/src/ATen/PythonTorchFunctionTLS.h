@@ -16,16 +16,22 @@ struct TORCH_API PythonTorchFunctionTLS {
   static const std::shared_ptr<SafePyObject>& get_stack_at(int64_t idx);
   static int64_t stack_len();
 
+  static bool exchange_skip_next(bool);
+  static bool peek_skip_next();
+
   static const PythonTorchFunctionTLS& get_state();
   static void set_state(const PythonTorchFunctionTLS& state);
 
  private:
   // The mode TLS is split into
   //   - disabled_state, which says which part of torch function are disabled
+  //   - skip_next_, which indicates the next has_torch_function call should
+  //     return false so skipping the next __torch_function__ dispatch
   //   - stack_, which is a vector of modes representing the stack of user
   //   defined modes
   TorchFunctionDisabledState disabled_state_ =
       TorchFunctionDisabledState::ENABLED;
+  bool skip_next_ = false;
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
   friend TORCH_API bool torch_function_mode_enabled();
 };

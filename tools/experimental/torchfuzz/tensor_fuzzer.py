@@ -1,6 +1,5 @@
-# mypy: ignore-errors
 import random
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple, TypeAlias
 
 import torch
 
@@ -25,13 +24,12 @@ class ScalarSpec(NamedTuple):
     """Specification for a scalar argument."""
 
     dtype: torch.dtype
-    constant: Optional[Union[int, float, bool, complex]] = (
+    constant: int | float | bool | complex | None = (
         None  # If set, use this constant value instead of fuzzing
     )
 
 
-# Union type for specs
-Spec = Union[TensorSpec, ScalarSpec]
+Spec: TypeAlias = TensorSpec | ScalarSpec
 
 
 def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
@@ -44,25 +42,10 @@ def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
     Returns:
         torch.dtype: A randomly selected PyTorch tensor data type based on template constraints
     """
+    # Import here to avoid circular imports
+    from torchfuzz.codegen import make_template
 
-    # Get template-specific dtypes
-    if template == "dtensor":
-        # Import here to avoid circular imports
-        from torchfuzz.codegen import DTensorFuzzTemplate
-
-        fuzz_template = DTensorFuzzTemplate()
-        tensor_dtypes = fuzz_template.supported_dtypes()
-    elif template == "unbacked":
-        # Import here to avoid circular imports
-        from torchfuzz.codegen import UnbackedFuzzTemplate
-
-        fuzz_template = UnbackedFuzzTemplate()
-        tensor_dtypes = fuzz_template.supported_dtypes()
-    else:
-        from torchfuzz.codegen import DefaultFuzzTemplate
-
-        fuzz_template = DefaultFuzzTemplate()
-        tensor_dtypes = fuzz_template.supported_dtypes()
+    tensor_dtypes = make_template(template).supported_dtypes()
 
     # Randomly select and return a data type
     return random.choice(tensor_dtypes)
@@ -334,10 +317,10 @@ def _compute_storage_size_needed(
 
 
 def fuzz_tensor(
-    size: Optional[tuple[int, ...]] = None,
-    stride: Optional[tuple[int, ...]] = None,
-    dtype: Optional[torch.dtype] = None,
-    seed: Optional[int] = None,
+    size: tuple[int, ...] | None = None,
+    stride: tuple[int, ...] | None = None,
+    dtype: torch.dtype | None = None,
+    seed: int | None = None,
 ) -> tuple[torch.Tensor, int]:
     """
     Create a tensor with fuzzed size, stride, and dtype.
@@ -406,7 +389,12 @@ def fuzz_tensor(
             elif dtype == torch.bool:
                 base_tensor = torch.randint(0, 2, (required_storage,), dtype=torch.bool)
             else:  # integer types
-                base_tensor = torch.randint(-100, 100, (required_storage,), dtype=dtype)
+                # torch.randint requires `low` to be within the dtype's
+                # representable range. Unsigned dtypes (uint8/16/32/64)
+                # cannot represent negative values, so clamp `low` to 0;
+                # signed dtypes keep the default of -100.
+                low = -100 if torch.iinfo(dtype).min < 0 else 0
+                base_tensor = torch.randint(low, 100, (required_storage,), dtype=dtype)
         else:
             # Use zeros (default behavior)
             base_tensor = torch.ones(required_storage, dtype=dtype)
@@ -423,10 +411,10 @@ def fuzz_tensor(
 
 
 def fuzz_tensor_simple(
-    size: Optional[tuple[int, ...]] = None,
-    stride: Optional[tuple[int, ...]] = None,
-    dtype: Optional[torch.dtype] = None,
-    seed: Optional[int] = None,
+    size: tuple[int, ...] | None = None,
+    stride: tuple[int, ...] | None = None,
+    dtype: torch.dtype | None = None,
+    seed: int | None = None,
 ) -> torch.Tensor:
     """
     Convenience function that returns just the tensor without the seed.
@@ -445,7 +433,7 @@ def fuzz_tensor_simple(
 
 
 def fuzz_non_contiguous_dense_tensor(
-    size: Optional[tuple[int, ...]] = None, dtype: Optional[torch.dtype] = None
+    size: tuple[int, ...] | None = None, dtype: torch.dtype | None = None
 ) -> torch.Tensor:
     """
     Specifically generates tensors that are non-contiguous but dense and non-overlapping.
@@ -492,7 +480,9 @@ def fuzz_non_contiguous_dense_tensor(
     return tensor
 
 
-def fuzz_scalar(spec, seed: Optional[int] = None) -> Union[float, int, bool, complex]:
+def fuzz_scalar(
+    spec: ScalarSpec, seed: int | None = None
+) -> float | int | bool | complex:
     """
     Create a Python scalar value from a ScalarSpec.
 
@@ -561,7 +551,8 @@ def specs_compatible(spec1: Spec, spec2: Spec) -> bool:
         # For scalars, require exact dtype match for simplicity
         return spec1.dtype == spec2.dtype
     elif isinstance(spec1, TensorSpec):
-        assert isinstance(spec2, TensorSpec)
+        if not isinstance(spec2, TensorSpec):
+            raise AssertionError(f"Expected TensorSpec, got {type(spec2)}")
         # For tensors, shape and dtype should match exactly
         return spec1.size == spec2.size and spec1.dtype == spec2.dtype
 

@@ -87,6 +87,21 @@ TEST(TestStream, StreamPriorityTest) {
   EXPECT_EQ(stream.priority(), 0);
 }
 
+TEST(TestStream, GenericStream) {
+  if (!at::cuda::is_available()) return;
+
+  c10::cuda::CUDAStream cuda_stream = c10::cuda::getStreamFromPool();
+  c10::Stream generic_stream = cuda_stream.unwrap();
+  c10::cuda::CUDAStream wrapped_stream = c10::cuda::CUDAStream(generic_stream);
+  EXPECT_EQ(cuda_stream, wrapped_stream);
+  EXPECT_EQ(
+      (cudaStream_t)cuda_stream,
+      reinterpret_cast<cudaStream_t>(generic_stream.native_handle()));
+  EXPECT_EQ(
+      cuda_stream.stream(),
+      reinterpret_cast<cudaStream_t>(generic_stream.native_handle()));
+}
+
 // Verifies streams are set properly
 TEST(TestStream, GetAndSetTest) {
   if (!at::cuda::is_available()) return;
@@ -198,8 +213,8 @@ TEST(TestStream, StreamPoolTest) {
 
   std::unordered_set<cudaStream_t> stream_set{};
   bool hasDuplicates = false;
-  for (const auto i: c10::irange(streams.size())) {
-    cudaStream_t cuda_stream = streams[i];
+  for (const auto& stream : streams) {
+    cudaStream_t cuda_stream = stream;
     auto result_pair = stream_set.insert(cuda_stream);
     if (!result_pair.second)
       hasDuplicates = true;

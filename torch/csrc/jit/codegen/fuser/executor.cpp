@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/codegen/fuser/executor.h>
 
-#include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/functional.h>
 #include <ATen/core/stack.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
@@ -13,7 +11,6 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <optional>
 
-#include <algorithm>
 #include <vector>
 
 namespace torch::jit::fuser {
@@ -343,7 +340,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
 
   // Determines device to dispatch to.
   at::Device device = inputs.at(0).device();
-  // If there's a device mismatch in the inputs or if one of the input is a
+  // If there's a device mismatch in the inputs or if one of the inputs is a
   // sparse tensor, we use the fallback (which should give a nice error
   // message).
   for (const auto& t : at::TensorList(inputs).slice(1)) {

@@ -1,4 +1,5 @@
 #include <ATen/xpu/CachingHostAllocator.h>
+#include <c10/xpu/XPUGraphsC10Utils.h>
 
 namespace at::xpu {
 namespace {
@@ -13,6 +14,11 @@ struct XPUCachingHostAllocatorImpl
   void allocate_host_memory(size_t size, void** ptr) override {
     *ptr = sycl::aligned_alloc_host(
         kHostAlignment, size, c10::xpu::get_device_context());
+    TORCH_CHECK(
+        *ptr != nullptr,
+        "Failed to allocate ",
+        CachingAllocator::format_size(size),
+        " of pinned host memory.");
   }
 
   void free_block(Block* block) override {
@@ -35,6 +41,14 @@ struct XPUCachingHostAllocatorImpl
     // Using background threads for XPU causes a hang on Windows during program
     // exit. Will be enabled once the issue is resolved.
     return false;
+  }
+
+  XPUStream get_current_stream() const override {
+    return c10::xpu::getCurrentXPUStream();
+  }
+
+  bool stream_is_capturing(XPUStream s) const override {
+    return s.is_capturing();
   }
 };
 

@@ -1,6 +1,40 @@
 import functools
 import hashlib
+import logging
+import os
 from typing import Any
+
+
+log = logging.getLogger(__name__)
+
+
+_FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT = "failed to map segment from shared object"
+
+
+def _triton_cache_dir_for_error_message() -> str | None:
+    if triton_cache_dir := os.environ.get("TRITON_CACHE_DIR"):
+        return triton_cache_dir
+
+    try:
+        from triton.runtime.cache import knobs
+
+        return knobs.cache.dir
+    except (AttributeError, ImportError):
+        return None
+
+
+def _raise_triton_cache_load_error(exc: BaseException) -> None:
+    cache_dir = _triton_cache_dir_for_error_message()
+    if "TRITON_CACHE_DIR" in os.environ:
+        cache_dir_msg = f" (TRITON_CACHE_DIR={cache_dir})"
+    else:
+        cache_dir_msg = f" ({cache_dir})" if cache_dir else ""
+    raise ImportError(
+        f"{exc}. This usually means Triton's cache directory{cache_dir_msg} is on "
+        "a filesystem mounted with noexec, so the dynamic loader cannot map "
+        "generated shared objects. Set TRITON_CACHE_DIR to a directory on an "
+        "executable filesystem."
+    ) from exc
 
 
 @functools.cache
@@ -11,6 +45,22 @@ def has_triton_package() -> bool:
         return True
     except ImportError:
         return False
+
+
+@functools.cache
+def has_triton_block_ptr() -> bool:
+    """Whether the installed Triton still provides the block-pointer frontend API.
+
+    triton-lang/triton#10833 removed block pointers but kept ``tl.make_block_ptr``
+    as a raising stub while dropping ``tl.advance``, so ``advance`` is the
+    load-bearing check -- probing ``make_block_ptr`` alone would be fooled by the
+    stub. Inductor's codegen emits both builtins, so require both.
+    """
+    if not has_triton_package():
+        return False
+    import triton.language as tl
+
+    return hasattr(tl, "make_block_ptr") and hasattr(tl, "advance")
 
 
 @functools.cache
@@ -25,27 +75,42 @@ def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
 
 
 @functools.cache
-def _device_supports_tma() -> bool:
+def _device_supports_tensor_descriptor() -> bool:
     import torch
 
     return (
         torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (9, 0)
         and not torch.version.hip
-    )
+    ) or has_triton_cpu_backend()
+
+
+@functools.cache
+def has_triton_cpu_backend() -> bool:
+    if has_triton_package():
+        import triton
+
+        return "cpu" in triton.backends.backends
+
+    return False
 
 
 @functools.cache
 def has_triton_experimental_host_tma() -> bool:
     if has_triton_package():
-        if _device_supports_tma():
+        if _device_supports_tensor_descriptor():
             try:
                 from triton.tools.experimental_descriptor import (  # noqa: F401
                     create_1d_tma_descriptor,
                     create_2d_tma_descriptor,
                 )
 
-                return True
+                try:
+                    from triton.tools.experimental_descriptor import enable_in_pytorch
+
+                    return enable_in_pytorch()
+                except ImportError:
+                    return True
             except ImportError:
                 pass
 
@@ -55,7 +120,7 @@ def has_triton_experimental_host_tma() -> bool:
 @functools.cache
 def has_triton_tensor_descriptor_host_tma() -> bool:
     if has_triton_package():
-        if _device_supports_tma():
+        if _device_supports_tensor_descriptor():
             try:
                 from triton.tools.tensor_descriptor import (  # noqa: F401
                     TensorDescriptor,
@@ -79,10 +144,14 @@ def has_triton_tma_device() -> bool:
         import torch
 
         if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ) or torch.xpu.is_available():
+            (
+                torch.cuda.is_available()
+                and torch.cuda.get_device_capability() >= (9, 0)
+                and not torch.version.hip
+            )
+            or torch.xpu.is_available()
+            or has_triton_cpu_backend()
+        ):
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -103,6 +172,50 @@ def has_triton_tma_device() -> bool:
                 pass
 
     return False
+
+
+def has_triton_amd_tdm_device(arch: str) -> bool:
+    """Return whether Triton exposes AMD TDM lowering for the given GCN arch."""
+    return _has_triton_amd_tdm_device(arch.split(":", 1)[0])
+
+
+@functools.cache
+def _has_triton_amd_tdm_device(arch: str) -> bool:
+    if not has_triton_package():
+        return False
+
+    try:
+        from triton.language import make_tensor_descriptor  # noqa: F401
+    except ImportError:
+        return False
+
+    try:
+        from triton._C.libtriton import amd
+
+        return bool(amd.supports_tdm(arch))
+    except Exception:
+        log.debug(
+            "Failed to query Triton AMD TDM support for %s",
+            arch,
+            exc_info=True,
+        )
+    return False
+
+
+@functools.cache
+def has_triton_cuda_tma_device() -> bool:
+    """Whether the current CUDA device supports Triton device-side TMA."""
+    if not has_triton_package():
+        return False
+
+    import torch
+
+    return (
+        torch.cuda.is_available()
+        and not torch.version.hip
+        and torch.cuda.get_device_capability() >= (9, 0)
+        and has_triton_tma_device()
+    )
 
 
 @functools.cache
@@ -126,10 +239,14 @@ def has_triton_stable_tma_api() -> bool:
         import torch
 
         if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ) or torch.xpu.is_available():
+            (
+                torch.cuda.is_available()
+                and torch.cuda.get_device_capability() >= (9, 0)
+                and not torch.version.hip
+            )
+            or torch.xpu.is_available()
+            or has_triton_cpu_backend()
+        ):
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 
@@ -140,7 +257,25 @@ def has_triton_stable_tma_api() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def has_triton_reduction_ordering() -> bool:
+    """Whether the available Triton exposes inner-tree reduction ordering."""
+    if has_triton_package():
+        try:
+            from triton.language import ReductionOrdering
+
+            return hasattr(ReductionOrdering, "INNER_TREE")
+        except ImportError:
+            pass
+    return False
+
+
+@functools.cache
+def has_triton(*, include_cpu: bool = False) -> bool:
+    """Return whether a usable Triton backend is available.
+
+    By default, this helper only considers accelerator devices; callers must
+    explicitly include CPU.
+    """
     if not has_triton_package():
         return False
 
@@ -149,34 +284,28 @@ def has_triton() -> bool:
     if triton_disable_device_detection:
         return False
 
-    from torch._dynamo.device_interface import get_interface_for_device
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+    from torch._dynamo.exc import TritonUnavailableError
 
-    def cuda_extra_check(device_interface: Any) -> bool:
-        return device_interface.Worker.get_device_properties().major >= 7
-
-    def cpu_extra_check(device_interface: Any) -> bool:
-        import triton.backends
-
-        return "cpu" in triton.backends.backends
-
-    def _return_true(device_interface: Any) -> bool:
+    # A device supports Triton if it is available, reports Triton capability, and
+    # its Triton backend is actually built. Capability is gated first so that
+    # raise_if_triton_unavailable() only surfaces missing-backend errors (and
+    # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
+    # specific TritonUnavailableError rather than RuntimeError so unexpected
+    # errors are not silently swallowed.
+    for name, device_interface in get_registered_device_interfaces():
+        if ":" in name or (name == "cpu" and not include_cpu):
+            continue
+        if not (
+            device_interface.is_available() and device_interface.is_triton_capable()
+        ):
+            continue
+        try:
+            device_interface.raise_if_triton_unavailable()
+        except TritonUnavailableError:
+            continue
         return True
-
-    triton_supported_devices = {
-        "cuda": cuda_extra_check,
-        "xpu": _return_true,
-        "cpu": cpu_extra_check,
-        "mtia": _return_true,
-    }
-
-    def is_device_compatible_with_triton() -> bool:
-        for device, extra_check in triton_supported_devices.items():
-            device_interface = get_interface_for_device(device)
-            if device_interface.is_available() and extra_check(device_interface):
-                return True
-        return False
-
-    return is_device_compatible_with_triton()
+    return False
 
 
 @functools.cache
@@ -184,8 +313,31 @@ def triton_backend() -> Any:
     from triton.compiler.compiler import make_backend
     from triton.runtime.driver import driver
 
-    target = driver.active.get_current_target()
-    return make_backend(target)
+    try:
+        target = driver.active.get_current_target()
+        return make_backend(target)
+    except (ImportError, OSError) as e:
+        if _FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT in str(e):
+            _raise_triton_cache_load_error(e)
+        raise
+
+
+def _extern_libs_key(backend: Any) -> str:
+    """Return a cache key fragment for extern libs (e.g. libdevice.10.bc).
+
+    These files affect codegen but are not covered by triton_key() (Python
+    sources only) or backend.hash() (ptxas version and arch only).
+    """
+    opts = backend.parse_options({})
+    extern_libs = getattr(opts, "extern_libs", None)
+    if not extern_libs:
+        return ""
+    parts = []
+    for name, path in sorted(extern_libs):
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                parts.append(f"{name}-{hashlib.sha256(f.read()).hexdigest()}")
+    return "-".join(parts)
 
 
 @functools.cache

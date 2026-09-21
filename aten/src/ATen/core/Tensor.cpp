@@ -1,8 +1,5 @@
 #include <ATen/core/Tensor.h>
-#include <ATen/core/Formatting.h>
 #include <ATen/core/VariableHooksInterface.h>
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/FunctionalTensorWrapper.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/MethodOperators.h>
@@ -71,7 +68,7 @@ void TensorBase::enforce_invariants() {
 
 void TensorBase::print() const {
   if (defined()) {
-    std::cerr << "[" << toString() << " " << sizes() << "]" << '\n';
+    std::cerr << '[' << toString() << ' ' << sizes() << ']' << '\n';
   } else {
     std::cerr << "[UndefinedTensor]" << '\n';
   }
@@ -161,7 +158,7 @@ const std::string& TensorBase::name() const {
   return impl::GetVariableHooks()->name(*this);
 }
 
-const std::shared_ptr<torch::autograd::Node>& TensorBase::grad_fn() const {
+const c10::intrusive_ptr<torch::autograd::Node>& TensorBase::grad_fn() const {
   return impl::GetVariableHooks()->grad_fn(*this);
 }
 

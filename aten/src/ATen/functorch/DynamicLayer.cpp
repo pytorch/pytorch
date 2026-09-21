@@ -7,12 +7,10 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <ATen/functorch/BatchRulesHelper.h>
 
 #include <torch/library.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/FunctionalTensorWrapper.h>
 #include <c10/util/irange.h>
 #include <ATen/FuncTorchTLS.h>
 #include <iostream>
@@ -31,7 +29,8 @@ DynamicLayer::DynamicLayer(
     std::optional<RandomnessType> randomness,
     std::optional<bool> prev_grad_mode,
     std::optional<bool> prev_fwd_grad_mode,
-    std::optional<bool> functionalize_add_back_views)
+    std::optional<bool> functionalize_add_back_views,
+    std::optional<bool> prev_inference_mode)
 {
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
@@ -45,10 +44,10 @@ DynamicLayer::DynamicLayer(
       interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
       break;
     case TransformType::Grad:
-      interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value());
+      interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value(), prev_inference_mode.value_or(false));
       break;
     case TransformType::Jvp:
-      interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value());
+      interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value(), prev_inference_mode.value_or(false));
       break;
     case TransformType::Functionalize:
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -248,10 +247,11 @@ int64_t initAndPushDynamicLayer(
     std::optional<RandomnessType> randomness,
     std::optional<bool> prev_grad_mode,
     std::optional<bool> prev_fwd_grad_mode,
-    std::optional<bool> functionalize_add_back_views) {
+    std::optional<bool> functionalize_add_back_views,
+    std::optional<bool> prev_inference_mode) {
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const int64_t layerId = static_cast<int64_t>(1 + dynamicLayerStack.size());
-  DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
+  DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views, prev_inference_mode);
   // NB: this function should be called while holding the GIL to avoid races
   new_layer.interpreter().set_is_alive(true);
   pushDynamicLayer(std::move(new_layer));
@@ -346,15 +346,15 @@ void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int6
 }
 
 std::ostream& operator<< (std::ostream& os, const DynamicLayer& layer) {
-  os << layer.layerId() << ":" << layer.key();
+  os << layer.layerId() << ':' << layer.key();
   return os;
 }
 std::ostream& operator<< (std::ostream& os, const std::vector<DynamicLayer>& dls) {
   os << "DynamicLayerStack[ ";
   for (const auto& layer : dls) {
-    os << layer << " ";
+    os << layer << ' ';
   }
-  os << "]";
+  os << ']';
   return os;
 }
 

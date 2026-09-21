@@ -9,9 +9,9 @@ import requests
 
 CONFIGS = {
     "dynamo39": {
-        "linux-jammy-py3.9-clang12 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-jammy-py3.9-clang12 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-jammy-py3.9-clang12 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+        "linux-jammy-py3.10-clang12 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-jammy-py3.10-clang12 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-jammy-py3.10-clang12 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
     "dynamo313": {
         "linux-jammy-py3.13-clang12 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",

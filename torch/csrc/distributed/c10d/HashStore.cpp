@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 
-#include <unistd.h>
 #include <cstdint>
 
 #include <chrono>
@@ -47,7 +46,7 @@ std::vector<uint8_t> HashStore::get(const std::string& key) {
     return it->second;
   }
   // Slow path: wait up to any timeout_.
-  auto pred = [&]() { return map_.find(key) != map_.end(); };
+  auto pred = [&]() { return map_.contains(key); };
   if (timeout_ == kNoTimeout) {
     cv_.wait(lock, pred);
   } else {
@@ -118,9 +117,8 @@ bool HashStore::checkLocked(
     const std::unique_lock<std::mutex>& lock,
     const std::vector<std::string>& keys) {
   for (const auto& key : keys) {
-    auto foundKV = map_.find(key) != map_.end();
-    auto foundQueue =
-        queues_.find(key) != queues_.end() && !queues_[key].empty();
+    auto foundKV = map_.contains(key);
+    auto foundQueue = queues_.contains(key) && !queues_[key].empty();
     if (!foundKV && !foundQueue) {
       return false;
     }
@@ -153,7 +151,7 @@ std::vector<std::vector<uint8_t>> HashStore::multiGet(
     if (it != map_.end()) {
       res.emplace_back(it->second);
     } else {
-      auto pred = [&]() { return map_.find(key) != map_.end(); };
+      auto pred = [&]() { return map_.contains(key); };
       if (timeout_ == kNoTimeout) {
         cv_.wait(lock, pred);
       } else {
@@ -215,6 +213,16 @@ int64_t HashStore::queueLen(const std::string& key) {
     return 0;
   }
   return static_cast<int64_t>(it->second.size());
+}
+
+std::vector<std::string> HashStore::listKeys() {
+  std::unique_lock<std::mutex> lock(m_);
+  std::vector<std::string> keys;
+  keys.reserve(map_.size());
+  for (const auto& kv : map_) {
+    keys.push_back(kv.first);
+  }
+  return keys;
 }
 
 } // namespace c10d

@@ -2,9 +2,7 @@
 import functools
 import math
 import operator
-import weakref
 from collections.abc import Sequence
-from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -48,7 +46,7 @@ __all__ = [
 
 class Transform:
     """
-    Abstract class for invertable transformations with computable log
+    Abstract class for invertible transformations with computable log
     det jacobians. They are primarily used in
     :class:`torch.distributions.TransformedDistribution`.
 
@@ -97,7 +95,7 @@ class Transform:
 
     def __init__(self, cache_size: int = 0) -> None:
         self._cache_size = cache_size
-        self._inv: Optional[weakref.ReferenceType[Transform]] = None
+        self._inv: Transform | None = None
         if cache_size == 0:
             pass  # default behavior
         elif cache_size == 1:
@@ -123,12 +121,10 @@ class Transform:
         Returns the inverse :class:`Transform` of this transform.
         This should satisfy ``t.inv.inv is t``.
         """
-        inv = None
-        if self._inv is not None:
-            inv = self._inv()
+        inv = self._inv
         if inv is None:
             inv = _InverseTransform(self)
-            self._inv = weakref.ref(inv)
+            self._inv = inv
         return inv
 
     @property
@@ -223,60 +219,68 @@ class _InverseTransform(Transform):
 
     def __init__(self, transform: Transform) -> None:
         super().__init__(cache_size=transform._cache_size)
-        self._inv: Transform = transform  # type: ignore[assignment]
+        self._inv: Transform | None = transform
 
     @constraints.dependent_property(is_discrete=False)
     # pyrefly: ignore [bad-override]
     def domain(self):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv.codomain
 
     @constraints.dependent_property(is_discrete=False)
     # pyrefly: ignore [bad-override]
     def codomain(self):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv.domain
 
     @property
     def bijective(self) -> bool:  # type: ignore[override]
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv.bijective
 
     @property
     def sign(self) -> int:
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv.sign
 
     @property
     def inv(self) -> Transform:
-        return self._inv
+        return self._inv  # pyrefly: ignore[bad-return]
 
     def with_cache(self, cache_size=1):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self.inv.with_cache(cache_size).inv
 
     def __eq__(self, other):
         if not isinstance(other, _InverseTransform):
             return False
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv == other._inv
 
     def __repr__(self):
         return f"{self.__class__.__name__}({repr(self._inv)})"
 
     def __call__(self, x):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv._inv_call(x)
 
     def log_abs_det_jacobian(self, x, y):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return -self._inv.log_abs_det_jacobian(y, x)
 
     def forward_shape(self, shape):
-        return self._inv.inverse_shape(shape)
+        return self._inv.inverse_shape(shape)  # pyrefly: ignore[missing-attribute]
 
     def inverse_shape(self, shape):
-        return self._inv.forward_shape(shape)
+        return self._inv.forward_shape(shape)  # pyrefly: ignore[missing-attribute]
 
 
 class ComposeTransform(Transform):
@@ -312,7 +316,10 @@ class ComposeTransform(Transform):
         for part in reversed(self.parts):
             event_dim += part.domain.event_dim - part.codomain.event_dim
             event_dim = max(event_dim, part.domain.event_dim)
-        assert event_dim >= domain.event_dim
+        if event_dim < domain.event_dim:
+            raise AssertionError(
+                f"event_dim {event_dim} must be >= domain.event_dim {domain.event_dim}"
+            )
         if event_dim > domain.event_dim:
             domain = constraints.independent(domain, event_dim - domain.event_dim)
         return domain
@@ -328,7 +335,10 @@ class ComposeTransform(Transform):
         for part in self.parts:
             event_dim += part.codomain.event_dim - part.domain.event_dim
             event_dim = max(event_dim, part.codomain.event_dim)
-        assert event_dim >= codomain.event_dim
+        if event_dim < codomain.event_dim:
+            raise AssertionError(
+                f"event_dim {event_dim} must be >= codomain.event_dim {codomain.event_dim}"
+            )
         if event_dim > codomain.event_dim:
             codomain = constraints.independent(codomain, event_dim - codomain.event_dim)
         return codomain
@@ -346,13 +356,11 @@ class ComposeTransform(Transform):
 
     @property
     def inv(self) -> Transform:
-        inv = None
-        if self._inv is not None:
-            inv = self._inv()
+        inv = self._inv
         if inv is None:
             inv = ComposeTransform([p.inv for p in reversed(self.parts)])
-            self._inv = weakref.ref(inv)
-            inv._inv = weakref.ref(self)
+            self._inv = inv
+            inv._inv = self
         return inv
 
     def with_cache(self, cache_size=1):
@@ -757,8 +765,8 @@ class AffineTransform(Transform):
 
     def __init__(
         self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
+        loc: Tensor | float,
+        scale: Tensor | float,
         event_dim: int = 0,
         cache_size: int = 0,
     ) -> None:
@@ -813,7 +821,7 @@ class AffineTransform(Transform):
         return True
 
     @property
-    def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
+    def sign(self) -> Tensor | int:  # type: ignore[override]
         if isinstance(self.scale, _Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
@@ -877,7 +885,6 @@ class CorrCholeskyTransform(Transform):
         # apply stick-breaking on the squared values
         # Note that y = sign(r) * sqrt(z * z1m_cumprod)
         #             = (sign(r) * sqrt(z)) * sqrt(z1m_cumprod) = r * sqrt(z1m_cumprod)
-        # pyrefly: ignore [unsupported-operation]
         z = r**2
         z1m_cumprod_sqrt = (1 - z).sqrt().cumprod(-1)
         # Diagonal elements must be 1.
@@ -1087,10 +1094,11 @@ class CatTransform(Transform):
         self,
         tseq: Sequence[Transform],
         dim: int = 0,
-        lengths: Optional[Sequence[int]] = None,
+        lengths: Sequence[int] | None = None,
         cache_size: int = 0,
     ) -> None:
-        assert all(isinstance(t, Transform) for t in tseq)
+        if not all(isinstance(t, Transform) for t in tseq):
+            raise AssertionError("All elements of tseq must be Transform instances")
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
         super().__init__(cache_size=cache_size)
@@ -1098,7 +1106,10 @@ class CatTransform(Transform):
         if lengths is None:
             lengths = [1] * len(self.transforms)
         self.lengths = list(lengths)
-        assert len(self.lengths) == len(self.transforms)
+        if len(self.lengths) != len(self.transforms):
+            raise AssertionError(
+                f"lengths ({len(self.lengths)}) must match transforms ({len(self.transforms)})"
+            )
         self.dim = dim
 
     @lazy_property
@@ -1115,8 +1126,14 @@ class CatTransform(Transform):
         return CatTransform(self.transforms, self.dim, self.lengths, cache_size)
 
     def _call(self, x):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == self.length
+        if not (-x.dim() <= self.dim < x.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for tensor with {x.dim()} dimensions"
+            )
+        if x.size(self.dim) != self.length:
+            raise AssertionError(
+                f"x.size({self.dim}) = {x.size(self.dim)} must equal length {self.length}"
+            )
         yslices = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -1126,8 +1143,14 @@ class CatTransform(Transform):
         return torch.cat(yslices, dim=self.dim)
 
     def _inverse(self, y):
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == self.length
+        if not (-y.dim() <= self.dim < y.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for tensor with {y.dim()} dimensions"
+            )
+        if y.size(self.dim) != self.length:
+            raise AssertionError(
+                f"y.size({self.dim}) = {y.size(self.dim)} must equal length {self.length}"
+            )
         xslices = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -1137,10 +1160,22 @@ class CatTransform(Transform):
         return torch.cat(xslices, dim=self.dim)
 
     def log_abs_det_jacobian(self, x, y):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == self.length
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == self.length
+        if not (-x.dim() <= self.dim < x.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for x with {x.dim()} dimensions"
+            )
+        if x.size(self.dim) != self.length:
+            raise AssertionError(
+                f"x.size({self.dim}) = {x.size(self.dim)} must equal length {self.length}"
+            )
+        if not (-y.dim() <= self.dim < y.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for y with {y.dim()} dimensions"
+            )
+        if y.size(self.dim) != self.length:
+            raise AssertionError(
+                f"y.size({self.dim}) = {y.size(self.dim)} must equal length {self.length}"
+            )
         logdetjacs = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -1198,7 +1233,8 @@ class StackTransform(Transform):
     def __init__(
         self, tseq: Sequence[Transform], dim: int = 0, cache_size: int = 0
     ) -> None:
-        assert all(isinstance(t, Transform) for t in tseq)
+        if not all(isinstance(t, Transform) for t in tseq):
+            raise AssertionError("All elements of tseq must be Transform instances")
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
         super().__init__(cache_size=cache_size)
@@ -1214,26 +1250,50 @@ class StackTransform(Transform):
         return [z.select(self.dim, i) for i in range(z.size(self.dim))]
 
     def _call(self, x):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == len(self.transforms)
+        if not (-x.dim() <= self.dim < x.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for tensor with {x.dim()} dimensions"
+            )
+        if x.size(self.dim) != len(self.transforms):
+            raise AssertionError(
+                f"x.size({self.dim}) = {x.size(self.dim)} must equal len(transforms) {len(self.transforms)}"
+            )
         yslices = []
         for xslice, trans in zip(self._slice(x), self.transforms):
             yslices.append(trans(xslice))
         return torch.stack(yslices, dim=self.dim)
 
     def _inverse(self, y):
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == len(self.transforms)
+        if not (-y.dim() <= self.dim < y.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for tensor with {y.dim()} dimensions"
+            )
+        if y.size(self.dim) != len(self.transforms):
+            raise AssertionError(
+                f"y.size({self.dim}) = {y.size(self.dim)} must equal len(transforms) {len(self.transforms)}"
+            )
         xslices = []
         for yslice, trans in zip(self._slice(y), self.transforms):
             xslices.append(trans.inv(yslice))
         return torch.stack(xslices, dim=self.dim)
 
     def log_abs_det_jacobian(self, x, y):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == len(self.transforms)
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == len(self.transforms)
+        if not (-x.dim() <= self.dim < x.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for x with {x.dim()} dimensions"
+            )
+        if x.size(self.dim) != len(self.transforms):
+            raise AssertionError(
+                f"x.size({self.dim}) = {x.size(self.dim)} must equal len(transforms) {len(self.transforms)}"
+            )
+        if not (-y.dim() <= self.dim < y.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for y with {y.dim()} dimensions"
+            )
+        if y.size(self.dim) != len(self.transforms):
+            raise AssertionError(
+                f"y.size({self.dim}) = {y.size(self.dim)} must equal len(transforms) {len(self.transforms)}"
+            )
         logdetjacs = []
         yslices = self._slice(y)
         xslices = self._slice(x)
@@ -1284,7 +1344,7 @@ class CumulativeDistributionTransform(Transform):
         self.distribution = distribution
 
     @property
-    def domain(self) -> Optional[constraints.Constraint]:  # type: ignore[override]
+    def domain(self) -> constraints.Constraint | None:  # type: ignore[override]
         return self.distribution.support
 
     def _call(self, x):

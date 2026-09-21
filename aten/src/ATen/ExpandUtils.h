@@ -9,6 +9,7 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/core/DimVector.h>
+#include <c10/core/SymBool.h>
 #include <c10/util/Exception.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
@@ -99,7 +100,18 @@ inline void check_defined(
 inline c10::MaybeOwned<Tensor> expand_inplace(
     const Tensor& tensor,
     const Tensor& to_expand) {
-  if (tensor.sym_sizes().equals(to_expand.sym_sizes())) {
+  auto t_sizes = tensor.sym_sizes();
+  auto e_sizes = to_expand.sym_sizes();
+  bool same = t_sizes.size() == e_sizes.size();
+  if (same) {
+    for (size_t i = 0; i < t_sizes.size(); ++i) {
+      if (!TORCH_GUARD_OR_FALSE(sym_eq(t_sizes[i], e_sizes[i]))) {
+        same = false;
+        break;
+      }
+    }
+  }
+  if (same) {
     return c10::MaybeOwned<Tensor>::borrowed(to_expand);
   }
   return c10::MaybeOwned<Tensor>::owned(
@@ -421,14 +433,14 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
   SymDimVector sizes;
-  for (const auto i : c10::irange(to_expand.size())) {
-    if (!to_expand[i].defined()) {
+  for (const auto& to_expand_elem : to_expand) {
+    if (!to_expand_elem.defined()) {
       continue;
     } else if (first) {
-      sizes = to_expand[i].sym_sizes();
+      sizes = to_expand_elem.sym_sizes();
       first = false;
     } else {
-      sizes = infer_size_symdimvector(sizes, to_expand[i].sym_sizes());
+      sizes = infer_size_symdimvector(sizes, to_expand_elem.sym_sizes());
     }
   }
 

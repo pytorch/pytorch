@@ -39,7 +39,7 @@ using MIOpenPoolType = at::cuda::DeviceThreadHandlePool<
 
 miopenHandle_t getMiopenHandle() {
   c10::DeviceIndex device = 0;
-  AT_CUDA_CHECK(c10::hip::GetDevice(&device));
+  AT_CUDA_CHECK(at::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.
@@ -51,7 +51,7 @@ miopenHandle_t getMiopenHandle() {
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);
-  MIOPEN_CHECK(miopenSetStream(handle, c10::hip::getCurrentHIPStream()));
+  MIOPEN_CHECK(miopenSetStream(handle, at::cuda::getCurrentCUDAStream()));
   return handle;
 }
 

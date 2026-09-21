@@ -50,7 +50,7 @@ class _IterationGuard:
 # This file defines a variant of WeakKeyDictionary that overrides the hashing
 # behavior of the key to use object identity, rather than the builtin
 # __eq__/__hash__ functions.  This is useful for Tensor weak keys, as their
-# __eq__ implementation return a Tensor (elementwise equality), which means
+# __eq__ implementation returns a Tensor (elementwise equality), which means
 # you can't use them directly with the WeakKeyDictionary in standard library.
 #
 # Our implementation strategy is to create a wrapper weak key object, which we
@@ -295,7 +295,7 @@ class WeakIdKeyDictionary(MutableMapping):
     # pyrefly: ignore [bad-override]
     def pop(self, key, *args):
         self._dirty_len = True
-        # pyrefly: ignore [not-iterable]
+
         return self.data.pop(self.ref_type(key), *args)  # CHANGED
 
     def setdefault(self, key, default=None):

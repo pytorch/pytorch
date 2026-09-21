@@ -109,6 +109,9 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   auto isDefined = [](const Tensor & tensor){ return tensor.defined(); };
   auto isNull = [](const Tensor & tensor){ return !tensor.defined(); };
   auto start = std::find_if(tl.begin(), tl.end(), isDefined);
+  if (start == tl.end()) {
+    return true;
+  }
   auto stop = std::find_if(tl.rbegin(), tl.rend(), isDefined);
   auto it = std::find_if(start, stop.base(), isNull);
   return it == stop.base();
@@ -126,6 +129,7 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
+  transposedIndices.reserve(self.dim());
   for (const auto i : c10::irange(self.dim())) {
     if (indices[i].defined()) {
       dims.push_back(i);
@@ -148,6 +152,7 @@ transposeToFrontAndInvPerm(const Tensor& self, TensorList indices) {
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
   invPerm.resize(self.dim());
+  transposedIndices.reserve(self.dim());
   for (const auto i : c10::irange(self.dim())) {
     if (indices[i].defined()) {
       dims.push_back(i);

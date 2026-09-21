@@ -6,7 +6,6 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
-#include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/unique.h>
 
 #include <fstream>
@@ -77,8 +76,8 @@ std::string GetFirstUserFrameInPython() {
     auto& loc = frames[i - 1];
     if (loc.file.find("site-packages") == std::string::npos) {
       std::stringstream ss;
-      ss << loc.file << " " << loc.function << " " << loc.line;
-      return ss.str();
+      ss << loc.file << ' ' << loc.function << ' ' << loc.line;
+      return std::move(ss).str();
     }
   }
   return empty;
@@ -115,12 +114,12 @@ std::string DebugUtil::GetTensorsGraphInfo(
     }
   }
   std::stringstream ss;
-  // Call into a function pointer that may backed by python or empty depending
-  // on runtime
+  // Call into a function pointer that may be backed by python or empty
+  // depending on runtime
   std::vector<SourceLocation> frames = GetPythonFramesFunction()();
   ss << "Python Stacktrace:\n";
   for (auto& location : frames) {
-    ss << "  " << location.function << " (" << location.file << ":"
+    ss << "  " << location.function << " (" << location.file << ':'
        << location.line << ")\n";
   }
   ss << "\nHashes: (";
@@ -145,7 +144,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
     LOG(ERROR) << "Invalid graph format: " << format;
   }
   ss << "\n## BEGIN_GRAPH\n" << graph_str << "\n## END_GRAPH\n\n";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void DebugUtil::SaveTensorsGraphInfo(
@@ -160,13 +159,13 @@ void DebugUtil::SaveTensorsGraphInfo(
     std::string info = GetTensorsGraphInfo(tensors, indices, format);
     std::lock_guard<std::mutex> guard(lock);
     std::ofstream graph_file(save_file, std::ios_base::app);
-    graph_file << "[" << name << "]\n" << info << "\n";
+    graph_file << '[' << name << "]\n" << info << '\n';
   }
 }
 
 bool DebugUtil::ExperimentEnabled(const std::string& name) {
   static const std::unordered_set<std::string>* xset = LoadExperiments();
-  return xset->find(name) != xset->end();
+  return xset->contains(name);
 }
 
 } // namespace torch::lazy

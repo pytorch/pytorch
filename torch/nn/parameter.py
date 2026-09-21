@@ -101,6 +101,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             (self.data, self.requires_grad, hooks, state),
         )
 
+    # pyrefly: ignore [bad-override]
     __torch_function__ = _disabled_torch_function_impl
 
 
@@ -144,7 +145,7 @@ class UninitializedTensorMixin:
         if dtype is None:
             dtype = self.data.dtype
         self.data = torch.empty(shape, device=device, dtype=dtype)
-        # pyrefly: ignore [bad-override, missing-attribute]
+        # pyrefly: ignore [missing-attribute]
         self.__class__ = self.cls_to_become
 
     @property
@@ -199,6 +200,7 @@ def is_lazy(param: Any) -> bool:
     return isinstance(param, UninitializedTensorMixin)
 
 
+# pyrefly: ignore [inconsistent-inheritance]
 class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 
@@ -207,7 +209,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 
     Unlike a :class:`torch.nn.Parameter`, uninitialized parameters
     hold no data and attempting to access some properties, like their shape,
-    will throw a runtime error. The only operations that can be performed on a uninitialized
+    will throw a runtime error. The only operations that can be performed on an uninitialized
     parameter are changing its datatype, moving it to a different device and
     converting it to a regular :class:`torch.nn.Parameter`.
 
@@ -272,18 +274,19 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
         t._is_buffer = True
         return t
 
+    # pyrefly: ignore [bad-override]
     __torch_function__ = _disabled_torch_function_impl
 
 
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
-    Uninitialized Buffer is a a special case of :class:`torch.Tensor`
+    Uninitialized Buffer is a special case of :class:`torch.Tensor`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.Tensor`, uninitialized parameters
     hold no data and attempting to access some properties, like their shape,
-    will throw a runtime error. The only operations that can be performed on a uninitialized
+    will throw a runtime error. The only operations that can be performed on an uninitialized
     parameter are changing its datatype, moving it to a different device and
     converting it to a regular :class:`torch.Tensor`.
 

@@ -1,12 +1,10 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
-
 import torch
 
 from . import _is_tensorpipe_available, constants as rpc_contants
 
 
-DeviceType = Union[int, str, torch.device]
+DeviceType = int | str | torch.device
 
 __all__ = ["TensorPipeRpcBackendOptions"]
 
@@ -89,10 +87,10 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
-        device_maps: Optional[dict[str, dict[DeviceType, DeviceType]]] = None,
-        devices: Optional[list[DeviceType]] = None,
-        _transports: Optional[list] = None,
-        _channels: Optional[list] = None,
+        device_maps: dict[str, dict[DeviceType, DeviceType]] | None = None,
+        devices: list[DeviceType] | None = None,
+        _transports: list | None = None,
+        _channels: list | None = None,
     ):
         full_device_maps = (
             {}

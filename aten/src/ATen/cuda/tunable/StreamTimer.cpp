@@ -1,18 +1,16 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
 // Adapting TunableOp into PyTorch
 // Copyright (c) Advanced Micro Devices, Inc.
 //
-#include <cuda_runtime.h>
 
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/tunable/StreamTimer.h>
 #include <c10/cuda/CUDAStream.h>
-#include <cmath>
 
 namespace at::cuda::tunable {
 
@@ -21,7 +19,10 @@ StreamTimer::StreamTimer() {
   AT_CUDA_CHECK(cudaEventCreate(&end_));
 }
 
-StreamTimer::~StreamTimer() = default;
+StreamTimer::~StreamTimer() {
+  C10_CUDA_CHECK_WARN(cudaEventDestroy(start_));
+  C10_CUDA_CHECK_WARN(cudaEventDestroy(end_));
+}
 
 void StreamTimer::Start() {
   AT_CUDA_CHECK(cudaEventSynchronize(start_));
@@ -45,7 +46,10 @@ StreamTimerNoSync::StreamTimerNoSync() {
   AT_CUDA_CHECK(cudaEventCreate(&end_));
 }
 
-StreamTimerNoSync::~StreamTimerNoSync() = default;
+StreamTimerNoSync::~StreamTimerNoSync() {
+  C10_CUDA_CHECK_WARN(cudaEventDestroy(start_));
+  C10_CUDA_CHECK_WARN(cudaEventDestroy(end_));
+}
 
 void StreamTimerNoSync::Start() {
   AT_CUDA_CHECK(cudaEventRecord(start_, at::cuda::getCurrentCUDAStream()));

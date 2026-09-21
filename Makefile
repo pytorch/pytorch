@@ -11,18 +11,6 @@ all:
 	@cmake -S . -B build $(shell $(PYTHON) ./scripts/get_python_cmake_flags.py) && \
 		cmake --build build --parallel --
 
-.PHONY: local
-local:
-	@./scripts/build_local.sh
-
-.PHONY: android
-android:
-	@./scripts/build_android.sh
-
-.PHONY: ios
-ios:
-	@./scripts/build_ios.sh
-
 .PHONY: triton
 triton:
 	$(PIP) uninstall -y triton

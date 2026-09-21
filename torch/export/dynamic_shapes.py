@@ -6,7 +6,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable
 from enum import auto, Enum
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
 from torch.utils._pytree import (
@@ -70,9 +70,9 @@ class _DimHint:
     """
 
     type: _DimHintType
-    min: Optional[int] = None
-    max: Optional[int] = None
-    _factory: Optional[bool] = True
+    min: int | None = None
+    max: int | None = None
+    _factory: bool | None = True
 
     @staticmethod
     def AUTO():
@@ -89,9 +89,12 @@ class _DimHint:
     def __call__(self, min=None, max=None) -> "_DimHint":
         if not self._factory:
             raise TypeError(f"'{type(self)}' object is not callable")
-        assert min is None or min >= 0, "min must be non-negative"
-        assert max is None or max >= 0, "max must be non-negative"
-        assert min is None or max is None or min <= max, "min must be <= max"
+        if min is not None and min < 0:
+            raise AssertionError(f"min must be non-negative, got {min}")
+        if max is not None and max < 0:
+            raise AssertionError(f"max must be non-negative, got {max}")
+        if min is not None and max is not None and min > max:
+            raise AssertionError(f"min must be <= max, got min={min}, max={max}")
         return _DimHint(self.type, min=min, max=max, _factory=False)
 
     def __repr__(self):
@@ -114,7 +117,7 @@ class Dim:
     ``Dim("name", min=1, max=2)``).
 
     Dim hints provide the lowest barrier to exportability, with the user only
-    needing to specify if a dimension if dynamic, static, or left for the
+    needing to specify if a dimension is dynamic, static, or left for the
     compiler to decide (``Dim.AUTO``). The export process will automatically
     infer the remaining constraints on min/max ranges and relationships between
     dimensions.
@@ -171,15 +174,17 @@ class Dim:
     DYNAMIC = _DimHint.DYNAMIC()
     STATIC = _DimHint.STATIC()
 
-    def __init__(
-        self, name: str, *, min: Optional[int] = None, max: Optional[int] = None
-    ):
+    def __init__(self, name: str, *, min: int | None = None, max: int | None = None):
         from torch.utils._sympy.numbers import int_oo
 
         _min = 0 if min is None else min
         _max = int_oo if max is None else max
-        assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
-        assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
+        if not (_max > _min):
+            raise AssertionError(
+                f"Cannot create Dim with inconsistent min={min}, max={max}"
+            )
+        if not name.isidentifier():
+            raise AssertionError(f"Dim name must be a valid identifier, got {name}")
         self.__name__ = name
         self.min = _min
         self.max = _max
@@ -309,11 +314,12 @@ class _DerivedDim(Dim):
 
         _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
         root = self.root  # type: ignore[attr-defined]
-        assert _min_symint >= 0, (
-            f"Expected derived min value of {self.__name__} to be >= 0. "
-            f"Please specify an appropriate min value for {root.__name__} "
-            f"(currently {root.min})."
-        )
+        if _min_symint < 0:
+            raise AssertionError(
+                f"Expected derived min value of {self.__name__} to be >= 0. "
+                f"Please specify an appropriate min value for {root.__name__} "
+                f"(currently {root.min})."
+            )
         return int(_min_symint)
 
     @property
@@ -329,11 +335,12 @@ class _DerivedDim(Dim):
 
         _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]
         root = self.root  # type: ignore[attr-defined]
-        assert _max_symint <= sys.maxsize - 1, (
-            f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
-            f"Please specify an appropriate max value for {root.__name__} "
-            f"(currently {root.max})."
-        )
+        if _max_symint > sys.maxsize - 1:
+            raise AssertionError(
+                f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
+                f"Please specify an appropriate max value for {root.__name__} "
+                f"(currently {root.max})."
+            )
         return int(_max_symint)
 
     def _derive(self, fn):
@@ -351,7 +358,7 @@ class _DerivedDim(Dim):
 
 
 def dims(
-    *names: str, min: Optional[int] = None, max: Optional[int] = None
+    *names: str, min: int | None = None, max: int | None = None
 ) -> tuple[Dim, ...]:
     """
     Util to create multiple :func:`Dim` types.
@@ -475,7 +482,7 @@ class _DerivedConstraint(_ConstraintTarget):
 
     name: str
     constraint_range: "StrictMinMaxConstraint"
-    root: Union[_ConstraintTarget, _PhantomRoot]
+    root: _ConstraintTarget | _PhantomRoot
     fn: Callable
 
     @property
@@ -506,7 +513,7 @@ class _RelaxedConstraint(_ConstraintTarget):
         }
 
 
-Constraint = Union[_Constraint, _DerivedConstraint, _RelaxedConstraint]
+Constraint = _Constraint | _DerivedConstraint | _RelaxedConstraint
 
 
 @dataclasses.dataclass
@@ -519,9 +526,7 @@ class _IntWrapper:
 
     val: int
     # Disallow specifying dynamism
-    dynamism: Optional[Union[_DimHint, int]] = dataclasses.field(
-        init=False, default=None
-    )
+    dynamism: _DimHint | int | None = dataclasses.field(init=False, default=None)
 
 
 def _process_equalities(
@@ -587,7 +592,7 @@ def _tree_map_with_path(
     func: Callable[..., Any],
     tree: Any,
     *dynamic_shapes: Any,
-    tree_name: Optional[str] = None,
+    tree_name: str | None = None,
 ) -> Any:
     """
     Customized tree_map for mapping pytrees to dynamic_shapes.
@@ -636,15 +641,24 @@ def _tree_map_with_path(
         if "mismatch" in e.args[0]:
             # When PyTree finds a structural mismatch between tree and dynamic_shapes,
             # the error message is unfortunately quite horrible. Let's fix that.
-            assert dynamic_shapes, "Cannot be a mismatch if there is no dynamic_shapes"
-            assert tree_name, "Must provide a tree_name when there might be a mismatch"
+            if not dynamic_shapes:
+                raise AssertionError(
+                    "Cannot be a mismatch if there is no dynamic_shapes"
+                ) from None
+            if not tree_name:
+                raise AssertionError(
+                    "Must provide a tree_name when there might be a mismatch"
+                ) from None
 
             def _key(type_, context, i):
                 # derive a PyTree key given the type, context, and child # of a TreeSpec
                 if type_ is dict:
                     return MappingKey(context[i])
                 if type_ in (list, tuple):
-                    assert context is None
+                    if context is not None:
+                        raise AssertionError(
+                            f"expected context to be None for type {type_}, got {context}"
+                        )
                     return SequenceKey(i)
                 raise AssertionError(f"Did not expect type {type_}")
 
@@ -709,25 +723,240 @@ def _tree_map_with_path(
         raise
 
 
-def _combine_args(f, args, kwargs) -> dict[str, Any]:
-    # combine args and kwargs following the signature of f, as it happens
-    # in the body of f when called with *args, **kwargs
+_DynamicShapesSpec = dict[str, Any] | tuple[Any, ...] | list[Any]
+
+
+def _signature(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+) -> inspect.Signature:
     if isinstance(f, ExportedProgram):
         f = f.module()
-
-    signature = (
+    return (
         inspect.signature(f.forward)
         if isinstance(f, torch.nn.Module)
         else inspect.signature(f)
     )
+
+
+def _combine_args_from_signature(
+    signature: inspect.Signature,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> dict[str, Any]:
     kwargs = kwargs if kwargs is not None else {}
     return signature.bind(*args, **kwargs).arguments
+
+
+def _combine_args(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> dict[str, Any]:
+    # combine args and kwargs following the signature of f, as it happens
+    # in the body of f when called with *args, **kwargs
+    return _combine_args_from_signature(_signature(f), args, kwargs)
+
+
+_MISSING = object()
+
+
+def _var_keyword_param_name(signature: inspect.Signature) -> str | None:
+    for name, param in signature.parameters.items():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return name
+    return None
+
+
+def _variadic_kwargs_info(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> tuple[inspect.Signature, dict[str, Any], str | None, dict[str, Any]]:
+    signature = _signature(f)
+    combined_args = _combine_args_from_signature(signature, args, kwargs)
+    var_keyword_name = _var_keyword_param_name(signature)
+    if var_keyword_name is None or var_keyword_name not in combined_args:
+        return signature, combined_args, var_keyword_name, {}
+
+    var_kwargs = combined_args[var_keyword_name]
+    if not isinstance(var_kwargs, dict):
+        return signature, combined_args, var_keyword_name, {}
+    return signature, combined_args, var_keyword_name, var_kwargs
+
+
+def _colliding_variadic_kwarg_names(
+    signature: inspect.Signature,
+    args: tuple[Any, ...],
+    var_kwargs: dict[str, Any],
+) -> list[str]:
+    positional_names = set()
+    arg_i = 0
+    for param in signature.parameters.values():
+        if arg_i == len(args):
+            break
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            positional_names.update(
+                f"{param.name}_{i}" for i in range(len(args) - arg_i)
+            )
+            break
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }:
+            positional_names.add(param.name)
+            arg_i += 1
+        elif param.kind == inspect.Parameter.KEYWORD_ONLY:
+            break
+    return sorted(set(var_kwargs) & positional_names)
+
+
+def _normalize_dynamic_shapes(
+    dynamic_shapes: _DynamicShapesSpec | None,
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> _DynamicShapesSpec | None:
+    """
+    Normalize call-like dynamic shape specs for **kwargs to the signature-shaped
+    structure used by the rest of dynamic shapes processing.
+    """
+    if not dynamic_shapes:
+        return dynamic_shapes
+
+    signature, combined_args, var_keyword_name, var_kwargs = _variadic_kwargs_info(
+        f, args, kwargs
+    )
+    if var_keyword_name is None or not var_kwargs:
+        return dynamic_shapes
+
+    from torch._dynamo.exc import UserError, UserErrorType
+
+    collisions = _colliding_variadic_kwarg_names(signature, args, var_kwargs)
+    if collisions:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "Cannot represent dynamic shapes for variadic keyword argument(s) "
+            f"{collisions} because they collide with another input name used "
+            "for positional inputs.",
+            case_name="dynamic_shapes_validation",
+        )
+
+    if not isinstance(dynamic_shapes, dict):
+        return dynamic_shapes
+
+    result = dict(dynamic_shapes)
+    nested = result.get(var_keyword_name, _MISSING)
+    nested_shapes = dict(nested) if isinstance(nested, dict) else nested
+    fixed_arg_names = set(combined_args) - {var_keyword_name}
+
+    for key in var_kwargs:
+        has_nested_shape = isinstance(nested_shapes, dict) and key in nested_shapes
+        if key in fixed_arg_names or key == var_keyword_name:
+            if key in result and not has_nested_shape:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Cannot represent dynamic shape for variadic keyword argument "
+                    f"'{key}' as a top-level key because it collides with another "
+                    f"input name. Specify it under the variadic keyword parameter "
+                    f"instead, e.g. `dynamic_shapes['{var_keyword_name}']['{key}']`.",
+                    case_name="dynamic_shapes_validation",
+                )
+            continue
+
+        if key in result:
+            if nested is not _MISSING and not isinstance(nested_shapes, dict):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Cannot merge dynamic shape for variadic keyword argument "
+                    f"'{key}' into `dynamic_shapes['{var_keyword_name}']` because "
+                    "that entry is not a dict.",
+                    case_name="dynamic_shapes_validation",
+                )
+            if has_nested_shape:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Found dynamic shape for variadic keyword argument '{key}' "
+                    f"both as a top-level key and under "
+                    f"`dynamic_shapes['{var_keyword_name}']`.",
+                    case_name="dynamic_shapes_validation",
+                )
+            if not isinstance(nested_shapes, dict):
+                nested_shapes = {}
+            nested_shapes[key] = result.pop(key)
+
+    if isinstance(nested_shapes, dict):
+        result[var_keyword_name] = nested_shapes
+    return result
+
+
+def _combine_args_for_tracing(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+    dynamic_shapes: Any,
+) -> tuple[dict[Any, Any], Any]:
+    if not dynamic_shapes:
+        return _combine_args(f, args, kwargs), dynamic_shapes
+
+    kwargs = kwargs if kwargs is not None else {}
+    signature, combined_args, var_keyword_name, var_kwargs = _variadic_kwargs_info(
+        f, args, kwargs
+    )
+    if isinstance(dynamic_shapes, (tuple, list)):
+        dynamic_shapes_by_name = dict(zip(combined_args, dynamic_shapes))
+    else:
+        dynamic_shapes_by_name = dynamic_shapes
+
+    if not isinstance(dynamic_shapes_by_name, dict):
+        return combined_args, dynamic_shapes
+
+    traced_args = []
+    traced_dynamic_shapes = []
+    traced_names = []
+    arg_i = 0
+    for param in signature.parameters.values():
+        if arg_i == len(args):
+            break
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            var_args = combined_args[param.name]
+            var_arg_dynamic_shapes = dynamic_shapes_by_name[param.name]
+            for i, arg in enumerate(var_args):
+                traced_args.append(arg)
+                traced_dynamic_shapes.append(var_arg_dynamic_shapes[i])
+                traced_names.append(f"{param.name}_{i}")
+            arg_i = len(args)
+            break
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }:
+            traced_args.append(combined_args[param.name])
+            traced_dynamic_shapes.append(dynamic_shapes_by_name[param.name])
+            traced_names.append(param.name)
+            arg_i += 1
+
+    for key, arg in kwargs.items():
+        traced_args.append(arg)
+        traced_names.append(key)
+        if var_keyword_name is not None and key in var_kwargs:
+            traced_dynamic_shapes.append(dynamic_shapes_by_name[var_keyword_name][key])
+        else:
+            traced_dynamic_shapes.append(dynamic_shapes_by_name[key])
+
+    if isinstance(dynamic_shapes, dict) and len(set(traced_names)) == len(traced_names):
+        return dict(zip(traced_names, traced_args)), dict(
+            zip(traced_names, traced_dynamic_shapes)
+        )
+    return dict(enumerate(traced_args)), tuple(traced_dynamic_shapes)
 
 
 class ShapesCollection:
     """
     Builder for dynamic_shapes.
     Used to assign dynamic shape specifications to tensors that appear in inputs.
+
+    Note: this produces the ``Dim``-based ``dynamic_shapes`` format only; it does
+    not (yet) emit the structured ``ShapesSpec`` / ``ParamsSpec`` API.
 
     This is useful particularly when :func:`args` is a nested input structure, and it's
     easier to index the input tensors, than to replicate the structure of :func:`args` in
@@ -769,18 +998,20 @@ class ShapesCollection:
         self._shapes = {}
 
     def __setitem__(self, t, shape):
-        assert isinstance(t, (torch.Tensor, _IntWrapper)), (
-            f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
-        )
+        if not isinstance(t, (torch.Tensor, _IntWrapper)):
+            raise AssertionError(
+                f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
+            )
 
         # TODO(avik): check that shape is indeed a Shape
 
         t_id = id(t)
         if t_id in self._shapes:
             _shape = self._shapes[t_id]
-            assert shape == _shape, (
-                f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
-            )
+            if shape != _shape:
+                raise AssertionError(
+                    f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
+                )
         else:
             self._shapes[id(t)] = shape
 
@@ -823,6 +1054,9 @@ class AdditionalInputs:
     """
     Infers dynamic_shapes based on additional inputs.
 
+    Note: this produces the ``Dim``-based ``dynamic_shapes`` format only; it does
+    not (yet) emit the structured ``ShapesSpec`` / ``ParamsSpec`` API.
+
     This is useful particularly for deployment engineers who, on the one hand, may
     have access to ample testing or profiling data that can provide a fair sense of
     representative inputs for a model, but on the other hand, may not know enough
@@ -854,10 +1088,12 @@ class AdditionalInputs:
         Additional input :func:`args` and :func:`kwargs`.
         """
 
-        assert type(args) is tuple, f"Representative args {args} must be a tuple"
-        assert kwargs is None or type(kwargs) is dict, (
-            f"Representative kwargs {kwargs} must be None or a dict"
-        )
+        if type(args) is not tuple:
+            raise AssertionError(f"Representative args {args} must be a tuple")
+        if kwargs is not None and type(kwargs) is not dict:
+            raise AssertionError(
+                f"Representative kwargs {kwargs} must be None or a dict"
+            )
         self._examples.append((args, kwargs))
 
     def dynamic_shapes(self, m, args, kwargs=None):
@@ -925,7 +1161,7 @@ def _warn_on_None_dynamic_shape_dimension():
 
 def _check_dynamic_shapes(
     combined_args: dict[str, Any],
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
 ):
     """
     Checks the dynamic_shapes specification for correctness,
@@ -1002,7 +1238,10 @@ def _check_dynamic_shapes(
                 case_name="dynamic_shapes_validation",
             )
 
-    assert isinstance(dynamic_shapes, (dict, tuple, list))
+    if not isinstance(dynamic_shapes, (dict, tuple, list)):
+        raise AssertionError(
+            f"expected dynamic_shapes to be dict, tuple, or list, got {type(dynamic_shapes)}"
+        )
     if isinstance(dynamic_shapes, dict):
         got_keys = list(dynamic_shapes.keys())
         expected_arg_names = list(combined_args.keys())
@@ -1039,7 +1278,12 @@ def _check_dynamic_shapes(
                     "Unable to specify input integers as dynamic through named "
                     "Dims. Please use Dim.AUTO/DYNAMIC instead."
                 )
-            assert dynamic_shape is None or isinstance(dynamic_shape, (int, _DimHint))
+            if dynamic_shape is not None and not isinstance(
+                dynamic_shape, (int, _DimHint)
+            ):
+                raise AssertionError(
+                    f"expected dynamic_shape to be None, int, or _DimHint for _IntWrapper, got {type(dynamic_shape)}"
+                )
         else:
             if dynamic_shape is not None:
                 rendered_path = keystr(path)
@@ -1055,7 +1299,7 @@ def _check_dynamic_shapes(
 
 def _process_dynamic_shapes(
     combined_args: dict[str, Any],
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
 ) -> list[Constraint]:
     """
     Reads the dynamic_shapes specification and produces a list of constraints.
@@ -1092,7 +1336,7 @@ def _process_dynamic_shapes(
             if solution is not None:
                 return int(solution[1])
             else:
-                raise UserError(  # noqa: B904
+                raise UserError(
                     UserErrorType.CONSTRAINT_VIOLATION,
                     f"Expected shape[{i}] = {tensor.shape[i]} of input Tensor to be "
                     f"of the form {expr}, where {symbol} is an integer",
@@ -1149,7 +1393,8 @@ def _process_dynamic_shapes(
                 ),
             )
         else:
-            assert isinstance(dim, Dim)
+            if not isinstance(dim, Dim):
+                raise AssertionError(f"expected dim to be Dim, got {type(dim)}")
             constraint = _Constraint(  # type: ignore[assignment]
                 id(tensor),
                 i,
@@ -1186,7 +1431,10 @@ def _process_dynamic_shapes(
         # we also delete these attributes in non_strict_utils.py/make_constraints()
         tensor._dynamo_weak_dynamic_indices = set()
         tensor._dynamo_dynamic_indices = set()
-        tensor._dynamo_dynamic_range = set()
+        if hasattr(tensor, "_dynamo_dynamic_range"):
+            # Removed rather than emptied, an empty set is a different value to the
+            # guards than an absent attribute. See _clean_dynamic_markers.
+            del tensor._dynamo_dynamic_range
         tensor._dynamo_static_indices = set()
         tensor._dynamo_unbacked_indices = set()
 
@@ -1232,7 +1480,7 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
 ):
     name_to_dim = {}
     for dim in tree_iter(dynamic_shapes, is_leaf=lambda x: isinstance(x, Dim)):
@@ -1246,14 +1494,15 @@ def _get_dim_name_mapping(
             if isinstance(dim, _DerivedDim):
                 name_to_dim[dim.root.__name__] = dim.root  # type: ignore[attr-defined]
         else:
-            assert isinstance(dim, _DimHint)
+            if not isinstance(dim, _DimHint):
+                raise AssertionError(f"expected dim to be _DimHint, got {type(dim)}")
     return name_to_dim
 
 
 def refine_dynamic_shapes_from_suggested_fixes(
     msg: str,
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any]],
-) -> Union[dict[str, Any], tuple[Any], list[Any]]:
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
+) -> dict[str, Any] | tuple[Any] | list[Any]:
     """
     When exporting with :func:`dynamic_shapes`, export may fail with a ConstraintViolation error if the specification
     doesn't match the constraints inferred from tracing the model. The error message may provide suggested fixes -
@@ -1324,9 +1573,13 @@ def refine_dynamic_shapes_from_suggested_fixes(
     # track derived dim roots
     roots: set[str] = set()
     for k, c in shape_fixes.items():
-        assert isinstance(c, (int, Dim, _DerivedDim, sympy.Expr))
+        if not isinstance(c, (int, Dim, _DerivedDim, sympy.Expr)):
+            raise AssertionError(
+                f"expected shape_fixes[{k!r}] to be int, Dim, _DerivedDim, or sympy.Expr, got {type(c)}"
+            )
         if isinstance(c, sympy.Expr):  # check dim/derived dim expression
-            assert _is_supported_equivalence(c)
+            if not _is_supported_equivalence(c):
+                raise AssertionError(f"sympy.Expr {c} is not a supported equivalence")
             shape_fixes[k] = c
             roots.add(str(next(iter(c.free_symbols))))
         if isinstance(c, _DerivedDim):
@@ -1334,7 +1587,10 @@ def refine_dynamic_shapes_from_suggested_fixes(
 
     # check keys are existing dims or new roots
     for k in shape_fixes:
-        assert k in name_to_dim or k in roots
+        if k not in name_to_dim and k not in roots:
+            raise AssertionError(
+                f"shape_fixes key {k!r} not found in name_to_dim or roots"
+            )
 
     # cache so we don't produce multiple derived dim objects
     derived_dim_cache: dict[str, _DerivedDim] = {}
@@ -1353,7 +1609,10 @@ def refine_dynamic_shapes_from_suggested_fixes(
                     if symbol.name in shape_fixes:
                         root = shape_fixes[symbol.name]
                     else:
-                        assert symbol.name in name_to_dim
+                        if symbol.name not in name_to_dim:
+                            raise AssertionError(
+                                f"symbol.name {symbol.name!r} not found in name_to_dim"
+                            )
                         root = name_to_dim[symbol.name]
                     # figure out value of fix
                     modulus, remainder = sympy.polys.polytools.div(fix, symbol)
@@ -1362,6 +1621,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
                         dim = int(modulus) * dim
                     if remainder != 0:
                         dim = dim + int(remainder)
+                    # pyrefly: ignore [unsupported-operation]
                     derived_dim_cache[str(fix)] = dim
                     return dim
             else:

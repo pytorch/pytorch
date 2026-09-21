@@ -1,10 +1,7 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 find_package(ATen REQUIRED)
 include_directories(${ATEN_INCLUDE_DIR})
 
-# C++17
-if(not MSVC)
-    set(CMAKE_CXX_FLAGS "--std=c++17 ${CMAKE_CXX_FLAGS}")
-endif()
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 add_executable(main main.cpp)
 target_link_libraries(main ${ATEN_LIBRARIES})

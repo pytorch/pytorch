@@ -129,7 +129,7 @@ def generate_large_tests():
 
         suffix = "_use_runtime_constant_folding" if use_runtime_constant_folding else ""
         large_data.update(
-            {  # noqa: F541
+            {
                 f"model_so_path{suffix}": model_so_path,
                 f"pt2_package_path{suffix}": pt2_package_path,
                 "inputs": [x],
@@ -156,7 +156,7 @@ def generate_cuda_alloc_test():
         )
 
     cuda_alloc_data.update(
-        {  # noqa: F541
+        {
             "model_so_path": model_so_path,
             "inputs": [x],
             "outputs": [ref_output],

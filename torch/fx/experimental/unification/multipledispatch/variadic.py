@@ -1,4 +1,5 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 from .utils import typename
 
 
@@ -7,14 +8,14 @@ __all__ = ["VariadicSignatureType", "isvariadic", "VariadicSignatureMeta", "Vari
 
 class VariadicSignatureType(type):
     # checking if subclass is a subclass of self
-    def __subclasscheck__(cls, subclass):
+    def __subclasscheck__(cls, subclass: type) -> bool:
         other_type = subclass.variadic_type if isvariadic(subclass) else (subclass,)
         return subclass is cls or all(
             issubclass(other, cls.variadic_type)  # type: ignore[attr-defined]
             for other in other_type
         )
 
-    def __eq__(cls, other):
+    def __eq__(cls, other: object) -> bool:
         """
         Return True if other has the same variadic type
         Parameters
@@ -28,11 +29,11 @@ class VariadicSignatureType(type):
         """
         return isvariadic(other) and set(cls.variadic_type) == set(other.variadic_type)  # type: ignore[attr-defined]
 
-    def __hash__(cls):
+    def __hash__(cls) -> int:
         return hash((type(cls), frozenset(cls.variadic_type)))  # type: ignore[attr-defined]
 
 
-def isvariadic(obj):
+def isvariadic(obj: type) -> bool:
     """Check whether the type `obj` is variadic.
     Parameters
     ----------
@@ -59,7 +60,9 @@ class VariadicSignatureMeta(type):
     examples of how this behaves.
     """
 
-    def __getitem__(cls, variadic_type):
+    def __getitem__(
+        cls, variadic_type: type | tuple[type, ...]
+    ) -> VariadicSignatureType:
         if not (isinstance(variadic_type, (type, tuple)) or type(variadic_type)):
             raise ValueError(
                 "Variadic types must be type or tuple of types"

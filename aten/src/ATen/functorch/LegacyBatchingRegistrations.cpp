@@ -6,16 +6,13 @@
 
 #include <torch/library.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/ATen.h>
 #include <ATen/native/TensorShape.h>
 
-#include <ATen/NestedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
-#include <ATen/functorch/TensorWrapper.h>
-#include <ATen/functorch/BatchingMetaprogramming.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
+#include <ATen/WrapDimUtils.h>
 
 #include <utility>
 
@@ -713,10 +710,12 @@ Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   // Do a cat for each set of zipped unbound components
   const auto num_components = unbound.front().size();
   std::vector<Tensor> outputs;
+  outputs.reserve(num_components);
   for (auto i : c10::irange(num_components)) {
     std::vector<Tensor> arg_list;
-    for (auto j : c10::irange(unbound.size())) {
-      arg_list.push_back(unbound[j][i]);
+    arg_list.reserve(unbound.size());
+    for (const auto& unbound_elem : unbound) {
+      arg_list.push_back(unbound_elem[i]);
     }
     outputs.push_back(at::cat(arg_list, dim));
   }

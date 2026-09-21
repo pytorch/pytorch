@@ -298,11 +298,11 @@ class LazyLinear(LazyModuleMixin, Linear):
         # that will soon be overwritten.
         # pyrefly: ignore [bad-argument-type]
         super().__init__(0, 0, False)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_features = out_features
         if bias:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore [unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def reset_parameters(self) -> None:
@@ -326,11 +326,12 @@ class LazyLinear(LazyModuleMixin, Linear):
                     self.bias.materialize((self.out_features,))
                 self.reset_parameters()
         if self.in_features == 0:
-            assert input.shape[-1] == self.weight.shape[-1], (
-                f"The in_features inferred from input: {input.shape[-1]} "
-                f"is not equal to in_features from self.weight: "
-                f"{self.weight.shape[-1]}"
-            )
+            if input.shape[-1] != self.weight.shape[-1]:
+                raise AssertionError(
+                    f"The in_features inferred from input: {input.shape[-1]} "
+                    f"is not equal to in_features from self.weight: "
+                    f"{self.weight.shape[-1]}"
+                )
             self.in_features = input.shape[-1]
 
 

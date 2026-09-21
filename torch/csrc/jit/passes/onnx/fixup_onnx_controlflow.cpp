@@ -3,9 +3,7 @@
 #include <ATen/InitialTensorOptions.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
-#include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
 namespace torch::jit {
@@ -117,7 +115,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
 
   if (opset_version >= ONNX_OPSET_13) {
     // Sequence type as loop-carried dependencies should be supported by ONNX
-    // ospet 13.
+    // opset 13.
     return node->outputs().vec();
   }
 
@@ -196,7 +194,7 @@ Node* ONNXOptionalNode(const OptionalTypePtr& opt_type, Graph* g) {
 }
 
 // Replaces block output i with an onnx::Optional
-// with `type` taken from opt_type. If and Loop Ops shares this function.
+// with `type` taken from opt_type. If and Loop Ops share this function.
 // 1. If Op: Needed when control flow has multiple branches, one of which
 // is defined by `block` and returns a None and another branch
 // returns not-None. The passed-in opt_type should be from the other branch.

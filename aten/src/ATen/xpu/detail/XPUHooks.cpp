@@ -1,9 +1,12 @@
+#include <ATen/DynamicLibrary.h>
 #include <ATen/xpu/PeerToPeerAccess.h>
 #include <ATen/xpu/PinnedMemoryAllocator.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUDevice.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#include <ATen/xpu/detail/LazyLevelZero.h>
 #include <ATen/xpu/detail/XPUHooks.h>
+#include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/util/Logging.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
@@ -26,13 +29,7 @@ std::string XPUHooks::showConfig() const {
 
 int32_t XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
   TORCH_CHECK(device.is_xpu(), "Only the XPU device type is expected.");
-#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0. So we can NOT find its global index of the ATen device.");
-#else
   return at::xpu::getGlobalIdxFromDevice(device.index());
-#endif
 }
 
 const Generator& XPUHooks::getDefaultGenerator(DeviceIndex device_index) const {
@@ -44,13 +41,7 @@ Generator XPUHooks::getNewGenerator(DeviceIndex device_index) const {
 }
 
 Device XPUHooks::getDeviceFromPtr(void* data) const {
-#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0. So we can NOT find the ATen device of a pointer.");
-#else
   return at::xpu::getDeviceFromPtr(data);
-#endif
 }
 
 /**
@@ -102,6 +93,20 @@ DeviceIndex XPUHooks::deviceCount() const {
 
 DeviceIndex XPUHooks::getCurrentDevice() const {
   return at::xpu::current_device();
+}
+
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::xpu::LevelZero*>
+load_level_zero() {
+  return std::make_pair(nullptr, &at::xpu::detail::lazyLevelZero);
+}
+
+const at::xpu::LevelZero& level_zero() {
+  static auto handle = load_level_zero();
+  return *handle.second;
+}
+
+const at::xpu::LevelZero& XPUHooks::level_zero() const {
+  return at::xpu::detail::level_zero();
 }
 
 REGISTER_XPU_HOOKS(XPUHooks);

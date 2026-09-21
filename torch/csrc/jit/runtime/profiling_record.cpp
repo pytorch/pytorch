@@ -2,7 +2,6 @@
 
 #include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>

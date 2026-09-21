@@ -1,21 +1,68 @@
-# mypy: ignore-errors
+import hashlib
+import importlib
 import os
-from typing import Optional
+import random
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import cast, Protocol, TypeAlias
 
 import torch
 
+from torchfuzz.checks import Check
 from torchfuzz.operators import get_operator
 from torchfuzz.ops_fuzzer import OperationGraph
 from torchfuzz.tensor_descriptor import format_tensor_descriptor
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
 
+_DEFAULT_DEVICE_MODULE = "torchfuzz.cuda"
+
+# Operations handed to the args/constants codegen hooks: (varname, spec) and
+# (varname, literal, spec) respectively. These are spelled as aliases because
+# list and dict are invariant, so FuzzTemplate and every override must use the
+# identical type or the override is rejected.
+ArgOperations: TypeAlias = list[tuple[str, Spec]]
+ConstantOperations: TypeAlias = list[tuple[str, str, Spec]]
+SpecDistribution: TypeAlias = dict[str, float | bool]
+
+
+@dataclass
+class DeviceInfo:
+    """Per-device metadata returned by a torchfuzz device plugin.
+
+    Attributes:
+        device_name: Short device name (e.g. "cuda", "xpu", "mtia").  Used by
+            ``tensor_descriptor`` to label the device in emitted comments.
+        select_runtime_env: Optional callback that customizes the subprocess
+            environment passed to ``runner.py``.  Signature::
+
+                def select_runtime_env(
+                    env: dict[str, str],
+                    *,
+                    exclude_primary_device: bool = False,
+                ) -> dict[str, str]: ...
+
+            *env* is the current environment (``PYTHONPATH`` is already set by
+            the runner).  When *exclude_primary_device* is ``True`` the plugin
+            should avoid selecting device 0 (or the equivalent primary device)
+            to prevent contention with the orchestrating process.  Return a
+            (new) ``env`` dict; when the callback is ``None`` the runner uses
+            the environment as-is.
+    """
+
+    device_name: str
+    select_runtime_env: Callable[..., dict[str, str]] | None = None
+
+
 class FuzzTemplate:
-    def __init__(self, supported_ops, check):
+    supported_ops: list[str]
+    check: Check
+
+    def __init__(self, supported_ops: list[str], check: Check) -> None:
         self.supported_ops = supported_ops
         self.check = check
 
-    def supported_dtypes(self):
+    def supported_dtypes(self) -> list[torch.dtype]:
         """Return list of supported dtypes for this template."""
         return [
             torch.float32,
@@ -29,7 +76,7 @@ class FuzzTemplate:
             torch.bool,
         ]
 
-    def spec_distribution(self):
+    def spec_distribution(self) -> SpecDistribution:
         """
         Define the distribution for generating random Specs.
 
@@ -47,22 +94,18 @@ class FuzzTemplate:
             "allow_scalars": True,
         }
 
-    def fuzz_spec_custom(self):
+    def fuzz_spec_custom(self) -> Spec:
         """
         Generate a random Spec based on this template's distribution preferences.
 
         Returns:
             Spec: Either a TensorSpec or ScalarSpec according to template's distribution
         """
-        import random
-
-        from torchfuzz.tensor_fuzzer import fuzz_torch_tensor_type
-
         # Get template's distribution configuration
         distribution = self.spec_distribution()
 
-        # Get random dtype based on template
-        dtype = fuzz_torch_tensor_type("default")
+        # Get random dtype based on this template's supported dtypes
+        dtype = random.choice(self.supported_dtypes())
 
         # Validate distribution configuration
         allow_tensors = distribution.get("allow_tensors", True)
@@ -86,7 +129,7 @@ class FuzzTemplate:
             else:
                 return self._generate_scalar_spec(dtype)
 
-    def _generate_tensor_spec(self, dtype):
+    def _generate_tensor_spec(self, dtype: torch.dtype) -> TensorSpec:
         """Generate a TensorSpec with the given dtype."""
         from torchfuzz.tensor_fuzzer import (
             fuzz_tensor_size,
@@ -98,14 +141,84 @@ class FuzzTemplate:
         stride = fuzz_valid_stride(size)
         return TensorSpec(size=size, stride=stride, dtype=dtype)
 
-    def _generate_scalar_spec(self, dtype):
+    def _generate_scalar_spec(self, dtype: torch.dtype) -> ScalarSpec:
         """Generate a ScalarSpec with the given dtype."""
         from torchfuzz.tensor_fuzzer import ScalarSpec
 
         return ScalarSpec(dtype=dtype)
 
-    def args_codegen(self, arg_operations):
-        """Generate argument creation code for default template."""
+    def imports_codegen(self) -> list[str]:
+        """Return import lines emitted at the top of the generated file."""
+        return []
+
+    def flags_codegen(self) -> list[str]:
+        """Return flag/setup lines emitted at the top of the generated file."""
+        return []
+
+    def setseed_codegen(self, seed: int) -> list[str]:
+        """Return lines emitted to set the random seed."""
+        return [f"torch.manual_seed({seed})", ""]
+
+    def epilogue_codegen(self) -> list[str]:
+        """Return lines emitted at the very end of the generated file."""
+        return []
+
+    def treat_constant_as_global(self) -> bool:
+        """Whether ``constant`` ops should be lifted to function arguments.
+
+        When True, ``constant`` ops are appended to ``constant_operations`` and
+        passed into ``args_codegen``; the function signature receives them as
+        explicit parameters.  Templates that materialize constants outside the
+        traced function (e.g. DTensor placements with random sharding) should
+        return True.  Default is False.
+        """
+        return False
+
+    def wrap_body(
+        self, generated_code_lines: list[str], graph: OperationGraph
+    ) -> list[str]:
+        """Optionally rewrite the per-node body lines.
+
+        Default is a passthrough.  Used by ``StreamFuzzTemplate`` to partition
+        operations across CUDA streams.
+        """
+        return generated_code_lines
+
+    def return_codegen(self, final_var_name: str) -> list[str]:
+        """Return the lines that emit the ``return`` statement.
+
+        Default uses ``.real`` to drop imaginary parts of complex outputs.
+        """
+        return [
+            "    # Ensure gradient computation by multiplying with sentinel and taking real part",
+            f"    result = {final_var_name} * sentinel",
+            "    if result.is_complex():",
+            "        result = result.real",
+            "    return result",
+            "",
+        ]
+
+    def codegen_constant(self, output_name: str, tensor_creation_expr: str) -> str:
+        """Wrap a tensor-creation expression for use as a ``constant`` op.
+
+        Default just assigns the expression to ``output_name``.  Templates that
+        need to wrap constants (e.g. DTensor's ``DTensor.from_local``) should
+        override this hook.
+        """
+        return f"{output_name} = {tensor_creation_expr}"
+
+    def args_codegen(
+        self,
+        arg_operations: ArgOperations,
+        constant_operations: ConstantOperations | None = None,
+    ) -> list[str]:
+        """Generate argument creation code for default template.
+
+        ``constant_operations`` is only consulted by templates that opt in via
+        :meth:`treat_constant_as_global`.  The base implementation ignores it.
+        """
+        del constant_operations  # unused in the base implementation
+
         code_lines = []
 
         # Add sentinel tensor that ensures gradient computation
@@ -118,7 +231,7 @@ class FuzzTemplate:
         )
 
         if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
+            for i, (_node_id, spec) in enumerate(arg_operations):
                 arg_name = f"arg_{i}"
 
                 if isinstance(spec, ScalarSpec):
@@ -194,313 +307,82 @@ class FuzzTemplate:
         return code_lines
 
 
-class DefaultFuzzTemplate(FuzzTemplate):
-    def __init__(self):
-        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
+# ---------------------------------------------------------------------------
+# Plugin registry
+# ---------------------------------------------------------------------------
 
-        super().__init__(
-            supported_ops=[
-                # Basic arithmetic operations
-                "torch.add",
-                "torch.sub",
-                "torch.mul",
-                "torch.div",
-                "torch.clamp",
-                "torch.cumsum",
-                # Tensor shape operations
-                "torch.Tensor.view",
-                "torch.reshape",
-                "torch.flatten",
-                "torch.squeeze",
-                "torch.unsqueeze",
-                "torch.split",
-                "torch.chunk",
-                "torch.expand",
-                "torch.cat",
-                "torch.stack",
-                # Indexing operations
-                "torch.gather",
-                "torch.index_select",
-                "torch.argsort",
-                # Matrix operations
-                "torch.mm",
-                "torch.addmm",
-                "torch.bmm",
-                "torch.matmul",
-                # Neural network operations
-                "torch.nn.functional.embedding",
-                "torch.nn.functional.linear",
-                "torch.nn.functional.scaled_dot_product_attention",
-                "torch.nn.functional.multi_head_attention_forward",
-                # Activation functions
-                "torch.nn.functional.relu",
-                "torch.nn.functional.leaky_relu",
-                "torch.nn.functional.elu",
-                "torch.nn.functional.gelu",
-                "torch.nn.functional.silu",
-                "torch.sigmoid",
-                "torch.tanh",
-                "torch.nn.functional.softmax",
-                # Normalization layers
-                "torch.nn.functional.layer_norm",
-                "torch.nn.functional.rms_norm",
-                "torch.nn.functional.batch_norm",
-                "torch.nn.functional.group_norm",
-                # Regularization
-                "torch.nn.functional.dropout",
-            ],
-            check=EagerVsFullGraphDynamicCompileCheck(),
+
+# Registered templates are FuzzTemplate subclasses whose __init__ takes no
+# arguments (they pass supported_ops/check to super()), so the registry values
+# are zero-argument factories rather than plain ``type[FuzzTemplate]``.
+class DevicePlugin(Protocol):
+    """The contract a ``TORCHFUZZ_DEVICE_MODULE`` plugin module must satisfy."""
+
+    def register_codegen(self) -> dict[str, Callable[[], FuzzTemplate]]: ...
+    def get_device_info(self) -> DeviceInfo: ...
+
+
+_TEMPLATE_REGISTRY: dict[str, Callable[[], FuzzTemplate]] | None = None
+_DEVICE_INFO: DeviceInfo | None = None
+
+
+def initialize_codegen() -> None:
+    """Load the device plugin module and populate the template registry.
+
+    Idempotent.  Called explicitly from ``fuzzer.py`` and lazily from
+    :func:`make_template` / :func:`get_template_names` / :func:`get_device_info`
+    so that library callers do not have to remember to invoke it themselves.
+
+    The plugin module name comes from the ``TORCHFUZZ_DEVICE_MODULE`` environment
+    variable; if unset, the default ``torchfuzz.cuda`` plugin is loaded.
+    """
+    global _TEMPLATE_REGISTRY, _DEVICE_INFO
+    if _TEMPLATE_REGISTRY is not None:
+        return
+    module_name = os.environ.get("TORCHFUZZ_DEVICE_MODULE", _DEFAULT_DEVICE_MODULE)
+    # import_module returns a bare ModuleType, so every attribute on it is
+    # unchecked; assert the plugin contract instead.
+    plugin = cast("DevicePlugin", importlib.import_module(module_name))
+    _TEMPLATE_REGISTRY = plugin.register_codegen()
+    _DEVICE_INFO = plugin.get_device_info()
+
+
+def _template_registry() -> dict[str, Callable[[], FuzzTemplate]]:
+    """Return the registry, loading the device plugin on first use."""
+    initialize_codegen()
+    registry = _TEMPLATE_REGISTRY
+    if registry is None:
+        raise RuntimeError("device plugin did not populate the template registry")
+    return registry
+
+
+def get_template_names() -> list[str]:
+    """Return the list of template names registered by the active plugin."""
+    return list(_template_registry().keys())
+
+
+def make_template(name: str) -> FuzzTemplate:
+    """Instantiate the FuzzTemplate registered under ``name``."""
+    registry = _template_registry()
+    if name not in registry:
+        raise KeyError(
+            f"Unknown template '{name}'; available templates: {sorted(registry.keys())}"
         )
-
-    def spec_distribution(self):
-        """Default template: tensor-only (no scalars)."""
-        return {
-            "tensor_prob": 1.0,
-            "scalar_prob": 0.0,
-            "allow_tensors": True,
-            "allow_scalars": False,
-        }
-
-    def imports_codegen(self):
-        return [
-            "import torch",
-        ]
-
-    def flags_codegen(self):
-        return ["torch._dynamo.config.capture_scalar_outputs = True"]
-
-    def epilogue_codegen(self):
-        return []
+    return registry[name]()
 
 
-class DTensorFuzzTemplate(FuzzTemplate):
-    def __init__(self):
-        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
-
-        super().__init__(
-            supported_ops=[
-                "torch.add",
-                "torch.sub",
-                "torch.mul",
-                "torch.div",
-                "torch.mm",
-                "torch.addmm",
-                "torch.bmm",
-                "torch.matmul",
-            ],
-            check=EagerVsFullGraphDynamicCompileCheck(),
-        )
-
-    def supported_dtypes(self):
-        """Return list of DTensor-compatible dtypes (no complex types)."""
-        return [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.bool,
-        ]
-
-    def spec_distribution(self):
-        """DTensor template: tensor-only (no scalars)."""
-        return {
-            "tensor_prob": 1.0,
-            "scalar_prob": 0.0,
-            "allow_tensors": True,
-            "allow_scalars": False,
-        }
-
-    def imports_codegen(self):
-        return [
-            "import torch",
-            "from torch.distributed.tensor.placement_types import Replicate, Shard",
-            "from torch.testing._internal.distributed.fake_pg import FakeStore",
-            "from torch.distributed.tensor import DTensor",
-        ]
-
-    def flags_codegen(self):
-        return [
-            "torch._dynamo.config.capture_scalar_outputs = True",
-            "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
-            "torch._inductor.config.emulate_precision_casts = True",
-        ]
-
-    def args_codegen(self, arg_operations):
-        """Generate DTensor argument creation code with proper mesh setup."""
-        code_lines = []
-
-        # Add DTensor setup code first
-        code_lines.extend(
-            [
-                "world_size = 1024",
-                "fake_store = FakeStore()",
-                "torch.distributed.init_process_group(",
-                '    "fake", store=fake_store, rank=0, world_size=world_size',
-                ")",
-                "",
-                "mesh = torch.distributed.device_mesh.init_device_mesh(",
-                '    "cuda",',
-                "    (2, 8),",
-                "    mesh_dim_names=(",
-                '        "dim1", "dim2",',
-                "    ),",
-                ")",
-                "",
-                "placements = (Replicate(), Replicate())",
-                "",
-                "# Sentinel tensor to ensure gradient computation",
-                "sentinel_local = torch.tensor(1.0, device='cuda', requires_grad=True)",
-                "sentinel = DTensor.from_local(sentinel_local, mesh, placements)",
-                "",
-            ]
-        )
-
-        if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
-                arg_name = f"arg_{i}"
-
-                if isinstance(spec, ScalarSpec):
-                    # For scalars in DTensor, create a 0-dim tensor
-                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                    code_lines.extend(
-                        [
-                            f"{arg_name}_local = torch.randn((), dtype={dtype_str}, device='cuda', requires_grad=True)",
-                            f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
-                        ]
-                    )
-
-                elif isinstance(spec, TensorSpec):
-                    size_str = str(spec.size)
-                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-
-                    # Handle different dtypes appropriately for DTensor
-                    if spec.dtype in [
-                        torch.int32,
-                        torch.int64,
-                        torch.int8,
-                        torch.int16,
-                    ]:
-                        # Integer dtypes: use randint and no requires_grad
-                        code_lines.extend(
-                            [
-                                f"{arg_name}_local = torch.randint(1, 10, {size_str}, dtype={dtype_str}, device='cuda')",
-                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
-                            ]
-                        )
-                    elif spec.dtype == torch.bool:
-                        # Boolean dtype: use randint and cast to bool
-                        code_lines.extend(
-                            [
-                                f"{arg_name}_local = torch.randint(0, 2, {size_str}, device='cuda').bool()",
-                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
-                            ]
-                        )
-                    else:
-                        # Float dtypes: use randn and requires_grad
-                        code_lines.extend(
-                            [
-                                f"{arg_name}_local = torch.randn({size_str}, dtype={dtype_str}, device='cuda', requires_grad=True)",
-                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
-                            ]
-                        )
-
-        return code_lines
-
-    def epilogue_codegen(self):
-        return ["torch.distributed.destroy_process_group()"]
-
-
-class UnbackedFuzzTemplate(FuzzTemplate):
-    def __init__(self):
-        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
-
-        super().__init__(
-            supported_ops=[
-                "torch.ops.aten.item",
-                "torch.ops.aten.nonzero",
-                "torch.ops.aten.masked_select",
-                "torch.ops.aten.unique",
-                # Basic arithmetic operations
-                "torch.add",
-                "torch.sub",
-                "torch.mul",
-                "torch.div",
-                # Tensor shape operations
-                "torch.Tensor.view",
-                "torch.reshape",
-                "torch.flatten",
-                "torch.squeeze",
-                "torch.unsqueeze",
-                # Matrix operations
-                "torch.mm",
-                "torch.addmm",
-                "torch.bmm",
-                "torch.matmul",
-                # Neural network operations
-                "torch.nn.functional.embedding",
-                "torch.nn.functional.linear",
-                # Activation functions
-                "torch.nn.functional.relu",
-                "torch.nn.functional.leaky_relu",
-                "torch.nn.functional.elu",
-                "torch.nn.functional.gelu",
-                "torch.nn.functional.silu",
-                "torch.sigmoid",
-                "torch.tanh",
-                "torch.nn.functional.softmax",
-                # Normalization layers
-                "torch.nn.functional.layer_norm",
-                "torch.nn.functional.rms_norm",
-                "torch.nn.functional.batch_norm",
-                "torch.nn.functional.group_norm",
-                # Regularization
-                "torch.nn.functional.dropout",
-            ],
-            check=EagerVsFullGraphDynamicCompileCheck(),
-        )
-
-    def supported_dtypes(self):
-        """Return list of dtypes good for data-dependent operations."""
-        # Focus on dtypes that work well with data-dependent ops and arithmetic
-        # Exclude bool since arithmetic operations don't work with boolean tensors
-        return [
-            torch.float32,
-            torch.float64,
-            torch.int32,
-            torch.int64,
-        ]
-
-    def spec_distribution(self):
-        """Unbacked template: 50% tensors, 50% scalars."""
-        return {
-            "tensor_prob": 0.5,
-            "scalar_prob": 0.5,
-            "allow_tensors": True,
-            "allow_scalars": True,
-        }
-
-    def imports_codegen(self):
-        return [
-            "import torch",
-        ]
-
-    def flags_codegen(self):
-        return [
-            "torch._dynamo.config.capture_scalar_outputs = True",
-            "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
-        ]
-
-    def epilogue_codegen(self):
-        return []
+def get_device_info() -> DeviceInfo:
+    """Return the active plugin's :class:`DeviceInfo`."""
+    initialize_codegen()
+    device_info = _DEVICE_INFO
+    if device_info is None:
+        raise RuntimeError("device plugin did not provide DeviceInfo")
+    return device_info
 
 
 def convert_graph_to_python_code(
     operation_graph: OperationGraph,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     template: str = "default",
 ) -> str:
     """
@@ -519,18 +401,11 @@ def convert_graph_to_python_code(
         String containing the complete Python code that executes the operations
     """
 
-    # Instantiate template
-    if template == "dtensor":
-        fuzz_template = DTensorFuzzTemplate()
-    elif template == "unbacked":
-        fuzz_template = UnbackedFuzzTemplate()
-    else:
-        fuzz_template = DefaultFuzzTemplate()
+    # Instantiate template via the device plugin registry.
+    fuzz_template = make_template(template)
 
     # Set seed for reproducible code generation
     if seed is not None:
-        import random
-
         random.seed(seed + 1000)  # Offset to avoid conflicts with graph generation
         torch.manual_seed(seed + 1000)
 
@@ -540,12 +415,17 @@ def convert_graph_to_python_code(
     # Get topological order - this ensures dependencies are processed before dependents
     topo_order = operation_graph.get_topological_order()
 
-    # Track generated variables and arg operations
+    constant_as_global = fuzz_template.treat_constant_as_global()
+
+    # Track generated variables, arg operations, and constant operations
     generated_code_lines = []
     node_variables: dict[str, tuple[str, Spec]] = {}  # Maps node_id to (var_name, spec)
     arg_operations: list[
         tuple[str, Spec]
     ] = []  # List of (node_id, spec) for arg operations
+    constant_operations: list[
+        tuple[str, str, Spec]
+    ] = []  # List of (node_id, var_name, spec) for templates that lift constants out
 
     # Process nodes in topological order
     for node_id in topo_order:
@@ -576,6 +456,13 @@ def convert_graph_to_python_code(
             # Add tensor descriptor comment for arg operations too
             descriptor_comment = f"# {format_tensor_descriptor(output_spec)}"
             operation_lines = [f"{output_var_name} = {arg_name} " + descriptor_comment]
+        elif op_name == "constant" and constant_as_global:
+            # Track constants to create them outside the function
+            constant_operations.append((node_id, output_var_name, output_spec))
+            descriptor_comment = f"# {format_tensor_descriptor(output_spec)}"
+            operation_lines = [
+                f"{output_var_name} = {output_var_name} " + descriptor_comment
+            ]
         else:
             # Generate operation execution code
             operation_lines = generate_simple_operation_code(
@@ -588,6 +475,11 @@ def convert_graph_to_python_code(
         # Track this node's variable
         node_variables[node_id] = (output_var_name, output_spec)
 
+    # Optional template-driven body rewrite (e.g. CUDA stream wrapping).
+    generated_code_lines = fuzz_template.wrap_body(
+        generated_code_lines, operation_graph
+    )
+
     # The final result comes from the root node
     root_node_id = operation_graph.root_node_id
     if root_node_id not in node_variables:
@@ -595,12 +487,15 @@ def convert_graph_to_python_code(
 
     final_var_name, _ = node_variables[root_node_id]
 
-    # Generate function signature based on discovered arg operations
+    # Generate function signature based on discovered arg and constant operations
+    param_names: list[str] = []
     if arg_operations:
-        arg_names = [f"arg_{i}" for i in range(len(arg_operations))]
-        function_signature = f"def fuzzed_program({', '.join(arg_names)}, sentinel)"
-    else:
-        function_signature = "def fuzzed_program(sentinel)"
+        param_names.extend([f"arg_{i}" for i in range(len(arg_operations))])
+    if constant_as_global and constant_operations:
+        param_names.extend([var_name for _, var_name, _ in constant_operations])
+    param_names.append("sentinel")
+
+    function_signature = f"def fuzzed_program({', '.join(param_names)})"
 
     # Build the complete code - all imports at the top
     code_lines = []
@@ -614,59 +509,38 @@ def convert_graph_to_python_code(
 
     # Add single seed at the top if seed is provided
     if seed is not None:
-        code_lines.append(f"torch.manual_seed({seed})")
-        code_lines.append("")
+        code_lines.extend(fuzz_template.setseed_codegen(seed))
 
     code_lines.append(function_signature + ":")
 
     # Add the generated operation code
     code_lines.extend(generated_code_lines)
 
-    # Add return statement with sentinel multiplication to ensure gradient computation
-    # Handle complex tensors appropriately based on template
-    if template == "dtensor":
-        # For DTensor, avoid .real operation which doesn't work with sharding
-        # Instead use abs() for complex tensors to get a real result
-        code_lines.extend(
-            [
-                "    # Ensure gradient computation by multiplying with sentinel",
-                f"    result = {final_var_name} * sentinel",
-                "    if result.is_complex():",
-                "        result = result.abs()  # Use abs() instead of .real for DTensor compatibility",
-                "    return result",
-                "",
-            ]
-        )
-    else:
-        code_lines.extend(
-            [
-                "    # Ensure gradient computation by multiplying with sentinel and taking real part",
-                f"    result = {final_var_name} * sentinel",
-                "    if result.is_complex():",
-                "        result = result.real",
-                "    return result",
-                "",
-            ]
-        )
+    # Add return statement (template-controlled to handle complex tensors etc.)
+    code_lines.extend(fuzz_template.return_codegen(final_var_name))
 
-    # Generate argument creation code using template
-    arg_code_lines = fuzz_template.args_codegen(arg_operations)
+    # Generate argument creation code using template (always pass constant_operations;
+    # templates that don't opt in via treat_constant_as_global ignore the second arg).
+    arg_code_lines = fuzz_template.args_codegen(arg_operations, constant_operations)
     code_lines.extend(arg_code_lines)
 
     # Generate the final execution with both normal and compiled versions
+    param_values: list[str] = []
     if arg_operations:
-        arg_names = [f"arg_{i}" for i in range(len(arg_operations))]
-        if len(arg_names) == 1:
-            args_tuple = (
-                f"({arg_names[0]},)"  # Single element tuple needs trailing comma
-            )
-        else:
-            args_tuple = f"({', '.join(arg_names)})"
+        param_values.extend([f"arg_{i}" for i in range(len(arg_operations))])
+    if constant_as_global and constant_operations:
+        param_values.extend([var_name for _, var_name, _ in constant_operations])
+    param_values.append("sentinel")
+
+    if len(param_values) == 1:
+        args_tuple = (
+            f"({param_values[0]},)"  # Single element tuple needs trailing comma
+        )
     else:
-        args_tuple = "()"
+        args_tuple = f"({', '.join(param_values)})"
 
     # Generate execution code using template check
-    check_lines = fuzz_template.check.codegen(f"{args_tuple} + (sentinel,)")
+    check_lines = fuzz_template.check.codegen(args_tuple)
     code_lines.extend([""] + check_lines)
 
     # Add template epilogue
@@ -680,10 +554,10 @@ def convert_graph_to_python_code(
 
 def generate_simple_operation_code(
     output_var: str,
-    input_vars: list,
+    input_vars: list[str],
     op_name: str,
-    output_spec,
-) -> list:
+    output_spec: Spec,
+) -> list[str]:
     """
     Generate code lines for executing a single operation using class-based operators.
 
@@ -726,8 +600,6 @@ def create_program_file(python_code: str) -> str:
     Returns:
         Path to the created temporary file
     """
-    import hashlib
-
     # Generate a deterministic filename based on code content hash
     code_hash = hashlib.md5(python_code.encode()).hexdigest()[:8]  # noqa: S324
     tmp_dir = "/tmp/torchfuzz"

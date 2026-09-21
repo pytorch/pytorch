@@ -5,6 +5,7 @@ import sys
 from unittest.mock import patch
 
 import torch
+import torch.distributed.checkpoint._async_process_executor as async_process_executor
 import torch.testing._internal.common_utils as common
 from torch import distributed as dist
 from torch.distributed.checkpoint._async_process_executor import (
@@ -183,31 +184,41 @@ class TestAsyncProcessExecutorPrefixStore(TestCase):
         master_addr = "localhost"
         master_port = str(common.find_free_port())
 
-        with patch.dict(
-            os.environ,
-            {
-                "DCP_USE_PREFIX_STORE": "1",
-                "MASTER_ADDR": master_addr,
-                "MASTER_PORT": master_port,
-            },
-        ):
-            with patch(
-                "torch.distributed.checkpoint._async_process_executor.get_free_port"
-            ) as mock_get_free_port:
-                dist.init_process_group(
-                    backend=dist.Backend.GLOO,
-                    rank=0,
-                    world_size=1,
-                )
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so nothing it created may survive a failed attempt.
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "DCP_USE_PREFIX_STORE": "1",
+                    "MASTER_ADDR": master_addr,
+                    "MASTER_PORT": master_port,
+                },
+            ):
+                with patch(
+                    "torch.distributed.checkpoint._async_process_executor.get_free_port"
+                ) as mock_get_free_port:
+                    dist.init_process_group(
+                        backend=dist.Backend.GLOO,
+                        rank=0,
+                        world_size=1,
+                    )
 
-                proc_executor = _ProcessBasedAsyncCheckpointExecutor()
-                fut = proc_executor.execute_save(
-                    staging_future_or_state_dict=test_state_dict,
-                    storage_writer=TestStorageWriter(behavior="success"),
-                )
-                result = fut.result()
-                self.assertIsNotNone(result)
-                mock_get_free_port.assert_not_called()
+                    proc_executor = _ProcessBasedAsyncCheckpointExecutor()
+                    fut = proc_executor.execute_save(
+                        staging_future_or_state_dict=test_state_dict,
+                        storage_writer=TestStorageWriter(behavior="success"),
+                    )
+                    result = fut.result()
+                    self.assertIsNotNone(result)
+                    mock_get_free_port.assert_not_called()
+        finally:
+            # The daemon is cached in a module global and outlives the test. Drop
+            # it first: its __del__ terminates the child while the rank-0 store
+            # that child is connected to is still owned by the live group.
+            async_process_executor._CHECKPOINT_PROCESS = None
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
 
 class TestProcessGroupInitInfo(DTensorTestBase):
@@ -298,6 +309,56 @@ class TestProcessGroupInitInfo(DTensorTestBase):
         with patch.dict(os.environ, {"DCP_USE_PREFIX_STORE": ""}):
             pg_init_info = _ProcessGroupInitInfo()
             self.assertFalse(pg_init_info.use_prefix_store)
+
+    @with_comms
+    def test_process_group_init_info_gc_env_vars(self) -> None:
+        """Test that ProcessGroupInitInfo correctly reads GC-related environment variables."""
+
+        # Test with both GC env vars enabled
+        with patch.dict(
+            os.environ,
+            {
+                "DCP_DISABLE_AUTOMATIC_GC": "1",
+                "DCP_DISABLE_MANUAL_GC": "1",
+            },
+        ):
+            pg_init_info = _ProcessGroupInitInfo()
+            self.assertTrue(pg_init_info.disable_automatic_gc)
+            self.assertTrue(pg_init_info.disable_manual_gc)
+
+        # Test with automatic GC disabled, manual GC enabled
+        with patch.dict(
+            os.environ,
+            {
+                "DCP_DISABLE_AUTOMATIC_GC": "1",
+            },
+        ):
+            pg_init_info = _ProcessGroupInitInfo()
+            self.assertTrue(pg_init_info.disable_automatic_gc)
+            self.assertFalse(pg_init_info.disable_manual_gc)
+
+        # Test with automatic GC enabled, manual GC disabled
+        with patch.dict(
+            os.environ,
+            {
+                "DCP_DISABLE_MANUAL_GC": "1",
+            },
+        ):
+            pg_init_info = _ProcessGroupInitInfo()
+            self.assertFalse(pg_init_info.disable_automatic_gc)
+            self.assertTrue(pg_init_info.disable_manual_gc)
+
+        # Test with both GC env vars disabled
+        with patch.dict(
+            os.environ,
+            {
+                "DCP_DISABLE_AUTOMATIC_GC": "0",
+                "DCP_DISABLE_MANUAL_GC": "0",
+            },
+        ):
+            pg_init_info = _ProcessGroupInitInfo()
+            self.assertFalse(pg_init_info.disable_automatic_gc)
+            self.assertFalse(pg_init_info.disable_manual_gc)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, cast, IO, Optional
+from typing import Any, cast, IO
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -64,7 +64,7 @@ class Rot13Example(StreamTransformExtension):
             def writeable(self) -> bool:
                 return True
 
-            def write(self, b: Buffer) -> Optional[int]:
+            def write(self, b: Buffer) -> int | None:
                 # Don't mutate the input
                 chunk = bytearray(b)
                 Rot13Example._rot13bytes(chunk, len(chunk))
@@ -83,7 +83,7 @@ class Rot13Example(StreamTransformExtension):
             def readable(self) -> bool:
                 return True
 
-            def readinto(self, b: Buffer) -> Optional[int]:
+            def readinto(self, b: Buffer) -> int | None:
                 if hasattr(self.input, "readinto"):
                     count = self.input.readinto(b)
                 else:
@@ -122,12 +122,13 @@ def get_test_extension_registry() -> ExtensionRegistry:
 
 
 def with_temp_dir(
-    func: Optional[Callable] = None,
-) -> Optional[Callable]:
+    func: Callable | None = None,
+) -> Callable | None:
     """
     Wrapper to initialize temp directory for distributed checkpoint.
     """
-    assert func is not None
+    if func is None:
+        raise AssertionError("Expected func to not be None")
 
     @wraps(func)
     def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
@@ -153,19 +154,23 @@ def with_temp_dir(
         try:
             func(self, *args, **kwargs)
         finally:
-            if dist.is_initialized() and dist.get_rank() == 0:
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
-            else:
+            # Every rank reads the directory rank 0 created, so rank 0 must not
+            # remove it until the others are done. This has to run on the failure
+            # path too, or a rank whose body raised leaves its peers blocked here
+            # until the process group times out.
+            if dist.is_initialized():
+                dist.barrier()
+            if not dist.is_initialized() or dist.get_rank() == 0:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     return wrapper
 
 
 def with_checkpoint_logging(
-    func: Optional[Callable] = None,
+    func: Callable | None = None,
     logger_name: str = "torch.distributed.checkpoint",
     level: int = logging.INFO,
-) -> Optional[Callable]:
+) -> Callable | None:
     """
     Wrapper to configure checkpoint logging for distributed tests.
 
@@ -174,7 +179,8 @@ def with_checkpoint_logging(
         logger_name: Name of the logger to configure (default: 'torch.distributed.checkpoint')
         level: Logging level to set (default: logging.INFO)
     """
-    assert func is not None
+    if func is None:
+        raise AssertionError("Expected func to not be None")
 
     @wraps(func)
     def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:

@@ -13,13 +13,14 @@ from torch.testing._internal.common_utils import is_iterable_of_tensors, noncont
 
 import collections
 from copy import deepcopy
-from typing import Any, Union
+from typing import Any
 import math  # noqa: F401
 
 # Testing utils
 from torch import inf
 
-assert torch.get_default_dtype() == torch.float32
+if torch.get_default_dtype() != torch.float32:
+    raise AssertionError(f"Expected torch.get_default_dtype() == torch.float32, got {torch.get_default_dtype()}")
 
 L = 20
 M = 10
@@ -362,7 +363,7 @@ def get_constant(x):
 
 def get_script_args(args):
     formals: list[str] = []
-    tensors: list[Union[torch.Tensor, list[torch.Tensor]]] = []
+    tensors: list[torch.Tensor | list[torch.Tensor]] = []
     actuals: list[str] = []
     for arg in args:
         if isinstance(arg, torch.Tensor):
@@ -425,8 +426,8 @@ class SplitInputs:
         self.nontensor_args = [arg for arg in args if not self._is_tensor_input(arg)]
         self.tensor_kwargs = {k: v for k, v in kwargs.items() if self._is_tensor_input(v)}
         self.nontensor_kwargs = {k: v for k, v in kwargs.items() if not self._is_tensor_input(v)}
-        self.all_tensors = [*self.tensor_args, *[v for k, v in self.tensor_kwargs.items()]]
-        self.kwarg_order = [k for k, v in kwargs.items()]
+        self.all_tensors = [*self.tensor_args, *self.tensor_kwargs.values()]
+        self.kwarg_order = list(kwargs.keys())
 
     def nontensors_match(self, other: 'SplitInputs'):
         if self.arg_types != other.arg_types:

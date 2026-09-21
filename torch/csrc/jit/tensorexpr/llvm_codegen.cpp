@@ -116,6 +116,16 @@ struct TypedPointer {
 };
 #endif
 
+#if LLVM_VERSION_MAJOR > 23
+llvm::PointerType* llvm_pointer_to(llvm::Type* ty, unsigned addrspace = 0) {
+  return llvm::PointerType::get(ty->getContext(), addrspace);
+}
+#else
+llvm::PointerType* llvm_pointer_to(llvm::Type* ty, unsigned addrspace = 0) {
+  return ty->getPointerTo(addrspace);
+}
+#endif
+
 llvm::CmpInst::Predicate llvm_comparison_predicate(
     CompareSelectOperation compare_op,
     const ScalarType& type) {
@@ -186,7 +196,7 @@ using FunctionCallee = llvm::FunctionCallee;
 #elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
 
 struct FunctionCallee {
-  FunctionCallee() {}
+  FunctionCallee() = default;
 
   FunctionCallee(llvm::Constant* fn)
       : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
@@ -615,7 +625,7 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 }
 
 llvm::Type* LLVMCodeGenImpl::dtypeToLLVMPtr(Dtype dtype) {
-  return dtypeToLLVM(dtype)->getPointerTo();
+  return llvm_pointer_to(dtypeToLLVM(dtype));
 }
 
 void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
@@ -777,7 +787,7 @@ void LLVMCodeGenImpl::emitKernel(
   PM.run(*module_);
   asmCode_ = asmStream.str().str();
 
-  GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode_, "\n");
+  GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode_, '\n');
 }
 
 // TODO: The binary ops are copypaste.
@@ -1297,10 +1307,10 @@ void LLVMCodeGenImpl::visit(const VarPtr& v) {
 llvm::Value* LLVMCodeGenImpl::varToValue(VarPtr v) {
   // It is possible for v to be in both varToVal_ and varToArgs.
   // In that case, varToVal_ takes precedence.
-  if (varToVal_.count(v)) {
-    return varToVal_.at(v);
-  } else if (varToArg_.count(v)) {
-    auto idx = varToArg_.at(v);
+  if (auto it = varToVal_.find(v); it != varToVal_.end()) {
+    return it->second;
+  } else if (auto it = varToArg_.find(v); it != varToArg_.end()) {
+    auto idx = it->second;
     auto arg = fn_->arg_begin() + idx;
     return arg;
   }
@@ -1474,8 +1484,7 @@ void LLVMCodeGenImpl::visit(const LoadPtr& v) {
           first_idx);
 #endif
 
-      auto vaddr = irb_.CreateBitOrPointerCast(
-          addr, llvm::PointerType::get(loadType, 0));
+      auto vaddr = irb_.CreateBitOrPointerCast(addr, llvm_pointer_to(loadType));
 #if LLVM_VERSION_MAJOR >= 12
       value_ = irb_.CreateAlignedLoad(loadType, vaddr, llvm::MaybeAlign(4));
 #else
@@ -1535,10 +1544,10 @@ std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
   std::vector<llvm::Value*> func_args(arg_count);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
   for (const auto i : c10::irange(arg_count)) {
-    llvm::Type* feild_type = packed.type->getStructElementType(i);
-    llvm::Value* feild_addr = irb_.CreateInBoundsGEP(
+    llvm::Type* field_type = packed.type->getStructElementType(i);
+    llvm::Value* field_addr = irb_.CreateInBoundsGEP(
         packed.type, packed.addr, {zero, llvm::ConstantInt::get(IntTy_, i)});
-    func_args[i] = irb_.CreateLoad(feild_type, feild_addr);
+    func_args[i] = irb_.CreateLoad(field_type, field_addr);
   }
   return func_args;
 }
@@ -1857,8 +1866,8 @@ void LLVMCodeGenImpl::visit(const StorePtr& v) {
           first_idx);
 #endif
 
-      auto vaddr = irb_.CreateBitOrPointerCast(
-          addr, llvm::PointerType::get(val->getType(), 0));
+      auto vaddr =
+          irb_.CreateBitOrPointerCast(addr, llvm_pointer_to(val->getType()));
 
 #if LLVM_VERSION_MAJOR >= 13
       irb_.CreateAlignedStore(val, vaddr, llvm::MaybeAlign(4));

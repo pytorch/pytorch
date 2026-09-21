@@ -5,7 +5,8 @@ from functools import partial
 
 
 # To suppress FutureWarning from partial since 3.13
-if sys.version_info >= (3, 13):
+if sys.version_info >= (3, 11):
+    # member was introduced in Python 3.11
     from enum import member
 
     def _enum_member(x):
@@ -57,7 +58,7 @@ def _powerSGD_comm_hook_wrapper(
 
 class DDPCommHookType(Enum):
     """
-    Enumerate ``ddp_comm_hooks`` and ``ddp_comm_hook_wrapper`` communucation hook types.
+    Enumerate ``ddp_comm_hooks`` and ``ddp_comm_hook_wrapper`` communication hook types.
 
     DDPCommHookType enumerates the hooks of ``torch.distributed.algorithms.ddp_comm_hooks``
     as names and ``ddp_comm_hook_wrapper`` partials with hook specified. As an example,

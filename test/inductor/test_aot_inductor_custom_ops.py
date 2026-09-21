@@ -15,12 +15,12 @@ from torch.export import Dim, export
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -96,6 +96,29 @@ def _(x):
     return [torch.randn(i0)]
 
 
+@torch.library.custom_op("aoti_custom_ops::fn_ret_nested_tensor_lists", mutates_args={})
+def fn_ret_nested_tensor_lists(
+    x: torch.Tensor,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    return (
+        [x.new_ones(x.numel()), x.new_full((x.numel() + 1,), 2)],
+        [x.new_zeros(x.numel() + 2), x.new_full((x.numel() + 3,), 3)],
+    )
+
+
+@fn_ret_nested_tensor_lists.register_fake
+def _(x):
+    ctx = torch._custom_op.impl.get_ctx()
+    i0 = ctx.new_dynamic_size()
+    i1 = ctx.new_dynamic_size()
+    i2 = ctx.new_dynamic_size()
+    i3 = ctx.new_dynamic_size()
+    return (
+        [x.new_empty(i0), x.new_empty(i1)],
+        [x.new_empty(i2), x.new_empty(i3)],
+    )
+
+
 @torch.library.custom_op("aoti_custom_ops::fn_ret_single_tensor", mutates_args={})
 def fn_ret_single_tensor(x: torch.Tensor) -> torch.Tensor:
     s = x.sum().to(torch.int64)
@@ -107,6 +130,64 @@ def _(x):
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.new_dynamic_size()
     return torch.randn(i0)
+
+
+# Custom op to test ScalarType argument serialization
+@torch.library.custom_op("aoti_custom_ops::fn_with_dtype_arg", mutates_args={})
+def fn_with_dtype_arg(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.zeros_like(x, dtype=dtype)
+
+
+@fn_with_dtype_arg.register_fake
+def _(x, dtype):
+    return torch.zeros_like(x, dtype=dtype)
+
+
+# Custom ops to test MemoryFormat and Layout argument serialization
+# Using lower-level torch.library API since custom_op decorator doesn't support these types
+_memory_format_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")  # noqa: SCOPED_LIBRARY
+_memory_format_test_lib.define(
+    "fn_with_memory_format_arg(Tensor x, MemoryFormat memory_format) -> Tensor"
+)
+
+
+def _fn_with_memory_format_arg_impl(x, memory_format):
+    return x.contiguous(memory_format=memory_format)
+
+
+_memory_format_test_lib.impl(
+    "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "CPU"
+)
+_memory_format_test_lib.impl(
+    "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "CUDA"
+)
+_memory_format_test_lib.impl(
+    "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "XPU"
+)
+
+
+@torch.library.register_fake("aoti_custom_ops::fn_with_memory_format_arg")
+def fn_with_memory_format_arg_abstract(x, memory_format):
+    return x.contiguous(memory_format=memory_format)
+
+
+_layout_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")  # noqa: SCOPED_LIBRARY
+_layout_test_lib.define("fn_with_layout_arg(Tensor x, Layout layout) -> Tensor")
+
+
+def _fn_with_layout_arg_impl(x, layout):
+    # Layout argument is received correctly if we get here without error
+    return x.clone()
+
+
+_layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CPU")
+_layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CUDA")
+_layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "XPU")
+
+
+@torch.library.register_fake("aoti_custom_ops::fn_with_layout_arg")
+def fn_with_layout_arg_abstract(x, layout):
+    return x.clone()
 
 
 class AOTInductorTestsTemplate:
@@ -347,6 +428,23 @@ class AOTInductorTestsTemplate:
         args = (torch.randn(3, 4),)
         self.check_model(m, args)
 
+    def test_custom_op_return_nested_tensor_lists(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                values, lengths = torch.ops.aoti_custom_ops.fn_ret_nested_tensor_lists(
+                    x
+                )
+                return (
+                    values[0] + 1,
+                    values[1] + 2,
+                    lengths[0] + 3,
+                    lengths[1] + 4,
+                )
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(3, 4, device=self.device),)
+        self.check_model(m, args)
+
     def test_custom_op_return_single_tensor(self) -> None:
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -413,7 +511,40 @@ class AOTInductorTestsTemplate:
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
 
-    @skipIfXpu
+    def test_custom_op_with_dtype_arg_various_dtypes(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                a = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.float32)
+                b = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.float64)
+                c = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.int32)
+                d = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.uint16)
+                e = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.bfloat16)
+                return a, b, c, d, e
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(2, 2, device=self.device),)
+        self.check_model(m, args)
+
+    def test_custom_op_with_memory_format_arg(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_with_memory_format_arg(
+                    x, torch.channels_last
+                )
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(1, 3, 4, 4, device=self.device),)
+        self.check_model(m, args)
+
+    def test_custom_op_with_layout_arg(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_with_layout_arg(x, torch.strided)
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(4, 4, device=self.device),)
+        self.check_model(m, args)
+
     @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):
@@ -437,6 +568,11 @@ class AOTInductorTestsTemplate:
                 aoti_torch_cuda_fn_square(
                     AtenTensorHandle input,
                     AtenTensorHandle* ret)""",
+                        """
+                AOTITorchError
+                aoti_torch_xpu_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
                     ],
                 },
             ),
@@ -449,6 +585,8 @@ class AOTInductorTestsTemplate:
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
         # make sure ShapeEnv is only created once and reused afterwards
@@ -515,6 +653,8 @@ GPU_TEST_FAILURES = {
 
 
 class AOTInductorTestABICompatibleCpu(AOTICustomOpTestCase):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -534,6 +674,8 @@ copy_tests(
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(AOTICustomOpTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model

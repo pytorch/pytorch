@@ -7,6 +7,7 @@ from torch._inductor.codegen.block_analysis import BlockPatternMatcher
 from torch._inductor.utils import sympy_dot
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -22,6 +23,8 @@ x, y = sympy.symbols("x y")
 
 @instantiate_parametrized_tests
 class BlockAnalysisTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -118,13 +121,21 @@ class BlockAnalysisTest(TestCase):
             )
             sizevars = V.graph.sizevars
             for expected, actual in zip((dims, strides, block_index_exprs), match):
-                assert isinstance(expected, (list, tuple)) and isinstance(
-                    actual, (list, tuple)
-                )
-                for expected_expr, actual_expr in zip(expected, actual):
-                    assert isinstance(expected_expr, sympy.Expr) and isinstance(
-                        actual_expr, sympy.Expr
+                if not (
+                    isinstance(expected, (list, tuple))
+                    and isinstance(actual, (list, tuple))
+                ):
+                    raise AssertionError(
+                        f"Expected list/tuple types, got {type(expected)} and {type(actual)}"
                     )
+                for expected_expr, actual_expr in zip(expected, actual):
+                    if not (
+                        isinstance(expected_expr, sympy.Expr)
+                        and isinstance(actual_expr, sympy.Expr)
+                    ):
+                        raise AssertionError(
+                            f"Expected sympy.Expr types, got {type(expected_expr)} and {type(actual_expr)}"
+                        )
                     self.assertTrue(
                         sizevars.statically_known_equals(
                             sizevars.remove_precomputed_replacements(expected_expr),

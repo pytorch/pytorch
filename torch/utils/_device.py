@@ -53,14 +53,22 @@ def _device_constructors():
         torch.tensor,
         torch.as_tensor,
         torch.scalar_tensor,
+        # *_like may contain device kwarg, but the user implicitly
+        # expects a specific device even when kwarg unused.
+        # torch.zeros_like,
+        # torch.randint_like,
+        # torch.randn_like,
+        # torch.ones_like,
+        # torch.full_like,
+        # torch.empty_like,
     }
 
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
     def __init__(self, device) -> None:
-        # pyrefly: ignore [read-only]
         self.device = torch.device(device)
+        self.prev_mode: DeviceContext | None = None
 
     def __enter__(self):
         global CURRENT_DEVICE
@@ -75,7 +83,10 @@ class DeviceContext(TorchFunctionMode):
         _push_mode(self)
 
         for mode in reversed(cur_stack):
-            _push_mode(mode)
+            if isinstance(mode, DeviceContext):
+                self.prev_mode = mode
+            else:
+                _push_mode(mode)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global CURRENT_DEVICE
@@ -98,6 +109,8 @@ class DeviceContext(TorchFunctionMode):
                 raise AssertionError(
                     "Expected a DeviceContext at the bottom of the mode stack"
                 )
+        if self.prev_mode is not None:
+            _push_mode(self.prev_mode)
 
         for mode in reversed(cur_stack):
             _push_mode(mode)

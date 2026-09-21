@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -18,7 +17,7 @@ from torch.testing._internal.common_distributed import (
     skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -109,7 +108,7 @@ class DummyHook:
         self.custom_reduce_scatter(output, grad, group=state.process_group)
 
 
-class TestCommunicationHooks(FSDPTest):
+class TestCommunicationHooks(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
@@ -120,7 +119,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_default_communication_hook_behavior(
-        self, sharding_strategy: Optional[ShardingStrategy]
+        self, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's default communication hook's behavior and correctness.
@@ -162,7 +161,7 @@ class TestCommunicationHooks(FSDPTest):
             self.assertEqual(
                 grad[0].item(),
                 expected_grad,
-                msg=f"Expected hook grad of {expected_grad} but got {grad[0].item()}",
+                msg=lambda msg: f"{msg}\nExpected hook grad of {expected_grad} but got {grad[0].item()}",
             )
 
     def _get_submodules(self, fsdp_net):
@@ -192,7 +191,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_default_communication_hook_initialization(
-        self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
+        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook interface behavior.
@@ -242,7 +241,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_registering_hook_non_root(
-        self, sharding_strategy: Optional[ShardingStrategy]
+        self, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook registering for submodules.
@@ -302,7 +301,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_registering_hook_submodules(
-        self, sharding_strategy: Optional[ShardingStrategy]
+        self, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook registering for submodules.
@@ -391,7 +390,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_fp16_hook(
-        self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
+        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.fp16_compress_hook
@@ -417,7 +416,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_bf16_hook(
-        self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
+        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.bf16_compress_hook

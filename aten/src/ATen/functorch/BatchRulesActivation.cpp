@@ -5,8 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/Operators.h>
 
 // NB: most activation functions fit pointwise unary or binary rules.
 // These are only the ones that have special batch rules to help with organization
@@ -23,8 +21,8 @@ glu_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim, int64_t dim
 
   const auto self_ = moveBatchDimToFront(self, self_bdim);
 
-  const auto res = at::glu(self_, dim_);
-  return std::make_tuple(res, 0);
+  auto res = at::glu(self_, dim_);
+  return std::make_tuple(std::move(res), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> glu_backward_batch_rule(
@@ -44,8 +42,8 @@ static std::tuple<Tensor, std::optional<int64_t>> glu_backward_batch_rule(
   const auto grad_output_ = ensure_has_bdim(moveBatchDimToFront(grad_output, grad_output_bdim), grad_output_bdim.has_value(), batch_size);
   const auto self_ = ensure_has_bdim(moveBatchDimToFront(self, self_bdim), self_bdim.has_value(), batch_size);
 
-  const auto res = at::glu_backward(grad_output_, self_, dim_);
-  return std::make_tuple(res, 0);
+  auto res = at::glu_backward(grad_output_, self_, dim_);
+  return std::make_tuple(std::move(res), 0);
 }
 
 

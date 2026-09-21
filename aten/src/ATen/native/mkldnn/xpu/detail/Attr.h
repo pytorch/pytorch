@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <ATen/ops/dequantize.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_types.h>
 
@@ -34,7 +35,7 @@ namespace at::native::onednn {
 
 /*
    oneDNN postops usage:
-   Currently, oneDNN supports 5 kinds of post ops. More details can be refered
+   Currently, oneDNN supports 5 kinds of post ops. More details can be referred
 to oneDNN doc.
    https://oneapi-src.github.io/oneDNN/dev_guide_attributes_post_ops.html#doxid-dev-guide-attributes-post-ops-1dev-guide-attributes-post-ops-eltwise
 
@@ -351,7 +352,7 @@ class Attr {
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
         binary_m = at::native::onednn::make_onednn_memory(
-            md, engine, binary.data_ptr());
+            md, engine, binary.const_data_ptr());
 
         args.insert(
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});
@@ -399,7 +400,7 @@ static inline void construct_attr_for_unary(
   } else {
     TORCH_CHECK(
         unary_post_op == "none",
-        "onednn qlinear: unspported unary post op",
+        "onednn qlinear: unsupported unary post op",
         unary_post_op);
   }
 }

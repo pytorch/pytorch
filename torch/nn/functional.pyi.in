@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 
 from collections.abc import Callable, Sequence
+from enum import Enum
 from typing import Any, Literal, overload, TypeAlias
 
 from torch import Tensor
@@ -17,13 +18,15 @@ from .common_types import (
     _size_any_t,
 )
 
+from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
+
 __all__ = [
     "GRID_SAMPLE_INTERPOLATION_MODES",
     "GRID_SAMPLE_PADDING_MODES",
 ]
 
 # 'TypedDict' is a new accepted type that represents a dictionary with a fixed set of allowed keys.
-# It is standards-track but not in `typing` yet. We leave this hear to be uncommented once the feature
+# It is standards-track but not in `typing` yet. We leave this here to be uncommented once the feature
 # is wide-spread.
 
 # from mypy_extensions import TypedDict
@@ -40,7 +43,7 @@ GRID_SAMPLE_PADDING_MODES: TypeAlias = dict[str, int]
 # This was necessary since the JIT uses BroadcastingList* types but static checking with mypy etc requires a `Sequence`
 # type. There is no way to express the expected lengths of these lists in the current Python typing system.
 #
-# Functions created via `_add_docstr` in `functional.py` where merely typed as `Any` by `stubgen`, so those were
+# Functions created via `_add_docstr` in `functional.py` were merely typed as `Any` by `stubgen`, so those were
 # deleted from the stub and replaced by generated declarations. See `gen_pyi` for the implementation of the code
 # generation logic for those functions. In the future, it might be worth looking into using the mypy plugin system
 # to encode the type semantics of `_add_docstr`, should that system ever become widespread.
@@ -455,6 +458,21 @@ def local_response_norm(
 
 __all__ += ["local_response_norm"]
 
+def linear_cross_entropy(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    *,
+    linear_bias: Tensor | None = ...,
+    weight: Tensor | None = ...,
+    reduction: str = ...,
+    ignore_index: int | None = ...,
+    label_smoothing: float = ...,
+    options: LinearCrossEntropyOptions | None = ...,
+) -> Tensor: ...
+
+__all__ += ["linear_cross_entropy"]
+
 def log_softmax(
     input: Tensor,
     dim: int | None = ...,
@@ -585,6 +603,7 @@ def mse_loss(
     size_average: bool | None = ...,
     reduce: bool | None = ...,
     reduction: str = ...,
+    weight: Tensor | None = ...,
 ) -> Tensor: ...
 
 __all__ += ["mse_loss"]
@@ -715,11 +734,94 @@ def rrelu(
 
 __all__ += ["rrelu"]
 
+def scaled_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    bias: Tensor | None = None,
+    output_dtype: _dtype = ...,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+) -> Tensor: ...
+
+__all__ += ["scaled_mm"]
+
+def scaled_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor: ...
+
+__all__ += ["scaled_addmm"]
+
+def scaled_addmm_(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor: ...
+
+__all__ += ["scaled_addmm_"]
+
+def grouped_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    *,
+    offs: Tensor | None = None,
+    bias: Tensor | None = None,
+    out_dtype: _dtype | None = None,
+) -> Tensor: ...
+
+__all__ += ["grouped_mm"]
+
+class SwizzleType(Enum):
+    NO_SWIZZLE = 0
+    SWIZZLE_32_4_4 = 1
+    SWIZZLE_32_8 = 2
+
+__all__ += ["SwizzleType"]
+
+class ScalingType(Enum):
+    TensorWise = 0
+    RowWise = 1
+    BlockWise1x16 = 2
+    BlockWise1x32 = 3
+    BlockWise1x128 = 4
+    BlockWise128x128 = 5
+
+__all__ += ["ScalingType"]
+
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 
 __all__ += ["selu"]
 
-def sigmoid(input: Any) -> Tensor: ...
+def sigmoid(input: Tensor) -> Tensor: ...
 
 __all__ += ["sigmoid"]
 
@@ -766,15 +868,15 @@ def softmin(
 
 __all__ += ["softmin"]
 
-def softsign(input: Any): ...
+def softsign(input: Any) -> Tensor: ...
 
 __all__ += ["softsign"]
 
-def tanh(input: Any): ...
+def tanh(input: Any) -> Tensor: ...
 
 __all__ += ["tanh"]
 
-def tanhshrink(input: Any): ...
+def tanhshrink(input: Any) -> Tensor: ...
 
 __all__ += ["tanhshrink"]
 
@@ -829,7 +931,7 @@ def upsample_bilinear(
     input: Any,
     size: Any | None = ...,
     scale_factor: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample_bilinear"]
 
@@ -837,7 +939,7 @@ def upsample_nearest(
     input: Any,
     size: Any | None = ...,
     scale_factor: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample_nearest"]
 
@@ -847,7 +949,7 @@ def upsample(
     scale_factor: Any | None = ...,
     mode: str = ...,
     align_corners: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample"]
 

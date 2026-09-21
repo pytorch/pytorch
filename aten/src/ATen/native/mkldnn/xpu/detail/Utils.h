@@ -1,8 +1,7 @@
 #pragma once
-#include <ATen/ATen.h>
 #include <ATen/Tensor.h>
-#include <ATen/core/Tensor.h>
 #include <iostream>
+#include <optional>
 
 #include <ATen/core/grad_mode.h>
 #include <c10/core/MemoryFormat.h>
@@ -13,6 +12,7 @@
 #include <oneapi/dnnl/dnnl_version.h>
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <ATen/ops/empty.h>
 
 #define ONEDNN_SUPPORT_DETERMINISTIC \
   (DNNL_VERSION_MAJOR >= 3 && DNNL_VERSION_MINOR >= 4)
@@ -37,7 +37,9 @@ bool is_supported_onednn_dtype(const at::Tensor& tensor);
 dnnl::memory::dims get_onednn_dims(const at::Tensor& tensor);
 
 dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor);
-dnnl::memory::desc get_onednn_md(const at::Tensor& tensor);
+dnnl::memory::desc get_onednn_md(
+    const at::Tensor& tensor,
+    std::optional<int> packed_dim = std::nullopt);
 
 bool onednn_strides_check(const at::Tensor& src);
 bool is_broadcast(const at::Tensor& t);
@@ -45,6 +47,12 @@ void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2);
 void undo_broadcast(at::Tensor& tensor);
 
 bool is_onednn_matmul_strides(const at::Tensor& tensor);
+
+bool is_64_bytes_aligned(const at::Tensor& tensor);
+
+at::Tensor make_contiguous_and_aligned(
+    const at::Tensor& tensor,
+    std::optional<at::MemoryFormat> memory_format = std::nullopt);
 
 bool is_broadcast_from_other_to_self(
     const at::Tensor& self,
@@ -86,6 +94,29 @@ dnnl::memory::dims compatible_dilation(Vec&& dilation) {
     *it -= 1;
   }
   return ret;
+}
+
+inline std::vector<int64_t> padding_r(
+    IntArrayRef padding,
+    IntArrayRef output_padding) {
+  // ConvTranspose padding adjustment
+  //
+  // PyTorch uses padding/output_padding:
+  //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1)
+  //   + output_padding + 1
+  //
+  // MKLDNN uses padding_l/padding_r:
+  //   osize = (isize - 1) * stride - padding_l - padding_r + dilation *
+  //   (kernel_size - 1) + 1
+  //
+  // So: padding_l = padding, padding_r = padding - output_padding
+  //
+  auto dim = padding.size();
+  std::vector<int64_t> pad_r(dim);
+  for (const auto d : c10::irange(dim)) {
+    pad_r[d] = padding[d] - output_padding[d];
+  }
+  return pad_r;
 }
 
 template <typename T>

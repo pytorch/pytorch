@@ -11,8 +11,14 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 EXPECTED_GROUP_PREFIX = (
     "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
 )
-EXPECTED_GROUP = (
+# Standard pattern - dispatches in same concurrency group will cancel each other
+EXPECTED_GROUP_STANDARD = (
     EXPECTED_GROUP_PREFIX + "-${{ github.event_name == 'workflow_dispatch' }}"
+)
+# Concurrent dispatch pattern - uses run_id to allow concurrent dispatches (e.g., from autorevert bot)
+EXPECTED_GROUP_CONCURRENT = (
+    EXPECTED_GROUP_PREFIX
+    + "-${{ github.event_name == 'workflow_dispatch' && github.run_id }}"
 )
 
 
@@ -50,13 +56,17 @@ if __name__ == "__main__":
                     file=sys.stderr,
                 )
                 errors_found = True
-        elif not actual.get("group", "").startswith(EXPECTED_GROUP):
+        elif not (
+            actual.get("group", "").startswith(EXPECTED_GROUP_STANDARD)
+            or actual.get("group", "").startswith(EXPECTED_GROUP_CONCURRENT)
+        ):
             print(
                 f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
                 file=sys.stderr,
             )
             print(
-                f"concurrency group should start with {EXPECTED_GROUP} but found {actual.get('group', None)}",
+                f"concurrency group should start with {EXPECTED_GROUP_STANDARD} "
+                f"or {EXPECTED_GROUP_CONCURRENT} but found {actual.get('group', None)}",
                 file=sys.stderr,
             )
             errors_found = True

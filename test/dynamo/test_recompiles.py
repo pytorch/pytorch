@@ -5,56 +5,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config as dc
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
-    def test_inline_inbuilt_nn_modules_candidate(self):
-        def hook_flag_on(guard_manager, f_locals, builder):
-            self.assertTrue(
-                "[inline-inbuilt-nn-modules-candidate]" not in str(guard_manager)
-            )
-
-        def hook_flag_off(guard_manager, f_locals, builder):
-            self.assertTrue(
-                "[inline-inbuilt-nn-modules-candidate]" in str(guard_manager)
-            )
-
-        class SubMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            @torch.compile(backend="eager")
-            def forward(self, x):
-                return self.linear(x)
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.sm1 = SubMod()
-                self.sm2 = SubMod()
-
-            def forward(self, x):
-                return self.sm1(x) + self.sm2(x)
-
-        try:
-            from .utils import install_guard_manager_testing_hook
-        except ImportError:
-            from utils import install_guard_manager_testing_hook
-
-        with (
-            install_guard_manager_testing_hook(hook_flag_on),
-            dc.patch(inline_inbuilt_nn_modules=True),
-        ):
-            mod = Mod()
-            mod(torch.randn(2, 2))
-
-        with (
-            install_guard_manager_testing_hook(hook_flag_off),
-            dc.patch(inline_inbuilt_nn_modules=False),
-        ):
-            mod = Mod()
-            mod(torch.randn(2, 2))
+    hw_classification = HardwareClassification.GENERIC
 
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
@@ -245,6 +200,32 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_object_alias_relation_guards_without_lambda(self):
+        class Box:
+            pass
+
+        def foo(box_a, box_b, t):
+            entries = {box_a, box_b}
+            if len(entries) == 1:
+                return t + 1
+            return t - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.tensor(0)
+
+        with dc.patch(use_lamba_guard_for_object_aliasing=False):
+            compiled = torch.compile(foo, backend=cnt, fullgraph=True)
+
+            shared = Box()
+            res_alias = compiled(shared, shared, x)
+            self.assertEqual(res_alias.item(), 1)
+
+            res_unique = compiled(Box(), Box(), x)
+            self.assertEqual(res_unique.item(), -1)
+            self.assertEqual(cnt.frame_count, 2)
+
+        torch._dynamo.reset()
 
     def test_aliasing_guard_failures_with_globals(self):
         g1 = torch.randn([3])
@@ -442,38 +423,51 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious(self):
-        counter = torch._dynamo.testing.CompileCounter()
+    @torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True)
+    def test_tensorify_python_builtin_mul_does_not_recompile(self):
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
-        def f(x):
-            if x.size(0) < 10:
-                return x * 1
-            else:
-                return x + 10
+        def scaling_step(update, dummy_tensor, lr):
+            dummy_tensor.mul_(0.5 * lr)
 
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
+            r, c = update.size(-2), update.size(-1)
+            scaling_factor = max(1, r / c) ** 0.5
+            update.mul_(scaling_factor * lr)
 
-        for i in [3, 2, 1, 0]:
-            self.assertEqual(f(torch.zeros(i)), opt_f(torch.zeros(i)))
+            return update
 
-        self.assertEqual(counter.frame_count, 2)  # not three or four!
+        compiled = torch.compile(scaling_step, backend=counter, fullgraph=True)
+        base_update = torch.randn(128, 128)
+        base_dummy = torch.randn(324, 64)
 
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
-        counter = torch._dynamo.testing.CompileCounter()
+        for i in range(8):
+            lr = 1e-4 * (i + 1)
+            self.assertEqual(
+                compiled(base_update.clone(), base_dummy.clone(), lr),
+                scaling_step(base_update.clone(), base_dummy.clone(), lr),
+            )
 
-        def f(x):
-            if x.size(0) < 2:
-                return x * 1
-            else:
-                return x + 10
+        self.assertLessEqual(counter.frame_count, 2)
 
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
+    @torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True)
+    def test_tensorify_python_builtin_pow_does_not_recompile(self):
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
-        opt_f(torch.randn(1))
-        with self.assertRaises(torch._dynamo.exc.UserError):
-            opt_f(torch.randn(0))
+        def step_param(v_t, bc2):
+            eps = 1e-8
+            return v_t.sqrt().div_(bc2**0.5).add_(eps)
+
+        compiled = torch.compile(step_param, backend=counter, fullgraph=True)
+        base_v_t = torch.randn(64, 1280)
+
+        for step in range(1, 9):
+            bc2 = 1.0 - 0.999**step
+            self.assertEqual(
+                compiled(base_v_t.clone(), bc2),
+                step_param(base_v_t.clone(), bc2),
+            )
+
+        self.assertLessEqual(counter.frame_count, 2)
 
     def test_ambient_autocast_recompile(self):
         weights = torch.randn(10, 10)
@@ -570,6 +564,116 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         apply_patches(f, x, [("c", 3), ("d", 4)])
         self.assertEqual(counter.frame_count, 1)
+
+    def test_out_variant_does_not_overrecompile(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/135859.
+        # The out= variants of max/min/topk used to recompile on every new input
+        # shape because their out overloads (e.g. aten.max.dim_max) lacked a meta
+        # function, so dynamic shapes were not propagated to the out tensors.
+        # They should now recompile exactly once, like the functional variant.
+        def count_recompiles(fn):
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt = torch.compile(fn, backend=cnt, dynamic=None)
+            for n in range(4, 10):
+                opt(torch.randn(n, 8))
+            return cnt.frame_count
+
+        def max_out(x):
+            values = x.new_empty(x.shape[0])
+            indices = x.new_empty(x.shape[0], dtype=torch.long)
+            torch.max(x, dim=1, out=(values, indices))
+            return values, indices
+
+        def min_out(x):
+            values = x.new_empty(x.shape[0])
+            indices = x.new_empty(x.shape[0], dtype=torch.long)
+            torch.min(x, dim=1, out=(values, indices))
+            return values, indices
+
+        def topk_out(x):
+            values = x.new_empty((x.shape[0], 3))
+            indices = x.new_empty((x.shape[0], 3), dtype=torch.long)
+            torch.topk(x, 3, dim=1, out=(values, indices))
+            return values, indices
+
+        for out_fn in (max_out, min_out, topk_out):
+            torch._dynamo.reset()
+            self.assertEqual(count_recompiles(out_fn), 2)
+
+
+class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
+    # Float constant guards must be value-identity (bitwise), not IEEE eq:
+    # -0.0 == 0.0 so an EQUALS_MATCH guard built for 0.0 wrongly passed for
+    # -0.0 and reused a graph with 0.0 baked in, while nan != nan needs
+    # (and has) dedicated is-nan guards.
+
+    def test_neg_zero_recompiles_and_is_correct(self):
+        import math
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x * s, math.copysign(1.0, s)
+
+        x = torch.randn(4)
+        _, sign_pos = f(x, 0.0)
+        _, sign_neg = f(x, -0.0)
+        self.assertEqual(sign_pos, 1.0)
+        self.assertEqual(sign_neg, -1.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_nan_sign_recompiles_and_is_correct(self):
+        import math
+        import struct
+
+        def from_bits(bits):
+            return struct.unpack(">d", struct.pack(">Q", bits))[0]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x + 1, math.copysign(1.0, s)
+
+        # nan sign and payload are observable, so the nan guard must be
+        # bitwise: a graph specialized on a positive nan must not be reused
+        # for a negative nan.
+        x = torch.randn(4)
+        _, sign_pos = f(x, from_bits(0x7FF8000000000001))
+        _, sign_neg = f(x, from_bits(0xFFF8000000001234))
+        self.assertEqual(sign_pos, 1.0)
+        self.assertEqual(sign_neg, -1.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_nan_float_does_not_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x * s
+
+        x = torch.randn(4)
+        f(x, float("nan"))
+        f(x, float("nan"))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_complex_nan_guard_checks_other_component(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, c: complex):
+            return x + c
+
+        # The COMPLEX_IS_NAN guard must include the non-nan component:
+        # complex(7, nan) must not reuse the graph specialized on
+        # complex(5, nan), but the same constant must not recompile.
+        x = torch.randn(4, dtype=torch.cfloat)
+        f(x, complex(5.0, float("nan")))
+        f(x, complex(7.0, float("nan")))
+        self.assertEqual(cnt.frame_count, 2)
+        f(x, complex(7.0, float("nan")))
+        self.assertEqual(cnt.frame_count, 2)
 
 
 if __name__ == "__main__":

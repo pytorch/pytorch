@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import final, override
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-from torch._inductor.output_code import CompiledFxGraphConstants, OutputCode
+from torch._inductor.output_code import (
+    CompiledFxGraph,
+    CompiledFxGraphConstants,
+    OutputCode,
+)
 
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
-from .output_code import complex_memory_overlap  # noqa: F401
 
 
 # When async compile works with cache, remove the disabling below
@@ -37,7 +40,7 @@ class _PostCompileData:
 class ProgressiveCompilationState:
     progression_futures: deque[Future[_WireProtocolPickledOutput]]
     callback: Callable[[_WireProtocolPickledOutput], OutputCode]
-    post_compile_data: Optional[_PostCompileData]
+    post_compile_data: _PostCompileData | None
 
     def check_and_get_ready_stage(self) -> int:
         """Check if any progression stage is ready and return its index, or -1 if none are ready."""
@@ -58,7 +61,8 @@ class ProgressiveCompilationState:
         Returns a tuple of (optimized_output_code, should_clear_compilation_state).
         """
         future = self.progression_futures[stage_index]
-        assert future is not None
+        if future is None:
+            raise AssertionError("expected future to be not None")
         optimized_output_code = self.callback(future.result())
 
         if pcd := self.post_compile_data:
@@ -79,11 +83,11 @@ class ProgressiveCompilationState:
 # out-of-process compile to finish and then switching over to it.
 @final
 class _AsyncOutputCode(OutputCode):
-    _eager_fn: Optional[Callable[..., Any]]
-    _output_code: Optional[OutputCode]
-    _future: Optional[Future[_WireProtocolPickledOutput]]
+    _eager_fn: Callable[..., Any] | None
+    _output_code: OutputCode | None
+    _future: Future[_WireProtocolPickledOutput] | None
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
-    _post_compile_data: Optional[_PostCompileData] = None
+    _post_compile_data: _PostCompileData | None = None
     _boxed_call: bool  # Copied from the forward/output_code
 
     def __init__(
@@ -114,12 +118,14 @@ class _AsyncOutputCode(OutputCode):
 
         else:
             _AsyncFxCompile._stat_compiled_runs += 1
-            assert self._output_code is not None
+            if self._output_code is None:
+                raise AssertionError("expected self._output_code to be not None")
             return self._output_code.__call__(*args)
 
     # Takes and returns the args (converted to the "right" boxed mode)
     def _switch_to_compiled_fn(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
-        assert self._future is not None
+        if self._future is None:
+            raise AssertionError("expected self._future to be not None")
 
         # TODO: If the future ended in an exception do we want to continue
         # running eager or hit the exception now?
@@ -160,7 +166,8 @@ class _AsyncOutputCode(OutputCode):
                 example_inputs, constants, graph_kwargs
             )
         else:
-            assert self._output_code is not None
+            if self._output_code is None:
+                raise AssertionError("expected self._output_code to be not None")
             self._output_code.post_compile(example_inputs, constants, graph_kwargs)
 
 
@@ -199,7 +206,9 @@ class _AsyncFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        eager_output_code = _InProcessFxCompile().codegen_and_compile(
+        eager_compile = _InProcessFxCompile()
+        eager_compile.compile_region_name = self.compile_region_name
+        eager_output_code = eager_compile.codegen_and_compile(
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
 
@@ -222,6 +231,8 @@ class _AsyncFxCompile(FxCompile):
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
             _AsyncFxCompile._stat_bg_finished += 1
             output = pickled_output.deserialize(constants)
+            if isinstance(output.graph, CompiledFxGraph):
+                output.graph.compile_region_name = self.compile_region_name
             self._compile._postprocess(output)
             return output.graph
 
@@ -232,9 +243,9 @@ class _AsyncFxCompile(FxCompile):
 # to a more optimized version when the expensive compile finishes.
 @final
 class _ProgressiveOutputCode(OutputCode):
-    _fast_output_code: Optional[OutputCode]
-    _optimized_output_code: Optional[OutputCode]
-    _compilation_state: Optional[ProgressiveCompilationState]
+    _fast_output_code: OutputCode | None
+    _optimized_output_code: OutputCode | None
+    _compilation_state: ProgressiveCompilationState | None
     # _boxed_call state is effectively cached (we sometimes wrap unboxed w/
     # lambdas to box them) so we can't change it mid-way. Since _boxed_call=True
     # is more common let's default to that and we'll convert if necessary.
@@ -267,7 +278,8 @@ class _ProgressiveOutputCode(OutputCode):
             output_code = self._optimized_output_code
         else:
             _ProgressiveFxCompile._stat_fast_runs += 1
-            assert self._fast_output_code is not None
+            if self._fast_output_code is None:
+                raise AssertionError("expected self._fast_output_code to be not None")
             output_code = self._fast_output_code
 
         boxed_call = getattr(output_code, "_boxed_call", False)
@@ -289,7 +301,8 @@ class _ProgressiveOutputCode(OutputCode):
         self._switch_to_progression_stage(stage_index)
 
     def _switch_to_progression_stage(self, stage_index: int) -> None:
-        assert self._compilation_state is not None
+        if self._compilation_state is None:
+            raise AssertionError("expected self._compilation_state to be not None")
         optimized_output_code, should_clear_state = (
             self._compilation_state.switch_to_progression_stage(stage_index)
         )
@@ -308,10 +321,12 @@ class _ProgressiveOutputCode(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        assert self._fast_output_code is not None
+        if self._fast_output_code is None:
+            raise AssertionError("expected self._fast_output_code to be not None")
         self._fast_output_code.post_compile(example_inputs, constants, graph_kwargs)
 
-        assert self._compilation_state is not None
+        if self._compilation_state is None:
+            raise AssertionError("expected self._compilation_state to be not None")
         # Store for later when optimized version is ready
         self._compilation_state.post_compile_data = _PostCompileData(
             example_inputs, constants, graph_kwargs
@@ -392,6 +407,8 @@ class _ProgressiveFxCompile(FxCompile):
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
             _ProgressiveFxCompile._stat_bg_finished += 1
             output = pickled_output.deserialize(constants)
+            if isinstance(output.graph, CompiledFxGraph):
+                output.graph.compile_region_name = self.compile_region_name
             self._optimized_compile._postprocess(output)
             return output.graph
 

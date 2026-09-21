@@ -224,9 +224,8 @@ class TORCH_API OperatorEntry final {
   void setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback);
 
   template <typename F>
-  PyObject* getPythonOp(PyInterpreter* self_interpreter, F slow_accessor)
-      const {
-    return py_cache_.ptr_or(self_interpreter, slow_accessor);
+  PyObject* getPythonOp(F slow_accessor) const {
+    return py_cache_.ptr_or(slow_accessor);
   }
 
  private:

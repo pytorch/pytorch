@@ -49,7 +49,7 @@ class TORCH_API HashStore : public Store {
       const std::vector<std::string>& keys,
       const std::vector<std::vector<uint8_t>>& values) override;
 
-  // Returns true if this store support append, multiGet and multiSet
+  // Returns true if this store supports append, multiGet and multiSet
   bool hasExtendedApi() const override;
 
   void queuePush(const std::string& key, const std::vector<uint8_t>& value)
@@ -58,6 +58,8 @@ class TORCH_API HashStore : public Store {
   std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
 
   int64_t queueLen(const std::string& key) override;
+
+  std::vector<std::string> listKeys() override;
 
  protected:
   bool checkLocked(

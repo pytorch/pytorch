@@ -2,9 +2,7 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
-#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -219,7 +217,7 @@ std::optional<std::function<void(Stack&)>> makeOperatorFunction(
             static_cast<size_t>(num_specified_args.value()) >= out_args.size(),
             "The number of output arguments is: ",
             out_args.size(),
-            ", which is more then the number of specified arguments: ",
+            ", which is more than the number of specified arguments: ",
             num_specified_args.value());
         size_t start_index = num_specified_args.value() - out_args.size();
         for (size_t i = start_index; i < (args.size() - out_args.size()); ++i) {
@@ -250,12 +248,9 @@ Function& Function::registerFunc(
   static std::unordered_map<c10::QualifiedName, Function>
       upgrader_function_holder;
   c10::QualifiedName name = c10::QualifiedName(qualified_name);
-  auto found = upgrader_function_holder.find(name);
-  // Register the function if it's not found in the map.
-  if (found == upgrader_function_holder.end()) {
-    auto name_function_pair =
-        upgrader_function_holder.emplace(name, Function(name));
-    auto& func = name_function_pair.first->second;
+  auto [it, inserted] = upgrader_function_holder.try_emplace(name, name);
+  if (inserted) {
+    auto& func = it->second;
     for (auto const& inst : instructions) {
       func.append_instruction(inst.op, inst.X, inst.N);
     }
@@ -268,8 +263,7 @@ Function& Function::registerFunc(
     func.set_register_size(register_size);
     return func;
   }
-  auto& upgrader_function_in_holder = found->second;
-  return upgrader_function_in_holder;
+  return it->second;
 }
 
 } // namespace mobile

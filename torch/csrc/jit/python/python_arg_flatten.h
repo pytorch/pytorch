@@ -79,17 +79,17 @@ static inline std::ostream& operator<<(
       out << ", ";
     out << meta.sizes[i];
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
 static inline std::ostream& operator<<(
     std::ostream& out,
     const IODescriptor& desc) {
-  out << desc.structure << "\n";
-  out << "  with grad_enabled=" << desc.grad_enabled << "\n";
+  out << desc.structure << '\n';
+  out << "  with grad_enabled=" << desc.grad_enabled << '\n';
   for (const auto i : c10::irange(desc.metadata.size())) {
-    out << "  with v" << i << " having type " << desc.metadata[i] << "\n";
+    out << "  with v" << i << " having type " << desc.metadata[i] << '\n';
   }
   return out;
 }

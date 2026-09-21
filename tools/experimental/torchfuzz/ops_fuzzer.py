@@ -1,12 +1,9 @@
-# mypy: ignore-errors
-
 import random
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 
-from torchfuzz.operators import get_operator, list_operators
+from torchfuzz.operators import get_operator, list_operators, Operator
 from torchfuzz.tensor_fuzzer import (
     fuzz_tensor_size,
     fuzz_torch_tensor_type,
@@ -19,10 +16,10 @@ from torchfuzz.tensor_fuzzer import (
 
 
 # Cache operators at module level to avoid repeated calls to list_operators()
-_CACHED_OPERATORS = None
+_CACHED_OPERATORS: dict[str, Operator] | None = None
 
 
-def _get_cached_operators():
+def _get_cached_operators() -> dict[str, Operator]:
     """Get cached operators, initializing if necessary."""
     global _CACHED_OPERATORS
     if _CACHED_OPERATORS is None:
@@ -31,27 +28,17 @@ def _get_cached_operators():
 
 
 def _get_template_filtered_operators(
-    template: str = "default", supported_ops: Optional[list[str]] = None
-):
+    template: str = "default", supported_ops: list[str] | None = None
+) -> dict[str, Operator]:
     """Get operators filtered by template's supported_ops, with user override.
 
     If supported_ops is provided, it takes precedence and is used to filter the
     registry. Otherwise, the template's supported_ops are used. If neither are
     specified, all operators are returned.
     """
-    # Instantiate template
-    if template == "dtensor":
-        from torchfuzz.codegen import DTensorFuzzTemplate
+    from torchfuzz.codegen import make_template
 
-        fuzz_template = DTensorFuzzTemplate()
-    elif template == "unbacked":
-        from torchfuzz.codegen import UnbackedFuzzTemplate
-
-        fuzz_template = UnbackedFuzzTemplate()
-    else:
-        from torchfuzz.codegen import DefaultFuzzTemplate
-
-        fuzz_template = DefaultFuzzTemplate()
+    fuzz_template = make_template(template)
 
     all_operators = _get_cached_operators()
 
@@ -60,10 +47,14 @@ def _get_template_filtered_operators(
 
     # If no supported_ops specified, return all operators
     if not allowed_ops:
+        for operator in all_operators.values():
+            if hasattr(operator, "set_template"):
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
         return all_operators
 
     # Filter operators based on allowed_ops
-    filtered_ops = {}
+    filtered_ops: dict[str, Operator] = {}
+    allowed_ops_set = set(allowed_ops)
 
     for op_name, operator in all_operators.items():
         # Always include operations that don't have a specific torch operation
@@ -72,27 +63,19 @@ def _get_template_filtered_operators(
         if torch_op is None:
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
-                operator.set_template(template)  # type: ignore[attr-defined]
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
             filtered_ops[op_name] = operator
             continue
 
-        # Check if the operator supports any of the allowed operations
-        should_include = False
-        for supported_op in allowed_ops:
-            # Direct torch operation matching
-            if torch_op == supported_op:
-                should_include = True
-                break
-
-            # Direct name matching as fallback
-            if supported_op in op_name or op_name in supported_op:
-                should_include = True
-                break
+        # Accept either the fully qualified torch operation or the exact
+        # registry key. Substring matching makes similarly named operators
+        # indistinguishable, such as exp/expand and squeeze/unsqueeze.
+        should_include = torch_op in allowed_ops_set or op_name in allowed_ops_set
 
         if should_include:
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
-                operator.set_template(template)  # type: ignore[attr-defined]
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
             filtered_ops[op_name] = operator
 
     return filtered_ops
@@ -149,7 +132,7 @@ class OperationGraph:
     root_node_id: str  # The output node - produces the final result of the graph
     target_spec: Spec
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate the graph structure after initialization."""
         if self.root_node_id not in self.nodes:
             raise ValueError(f"Root node {self.root_node_id} not found in nodes")
@@ -165,7 +148,7 @@ class OperationGraph:
         temp_visited = set()
         result = []
 
-        def visit(node_id: str):
+        def visit(node_id: str) -> None:
             if node_id in temp_visited:
                 raise ValueError(f"Cycle detected involving node {node_id}")
             if node_id in visited:
@@ -199,7 +182,7 @@ class OperationGraph:
         visited = set()
         dependencies = []
 
-        def collect_deps(current_id: str):
+        def collect_deps(current_id: str) -> None:
             if current_id in visited or current_id not in self.nodes:
                 return
             visited.add(current_id)
@@ -236,19 +219,9 @@ def fuzz_spec(template: str = "default") -> Spec:
     """
     # Try to use template's custom distribution if available
     try:
-        # Instantiate template
-        if template == "dtensor":
-            from torchfuzz.codegen import DTensorFuzzTemplate
+        from torchfuzz.codegen import make_template
 
-            fuzz_template = DTensorFuzzTemplate()
-        elif template == "unbacked":
-            from torchfuzz.codegen import UnbackedFuzzTemplate
-
-            fuzz_template = UnbackedFuzzTemplate()
-        else:
-            from torchfuzz.codegen import DefaultFuzzTemplate
-
-            fuzz_template = DefaultFuzzTemplate()
+        fuzz_template = make_template(template)
 
         # Use template's custom spec generation
         return fuzz_template.fuzz_spec_custom()
@@ -271,10 +244,10 @@ def fuzz_spec(template: str = "default") -> Spec:
 
 def fuzz_op(
     target_spec: Spec,
-    depth,
-    stack_size,
+    depth: int,
+    stack_size: int,
     template: str = "default",
-    supported_ops: Optional[list[str]] = None,
+    supported_ops: list[str] | None = None,
 ) -> tuple[str, list[Spec]]:
     """
     Given an output specification, returns an operation that can
@@ -295,7 +268,7 @@ def fuzz_op(
 
     # Filter operators that can produce the target spec
     # IMPORTANT: iterate in a deterministic order to avoid dict-order nondeterminism
-    compatible_ops = []
+    compatible_ops: list[tuple[str, Operator]] = []
     for op_name in sorted(available_operators.keys()):
         operator = available_operators[op_name]
         if operator.can_produce(target_spec):
@@ -308,8 +281,8 @@ def fuzz_op(
         raise ValueError(f"No operators available that can produce {target_spec}")
 
     # Categorize operators into leaf and non-leaf
-    leaf_ops = []
-    non_leaf_ops = []
+    leaf_ops: list[tuple[str, Operator]] = []
+    non_leaf_ops: list[tuple[str, Operator]] = []
 
     for op_name, operator in compatible_ops:
         if op_name in ["constant", "arg"] or op_name.startswith("arg_"):
@@ -429,9 +402,9 @@ def _get_arg_args_specs(target_spec: Spec) -> tuple[str, list[Spec]]:
 def fuzz_operation_graph(
     target_spec: Spec,
     max_depth: int = 7,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     template: str = "default",
-    supported_ops: Optional[list[str]] = None,
+    supported_ops: list[str] | None = None,
 ) -> OperationGraph:
     """
     Generate a graph of operations that produces the target specification.
@@ -479,7 +452,7 @@ def fuzz_operation_graph(
         node_counter += 1
 
         # Generate input nodes
-        input_node_ids = []
+        input_node_ids: list[str] = []
         if input_specs:  # Non-leaf operations
             for input_spec in input_specs:
                 input_node_id = _generate_node(

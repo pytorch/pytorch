@@ -1,11 +1,12 @@
+from __future__ import annotations
+
 import glob
 import logging
 import shlex
 import shutil
 import sys
-from collections.abc import Iterable
-from importlib.metadata import PackageNotFoundError, version  # noqa: UP035
-from typing import Optional, Union
+from collections.abc import Iterable  # noqa: TC003
+from importlib.metadata import PackageNotFoundError, version
 
 from cli.lib.common.utils import run_command
 
@@ -17,8 +18,8 @@ def pip_install_packages(
     packages: Iterable[str] = (),
     env=None,
     *,
-    requirements: Optional[str] = None,
-    constraints: Optional[str] = None,
+    requirements: str | None = None,
+    constraints: str | None = None,
     prefer_uv: bool = False,
 ) -> None:
     use_uv = prefer_uv and shutil.which("uv") is not None
@@ -37,14 +38,14 @@ def pip_install_packages(
     run_command(" ".join(map(shlex.quote, cmd)), env=env)
 
 
-def pip_install_first_match(pattern: str, extras: Optional[str] = None, pref_uv=False):
+def pip_install_first_match(pattern: str, extras: str | None = None, pref_uv=False):
     wheel = first_matching_pkg(pattern)
     target = f"{wheel}[{extras}]" if extras else wheel
     logger.info("Installing %s...", target)
     pip_install_packages([target], prefer_uv=pref_uv)
 
 
-def run_python(args: Union[str, list[str]], env=None):
+def run_python(args: str | list[str], env=None):
     """
     Run the python in the current environment.
     """

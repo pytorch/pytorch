@@ -6,7 +6,7 @@ import sys
 import tempfile
 import typing_extensions
 from collections.abc import Callable
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -34,10 +34,28 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
-if os.path.basename(os.path.dirname(__file__)) == "shared":
-    torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-else:
-    torch_parent = os.path.dirname(os.path.dirname(__file__))
+
+def _compute_torch_parent() -> str:
+    torch_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.basename(torch_dir) == "shared":
+        return os.path.dirname(os.path.dirname(torch_dir))
+    # In scikit-build-core editable installs with redirect mode, binary
+    # artifacts (bin/, lib/) are installed to the dist package directory
+    # rather than the source tree. Fall back to the installed package
+    # location for get_file_path.
+    if not os.path.isdir(os.path.join(torch_dir, "bin")):
+        try:
+            from importlib.metadata import distribution
+
+            installed = str(distribution("torch").locate_file("torch"))
+            if os.path.isdir(os.path.join(installed, "bin")):
+                return os.path.dirname(installed)
+        except Exception:
+            pass
+    return os.path.dirname(torch_dir)
+
+
+torch_parent = _compute_torch_parent()
 
 
 def get_file_path(*path_components: str) -> str:
@@ -85,7 +103,6 @@ def compile_time_strobelight_meta(
         @functools.wraps(function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if "skip" in kwargs and isinstance(
-                # pyrefly: ignore [unsupported-operation]
                 skip := kwargs["skip"],
                 int,
             ):
@@ -222,19 +239,34 @@ def is_fb_unit_test() -> bool:
 
 
 @functools.cache
-def max_clock_rate():
+def max_clock_rate(device: int | None = None):
     """
     unit: MHz
     """
     if not torch.version.hip:
+        if device is not None:
+            return torch.cuda.get_device_properties(device).clock_rate / 1000
+
         from triton.testing import nvsmi
 
-        return nvsmi(["clocks.max.sm"])[0]
+        try:
+            return nvsmi(["clocks.max.sm"])[0]
+        except FileNotFoundError:
+            import pynvml  # type: ignore[import]
+
+            handle = torch.cuda._get_pynvml_handler()
+            try:
+                return pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
+            finally:
+                pynvml.nvmlShutdown()
     else:
         # Manually set max-clock speeds on ROCm until equivalent nvmsi
         # functionality in triton.testing or via pyamdsmi enablement. Required
         # for test_snode_runtime unit tests.
-        gcn_arch = str(torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0])
+        device = torch.cuda.current_device() if device is None else device
+        gcn_arch = str(
+            torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+        )
         if "gfx94" in gcn_arch:
             return 1700
         elif "gfx90a" in gcn_arch:
@@ -255,7 +287,7 @@ def max_clock_rate():
             return 1100
 
 
-def get_mast_job_name_version() -> Optional[tuple[str, int]]:
+def get_mast_job_name_version() -> tuple[str, int] | None:
     return None
 
 
@@ -274,7 +306,7 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> str | None:
     print("Uploading profile stats (fb-only otherwise no-op)")
     return None
 
@@ -367,12 +399,19 @@ def get_default_numa_options():
     return None
 
 
-def log_triton_builds(fail: Optional[str]):
+def log_triton_builds(fail: str | None):
     pass
 
 
-def find_compile_subproc_binary() -> Optional[str]:
+def find_compile_subproc_binary() -> str | None:
     """
     Allows overriding the binary used for subprocesses
     """
     return None
+
+
+def get_torch_source_version() -> str:
+    """Return the source commit hash for the current PyTorch build."""
+    import torch.version as torch_version
+
+    return getattr(torch_version, "git_version", "")

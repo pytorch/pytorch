@@ -2,7 +2,9 @@
 #define MPSImageWrapper_h
 
 #import <ATen/native/metal/MetalCommandBuffer.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+C10_DIAGNOSTIC_POP()
 #include <c10/util/ArrayRef.h>
 
 namespace at {

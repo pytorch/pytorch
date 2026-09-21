@@ -20,7 +20,7 @@ if [ $# -lt 2 ]; then
 fi
 
 # Building the wrapper
-$CXX -I$TORCH_ROOT_DIR/build/aten/src -I$TORCH_ROOT_DIR/aten/src -I$TORCH_ROOT_DIR/build -I$TORCH_ROOT_DIR -I$TORCH_ROOT_DIR/build/caffe2/aten/src -I$TORCH_ROOT_DIR/torch/csrc/api -I$TORCH_ROOT_DIR/torch/csrc/api/include -std=gnu++17 -fPIE -o $1.o -c $1
+$CXX -I$TORCH_ROOT_DIR/build/aten/src -I$TORCH_ROOT_DIR/aten/src -I$TORCH_ROOT_DIR/build -I$TORCH_ROOT_DIR -I$TORCH_ROOT_DIR/build/caffe2/aten/src -I$TORCH_ROOT_DIR/torch/csrc/api -I$TORCH_ROOT_DIR/torch/csrc/api/include -std=gnu++20 -fPIE -o $1.o -c $1
 
 # Linking
 $CXX -rdynamic -Wl,--no-as-needed,$TORCH_ROOT_DIR/build/lib/libtorch.so $1.o -Wl,--no-as-needed,$TORCH_ROOT_DIR/build/lib/libtorch_cpu.so -Wl,--no-as-needed,$TORCH_ROOT_DIR/build/lib/libc10.so -o $2

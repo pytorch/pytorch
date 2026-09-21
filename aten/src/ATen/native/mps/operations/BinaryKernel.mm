@@ -1,20 +1,21 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Lerp.h>
+#include <ATen/native/Pow.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/operations/BinaryKernel.h>
-#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/complex_native.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/nextafter_native.h>
@@ -29,35 +30,13 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/BinaryKernel_metallib.h>
 #endif
 
-namespace mps {
-
-void binary_op_kernel(const std::string func_name,
-                      const Tensor& input,
-                      const Tensor& other,
-                      const Tensor& output,
-                      const std::optional<Scalar> alpha) {
-  auto new_size = at::infer_size(input.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-
-  auto iter = TensorIteratorConfig()
-                  .allow_cpu_scalars(true)
-                  .add_output(output)
-                  .add_input(input)
-                  .add_input(other)
-                  .check_all_same_dtype(false)
-                  .promote_inputs_to_common_dtype(true)
-                  .build();
-
-  lib.exec_binary_kernel(iter, func_name, alpha);
+static void atan2_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "atan2");
 }
 
-} // namespace mps
+static void pow_tensor_tensor_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "pow");
+}
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
@@ -73,6 +52,14 @@ static void fmin_mps_kernel(TensorIteratorBase& iter) {
   } else {
     at::minimum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
   }
+}
+
+static void maximum_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "maximum");
+}
+
+static void minimum_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "minimum");
 }
 
 static void copysign_mps_kernel(TensorIteratorBase& iter) {
@@ -94,7 +81,13 @@ static void logaddexp_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void logaddexp2_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isFloatingType(iter.common_dtype()), "\"logaddexp2_mps\" not implemented for '", iter.common_dtype(), "'");
   lib.exec_binary_kernel(iter, "logaddexp2");
+}
+
+static void xlogy_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "xlogy");
 }
 
 static void xlog1py_mps_kernel(TensorIteratorBase& iter) {
@@ -162,6 +155,10 @@ static void hermite_polynomial_he_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hermite_polynomial_he");
 }
 
+static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -170,12 +167,42 @@ static void complex_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "make_complex");
 }
 
-static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
-  lib.exec_binary_kernel(iter, "lerp_alpha", weight);
+// `sub_out` routes through `add_stub` with a negated alpha, same as CPU/CUDA/XPU
+static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
+  const auto alpha_val = alpha.toComplexDouble();
+  if (alpha_val == 1.0) {
+    return lib.exec_binary_kernel(iter, "add");
+  }
+  if (alpha_val == -1.0 && iter.common_dtype() != kBool) {
+    return lib.exec_binary_kernel(iter, "sub");
+  }
+  lib.exec_binary_kernel(iter, "add_alpha", alpha);
 }
 
-static void native_dropout_mask_and_scale_mps_kernel(at::TensorIteratorBase& iter, const Scalar& scale) {
-  lib.exec_binary_kernel(iter, "native_dropout_mask_and_scale", scale);
+static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
+  // Narrowing the weight to a low-precision dtype would overflow for weights outside its
+  // range and lose accuracy inside it, so hand it over at opmath precision.
+  lib.exec_binary_kernel(iter, "lerp_alpha", weight, at::toOpMathType(iter.common_dtype()));
+}
+
+static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
+  // `lerp.Tensor` lets only a 0-dim `weight` differ in dtype from `self`/`end`, and
+  // TensorIterator materializes that promotion only when the common device is CPU, leaving
+  // other backends to cast while loading. `exec_ternary_kernel` picks the cast flavor for
+  // anything that disagrees with the common dtype.
+  const auto common_dtype = iter.common_dtype();
+
+  // Mirror the CUDA kernel: read a CPU scalar weight on the host, drop it from the iterator
+  // and let the scalar-weight path cast it to the compute dtype. `lerp_alpha` is instantiated
+  // for a single tensor dtype, so this needs the other operands to already agree.
+  if (iter.is_cpu_scalar(3) && iter.dtype(0) == common_dtype && iter.dtype(1) == common_dtype &&
+      iter.dtype(2) == common_dtype) {
+    const auto weight = iter.tensor(3).item();
+    iter.remove_operand(3);
+    return lerp_scalar_mps_kernel(iter, weight);
+  }
+
+  lib.exec_ternary_kernel(iter, "lerp");
 }
 
 static void mul_mps_kernel(TensorIteratorBase& iter) {
@@ -203,10 +230,12 @@ static void fmod_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void igamma_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "igamma_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "igamma");
 }
 
 static void igammac_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "igammac_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "igammac");
 }
 
@@ -214,13 +243,97 @@ static void hypot_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hypot");
 }
 
+static void gcd_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isIntegralType(iter.common_dtype(), false), "gcd_mps not implemented for ", iter.common_dtype());
+  lib.exec_binary_kernel(iter, "gcd");
+}
+
+static void lcm_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isIntegralType(iter.common_dtype(), false), "lcm_mps not implemented for ", iter.common_dtype());
+  lib.exec_binary_kernel(iter, "lcm");
+}
+
+static void bitwise_and_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "bitwise_and");
+}
+
+static void bitwise_or_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "bitwise_or");
+}
+
+static void bitwise_xor_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "bitwise_xor");
+}
+
+static void bitwise_left_shift_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isIntegralType(iter.common_dtype(), /*includeBool=*/false),
+                              "bitwise_left_shift not implemented for ",
+                              iter.common_dtype());
+  lib.exec_binary_kernel(iter, "bitwise_left_shift");
+}
+
+static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isIntegralType(iter.common_dtype(), /*includeBool=*/false),
+                              "bitwise_right_shift not implemented for ",
+                              iter.common_dtype());
+  lib.exec_binary_kernel(iter, "bitwise_right_shift");
+}
+
+// Comparison kernels naturally produce bool; passing kBool tells the
+// dispatcher to allocate a bool temp when the user's `out=` is non-bool.
+// The ILP threshold matches the floating-point default (256K) -- benchmark
+// shows float inputs gain ~4x at 1M; int inputs are neutral.
+static constexpr uint32_t kCmpILPThreshold = 1u << 18;
+static void eq_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "eq", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void ne_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "ne", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void lt_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "lt", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void le_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "le", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void gt_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "gt", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void ge_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "ge", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_and_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_and", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_or_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_or", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_xor_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_xor", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+REGISTER_DISPATCH(add_stub, &add_mps_kernel)
+REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
+REGISTER_DISPATCH(maximum_stub, &maximum_mps_kernel)
+REGISTER_DISPATCH(minimum_stub, &minimum_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
 REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_mps_kernel);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_mps_kernel);
+REGISTER_DISPATCH(xlogy_stub, &xlogy_mps_kernel)
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_mps_kernel)
@@ -232,9 +345,11 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
+REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_mps_kernel)
 REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
@@ -244,4 +359,21 @@ REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
 REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
+REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
+REGISTER_DISPATCH(lcm_stub, &lcm_mps_kernel)
+REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_mps_kernel)
+REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_mps_kernel)
+REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
+REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)
+REGISTER_DISPATCH(lshift_stub, &bitwise_left_shift_mps_kernel)
+REGISTER_DISPATCH(rshift_stub, &bitwise_right_shift_mps_kernel)
+REGISTER_DISPATCH(eq_stub, &eq_mps_kernel)
+REGISTER_DISPATCH(ne_stub, &ne_mps_kernel)
+REGISTER_DISPATCH(lt_stub, &lt_mps_kernel)
+REGISTER_DISPATCH(le_stub, &le_mps_kernel)
+REGISTER_DISPATCH(gt_stub, &gt_mps_kernel)
+REGISTER_DISPATCH(ge_stub, &ge_mps_kernel)
+REGISTER_DISPATCH(logical_and_stub, &logical_and_mps_kernel)
+REGISTER_DISPATCH(logical_or_stub, &logical_or_mps_kernel)
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_mps_kernel)
 } // namespace at::native

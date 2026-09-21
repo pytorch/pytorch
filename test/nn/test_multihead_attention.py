@@ -10,16 +10,18 @@ from torch.nn import MultiheadAttention
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyOn,
+    onlyAccelerator,
+    skipXPUIf,
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
-    TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_CROSSREF,
+    xfailIfNoAcceleratorTriton,
 )
 
 
@@ -33,9 +35,7 @@ if TEST_NUMPY:
 
 
 class TestMultiheadAttentionNN(NNTestCase):
-    if TEST_CUDA:
-        _do_cuda_memory_leak_check = True
-        _do_cuda_non_default_stream = True
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     @parametrize_test("average_attn_weights", [True, False])
@@ -81,8 +81,14 @@ class TestMultiheadAttentionNN(NNTestCase):
 
         def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
             """Numpy-based batch matrix multiply over 4 dim matrix"""
-            assert a.shape[0] == b.shape[0]
-            assert a.shape[1] == b.shape[1]
+            if a.shape[0] != b.shape[0]:
+                raise AssertionError(
+                    f"Expected a.shape[0] == b.shape[0], got {a.shape[0]} vs {b.shape[0]}"
+                )
+            if a.shape[1] != b.shape[1]:
+                raise AssertionError(
+                    f"Expected a.shape[1] == b.shape[1], got {a.shape[1]} vs {b.shape[1]}"
+                )
             retval = np.zeros(
                 (a.shape[0], a.shape[1], a.shape[2], b.shape[3]), dtype=np.float32
             )
@@ -120,22 +126,6 @@ class TestMultiheadAttentionNN(NNTestCase):
             X_fc_b = X_bias.detach().numpy()
             X_fc_w = X_weight.detach().numpy()
             return np.matmul(X, np.transpose(X_fc_w)) + X_fc_b
-
-        def _create_src_lengths_mask(batch_size, src_lengths):
-            """
-            Generate boolean mask to prevent attention beyond the end of source
-            Inputs:
-              batch_size : int
-              src_lengths : [batch_size] of sentence lengths
-            Outputs:
-              [batch_size, max_src_len]
-            """
-            max_srclen = src_lengths.max()
-            src_indices = torch.arange(0, max_srclen).unsqueeze(0).to(src_lengths)
-            src_indices = src_indices.expand(batch_size, max_srclen)
-            src_lengths = src_lengths.unsqueeze(dim=1).expand(batch_size, max_srclen)
-            # returns [batch_size, max_seq_len]
-            return (src_indices < src_lengths).int().detach()
 
         def _multihead_attn_test_helper(
             add_key_padding_mask=False,
@@ -747,6 +737,8 @@ class TestMultiheadAttentionNN(NNTestCase):
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
@@ -826,6 +818,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
             self.assertEqual(result_fast_path_masked, result_ref_masked)
 
     @torch.no_grad()
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4448")
     @unittest.skipIf(
         TEST_WITH_CROSSREF,
         "CrossRef turns on TorchFunctionMode, and so disables fastpath.",
@@ -836,13 +829,6 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         and key padding mask (mask type 1) are provided at the same time on CPU and CUDA and PrivateUse1
         """
         device = device.rstrip(":0123456789")
-        if device not in [
-            "cpu",
-            "cuda",
-            "xpu",
-            torch._C._get_privateuse1_backend_name(),
-        ]:
-            self.skipTest("Fastpath only runs on CPU and CUDA and XPU and PrivateUse1.")
 
         with torch.autocast(device_type=device, enabled=False):
             embed_dim = 16
@@ -876,7 +862,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
                 # If mock was called, fastpath was taken
                 self.assertTrue(fastpath_mock.called)
 
-    @onlyOn(["cuda", "xpu", torch._C._get_privateuse1_backend_name()])
+    @onlyAccelerator
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype(self, device, dtype):
         embed_dim = 128
@@ -891,7 +877,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
-    @onlyOn(["cuda", "xpu", torch._C._get_privateuse1_backend_name()])
+    @onlyAccelerator
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype_batch_first(self, device, dtype):
         embed_dim = 128
@@ -945,6 +931,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         mha(query, query, query)
 
     @dtypes(torch.double)
+    @xfailIfNoAcceleratorTriton
     def test_fast_path_check_with_mask_does_not_break_in_compile(self, device, dtype):
         # Test TransformerEncoder fast path determination with src_key_padding_mask set.
         # Specifically, ensure the mask left-align check doesn't fail in torch.compile.
@@ -985,7 +972,9 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         mha(query, key, key)
 
 
-instantiate_device_type_tests(TestMultiheadAttentionNNDeviceType, globals())
+instantiate_device_type_tests(
+    TestMultiheadAttentionNNDeviceType, globals(), allow_xpu=True
+)
 instantiate_parametrized_tests(TestMultiheadAttentionNN)
 
 if __name__ == "__main__":

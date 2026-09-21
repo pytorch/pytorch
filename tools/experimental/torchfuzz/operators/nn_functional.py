@@ -2,7 +2,6 @@
 
 import math
 import random
-from typing import Optional
 
 import torch
 
@@ -27,7 +26,7 @@ class EmbeddingOperator(Operator):
         super().__init__("torch.nn.functional.embedding")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.embedding"
 
@@ -109,7 +108,7 @@ class LinearOperator(Operator):
         super().__init__("torch.nn.functional.linear")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.linear"
 
@@ -207,7 +206,7 @@ class ReLUOperator(Operator):
         super().__init__("torch.nn.functional.relu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.relu"
 
@@ -250,7 +249,7 @@ class SoftmaxOperator(Operator):
         super().__init__("torch.nn.functional.softmax")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.softmax"
 
@@ -297,7 +296,7 @@ class DropoutOperator(Operator):
         super().__init__("torch.nn.functional.dropout")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.dropout"
 
@@ -341,7 +340,7 @@ class LayerNormOperator(Operator):
         super().__init__("torch.nn.functional.layer_norm")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.layer_norm"
 
@@ -438,7 +437,7 @@ class RMSNormOperator(Operator):
         self.weight = 5.0
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.rms_norm"
 
@@ -512,7 +511,7 @@ class GELUOperator(Operator):
         super().__init__("torch.nn.functional.gelu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.gelu"
 
@@ -544,7 +543,8 @@ class GELUOperator(Operator):
             raise ValueError("GELU requires exactly 1 input")
 
         input_name = input_names[0]
-        return f"{output_name} = torch.nn.functional.gelu({input_name})"
+        approx = random.choice(["none", "tanh"])
+        return f"{output_name} = torch.nn.functional.gelu({input_name}, approximate={approx!r})"
 
 
 class SigmoidOperator(Operator):
@@ -554,7 +554,7 @@ class SigmoidOperator(Operator):
         super().__init__("torch.sigmoid")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.sigmoid"
 
@@ -596,7 +596,7 @@ class TanhOperator(Operator):
         super().__init__("torch.tanh")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.tanh"
 
@@ -638,7 +638,7 @@ class BatchNormOperator(Operator):
         super().__init__("torch.nn.functional.batch_norm")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.batch_norm"
 
@@ -720,8 +720,11 @@ class BatchNormOperator(Operator):
 
         target_dtype = str(output_spec.dtype)
         input_name = input_names[0]
-        running_mean_name = input_names[1]
-        running_var_name = input_names[2]
+        # running_mean/running_var must not require grad (batch_norm is not
+        # differentiable w.r.t. them). Args are marked requires_grad by the
+        # template, so detach these two here.
+        running_mean_name = f"{input_names[1]}.detach()"
+        running_var_name = f"{input_names[2]}.detach()"
 
         # Use training=False for deterministic behavior
         if len(input_names) == 3:
@@ -742,7 +745,7 @@ class GroupNormOperator(Operator):
         super().__init__("torch.nn.functional.group_norm")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.group_norm"
 
@@ -846,7 +849,7 @@ class LeakyReLUOperator(Operator):
         super().__init__("torch.nn.functional.leaky_relu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.leaky_relu"
 
@@ -878,7 +881,8 @@ class LeakyReLUOperator(Operator):
             raise ValueError("LeakyReLU requires exactly 1 input")
 
         input_name = input_names[0]
-        return f"{output_name} = torch.nn.functional.leaky_relu({input_name}, negative_slope=0.01)"
+        slope = round(random.uniform(0.001, 0.5), 4)
+        return f"{output_name} = torch.nn.functional.leaky_relu({input_name}, negative_slope={slope!r})"
 
 
 class ELUOperator(Operator):
@@ -888,7 +892,7 @@ class ELUOperator(Operator):
         super().__init__("torch.nn.functional.elu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.elu"
 
@@ -920,7 +924,8 @@ class ELUOperator(Operator):
             raise ValueError("ELU requires exactly 1 input")
 
         input_name = input_names[0]
-        return f"{output_name} = torch.nn.functional.elu({input_name})"
+        alpha = round(random.uniform(0.1, 3.0), 4)
+        return f"{output_name} = torch.nn.functional.elu({input_name}, alpha={alpha!r})"
 
 
 class SiLUOperator(Operator):
@@ -930,7 +935,7 @@ class SiLUOperator(Operator):
         super().__init__("torch.nn.functional.silu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.silu"
 
@@ -972,7 +977,7 @@ class ScaledDotProductAttentionOperator(Operator):
         super().__init__("torch.nn.functional.scaled_dot_product_attention")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.scaled_dot_product_attention"
 
@@ -1038,7 +1043,7 @@ class MultiHeadAttentionForwardOperator(Operator):
         super().__init__("torch.nn.functional.multi_head_attention_forward")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.multi_head_attention_forward"
 

@@ -1,12 +1,12 @@
 #include <c10/util/irange.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Size.h>
-#include <torch/csrc/utils/pybind.h>
+// #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/python_tuples.h>
 #include <string>
 
@@ -23,14 +23,12 @@ PyObject* THPSize_New(const torch::autograd::Variable& var) {
     return THPSize_NewFromSizes(var.dim(), sizes.data());
   }
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, var.dim()));
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
 
   for (const auto i : c10::irange(var.dim())) {
     PyObject* py_size_tensor =
         THPVariable_Wrap(torch::jit::tracer::getSizeOf(var, i));
-    if (!py_size_tensor)
-      throw python_error();
+    TORCH_CHECK_PYTHON(py_size_tensor);
     PyTuple_SET_ITEM(self.get(), i, py_size_tensor);
   }
 
@@ -39,8 +37,7 @@ PyObject* THPSize_New(const torch::autograd::Variable& var) {
 
 PyObject* THPSize_NewFromSizes(int64_t dim, const int64_t* sizes) {
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, dim));
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   THPUtils_packInt64Array(self, dim, sizes);
   return self.release();
 }
@@ -50,8 +47,7 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
 
   auto ret = THPObjectPtr(THPSizeType.tp_alloc(
       &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
-  if (!ret)
-    throw python_error();
+  TORCH_CHECK_PYTHON(ret);
 
   for (auto i : c10::irange(sym_sizes.size())) {
     auto si = sym_sizes[i];
@@ -63,8 +59,7 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
       auto py_symint = py::cast(si).release().ptr();
-      if (!py_symint)
-        throw python_error();
+      TORCH_CHECK_PYTHON(py_symint);
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
     } else {
       // Otherwise, we know that it is an actual integer value.
@@ -72,8 +67,7 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
       if (torch::jit::tracer::isTracing()) {
         PyObject* py_size_tensor = THPVariable_Wrap(
             torch::jit::tracer::getSizeOf(self_, static_cast<int64_t>(i)));
-        if (!py_size_tensor)
-          throw python_error();
+        TORCH_CHECK_PYTHON(py_size_tensor);
         PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
       } else {
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -114,9 +108,7 @@ static PyObject* THPSize_pynew(
       if (number && THPUtils_checkLong(number.get())) {
         Py_INCREF(number.get());
         auto status = PyTuple_SetItem(self, i, number.get());
-        if (status != 0) {
-          throw python_error();
-        }
+        TORCH_CHECK_PYTHON(status == 0);
         continue;
       }
       return PyErr_Format(
@@ -219,6 +211,23 @@ static PySequenceMethods THPSize_as_sequence = {
     nullptr /* sq_contains */
 };
 
+#if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 14
+static Py_hash_t THPSize_hash(PyObject* self) {
+  /*
+  Python 3.14 introduced a caching mechanism for tuple hashing which is stored
+  in the `ob_hash` field. The caching mechanism relies on a sentinel value (-1)
+  to indicate the hash has not yet been computed.
+  For some unknown reason, this field is initialized with 0 when Size is
+  created, which causes the caching logic to behave incorrectly.
+  */
+  PyTupleObject* v = _PyTuple_CAST(self);
+  // reset ob_hash and force hash to be recomputed
+  Py_hash_t sentinel = -1;
+  v->ob_hash = sentinel;
+  return PyTuple_Type.tp_hash(self);
+}
+#endif
+
 static PyMappingMethods THPSize_as_mapping = {
     nullptr, /* mp_length */
     wrap_tuple_fn<decltype(&mp_subscript), &mp_subscript>,
@@ -239,16 +248,14 @@ static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPSize*>(_self);
   auto ret = THPObjectPtr{PyTuple_New(2)};
-  if (!ret)
-    throw python_error();
+  TORCH_CHECK_PYTHON(ret);
 
   auto obj = reinterpret_cast<PyObject*>(&THPSizeType);
   Py_INCREF(&THPSizeType);
   PyTuple_SET_ITEM(ret.get(), 0, obj);
 
   THPObjectPtr t(PyTuple_New(PyTuple_Size(_self)));
-  if (!t)
-    throw python_error();
+  TORCH_CHECK_PYTHON(t);
   for (Py_ssize_t i = 0; i < PyTuple_Size(_self); ++i) {
     auto d = PyTuple_GET_ITEM(self, i);
     Py_INCREF(d);
@@ -256,8 +263,7 @@ static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
   }
 
   THPObjectPtr dims(Py_BuildValue("(O)", t.get()));
-  if (!dims)
-    throw python_error();
+  TORCH_CHECK_PYTHON(dims);
   PyTuple_SET_ITEM(ret.get(), 1, dims.release());
 
   return ret.release();
@@ -284,7 +290,11 @@ PyTypeObject THPSizeType = {
     &THPSize_as_number, /* tp_as_number */
     &THPSize_as_sequence, /* tp_as_sequence */
     &THPSize_as_mapping, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
+#if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 14
+    &THPSize_hash, /* tp_hash  */
+#else
+    nullptr, /* tp_hash */
+#endif
     nullptr, /* tp_call */
     nullptr, /* tp_str */
     nullptr, /* tp_getattro */
@@ -294,7 +304,12 @@ PyTypeObject THPSizeType = {
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
+#if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 14
+    // if tp_hash is defined, one must also defines tp_richcompare
+    PyTuple_Type.tp_richcompare, /* tp_richcompare */
+#else
     nullptr, /* tp_richcompare */
+#endif
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
@@ -312,12 +327,5 @@ PyTypeObject THPSizeType = {
 };
 
 void THPSize_init(PyObject* module) {
-  if (PyType_Ready(&THPSizeType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPSizeType);
-  if (PyModule_AddObject(
-          module, "Size", reinterpret_cast<PyObject*>(&THPSizeType)) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPSizeType) >= 0);
 }

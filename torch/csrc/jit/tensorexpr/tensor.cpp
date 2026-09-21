@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 

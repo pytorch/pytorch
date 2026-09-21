@@ -78,6 +78,7 @@ class TestSetLinter(LinterTestCase):
             ("{1, 2}", 1),
             ("{One({'a': 1}), Two([{}, {2}, {1, 2}])}", 3),
             ('f" {h:{w}} "', 0),
+            ('buffer.splice(f"""{x} = {self.foo(f"{x}_idx")}""")', 0),
         )
         for s, expected in TESTS:
             pf = SetLinter.make_file(s)

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Literal, Optional, Union
+from typing import Literal
 from typing_extensions import deprecated
 
 import torch
@@ -49,7 +49,7 @@ convolution_notes = {
         In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
         a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`.""",
-}  # noqa: B950
+}
 
 
 class _ConvNd(Module):
@@ -64,10 +64,10 @@ class _ConvNd(Module):
         "out_channels",
         "kernel_size",
     ]
-    __annotations__ = {"bias": Optional[torch.Tensor]}
+    __annotations__ = {"bias": torch.Tensor | None}
 
     def _conv_forward(  # type: ignore[empty-body]
-        self, input: Tensor, weight: Tensor, bias: Optional[Tensor]
+        self, input: Tensor, weight: Tensor, bias: Tensor | None
     ) -> Tensor: ...
 
     in_channels: int
@@ -75,14 +75,14 @@ class _ConvNd(Module):
     out_channels: int
     kernel_size: tuple[int, ...]
     stride: tuple[int, ...]
-    padding: Union[str, tuple[int, ...]]
+    padding: str | tuple[int, ...]
     dilation: tuple[int, ...]
     transposed: bool
     output_padding: tuple[int, ...]
     groups: int
     padding_mode: Literal["zeros", "reflect", "replicate", "circular"]
     weight: Tensor
-    bias: Optional[Tensor]
+    bias: Tensor | None
 
     def __init__(
         self,
@@ -90,7 +90,7 @@ class _ConvNd(Module):
         out_channels: int,
         kernel_size: tuple[int, ...],
         stride: tuple[int, ...],
-        padding: Union[str, tuple[int, ...]],
+        padding: str | tuple[int, ...],
         dilation: tuple[int, ...],
         transposed: bool,
         output_padding: tuple[int, ...],
@@ -180,14 +180,24 @@ class _ConvNd(Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
-        # uniform(-1/sqrt(k), 1/sqrt(k)), where k = weight.size(1) * prod(*kernel_size)
-        # For more details see: https://github.com/pytorch/pytorch/issues/15314#issuecomment-477448573
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            if fan_in != 0:
-                bound = 1 / math.sqrt(fan_in)
+        # Use torch.no_grad() to allow in-place modification of weights/bias
+        with torch.no_grad():
+            # Check if the weight tensor is in channels_last_3d format to ensure numerical consistency
+            if not self.weight.is_contiguous():
+                # Use an empty contiguous buffer to optimize memory and ensure consistent initialization
+                temp_weight = torch.empty_like(
+                    self.weight, memory_format=torch.contiguous_format
+                )
+                init.kaiming_uniform_(temp_weight, a=math.sqrt(5))
+                # Copy the initialized values back to the original tensor
+                self.weight.copy_(temp_weight)
+            else:
+                # Standard initialization for default contiguous memory format
+                init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+            if self.bias is not None:
+                # Bias initialization remains independent of weight memory format
+                fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+                bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
                 init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self):
@@ -323,7 +333,7 @@ class Conv1d(_ConvNd):
         out_channels: int,
         kernel_size: _size_1_t,
         stride: _size_1_t = 1,
-        padding: Union[str, _size_1_t] = 0,
+        padding: str | _size_1_t = 0,
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -353,7 +363,7 @@ class Conv1d(_ConvNd):
             **factory_kwargs,
         )
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
             return F.conv1d(
                 F.pad(
@@ -390,9 +400,11 @@ class Conv2d(_ConvNd):
 
 
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
-    :math:`N` is a batch size, :math:`C` denotes a number of channels,
-    :math:`H` is a height of input planes in pixels, and :math:`W` is
-    width in pixels.
+    :math:`N` is a batch size, :math:`C_{\text{in}}` and :math:`C_{\text{out}}` correspond to
+    :attr:`in_channels` and :attr:`out_channels` respectively,
+    :math:`H` and :math:`W` are the input height and width in pixels.
+    See the Shape section below for how :math:`H_{\text{out}}` and :math:`W_{\text{out}}`
+    are derived from :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, and :attr:`dilation`.
     """
         + r"""
 
@@ -503,7 +515,7 @@ class Conv2d(_ConvNd):
         out_channels: int,
         kernel_size: _size_2_t,
         stride: _size_2_t = 1,
-        padding: Union[str, _size_2_t] = 0,
+        padding: str | _size_2_t = 0,
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -531,7 +543,7 @@ class Conv2d(_ConvNd):
             **factory_kwargs,
         )
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
             return F.conv2d(
                 F.pad(
@@ -673,7 +685,7 @@ class Conv3d(_ConvNd):
         out_channels: int,
         kernel_size: _size_3_t,
         stride: _size_3_t = 1,
-        padding: Union[str, _size_3_t] = 0,
+        padding: str | _size_3_t = 0,
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -701,7 +713,7 @@ class Conv3d(_ConvNd):
             **factory_kwargs,
         )
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
             return F.conv3d(
                 F.pad(
@@ -766,12 +778,12 @@ class _ConvTransposeNd(_ConvNd):
     def _output_padding(
         self,
         input: Tensor,
-        output_size: Optional[list[int]],
+        output_size: list[int] | None,
         stride: list[int],
         padding: list[int],
         kernel_size: list[int],
         num_spatial_dims: int,
-        dilation: Optional[list[int]] = None,
+        dilation: list[int] | None = None,
     ) -> list[int]:
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
@@ -850,7 +862,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
@@ -965,13 +977,14 @@ class ConvTranspose1d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: list[int] | None = None) -> Tensor:
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose1d"
             )
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 1
@@ -1039,7 +1052,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
@@ -1153,7 +1166,7 @@ class ConvTranspose2d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: list[int] | None = None) -> Tensor:
         """
         Performs the forward pass.
 
@@ -1167,7 +1180,8 @@ class ConvTranspose2d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose2d"
             )
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 2
@@ -1235,7 +1249,7 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
@@ -1344,13 +1358,14 @@ class ConvTranspose3d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: list[int] | None = None) -> Tensor:
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose3d"
             )
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 3
@@ -1430,7 +1445,8 @@ class _LazyConvXdMixin(LazyModuleMixin):
             self.in_channels = self._get_in_channels(input)
             if self.in_channels % self.groups != 0:
                 raise ValueError("in_channels must be divisible by groups")
-            assert isinstance(self.weight, UninitializedParameter)
+            if not isinstance(self.weight, UninitializedParameter):
+                raise AssertionError("self.weight must be an UninitializedParameter")
             if self.transposed:
                 self.weight.materialize(
                     (
@@ -1448,7 +1464,8 @@ class _LazyConvXdMixin(LazyModuleMixin):
                     )
                 )
             if self.bias is not None:
-                assert isinstance(self.bias, UninitializedParameter)
+                if not isinstance(self.bias, UninitializedParameter):
+                    raise AssertionError("self.bias must be an UninitializedParameter")
                 self.bias.materialize((self.out_channels,))
             self.reset_parameters()
 
@@ -1471,7 +1488,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
         raise NotImplementedError
 
 
-# LazyConv1d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConv1d defines weight as a Tensor but derived class defines it as UninitializedParameter
 class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv1d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1499,7 +1516,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     .. seealso:: :class:`torch.nn.Conv1d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
-    # super class define this variable as None. "type: ignore[..] is required
+    # super class defines this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
     cls_to_become = Conv1d  # type: ignore[assignment]
 
@@ -1532,18 +1549,18 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
         return 1
 
 
-# LazyConv2d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConv2d defines weight as a Tensor but derived class defines it as UninitializedParameter
 class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv2d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1571,7 +1588,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     .. seealso:: :class:`torch.nn.Conv2d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
-    # super class define this variable as None. "type: ignore[..] is required
+    # super class defines this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
     cls_to_become = Conv2d  # type: ignore[assignment]
 
@@ -1604,18 +1621,18 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
         return 2
 
 
-# LazyConv3d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConv3d defines weight as a Tensor but derived class defines it as UninitializedParameter
 class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv3d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1644,7 +1661,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     .. seealso:: :class:`torch.nn.Conv3d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
-    # super class define this variable as None. "type: ignore[..] is required
+    # super class defines this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
     cls_to_become = Conv3d  # type: ignore[assignment]
 
@@ -1677,18 +1694,18 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
         return 3
 
 
-# LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UninitializedParameter
 class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose1d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1714,7 +1731,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
     .. seealso:: :class:`torch.nn.ConvTranspose1d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
-    # super class define this variable as None. "type: ignore[..] is required
+    # super class defines this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
     cls_to_become = ConvTranspose1d  # type: ignore[assignment]
 
@@ -1749,18 +1766,18 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
         return 1
 
 
-# LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UninitializedParameter
 class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose2d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1786,7 +1803,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
     .. seealso:: :class:`torch.nn.ConvTranspose2d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
-    # super class define this variable as None. "type: ignore[..] is required
+    # super class defines this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
     cls_to_become = ConvTranspose2d  # type: ignore[assignment]
 
@@ -1821,18 +1838,18 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
         return 2
 
 
-# LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UninitializedParameter
 class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose3d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1858,7 +1875,7 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
     .. seealso:: :class:`torch.nn.ConvTranspose3d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
-    # super class define this variable as None. "type: ignore[..] is required
+    # super class defines this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
     cls_to_become = ConvTranspose3d  # type: ignore[assignment]
 
@@ -1893,11 +1910,11 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:

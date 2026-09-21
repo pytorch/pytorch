@@ -52,5 +52,6 @@ class TestBenchNetwork:
 
             with torch.no_grad():
                 for param in modeldef.params:
-                    assert param.grad is not None
+                    if param.grad is None:
+                        raise AssertionError("Parameter gradient must not be None")
                     param.grad.zero_()

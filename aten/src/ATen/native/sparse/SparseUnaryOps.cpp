@@ -7,7 +7,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/asin.h>
@@ -26,8 +25,6 @@
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/erfinv.h>
 #include <ATen/ops/erfinv_native.h>
-#include <ATen/ops/exp.h>
-#include <ATen/ops/exp_native.h>
 #include <ATen/ops/expm1.h>
 #include <ATen/ops/expm1_native.h>
 #include <ATen/ops/floor.h>
@@ -73,8 +70,6 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
-#include <ATen/ops/is_pinned_native.h>
-#include <ATen/ops/_pin_memory_native.h>
 #endif
 
 namespace at::native {
@@ -177,7 +172,6 @@ COALESCED_UNARY_UFUNC(atanh)
 COALESCED_UNARY_UFUNC(ceil)
 COALESCED_UNARY_UFUNC(deg2rad)
 COALESCED_UNARY_UFUNC(erf)
-COALESCED_UNARY_UFUNC(exp)
 COALESCED_UNARY_UFUNC(erfinv)
 COALESCED_UNARY_UFUNC(expm1)
 COALESCED_UNARY_UFUNC(floor)

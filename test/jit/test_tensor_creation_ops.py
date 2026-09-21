@@ -23,7 +23,7 @@ class TestTensorCreationOps(JitTestCase):
             perm = torch.randperm(x)
             # Have to perform assertion here because TorchScript returns dtypes
             # as integers, which are not comparable against eager torch.dtype.
-            assert perm.dtype == torch.int64
+            assert perm.dtype == torch.int64  # noqa: S101
 
         self.checkScript(randperm, (3,))
 
@@ -32,7 +32,7 @@ class TestTensorCreationOps(JitTestCase):
             perm = torch.randperm(x, dtype=torch.float)
             # Have to perform assertion here because TorchScript returns dtypes
             # as integers, which are not comparable against eager torch.dtype.
-            assert perm.dtype == torch.float
+            assert perm.dtype == torch.float  # noqa: S101
 
         self.checkScript(randperm, (3,))
 
@@ -41,7 +41,7 @@ class TestTensorCreationOps(JitTestCase):
             indices = torch.triu_indices(rows, cols)
             # Have to perform assertion here because TorchScript returns dtypes
             # as integers, which are not comparable against eager torch.dtype.
-            assert indices.dtype == torch.int64
+            assert indices.dtype == torch.int64  # noqa: S101
 
         self.checkScript(triu_indices, (3, 3))
 
@@ -50,7 +50,7 @@ class TestTensorCreationOps(JitTestCase):
             indices = torch.triu_indices(rows, cols, dtype=torch.int32)
             # Have to perform assertion here because TorchScript returns dtypes
             # as integers, which are not comparable against eager torch.dtype.
-            assert indices.dtype == torch.int32
+            assert indices.dtype == torch.int32  # noqa: S101
 
         self.checkScript(triu_indices, (3, 3))
 
@@ -59,7 +59,7 @@ class TestTensorCreationOps(JitTestCase):
             indices = torch.tril_indices(rows, cols)
             # Have to perform assertion here because TorchScript returns dtypes
             # as integers, which are not comparable against eager torch.dtype.
-            assert indices.dtype == torch.int64
+            assert indices.dtype == torch.int64  # noqa: S101
 
         self.checkScript(tril_indices, (3, 3))
 
@@ -68,7 +68,7 @@ class TestTensorCreationOps(JitTestCase):
             indices = torch.tril_indices(rows, cols, dtype=torch.int32)
             # Have to perform assertion here because TorchScript returns dtypes
             # as integers, which are not comparable against eager torch.dtype.
-            assert indices.dtype == torch.int32
+            assert indices.dtype == torch.int32  # noqa: S101
 
         self.checkScript(tril_indices, (3, 3))
 

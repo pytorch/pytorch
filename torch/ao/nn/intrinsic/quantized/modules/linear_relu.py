@@ -94,10 +94,10 @@ class LinearLeakyReLU(nnq.Linear):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) is nni.LinearLeakyReLU, (
-            "Input float module should be LinearLeakyReLU"
-        )
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        if type(mod) is not nni.LinearLeakyReLU:
+            raise AssertionError("Input float module should be LinearLeakyReLU")
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
         activation_post_process = mod.activation_post_process
         leaky_relu = mod[1]
         mod = mod[0]
@@ -105,7 +105,10 @@ class LinearLeakyReLU(nnq.Linear):
         weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[union-attr,operator]
-        assert dtype == torch.qint8, "Weight observer must have dtype torch.qint8"
+        if dtype != torch.qint8:
+            raise AssertionError(
+                f"Weight observer must have dtype torch.qint8, got {dtype}"
+            )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qlinear_leaky_relu = cls(
             mod.in_features, mod.out_features, leaky_relu.negative_slope, dtype=dtype
@@ -163,15 +166,20 @@ class LinearTanh(nnq.Linear):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) is nni.LinearTanh, "Input float module should be LinearTanh"
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        if type(mod) is not nni.LinearTanh:
+            raise AssertionError("Input float module should be LinearTanh")
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
         activation_post_process = mod.activation_post_process
         mod = mod[0]
         weight_post_process = mod.qconfig.weight()  # type: ignore[union-attr,operator]
         weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[union-attr,operator]
-        assert dtype == torch.qint8, "Weight observer must have dtype torch.qint8"
+        if dtype != torch.qint8:
+            raise AssertionError(
+                f"Weight observer must have dtype torch.qint8, got {dtype}"
+            )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qlinear_tanh = cls(mod.in_features, mod.out_features, dtype=dtype)
         qlinear_tanh.set_weight_bias(qweight, mod.bias)  # type: ignore[arg-type]

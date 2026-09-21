@@ -20,27 +20,22 @@ checks and proper tracking of distributed state and operations across processes.
 
 import functools
 import inspect
-from collections.abc import Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
 
-from .. import compiled_autograd, variables
+from .. import compiled_autograd
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
-from ..utils import istype
-from .base import VariableTracker
-from .constant import ConstantVariable, EnumVariable
+from .base import GetSet, Method, readonly_setter, VariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 class DistributedVariable(VariableTracker):
@@ -74,6 +69,14 @@ class DistributedVariable(VariableTracker):
     def is_available() -> bool:
         # check if the distributed package is available or not
         return torch.distributed.is_available()
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        return hash(self.value), False
+
+    def tp_richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
 
 def is_from_local(value: object) -> bool:
@@ -122,262 +125,35 @@ class WorldMetaClassVariable(DistributedVariable):
 
         return type(value) is _WorldMeta
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "WORLD":
-            assert self.source
-            source = AttrSource(base=self.source, member="WORLD")
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return ProcessGroupVariable(self.value.WORLD)
-        elif name == "NON_GROUP_MEMBER":
-            assert self.source
-            source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return EnumVariable(self.value.NON_GROUP_MEMBER)
-        return super().var_getattr(tx, name)
+    def python_type(self) -> type:
+        return type(self.value)
 
-
-class PlacementClassVariable(DistributedVariable):
-    @staticmethod
-    def is_placement_type(value: object) -> bool:
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if not DistributedVariable.is_available():
-            return False
-
-        from torch.distributed.tensor.placement_types import Placement
-
-        return isinstance(value, type) and issubclass(value, Placement)
-
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if self.source:
-            # NOTE: we don't need to track mutations to the placement class as they
-            # are supposed to be immutable.
-            new_obj = self.value.__new__(self.value)
-            var = PlacementVariable(new_obj)
-            if inspect.getattr_static(self.value, "__init__", None):
-                var.call_method(tx, "__init__", args, kwargs)
-                return var
-
-        return super().call_function(tx, args, kwargs)
-
-
-class PlacementVariable(DistributedVariable):
-    @staticmethod
-    def is_placement(value: object) -> bool:
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if not DistributedVariable.is_available():
-            return False
-        from torch.distributed.tensor.placement_types import Placement
-
-        return isinstance(value, Placement)
-
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "dim":
-            return ConstantVariable.create(self.value.dim)
-        return super().var_getattr(tx, name)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from . import ConstantVariable
-
-        # Placement types dynamo tracking only allows following methods
-        # and __setattr__  is for case like `Shard(dim)` and methods.
-        # Methods in the list must satisfy:
-        #    1. Input arguments are constants and do not need to be guarded on;
-        #    2. Output is constant with respect to their inputs
-        constant_fold_functions = [
-            "__init__",
-            "__setattr__",
-            "is_shard",
-            "is_partial",
-            "is_replicate",
-        ]
-
-        if name in constant_fold_functions:
-            try:
-                value_type = type(self.value)
-                if inspect.getattr_static(value_type, "__getattr__", None) is not None:
-                    unimplemented(
-                        gb_type="Placement with custom __getattr__ not supported",
-                        context=f"{value_type.__name__} with custom __getattr__",
-                        explanation="Dynamo does not support Placement types with custom __getattr__ methods",
-                        hints=[
-                            "Use Placement types without custom __getattr__ methods",
-                            "Move the Placement usage outside the compiled region",
-                        ],
-                    )
-                method = inspect.getattr_static(value_type, name)
-            except AttributeError:
-                method = None
-            if method is object.__init__:
-                return ConstantVariable.create(None)
-
-            args = [x.as_python_constant() for x in args]
-            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            assert method is not None
-            if name == "__setattr__":
-                method(self.value, *args, **kwargs)
-                return self
-            constant_val = method(self.value, *args, **kwargs)
-            return ConstantVariable.create(constant_val)
-
-        return super().call_method(tx, name, args, kwargs)  # type: ignore[arg-type]
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        # Reconstruct the Placement object by calling its constructor
-        # e.g., Shard(0), Replicate(), Partial()
-        from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
-
-        placement_type = type(self.value)
-
-        # Load the placement class
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                "torch.distributed.tensor.placement_types", placement_type.__name__
+    # dynamo-internal getset (not real CPython descriptors): _WorldMeta
+    # exposes the WORLD and NON_GROUP_MEMBER process-group sentinels.
+    def _world_getset(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if not self.source:
+            raise AssertionError(
+                "WorldMetaClassVariable requires a source for WORLD attribute"
             )
-        )
+        source = AttrSource(base=self.source, member="WORLD")
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return VariableTracker.build(tx, self.value.WORLD, source)
 
-        # For Shard, we need to pass the dim argument
-        if isinstance(self.value, Shard):
-            codegen(ConstantVariable.create(self.value.dim))
-            codegen.extend_output(create_call_function(1, False))
-        # Replicate and Partial have no required args
-        elif istype(self.value, (Replicate, Partial)):
-            codegen.extend_output(create_call_function(0, False))
-        else:
-            super().reconstruct(codegen)
-
-
-class DeviceMeshVariable(DistributedVariable):
-    @staticmethod
-    def is_device_mesh(value: object) -> bool:
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if not DistributedVariable.is_available():
-            return False
-
-        from torch.distributed.device_mesh import DeviceMesh
-
-        return istype(value, DeviceMesh)
-
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "ndim":
-            return ConstantVariable.create(self.value.ndim)
-        if name == "device_type":
-            return ConstantVariable.create(self.value.device_type)
-        if name == "mesh_dim_names":
-            source = self.source
-            if source:
-                source = AttrSource(base=source, member="mesh_dim_names")
-            return VariableTracker.build(tx, self.value.mesh_dim_names, source)
-        return super().var_getattr(tx, name)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+    def _non_group_member_getset(
+        self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker:
-        if name == "size":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
-        if name == "get_coordinate":
-            return ConstantVariable.create(self.value.get_coordinate())
-        if name == "get_rank":
-            return ConstantVariable.create(self.value.get_rank())
-        if name == "get_local_rank":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value.get_local_rank(*const_args, **const_kwargs)
+        if not self.source:
+            raise AssertionError(
+                "WorldMetaClassVariable requires a source for NON_GROUP_MEMBER attribute"
             )
-        if name == "get_group":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ProcessGroupVariable(
-                self.value.get_group(*const_args, **const_kwargs)
-            )
-        if name == "_get_or_create_default_group":
-            return ProcessGroupVariable(self.value._get_or_create_default_group())
-        return super().call_method(tx, name, args, kwargs)
+        source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)
 
-
-class ProcessGroupVariable(DistributedVariable):
-    """
-    We don't want a ProcessGroup object to end up in our output graph.
-
-    But it's common for dynamo to intercept a PG that is then used to get info like
-    rank() or world_size(), as well as passed to utility functions in distributed_c10d
-    which desugar it into plain types like a ranklist and tag.
-
-    For convenience and proper guarding, we construct a variable type.
-
-    TODO: make it possible to use ProcessGroupVariable as input to simple functions
-          like _expand_group without dynamo complaining about making a proxy for it.
-          It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
-          torch library functions are dealing with tensor-like types and would have proxies
-          for their args.
-    TODO: should we make this inherit VT instead of UDOV? Do we want any of the default behaviors
-          or just graph-break whenever one of our special cases is not hit?
-    """
-
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "rank":
-            return variables.ConstantVariable.create(self.value.rank())
-        if name == "size":
-            return variables.ConstantVariable.create(self.value.size())
-        if name == "_get_backend_name":
-            return variables.ConstantVariable.create(self.value._get_backend_name())
-
-        return super().call_method(tx, name, args, kwargs)
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "group_name":
-            return variables.ConstantVariable.create(self.value.group_name)
-        if name in ["rank", "size"]:
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            )
-        # TODO should this just raise unimplemented?
-        return super().var_getattr(tx, name)
-
-    @staticmethod
-    def is_process_group(value: object) -> bool:
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if not DistributedVariable.is_available():
-            return False
-        from torch._C._distributed_c10d import ProcessGroup
-        from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
-
-        return istype(value, (ProcessGroup, FakeProcessGroup))
+    tp_getset = {
+        "WORLD": GetSet(_world_getset, readonly_setter),
+        "NON_GROUP_MEMBER": GetSet(_non_group_member_getset, readonly_setter),
+    }
 
 
 class BackwardHookVariable(VariableTracker):
@@ -388,7 +164,7 @@ class BackwardHookVariable(VariableTracker):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         module: VariableTracker,
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
@@ -463,19 +239,35 @@ class BackwardHookVariable(VariableTracker):
     def as_proxy(self) -> torch.fx.Proxy:
         return self.proxy
 
-    def call_method(
+    def python_type(self) -> type:
+        return torch.utils.hooks.BackwardHook
+
+    def setup_input_hook(
         self,
-        tx: "InstructionTranslator",
-        name: str,
+        tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name in ("setup_input_hook", "setup_output_hook"):
-            return self._setup_hook(tx, name, *args, **kwargs)
-        return super().call_method(tx, name, args, kwargs)
+        return self._setup_hook(tx, "setup_input_hook", *args, **kwargs)
+
+    def setup_output_hook(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._setup_hook(tx, "setup_output_hook", *args, **kwargs)
+
+    tp_methods = {
+        "setup_input_hook": Method(setup_input_hook),
+        "setup_output_hook": Method(setup_output_hook),
+    }
 
     def _setup_hook(
-        self, tx: "InstructionTranslator", hook_method_name: str, args: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        hook_method_name: str,
+        args: VariableTracker,
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 

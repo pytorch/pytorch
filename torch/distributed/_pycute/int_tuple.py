@@ -36,14 +36,14 @@ Functions for manipulating IntTuples
 
 from functools import reduce
 from itertools import chain
-from typing import Optional, TypeAlias, Union
+from typing import TypeAlias
 from typing_extensions import TypeIs
 
 from .typing import Integer
 
 
 # Type aliases for better readability
-IntTuple: TypeAlias = Union[int, tuple["IntTuple", ...]]
+IntTuple: TypeAlias = int | tuple["IntTuple", ...]
 
 
 def is_int(x: object) -> TypeIs[int]:
@@ -91,10 +91,12 @@ def product(a: IntTuple) -> int:
 
 def inner_product(a: IntTuple, b: IntTuple) -> int:
     if is_tuple(a) and is_tuple(b):  # tuple tuple
-        assert len(a) == len(b)
+        if len(a) != len(b):
+            raise AssertionError
         return sum(inner_product(x, y) for x, y in zip(a, b))
     else:  # "int" "int"
-        assert not is_tuple(a) and not is_tuple(b)
+        if is_tuple(a) or is_tuple(b):
+            raise AssertionError
         return a * b
 
 
@@ -108,7 +110,8 @@ def tuple_max(a: IntTuple) -> int:
 def elem_scale(a: IntTuple, b: IntTuple) -> IntTuple:
     if is_tuple(a):
         if is_tuple(b):  # tuple tuple
-            assert len(a) == len(b)
+            if len(a) != len(b):
+                raise AssertionError
             return tuple(elem_scale(x, y) for x, y in zip(a, b))
         else:  # tuple "int"
             raise AssertionError("Invalid combination: tuple with int")
@@ -123,7 +126,8 @@ def elem_scale(a: IntTuple, b: IntTuple) -> IntTuple:
 def shape_div(a: IntTuple, b: IntTuple) -> IntTuple:
     if is_tuple(a):
         if is_tuple(b):  # tuple tuple
-            assert len(a) == len(b)
+            if len(a) != len(b):
+                raise AssertionError
             return tuple(shape_div(x, y) for x, y in zip(a, b))
         else:  # tuple "int"
             # r = [shape_div(a[0],b)] + [shape_div(a[i],b := shape_div(b, product(a[i-1]))) for i in range(1,len(a))]
@@ -136,7 +140,8 @@ def shape_div(a: IntTuple, b: IntTuple) -> IntTuple:
         if is_tuple(b):  # "int" tuple
             return shape_div(a, product(b))
         else:  # "int" "int"
-            assert a % b == 0 or b % a == 0
+            if not (a % b == 0 or b % a == 0):
+                raise AssertionError
             return (a + b - 1) // b
 
 
@@ -145,7 +150,8 @@ def suffix_product(a: IntTuple, init: IntTuple = 1) -> IntTuple:
     # TODO: With all these length asserts, may want to create a zip_strict wrapper.
     if is_tuple(a):
         if is_tuple(init):  # tuple tuple
-            assert len(a) == len(init)
+            if len(a) != len(init):
+                raise AssertionError
             return tuple(suffix_product(x, i) for x, i in zip(a, init))
         else:  # tuple "int"
             # Process from right to left for lexicographic ordering
@@ -168,36 +174,38 @@ def suffix_product(a: IntTuple, init: IntTuple = 1) -> IntTuple:
             return init
 
 
-def idx2crd(
-    idx: IntTuple, shape: IntTuple, stride: Optional[IntTuple] = None
-) -> IntTuple:
+def idx2crd(idx: IntTuple, shape: IntTuple, stride: IntTuple | None = None) -> IntTuple:
     if stride is None:
         stride = suffix_product(shape)
 
     if is_tuple(idx):
         if is_tuple(shape) and is_tuple(stride):  # tuple tuple tuple
-            assert len(idx) == len(shape) and len(stride) == len(shape)
+            if not (len(idx) == len(shape) and len(stride) == len(shape)):
+                raise AssertionError
             return tuple(idx2crd(i, s, d) for i, s, d in zip(idx, shape, stride))
         else:  # tuple "int" "int"
             raise AssertionError("Invalid combination: tuple with int stride")
     else:
         if is_tuple(shape) and is_tuple(stride):  # "int" tuple tuple
-            assert len(shape) == len(stride)
+            if len(shape) != len(stride):
+                raise AssertionError
             return tuple(idx2crd(idx, s, d) for s, d in zip(shape, stride))
         else:  # "int" "int" "int"
-            assert not is_tuple(shape) and not is_tuple(stride)
+            if is_tuple(shape) or is_tuple(stride):
+                raise AssertionError
             return (idx // stride) % shape  # all are ints after type checks
 
 
 def crd2idx(
-    crd: Optional[IntTuple], shape: IntTuple, stride: Optional[IntTuple] = None
+    crd: IntTuple | None, shape: IntTuple, stride: IntTuple | None = None
 ) -> int:
     if stride is None:
         stride = suffix_product(shape)
 
     if is_tuple(crd):
         if is_tuple(shape) and is_tuple(stride):  # tuple tuple tuple
-            assert len(crd) == len(shape) and len(stride) == len(shape)
+            if not (len(crd) == len(shape) and len(stride) == len(shape)):
+                raise AssertionError
             return sum(crd2idx(c, s, d) for c, s, d in zip(crd, shape, stride))
         else:  # tuple "int" "int"
             raise AssertionError(f"Invalid combination: crd={crd}, shape={shape}")
@@ -206,7 +214,8 @@ def crd2idx(
             crd = 0
 
         if is_tuple(shape) and is_tuple(stride):  # "int" tuple tuple
-            assert len(shape) == len(stride)
+            if len(shape) != len(stride):
+                raise AssertionError
             result = 0
             # Process from right to left for lexicographic ordering
             for i in range(len(shape) - 1, 0, -1):
@@ -216,35 +225,40 @@ def crd2idx(
                 result += crd2idx(crd, shape[0], stride[0])
             return result
         else:  # "int" "int" "int"
-            assert not is_tuple(shape) and not is_tuple(stride)
+            if is_tuple(shape) or is_tuple(stride):
+                raise AssertionError
             return crd * stride  # all are ints after type checks
 
 
 # Transform crd into the dst_shape's iteration space
 def crd2crd(
-    crd: IntTuple, dst_shape: IntTuple, src_shape: Optional[IntTuple] = None
+    crd: IntTuple, dst_shape: IntTuple, src_shape: IntTuple | None = None
 ) -> IntTuple:
     if is_tuple(crd):
         if is_tuple(dst_shape):  # tuple tuple
-            assert len(crd) == len(dst_shape)
+            if len(crd) != len(dst_shape):
+                raise AssertionError
             return tuple(crd2crd(x, y) for x, y in zip(crd, dst_shape))
         else:  # tuple "int"
             # Ambiguous unless we have src_shape
-            assert src_shape is not None
+            if src_shape is None:
+                raise AssertionError
             return crd2idx(crd, src_shape)
     else:
         if is_tuple(dst_shape):  # "int" tuple
             return idx2crd(crd, dst_shape)
         else:  # "int" "int"
-            assert crd < dst_shape
+            if crd >= dst_shape:
+                raise AssertionError
             return crd
 
 
 # Filter trg according to crd: keep only elements of trg that are paired with None
-def slice_(crd: Union[None, tuple, int], trg: Union[tuple, int]) -> Union[tuple, int]:
+def slice_(crd: tuple | int | None, trg: tuple | int) -> tuple | int:
     if is_tuple(crd):
         if is_tuple(trg):  # tuple tuple
-            assert len(crd) == len(trg)
+            if len(crd) != len(trg):
+                raise AssertionError
             # match C++ behavior of `filter_tuple` using `tuple_cat(...)`
             return tuple(
                 chain(
@@ -264,7 +278,7 @@ def slice_(crd: Union[None, tuple, int], trg: Union[tuple, int]) -> Union[tuple,
 
 
 # Determine if None appears at any of an int_tuples' terminals
-def has_none(a: Union[None, tuple, int]) -> bool:
+def has_none(a: tuple | int | None) -> bool:
     if is_tuple(a):
         return any(has_none(v) for v in a)
     else:

@@ -23,16 +23,14 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
 
 
-class TestStateDictUtils(DTensorTestBase):
-    @property
-    def world_size(self):
-        return min(4, torch.cuda.device_count())
+class TestStateDictUtils(DTensorContinuousTestBase):
+    world_size = min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -45,11 +43,11 @@ class TestStateDictUtils(DTensorTestBase):
         state_dict = {"dtensor": dist_tensor}
 
         gathered_state_dict = _gather_state_dict(state_dict)
-        expected_gathered_dtensor = funcol.all_gather_tensor(
+        expected_gathered_dtensor = funcol.all_gather_single(
             dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
         self.assertEqual(expected_gathered_dtensor, gathered_state_dict["dtensor"])
-        self.assertTrue(gathered_state_dict["dtensor"].is_cuda)
+        self.assertEqual(gathered_state_dict["dtensor"].device.type, self.device_type)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -64,19 +62,21 @@ class TestStateDictUtils(DTensorTestBase):
         gathered_state_dict = _gather_state_dict(
             state_dict, cpu_offload=True, ranks_only=(0, 2)
         )
-        expected_gathered_dtensor = funcol.all_gather_tensor(
+        expected_gathered_dtensor = funcol.all_gather_single(
             dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
         if dist.get_rank() in (0, 2):
             self.assertEqual(expected_gathered_dtensor, gathered_state_dict["dtensor"])
-            self.assertFalse(gathered_state_dict["dtensor"].is_cuda)
+            self.assertNotEqual(
+                gathered_state_dict["dtensor"].device.type, self.device_type
+            )
         else:
             self.assertEqual(gathered_state_dict, {})
 
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_cpu_and_ranks_only(self):
-        device = torch.device("cuda")
+        device = torch.device(self.device_type)
         state_dict = {
             "tensor1": torch.arange(10, device=device),
             "tensor2": torch.ones(10, device=device),
@@ -85,7 +85,7 @@ class TestStateDictUtils(DTensorTestBase):
         cpu_state_dict = _offload_state_dict_to_cpu(state_dict, ranks_only=(0, 2))
         if dist.get_rank() in (0, 2):
             for v in cpu_state_dict.values():
-                self.assertFalse(v.is_cuda)
+                self.assertNotEqual(v.device.type, self.device_type)
             self.assertEqual(cpu_state_dict["tensor1"], torch.arange(10))
             self.assertEqual(cpu_state_dict["tensor2"], torch.ones(10))
         else:
@@ -100,7 +100,7 @@ class TestStateDictUtils(DTensorTestBase):
             torch.random.manual_seed(dist.get_rank())
             local_tensor = torch.randn(3, 3, 3)
             dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
-            tensor = funcol.all_gather_tensor(
+            tensor = funcol.all_gather_single(
                 dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
             return tensor, dist_tensor
@@ -109,27 +109,27 @@ class TestStateDictUtils(DTensorTestBase):
         for _ in range(10):
             tensor, dtensor = create_dtensor()
             ltensor.append(tensor)
-            ltensor.append(torch.ones(10, device=torch.device("cuda")))
+            ltensor.append(torch.ones(10, device=torch.device(self.device_type)))
             ldtensor.append(dtensor)
-            ldtensor.append(torch.ones(10, device=torch.device("cuda")))
+            ldtensor.append(torch.ones(10, device=torch.device(self.device_type)))
 
         tensor, dtensor = create_dtensor()
         dist_state_dict = {
             "local": dtensor,
             "list": ldtensor,
-            "arange": torch.arange(10, device=torch.device("cuda")),
+            "arange": torch.arange(10, device=torch.device(self.device_type)),
         }
         state_dict = {
             "local": tensor,
             "list": ltensor,
-            "arange": torch.arange(10, device=torch.device("cuda")),
+            "arange": torch.arange(10, device=torch.device(self.device_type)),
         }
         self.assertEqual(state_dict, _gather_state_dict(dist_state_dict))
 
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_create_cpu_state_dict(self):
-        device = torch.device("cuda")
+        device = torch.device(self.device_type)
         rank = dist.get_rank()
         # Scale tensors based on world size
         # to fit in the tensor shards accurately.
@@ -149,7 +149,7 @@ class TestStateDictUtils(DTensorTestBase):
                         metadata=ShardMetadata(
                             shard_offsets=[5 * rank, 0],
                             shard_sizes=[5, 10],
-                            placement=f"rank:{rank}/cuda:{rank}",
+                            placement=f"rank:{rank}/{self.device_type}:{rank}",
                         ),
                     )
                 ],
@@ -159,7 +159,7 @@ class TestStateDictUtils(DTensorTestBase):
                 torch.arange(50 * scale_factor, device=device).reshape(
                     5 * scale_factor, 10
                 ),
-                init_device_mesh("cuda", mesh_shape=(self.world_size,)),
+                init_device_mesh(self.device_type, mesh_shape=(self.world_size,)),
                 [Shard(0)],
             ),
             "non_tensor_bytes_io": copy.deepcopy(buffer),
@@ -245,7 +245,7 @@ class TestStateDictUtils(DTensorTestBase):
         even_tensor = torch.randn(self.world_size, 2)
         uneven_tensor = torch.randn(1, 2)
 
-        mesh = init_device_mesh("cuda", mesh_shape=(self.world_size,))
+        mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
         even_dtensor = distribute_tensor(
             torch.randn(self.world_size, 2), mesh, [Shard(0)]
         )
@@ -273,10 +273,10 @@ class TestStateDictUtils(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_cpu_offload_for_dtensor(self):
-        device_mesh = init_device_mesh("cuda", mesh_shape=(self.world_size,))
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
         sd = {
             "k": DTensor.from_local(
-                torch.ones(8, 8, device="cuda"), device_mesh, [Shard(0)]
+                torch.ones(8, 8, device=self.device_type), device_mesh, [Shard(0)]
             )
         }
         cpu_sd = _create_cpu_state_dict(sd)
@@ -290,12 +290,12 @@ class TestStateDictUtils(DTensorTestBase):
 
         self.assertFalse(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
         _copy_state_dict(sd, cpu_sd, non_blocking=True)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         self.assertTrue(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
         sd["k"] += 1
         self.assertFalse(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
         _copy_state_dict(sd, cpu_sd, non_blocking=True)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         self.assertTrue(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
 
 

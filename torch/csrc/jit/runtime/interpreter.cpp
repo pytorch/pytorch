@@ -1,17 +1,10 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 
-#include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
-#include <c10/core/thread_pool.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -40,7 +33,6 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
-#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -70,7 +62,7 @@ using CodeImpl = interpreter::CodeImpl;
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
 // In particular we:
-// *  Computes whether a input to a node is the last use, so we can issue MOVE
+// *  Computes whether an input to a node is the last use, so we can issue MOVE
 //    rather than LOAD instructions.
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
@@ -213,7 +205,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     out << "Stack:\n";
     for (const auto& val : stack) {
       out << val;
-      out << "\n";
+      out << '\n';
     }
   }
 
@@ -779,9 +771,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
-                Stack(stack.end() - inst.N, stack.end()),
+                pop(stack, static_cast<size_t>(inst.N)),
                 getDistAutogradContextId());
-            drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
           }
@@ -801,7 +792,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
               out_type = TupleType::create(out_types);
             }
-            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
+            auto args = pop(stack, static_cast<size_t>(inst.N));
             auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
             aw->setArgs(std::move(args));
             aw->setFn(
@@ -822,7 +813,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   }
                   return c10::ivalue::Tuple::create(jit::last(s, n_out));
                 });
-            drop(stack, inst.N);
             push(stack, std::move(aw));
           }
             INST_NEXT;
@@ -929,7 +919,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         python_class_name ? *python_class_name : "RuntimeError";
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
-    ss << class_name << ": " << msg << "\n";
+    ss << class_name << ": " << msg << '\n';
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
@@ -942,9 +932,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           not_implemented_error->caller());
     } else {
       if (get_cpp_stacktraces_enabled()) {
-        ss << e.what() << "\n";
+        ss << e.what() << '\n';
       }
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error(std::move(ss).str());
     }
   }
 
@@ -975,7 +965,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // interpreter. But this way we hold onto graph/node and Function and
   // we can create module hierarchy string for each event in autograd
   // profiler at the end, when consolidating events.
-  // At the moment overhead does not seem exhorbitantly large.
+  // At the moment overhead does not seem exorbitantly large.
   // Another option would be return vector of (string, InlinedCallstackPtrs)
   // string would contain function name and typename of self
   // Format of the returned vector of strings:
@@ -1143,7 +1133,7 @@ std::vector<std::string> currentModuleHierarchy() {
 }
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
-  out << *code.pImpl->graph_ << "\n";
+  out << *code.pImpl->graph_ << '\n';
   code.pImpl->dump(out);
   return out;
 }

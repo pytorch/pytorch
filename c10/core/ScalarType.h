@@ -21,31 +21,19 @@
 #include <cstddef>
 #include <limits>
 #include <ostream>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 
 #include <torch/headeronly/core/ScalarType.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 
 namespace c10 {
 
 // See [dtype Macros note] in torch/headeronly/core/ScalarType.h
 // regarding macros.
-
-template <typename T>
-struct CppTypeToScalarType;
-
-#define SPECIALIZE_CppTypeToScalarType(cpp_type, scalar_type)                  \
-  template <>                                                                  \
-  struct CppTypeToScalarType<cpp_type>                                         \
-      : std::                                                                  \
-            integral_constant<c10::ScalarType, c10::ScalarType::scalar_type> { \
-  };
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
-
-#undef SPECIALIZE_CppTypeToScalarType
 
 #define DEFINE_CONSTANT(_, name) \
   constexpr ScalarType k##name = ScalarType::name;
@@ -67,6 +55,31 @@ inline size_t elementSize(ScalarType t) {
 #undef CASE_ELEMENTSIZE_CASE
 }
 
+inline ScalarType opaqueScalarType(ScalarType t) {
+  auto esize = elementSize(t);
+  ScalarType result;
+  switch (esize) {
+    case 1:
+      result = kByte;
+      break;
+    case 2:
+      result = kUInt16;
+      break;
+    case 4:
+      result = kUInt32;
+      break;
+    case 8:
+      result = kUInt64;
+      break;
+    case 16:
+      result = kComplexDouble;
+      break;
+    default:
+      TORCH_CHECK(false, "Unknown ScalarType");
+  }
+  return result;
+}
+
 inline bool isIntegralType(ScalarType t, bool includeBool) {
   bool isIntegral =
       (t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
@@ -75,12 +88,6 @@ inline bool isIntegralType(ScalarType t, bool includeBool) {
        t == ScalarType::UInt64);
 
   return isIntegral || (includeBool && t == ScalarType::Bool);
-}
-
-[[deprecated(
-    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")]] inline bool
-isIntegralType(ScalarType t) {
-  return isIntegralType(t, /*includeBool=*/false);
 }
 
 inline bool isFloat8Type(ScalarType t) {
@@ -102,14 +109,7 @@ inline bool isFloatingType(ScalarType t) {
 inline bool isComplexType(ScalarType t) {
   return (
       t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
-      t == ScalarType::ComplexDouble);
-}
-
-inline bool isQIntType(ScalarType t) {
-  // Don't forget to extend this when adding new QInt types
-  return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
-      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
-      t == ScalarType::QUInt2x4;
+      t == ScalarType::ComplexDouble || t == ScalarType::BComplex32);
 }
 
 inline bool isBitsType(ScalarType t) {
@@ -118,7 +118,7 @@ inline bool isBitsType(ScalarType t) {
       t == ScalarType::Bits16;
 }
 
-inline bool isBarebonesUnsignedType(ScalarType t) {
+constexpr bool isBarebonesUnsignedType(ScalarType t) {
   return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
       t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
       t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
@@ -182,6 +182,7 @@ inline bool isSignedType(ScalarType t) {
       CASE_ISSIGNED(ComplexHalf);
       CASE_ISSIGNED(ComplexFloat);
       CASE_ISSIGNED(ComplexDouble);
+      CASE_ISSIGNED(BComplex32);
       CASE_ISSIGNED(Bool);
     case ScalarType::Int1:
     case ScalarType::Int2:
@@ -205,6 +206,12 @@ inline bool isSignedType(ScalarType t) {
       break;
       // Do not add default here, but rather define behavior of every new entry
       // here.  `-Wswitch-enum` would raise a warning in those cases.
+      // TODO: get PyTorch to adopt exhaustive switches by default with a way to
+      // opt specific switches to being non-exhaustive.
+      // Exhaustive:
+      // `-Wswitch-enum`, `-Wswitch-default`, `-Wno-covered-switch-default`
+      // Non-Exhaustive:
+      // `-Wno-switch-enum`, `-Wswitch-default`, `-Wcovered-switch-default`
   }
   TORCH_CHECK(false, "Unknown ScalarType ", t);
 #undef CASE_ISSIGNED
@@ -218,6 +225,8 @@ inline ScalarType toRealValueType(ScalarType t) {
   switch (t) {
     case ScalarType::ComplexHalf:
       return ScalarType::Half;
+    case ScalarType::BComplex32:
+      return ScalarType::BFloat16;
     case ScalarType::ComplexFloat:
       return ScalarType::Float;
     case ScalarType::ComplexDouble:
@@ -230,9 +239,7 @@ inline ScalarType toRealValueType(ScalarType t) {
 inline ScalarType toComplexType(ScalarType t) {
   switch (t) {
     case ScalarType::BFloat16:
-      // BFloat16 has range equivalent to Float,
-      // so we map it to ComplexFloat.
-      return ScalarType::ComplexFloat;
+      return ScalarType::BComplex32;
     case ScalarType::Half:
       return ScalarType::ComplexHalf;
     case ScalarType::Float:
@@ -241,6 +248,8 @@ inline ScalarType toComplexType(ScalarType t) {
       return ScalarType::ComplexDouble;
     case ScalarType::ComplexHalf:
       return ScalarType::ComplexHalf;
+    case ScalarType::BComplex32:
+      return ScalarType::BComplex32;
     case ScalarType::ComplexFloat:
       return ScalarType::ComplexFloat;
     case ScalarType::ComplexDouble:
@@ -283,12 +292,15 @@ C10_API ScalarType promoteTypes(ScalarType a, ScalarType b);
 
 // Returns a pair of strings representing the names for each dtype.
 // The returned pair is (name, legacy_name_if_applicable)
-C10_API std::pair<std::string, std::string> getDtypeNames(
+C10_API std::pair<std::string_view, std::string_view> getDtypeNames(
     c10::ScalarType scalarType);
+
+C10_API std::string_view getScalarTypeAbbr(ScalarType scalarType);
 
 // Returns a map of string name to dtype.
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();
 
 } // namespace c10
 
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()

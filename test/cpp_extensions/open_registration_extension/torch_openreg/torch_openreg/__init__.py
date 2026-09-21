@@ -10,12 +10,28 @@ if sys.platform == "win32":
     del _load_dll_libraries
 
 import torch_openreg._C  # type: ignore[misc]
+import torch_openreg.compiler
 import torch_openreg.openreg
 
 
 torch.utils.rename_privateuse1_backend("openreg")
 torch._register_device_module("openreg", torch_openreg.openreg)
 torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
+
+# LITERALINCLUDE START: OCCL BACKEND REGISTRATION
+if torch.distributed.is_available():
+    try:
+        from torch_openreg._C import ProcessGroupOCCL
+
+        def _create_occl_backend(store, rank, size, timeout):
+            return ProcessGroupOCCL(store, rank, size, timeout)
+
+        torch.distributed.Backend.register_backend(
+            "occl", _create_occl_backend, devices=["openreg"]
+        )
+    except Exception as e:
+        raise RuntimeError("Failed to register 'occl' process group backend.") from e
+# LITERALINCLUDE END: OCCL BACKEND REGISTRATION
 
 
 # LITERALINCLUDE START: AUTOLOAD

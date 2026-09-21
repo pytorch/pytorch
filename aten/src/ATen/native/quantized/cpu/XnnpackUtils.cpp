@@ -39,7 +39,7 @@ void q8_copy_int8_weight_and_add_offset(const at::Tensor& in, at::Tensor& out) {
       " but got ",
       toString(in.scalar_type()))
   const int8_t* in_ptr =
-      reinterpret_cast<const int8_t*>(in.data_ptr<c10::qint8>());
+      reinterpret_cast<const int8_t*>(in.const_data_ptr<c10::qint8>());
   T* out_ptr = reinterpret_cast<T*>(out.data_ptr<PT>());
 
   for (const auto i : c10::irange(in.numel())) {

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
 
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -11,6 +11,7 @@ from .optimizer import (
     _device_dtype_check_for_fused,
     _differentiable_doc,
     _foreach_doc,
+    _functional_api_doc,
     _fused_doc,
     _maximize_doc,
     _params_doc,
@@ -25,21 +26,21 @@ from .optimizer import (
 __all__ = ["SGD", "sgd"]
 
 
-class SGD(Optimizer):  # noqa: D101
+class SGD(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
+        lr: float | Tensor = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
-        weight_decay: Union[float, Tensor] = 0,
+        weight_decay: float | Tensor = 0,
         nesterov: bool = False,
         *,
         maximize: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         differentiable: bool = False,
-        fused: Optional[bool] = None,
-    ) -> None:  # noqa: D107
+        fused: bool | None = None,
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if lr < 0.0:
@@ -72,7 +73,7 @@ class SGD(Optimizer):  # noqa: D101
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
-    def __setstate__(self, state):  # noqa: D105
+    def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("nesterov", False)
@@ -118,7 +119,7 @@ class SGD(Optimizer):  # noqa: D101
         for group in self.param_groups:
             params: list[Tensor] = []
             grads: list[Tensor] = []
-            momentum_buffer_list: list[Optional[Tensor]] = []
+            momentum_buffer_list: list[Tensor | None] = []
 
             has_sparse_grad = self._init_group(
                 group, params, grads, momentum_buffer_list
@@ -252,26 +253,22 @@ SGD.__doc__ = (
 def sgd(
     params: list[Tensor],
     d_p_list: list[Tensor],
-    momentum_buffer_list: list[Optional[Tensor]],
+    momentum_buffer_list: list[Tensor | None],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     has_sparse_grad: bool = False,
-    foreach: Optional[bool] = None,
-    fused: Optional[bool] = None,
-    grad_scale: Optional[Tensor] = None,
-    found_inf: Optional[Tensor] = None,
+    foreach: bool | None = None,
+    fused: bool | None = None,
+    grad_scale: Tensor | None = None,
+    found_inf: Tensor | None = None,
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs SGD algorithm computation.
-
-    See :class:`~torch.optim.SGD` for details.
-    """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
@@ -319,16 +316,19 @@ def sgd(
     )
 
 
+sgd.__doc__ = _functional_api_doc.format(optimizer="SGD")
+
+
 def _single_tensor_sgd(
     params: list[Tensor],
     grads: list[Tensor],
-    momentum_buffer_list: list[Optional[Tensor]],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    momentum_buffer_list: list[Tensor | None],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -350,7 +350,6 @@ def _single_tensor_sgd(
                     # usually this is the differentiable path, which is why the param.clone() is needed
                     grad = grad.addcmul_(param.clone(), weight_decay)
                 else:
-                    # pyrefly: ignore [bad-argument-type]
                     grad = grad.add(param, alpha=weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)
@@ -383,13 +382,13 @@ def _single_tensor_sgd(
 def _multi_tensor_sgd(
     params: list[Tensor],
     grads: list[Tensor],
-    momentum_buffer_list: list[Optional[Tensor]],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    momentum_buffer_list: list[Tensor | None],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -470,23 +469,23 @@ def _multi_tensor_sgd(
                 grads_x_lr = torch._foreach_mul(device_grads, -lr)
                 torch._foreach_add_(device_params, grads_x_lr)
             else:
-                torch._foreach_add_(device_params, device_grads, alpha=-lr)
+                torch._foreach_add_(device_params, device_grads, alpha=-lr)  # type: ignore[arg-type]
         else:
             # foreach APIs don't support sparse
             for i in range(len(device_params)):
-                device_params[i].add_(device_grads[i], alpha=-lr)
+                device_params[i].add_(device_grads[i], alpha=-lr)  # type: ignore[arg-type]
 
 
 def _fused_sgd(
     params: list[Tensor],
     grads: list[Tensor],
-    momentum_buffer_list: list[Optional[Tensor]],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    momentum_buffer_list: list[Tensor | None],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,

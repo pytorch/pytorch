@@ -43,7 +43,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                int window_size_right,
                const float softcap,
                const bool return_softmax,
-               std::optional<at::Generator> gen_);
+               std::optional<at::Generator> gen_,
+               int num_splits = 0);
 
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>

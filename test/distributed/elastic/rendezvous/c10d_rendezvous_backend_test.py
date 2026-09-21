@@ -37,6 +37,7 @@ class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
         cls._store = TCPStore("localhost", 0, is_master=True)  # type: ignore[call-arg]
 
     def setUp(self) -> None:
+        super().setUp()
         # Make sure we have a clean slate.
         self._store.delete_key("torch.rendezvous.dummy_run_id")
 
@@ -50,6 +51,7 @@ class FileStoreBackendTest(TestCase, RendezvousBackendTestMixin):
     _store: ClassVar[FileStore]
 
     def setUp(self) -> None:
+        super().setUp()
         _, path = tempfile.mkstemp()
         self._path = path
 
@@ -68,6 +70,7 @@ class FileStoreBackendTest(TestCase, RendezvousBackendTestMixin):
 
 class CreateBackendTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         # For testing, the default parameters used are for tcp. If a test
         # uses parameters for file store, we set the self._params to
         # self._params_filestore.
@@ -150,8 +153,10 @@ class CreateBackendTest(TestCase):
                 )
 
     def test_create_backend_returns_backend_if_is_host_is_false(self) -> None:
-        TCPStore(  # type: ignore[call-arg]
-            self._expected_endpoint_host, self._expected_endpoint_port, is_master=True
+        store = TCPStore(  # type: ignore[call-arg] # noqa: F841
+            self._expected_endpoint_host,
+            self._expected_endpoint_port,
+            is_master=True,
         )
 
         self._params.config["is_host"] = "false"
@@ -268,6 +273,27 @@ class CreateBackendTest(TestCase):
             r"The file creation for C10d store has failed. See inner exception for details.",
         ):
             create_backend(self._params_filestore)
+
+    def test_create_backend_file_store_does_not_leak_fd(self) -> None:
+        # Set the endpoint to empty so it defaults to creating a temp file
+        self._params_filestore.endpoint = ""
+
+        def open_fd_count() -> int:
+            # The lowest free descriptor number approximates the open fd count.
+            fd = os.open(os.devnull, os.O_RDONLY)
+            os.close(fd)
+            return fd
+
+        baseline = open_fd_count()
+        paths = []
+        for _ in range(20):
+            _, store = create_backend(self._params_filestore)
+            paths.append(store.path)  # type: ignore[attr-defined]
+        growth = open_fd_count() - baseline
+        for path in paths:
+            os.remove(path)
+
+        self.assertLessEqual(growth, 2)
 
     @mock.patch(
         "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"

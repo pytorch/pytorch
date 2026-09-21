@@ -29,6 +29,11 @@ from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (
 from torch.fx.experimental.migrate_gradual_types.z3_types import D, tensor_type, z3_dyn
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.tensor_type import Dyn, TensorType
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 try:
@@ -48,7 +53,9 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
-class TorchDynamoUseCases(unittest.TestCase):
+class TorchDynamoUseCases(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dim(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: TensorType([1, 2])):
@@ -86,7 +93,9 @@ class TorchDynamoUseCases(unittest.TestCase):
         # print(s.model()[dim])
 
 
-class HFOperations(unittest.TestCase):
+class HFOperations(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_eq_dim(self):
         """
         test dimensions and equalities
@@ -274,9 +283,21 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
         attr_res = z3.Const(3, tensor_type)
-        assert s.model()[attr_res].arg(0).arg(1) == b.shape[0]
-        assert s.model()[attr_res].arg(1).arg(1) == b.shape[1]
-        assert s.model()[attr_res].arg(2).arg(1) == b.shape[2]
+        if s.model()[attr_res].arg(0).arg(1) != b.shape[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {b.shape[0]}, "
+                f"got {s.model()[attr_res].arg(0).arg(1)}"
+            )
+        if s.model()[attr_res].arg(1).arg(1) != b.shape[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {b.shape[1]}, "
+                f"got {s.model()[attr_res].arg(1).arg(1)}"
+            )
+        if s.model()[attr_res].arg(2).arg(1) != b.shape[2]:
+            raise AssertionError(
+                f"Expected arg(2).arg(1) == {b.shape[2]}, "
+                f"got {s.model()[attr_res].arg(2).arg(1)}"
+            )
 
     def test_expand(self):
         class BasicBlock(torch.nn.Module):
@@ -295,8 +316,16 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
         expand_res = z3.Const(4, tensor_type)
-        assert s.model()[expand_res].arg(0).arg(1) == b.shape[0]
-        assert s.model()[expand_res].arg(1).arg(1) == b.shape[1]
+        if s.model()[expand_res].arg(0).arg(1) != b.shape[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {b.shape[0]}, "
+                f"got {s.model()[expand_res].arg(0).arg(1)}"
+            )
+        if s.model()[expand_res].arg(1).arg(1) != b.shape[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {b.shape[1]}, "
+                f"got {s.model()[expand_res].arg(1).arg(1)}"
+            )
 
         # change the annotation on the input to Dyn.
         # the last dimension should still be 4
@@ -310,7 +339,11 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
 
-        assert s.model()[expand_res].arg(1).arg(1) == b.shape[1]
+        if s.model()[expand_res].arg(1).arg(1) != b.shape[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {b.shape[1]}, "
+                f"got {s.model()[expand_res].arg(1).arg(1)}"
+            )
 
     def test_getitem_tensor(self):
         class BasicBlock(torch.nn.Module):
@@ -330,10 +363,26 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
         get_item_res = z3.Const(2, tensor_type)
-        assert s.model()[get_item_res].arg(0).arg(1) == b.shape[0]
-        assert s.model()[get_item_res].arg(1).arg(1) == b.shape[1]
-        assert s.model()[get_item_res].arg(2).arg(1) == b.shape[2]
-        assert s.model()[get_item_res].arg(3).arg(1) == b.shape[3]
+        if s.model()[get_item_res].arg(0).arg(1) != b.shape[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {b.shape[0]}, "
+                f"got {s.model()[get_item_res].arg(0).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(1).arg(1) != b.shape[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {b.shape[1]}, "
+                f"got {s.model()[get_item_res].arg(1).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(2).arg(1) != b.shape[2]:
+            raise AssertionError(
+                f"Expected arg(2).arg(1) == {b.shape[2]}, "
+                f"got {s.model()[get_item_res].arg(2).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(3).arg(1) != b.shape[3]:
+            raise AssertionError(
+                f"Expected arg(3).arg(1) == {b.shape[3]}, "
+                f"got {s.model()[get_item_res].arg(3).arg(1)}"
+            )
 
         # change the annotation on the input to make sure it propagates
         # to the output
@@ -346,7 +395,11 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
         # dyn check
-        assert s.model()[get_item_res].arg(2).arg(0) == 0
+        if s.model()[get_item_res].arg(2).arg(0) != 0:
+            raise AssertionError(
+                f"Expected arg(2).arg(0) == 0, "
+                f"got {s.model()[get_item_res].arg(2).arg(0)}"
+            )
 
     def test_getitem_tensor2(self):
         class BasicBlock(torch.nn.Module):
@@ -363,10 +416,26 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
         get_item_res = z3.Const(2, tensor_type)
-        assert s.model()[get_item_res].arg(0).arg(1) == b.shape[0]
-        assert s.model()[get_item_res].arg(1).arg(1) == b.shape[1]
-        assert s.model()[get_item_res].arg(2).arg(1) == b.shape[2]
-        assert s.model()[get_item_res].arg(3).arg(1) == b.shape[3]
+        if s.model()[get_item_res].arg(0).arg(1) != b.shape[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {b.shape[0]}, "
+                f"got {s.model()[get_item_res].arg(0).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(1).arg(1) != b.shape[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {b.shape[1]}, "
+                f"got {s.model()[get_item_res].arg(1).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(2).arg(1) != b.shape[2]:
+            raise AssertionError(
+                f"Expected arg(2).arg(1) == {b.shape[2]}, "
+                f"got {s.model()[get_item_res].arg(2).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(3).arg(1) != b.shape[3]:
+            raise AssertionError(
+                f"Expected arg(3).arg(1) == {b.shape[3]}, "
+                f"got {s.model()[get_item_res].arg(3).arg(1)}"
+            )
 
     def test_getitem_tensor_3(self):
         class BasicBlock(torch.nn.Module):
@@ -384,10 +453,26 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
         get_item_res = z3.Const(2, tensor_type)
-        assert s.model()[get_item_res].arg(0).arg(1) == b.shape[0]
-        assert s.model()[get_item_res].arg(1).arg(1) == b.shape[1]
-        assert s.model()[get_item_res].arg(2).arg(1) == b.shape[2]
-        assert s.model()[get_item_res].arg(3).arg(1) == b.shape[3]
+        if s.model()[get_item_res].arg(0).arg(1) != b.shape[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {b.shape[0]}, "
+                f"got {s.model()[get_item_res].arg(0).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(1).arg(1) != b.shape[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {b.shape[1]}, "
+                f"got {s.model()[get_item_res].arg(1).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(2).arg(1) != b.shape[2]:
+            raise AssertionError(
+                f"Expected arg(2).arg(1) == {b.shape[2]}, "
+                f"got {s.model()[get_item_res].arg(2).arg(1)}"
+            )
+        if s.model()[get_item_res].arg(3).arg(1) != b.shape[3]:
+            raise AssertionError(
+                f"Expected arg(3).arg(1) == {b.shape[3]}, "
+                f"got {s.model()[get_item_res].arg(3).arg(1)}"
+            )
 
     def test_layer_norm(self):
         class BasicBlock(torch.nn.Module):
@@ -741,9 +826,21 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(s.check(), z3.sat)
         embedding_result = z3.Const(2, tensor_type)
 
-        assert s.model()[embedding_result].arg(0).arg(1) == B[0]
-        assert s.model()[embedding_result].arg(1).arg(1) == B[1]
-        assert s.model()[embedding_result].arg(2).arg(1) == B[2]
+        if s.model()[embedding_result].arg(0).arg(1) != B[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {B[0]}, "
+                f"got {s.model()[embedding_result].arg(0).arg(1)}"
+            )
+        if s.model()[embedding_result].arg(1).arg(1) != B[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {B[1]}, "
+                f"got {s.model()[embedding_result].arg(1).arg(1)}"
+            )
+        if s.model()[embedding_result].arg(2).arg(1) != B[2]:
+            raise AssertionError(
+                f"Expected arg(2).arg(1) == {B[2]}, "
+                f"got {s.model()[embedding_result].arg(2).arg(1)}"
+            )
 
         # change the type. This should still be satisfiable
         for n in traced.graph.nodes:
@@ -754,9 +851,21 @@ class HFOperations(unittest.TestCase):
         s = z3.Solver()
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
-        assert s.model()[embedding_result].arg(0).arg(0) == 0
-        assert s.model()[embedding_result].arg(1).arg(0) == 0
-        assert s.model()[embedding_result].arg(2).arg(1) == B[2]
+        if s.model()[embedding_result].arg(0).arg(0) != 0:
+            raise AssertionError(
+                f"Expected arg(0).arg(0) == 0, "
+                f"got {s.model()[embedding_result].arg(0).arg(0)}"
+            )
+        if s.model()[embedding_result].arg(1).arg(0) != 0:
+            raise AssertionError(
+                f"Expected arg(1).arg(0) == 0, "
+                f"got {s.model()[embedding_result].arg(1).arg(0)}"
+            )
+        if s.model()[embedding_result].arg(2).arg(1) != B[2]:
+            raise AssertionError(
+                f"Expected arg(2).arg(1) == {B[2]}, "
+                f"got {s.model()[embedding_result].arg(2).arg(1)}"
+            )
 
         # change the type to Dyn. Here, we will get an arbitrary migration
         for n in traced.graph.nodes:
@@ -788,9 +897,21 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(s.check(), z3.sat)
         embedding_result = z3.Const(5, tensor_type)
 
-        assert s.model()[embedding_result].arg(0).arg(1) == B[0]
-        assert s.model()[embedding_result].arg(1).arg(1) == B[1]
-        assert s.model()[embedding_result].arg(2).arg(1) == B[2]
+        if s.model()[embedding_result].arg(0).arg(1) != B[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {B[0]}, "
+                f"got {s.model()[embedding_result].arg(0).arg(1)}"
+            )
+        if s.model()[embedding_result].arg(1).arg(1) != B[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {B[1]}, "
+                f"got {s.model()[embedding_result].arg(1).arg(1)}"
+            )
+        if s.model()[embedding_result].arg(2).arg(1) != B[2]:
+            raise AssertionError(
+                f"Expected arg(2).arg(1) == {B[2]}, "
+                f"got {s.model()[embedding_result].arg(2).arg(1)}"
+            )
 
     def test_size_two_args(self):
         class BasicBlock(torch.nn.Module):
@@ -912,11 +1033,23 @@ class HFOperations(unittest.TestCase):
         # note that the view output will be: tensor3(dim(0, 0), dim(1, 4), dim(1, 1024))
         # this is due to the reshape constraints. This can be lifted
         # but would require revising the type rules accordingly so we leave it for now
-        assert (s.model()[embedding_result].arg(1).arg(1)) == 4
-        assert (s.model()[embedding_result].arg(2).arg(1)) == 1024
+        if s.model()[embedding_result].arg(1).arg(1) != 4:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == 4, "
+                f"got {s.model()[embedding_result].arg(1).arg(1)}"
+            )
+        if s.model()[embedding_result].arg(2).arg(1) != 1024:
+            raise AssertionError(
+                f"Expected arg(2).arg(1) == 1024, "
+                f"got {s.model()[embedding_result].arg(2).arg(1)}"
+            )
 
         mul_result = z3.Const(13, tensor_type)
-        assert s.model()[mul_result] == s.model()[embedding_result]
+        if s.model()[mul_result] != s.model()[embedding_result]:
+            raise AssertionError(
+                f"Expected mul_result == embedding_result, "
+                f"got {s.model()[mul_result]} != {s.model()[embedding_result]}"
+            )
 
     def test_gt(self):
         class BasicBlock(torch.nn.Module):
@@ -1095,7 +1228,9 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(negative, z3.sat)
 
 
-class ComposeOperationsGradualTypes(unittest.TestCase):
+class ComposeOperationsGradualTypes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_masked_fill(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: TensorType([2, 4])):
@@ -1265,10 +1400,22 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
 
         solver.add(conv_result == tensor_type.tensor4(d1, d2, d3, d4))
         solver.check()
-        assert solver.model()[s1].as_long() == res[0]
-        assert solver.model()[s2].as_long() == res[1]
-        assert solver.model()[s3].as_long() == res[2]
-        assert solver.model()[s4].as_long() == res[3]
+        if solver.model()[s1].as_long() != res[0]:
+            raise AssertionError(
+                f"Expected s1 == {res[0]}, got {solver.model()[s1].as_long()}"
+            )
+        if solver.model()[s2].as_long() != res[1]:
+            raise AssertionError(
+                f"Expected s2 == {res[1]}, got {solver.model()[s2].as_long()}"
+            )
+        if solver.model()[s3].as_long() != res[2]:
+            raise AssertionError(
+                f"Expected s3 == {res[2]}, got {solver.model()[s3].as_long()}"
+            )
+        if solver.model()[s4].as_long() != res[3]:
+            raise AssertionError(
+                f"Expected s4 == {res[3]}, got {solver.model()[s4].as_long()}"
+            )
 
         solver.add(input_2 == tensor_type.tensor2(D(1, 4), D(1, 1)))
         self.assertEqual(solver.check(), z3.sat)
@@ -1276,10 +1423,14 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
         self.assertEqual(solver.check(), z3.sat)
 
         # first dimension could be anything because we have broadcasting
-        assert solver.model()[s1] == res[0]
-        assert solver.model()[s2] == res[1]
-        assert solver.model()[s3] == res[2]
-        assert solver.model()[s4] == res[3]
+        if solver.model()[s1] != res[0]:
+            raise AssertionError(f"Expected s1 == {res[0]}, got {solver.model()[s1]}")
+        if solver.model()[s2] != res[1]:
+            raise AssertionError(f"Expected s2 == {res[1]}, got {solver.model()[s2]}")
+        if solver.model()[s3] != res[2]:
+            raise AssertionError(f"Expected s3 == {res[2]}, got {solver.model()[s3]}")
+        if solver.model()[s4] != res[3]:
+            raise AssertionError(f"Expected s4 == {res[3]}, got {solver.model()[s4]}")
 
     def test_conv_reshape_add_0_3(self):
         class BasicBlock(torch.nn.Module):
@@ -1354,7 +1505,9 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
         self.assertEqual(solver.check(), z3.unsat)
 
 
-class GradualTypes(unittest.TestCase):
+class GradualTypes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_conv_reshape_unsat(self):
         class BasicBlock(torch.nn.Module):
             def __init__(
@@ -1443,10 +1596,22 @@ class GradualTypes(unittest.TestCase):
         solver.check()
         # print(solver.model())
         # print(type(solver.model()[s1]))
-        assert solver.model()[s1].as_long() == res[0]
-        assert solver.model()[s2].as_long() == res[1]
-        assert solver.model()[s3].as_long() == res[2]
-        assert solver.model()[s4].as_long() == res[3]
+        if solver.model()[s1].as_long() != res[0]:
+            raise AssertionError(
+                f"Expected s1 == {res[0]}, got {solver.model()[s1].as_long()}"
+            )
+        if solver.model()[s2].as_long() != res[1]:
+            raise AssertionError(
+                f"Expected s2 == {res[1]}, got {solver.model()[s2].as_long()}"
+            )
+        if solver.model()[s3].as_long() != res[2]:
+            raise AssertionError(
+                f"Expected s3 == {res[2]}, got {solver.model()[s3].as_long()}"
+            )
+        if solver.model()[s4].as_long() != res[3]:
+            raise AssertionError(
+                f"Expected s4 == {res[3]}, got {solver.model()[s4].as_long()}"
+            )
 
         s1, s2, s3, s4 = z3.Ints("y1 y2 y3 y4")
         s11, s22, s33, s44 = z3.Ints("y11 y22 y33 y44")
@@ -1520,13 +1685,27 @@ class GradualTypes(unittest.TestCase):
         solver.add(conv_result == tensor_type.tensor4(d1, d2, d3, d4))
         solver.check()
         # print(solver.model())
-        assert solver.model()[s1].as_long() == res[0]
-        assert solver.model()[s2].as_long() == res[1]
-        assert solver.model()[s3].as_long() == res[2]
-        assert solver.model()[s4].as_long() == res[3]
+        if solver.model()[s1].as_long() != res[0]:
+            raise AssertionError(
+                f"Expected s1 == {res[0]}, got {solver.model()[s1].as_long()}"
+            )
+        if solver.model()[s2].as_long() != res[1]:
+            raise AssertionError(
+                f"Expected s2 == {res[1]}, got {solver.model()[s2].as_long()}"
+            )
+        if solver.model()[s3].as_long() != res[2]:
+            raise AssertionError(
+                f"Expected s3 == {res[2]}, got {solver.model()[s3].as_long()}"
+            )
+        if solver.model()[s4].as_long() != res[3]:
+            raise AssertionError(
+                f"Expected s4 == {res[3]}, got {solver.model()[s4].as_long()}"
+            )
 
 
-class TestSingleOperation(unittest.TestCase):
+class TestSingleOperation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_conv_wrong_example(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self) -> None:
@@ -1569,7 +1748,10 @@ class TestSingleOperation(unittest.TestCase):
         solver3 = z3.Solver()
         solver3.add(transformed)
         print(solver3.check())
-        assert solver3.check() == z3.sat
+        if solver3.check() != z3.sat:
+            raise AssertionError(
+                f"Expected solver3.check() == z3.sat, got {solver3.check()}"
+            )
 
         s1, s2, s3, s4 = z3.Ints("s1 s2 s3 s4")
         s11, s22, s33, s44 = z3.Ints("s11 s22 s33 s44")
@@ -1581,10 +1763,16 @@ class TestSingleOperation(unittest.TestCase):
         )
         x = z3.Const(1, tensor_type)
         solver3.add(x == tensor_type.tensor4(d1, d2, d3, d4))
-        assert solver3.check() == z3.sat
+        if solver3.check() != z3.sat:
+            raise AssertionError(
+                f"Expected solver3.check() == z3.sat, got {solver3.check()}"
+            )
 
         solver3.add(s22 != 0)
-        assert solver3.check() == z3.unsat
+        if solver3.check() != z3.unsat:
+            raise AssertionError(
+                f"Expected solver3.check() == z3.unsat, got {solver3.check()}"
+            )
 
     def test_conv_dyn(self):
         s1, s2, s3, s4 = z3.Ints("s1 s2 s3 s4")
@@ -1635,7 +1823,10 @@ class TestSingleOperation(unittest.TestCase):
 
         solver3 = z3.Solver()
         solver3.add(transformed)
-        assert solver3.check() == z3.sat
+        if solver3.check() != z3.sat:
+            raise AssertionError(
+                f"Expected solver3.check() == z3.sat, got {solver3.check()}"
+            )
 
         x = z3.Const(1, tensor_type)
         y = z3.Const(2, tensor_type)
@@ -1645,20 +1836,40 @@ class TestSingleOperation(unittest.TestCase):
             y == tensor_type.tensor4(b1, b2, b3, b4),
         )
 
-        assert solver3.check() == z3.sat
-        assert solver3.model()[s1].as_long() == solver3.model()[e1].as_long()
-        assert solver3.model()[s11].as_long() == solver3.model()[e11].as_long()
+        if solver3.check() != z3.sat:
+            raise AssertionError(
+                f"Expected solver3.check() == z3.sat, got {solver3.check()}"
+            )
+        if solver3.model()[s1].as_long() != solver3.model()[e1].as_long():
+            raise AssertionError(
+                f"Expected s1 == e1, got {solver3.model()[s1].as_long()} != "
+                f"{solver3.model()[e1].as_long()}"
+            )
+        if solver3.model()[s11].as_long() != solver3.model()[e11].as_long():
+            raise AssertionError(
+                f"Expected s11 == e11, got {solver3.model()[s11].as_long()} != "
+                f"{solver3.model()[e11].as_long()}"
+            )
 
         solver3.add(s2 != 2)
-        assert solver3.check() == z3.sat
-        assert solver3.model()[s22].as_long() == 0
+        if solver3.check() != z3.sat:
+            raise AssertionError(
+                f"Expected solver3.check() == z3.sat, got {solver3.check()}"
+            )
+        if solver3.model()[s22].as_long() != 0:
+            raise AssertionError(
+                f"Expected s22 == 0, got {solver3.model()[s22].as_long()}"
+            )
 
         solver3.add(s22 != 0)
         self.assertEqual(solver3.check(), z3.unsat)
 
         solver2 = z3.Solver()
         solver2.add(transformed)
-        assert solver2.check() == z3.sat
+        if solver2.check() != z3.sat:
+            raise AssertionError(
+                f"Expected solver2.check() == z3.sat, got {solver2.check()}"
+            )
         solver2.add(x == tensor_type.tensor3(d1, d2, d3))
         self.assertEqual(solver2.check(), z3.unsat)
 
@@ -1790,22 +2001,42 @@ class TestSingleOperation(unittest.TestCase):
 
         # print(s.model())
 
-        assert s.model()[broadcast_res1].decl() == tensor_type.tensor2
-        assert s.model()[broadcast_res2].decl() == tensor_type.tensor2
-        assert s.model()[add_result].decl() == tensor_type.tensor2
-        assert s.model()[y].decl() == tensor_type.tensor1
+        if s.model()[broadcast_res1].decl() != tensor_type.tensor2:
+            raise AssertionError(
+                f"Expected broadcast_res1.decl() == tensor_type.tensor2, "
+                f"got {s.model()[broadcast_res1].decl()}"
+            )
+        if s.model()[broadcast_res2].decl() != tensor_type.tensor2:
+            raise AssertionError(
+                f"Expected broadcast_res2.decl() == tensor_type.tensor2, "
+                f"got {s.model()[broadcast_res2].decl()}"
+            )
+        if s.model()[add_result].decl() != tensor_type.tensor2:
+            raise AssertionError(
+                f"Expected add_result.decl() == tensor_type.tensor2, "
+                f"got {s.model()[add_result].decl()}"
+            )
+        if s.model()[y].decl() != tensor_type.tensor1:
+            raise AssertionError(
+                f"Expected y.decl() == tensor_type.tensor1, got {s.model()[y].decl()}"
+            )
 
         # print(s.model())
 
         # prevent broadcasting for that dimension
         s.add(s2 > 1)
 
-        assert s.check()
+        if not s.check():
+            raise AssertionError("Expected s.check() to be truthy")
 
         # the second dimension of the result is a number, not Dyn.
         # however if the first input dimension had been 1, we would
         # have had dyn in the result, as seen in the next test case
-        assert s.model()[add_result].arg(1).arg(0).as_long() != 0
+        if s.model()[add_result].arg(1).arg(0).as_long() == 0:
+            raise AssertionError(
+                f"Expected arg(1).arg(0) != 0, "
+                f"got {s.model()[add_result].arg(1).arg(0).as_long()}"
+            )
 
     def test_add_padding_3(self):
         s1, s2, s3, s4 = z3.Ints("s1 s2 s3 s4")
@@ -1837,8 +2068,16 @@ class TestSingleOperation(unittest.TestCase):
         # print(s.model())
 
         add_result = z3.Const(3, tensor_type)
-        assert s.model()[add_result].arg(0).arg(0).as_long() == 0
-        assert s.model()[add_result].arg(1).arg(0).as_long() == 0
+        if s.model()[add_result].arg(0).arg(0).as_long() != 0:
+            raise AssertionError(
+                f"Expected arg(0).arg(0) == 0, "
+                f"got {s.model()[add_result].arg(0).arg(0).as_long()}"
+            )
+        if s.model()[add_result].arg(1).arg(0).as_long() != 0:
+            raise AssertionError(
+                f"Expected arg(1).arg(0) == 0, "
+                f"got {s.model()[add_result].arg(1).arg(0).as_long()}"
+            )
 
     def test_add_padding_4(self):
         class BasicBlock(torch.nn.Module):
@@ -1857,7 +2096,11 @@ class TestSingleOperation(unittest.TestCase):
         self.assertEqual(s.check(), z3.sat)
 
         add_result = z3.Const(3, tensor_type)
-        assert s.model()[add_result] == tensor_type.tensor2(D(1, 2), D(1, 3))
+        expected = tensor_type.tensor2(D(1, 2), D(1, 3))
+        if s.model()[add_result] != expected:
+            raise AssertionError(
+                f"Expected add_result == {expected}, got {s.model()[add_result]}"
+            )
 
     def test_add_padding_5(self):
         class BasicBlock(torch.nn.Module):
@@ -2010,9 +2253,14 @@ class TestSingleOperation(unittest.TestCase):
 
         self.assertEqual(s.check(), z3.sat)
         s.add(s5 != 1, s7 != 1)
-        assert s.check()
+        if not s.check():
+            raise AssertionError("Expected s.check() to be truthy")
 
-        assert s.model()[s5].as_long() == s.model()[s7].as_long()
+        if s.model()[s5].as_long() != s.model()[s7].as_long():
+            raise AssertionError(
+                f"Expected s5 == s7, got {s.model()[s5].as_long()} != "
+                f"{s.model()[s7].as_long()}"
+            )
 
     def test_conv_static(self):
         s1, s2, s3, s4 = z3.Ints("s1 s2 s3 s4")
@@ -2070,8 +2318,14 @@ class TestSingleOperation(unittest.TestCase):
         solver.add(y == tensor_type.tensor4(b1, b2, b3, b4))
         self.assertEqual(solver.check(), z3.sat)
         # print(solver.model())
-        assert solver.model()[e3].as_long() == res[2]
-        assert solver.model()[e4].as_long() == res[3]
+        if solver.model()[e3].as_long() != res[2]:
+            raise AssertionError(
+                f"Expected e3 == {res[2]}, got {solver.model()[e3].as_long()}"
+            )
+        if solver.model()[e4].as_long() != res[3]:
+            raise AssertionError(
+                f"Expected e4 == {res[3]}, got {solver.model()[e4].as_long()}"
+            )
 
         B2 = BasicBlock(2, 4, 5, 2, 9, 2, 2)
         res2 = B2.forward(torch.rand(1, 2, 10, 20)).size()
@@ -2086,8 +2340,14 @@ class TestSingleOperation(unittest.TestCase):
         solver.add(y == tensor_type.tensor4(b1, b2, b3, b4))
 
         self.assertEqual(solver.check(), z3.sat)
-        assert solver.model()[e3].as_long() == res2[2]
-        assert solver.model()[e4].as_long() == res2[3]
+        if solver.model()[e3].as_long() != res2[2]:
+            raise AssertionError(
+                f"Expected e3 == {res2[2]}, got {solver.model()[e3].as_long()}"
+            )
+        if solver.model()[e4].as_long() != res2[3]:
+            raise AssertionError(
+                f"Expected e4 == {res2[3]}, got {solver.model()[e4].as_long()}"
+            )
 
     def test_reshape_dyn(self):
         s11, s22, s33, s44 = z3.Ints("s11 s22 s33 s44")
@@ -2150,7 +2410,8 @@ class TestSingleOperation(unittest.TestCase):
         x = z3.Const(1, tensor_type)
         s.add(x == tensor_type.tensor1(D(1, s11)))
         s.check()
-        assert s.model()[s11].as_long() == 6
+        if s.model()[s11].as_long() != 6:
+            raise AssertionError(f"Expected s11 == 6, got {s.model()[s11].as_long()}")
         s.add(s11 != 6)
         self.assertEqual(s.check(), z3.unsat)
 
@@ -2171,7 +2432,8 @@ class TestSingleOperation(unittest.TestCase):
         x = z3.Const(1, tensor_type)
         s.add(x == tensor_type.tensor1(D(1, s11)))
         s.check()
-        assert s.model()[s11].as_long() == 6
+        if s.model()[s11].as_long() != 6:
+            raise AssertionError(f"Expected s11 == 6, got {s.model()[s11].as_long()}")
         s.add(s11 != 6)
         self.assertEqual(s.check(), z3.unsat)
 
@@ -2209,8 +2471,16 @@ class TestSingleOperation(unittest.TestCase):
         solver.add(input == tensor_type.tensor4(D(1, 4), D(1, 3), D(1, 32), D(1, 32)))
         solver.check()
         output = z3.Const(48, tensor_type)
-        assert solver.model()[output].arg(0).arg(1) == res[0]
-        assert solver.model()[output].arg(1).arg(1) == res[1]
+        if solver.model()[output].arg(0).arg(1) != res[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {res[0]}, "
+                f"got {solver.model()[output].arg(0).arg(1)}"
+            )
+        if solver.model()[output].arg(1).arg(1) != res[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {res[1]}, "
+                f"got {solver.model()[output].arg(1).arg(1)}"
+            )
 
     def test_conv2D_maxpool2d_flatten_unsat(self):
         class BasicBlock(torch.nn.Module):
@@ -2291,8 +2561,16 @@ class TestSingleOperation(unittest.TestCase):
         flatten = z3.Const(2, tensor_type)
 
         res = M().forward(torch.rand(2, 3, 4, 5)).size()
-        assert solver.model()[flatten].arg(0).arg(1) == res[0]
-        assert solver.model()[flatten].arg(1).arg(1) == res[1]
+        if solver.model()[flatten].arg(0).arg(1) != res[0]:
+            raise AssertionError(
+                f"Expected arg(0).arg(1) == {res[0]}, "
+                f"got {solver.model()[flatten].arg(0).arg(1)}"
+            )
+        if solver.model()[flatten].arg(1).arg(1) != res[1]:
+            raise AssertionError(
+                f"Expected arg(1).arg(1) == {res[1]}, "
+                f"got {solver.model()[flatten].arg(1).arg(1)}"
+            )
 
         class M(torch.nn.Module):
             def forward(self, x: TensorType([2, 3, Dyn, 5])):
@@ -2309,7 +2587,10 @@ class TestSingleOperation(unittest.TestCase):
 
         solver.add(x == tensor_type.tensor4(D(1, 2), D(1, 3), D(0, s1), D(1, 5)))
         self.assertEqual(solver.check(), z3.sat)
-        assert solver.model()[y].arg(1).arg(0) == 0
+        if solver.model()[y].arg(1).arg(0) != 0:
+            raise AssertionError(
+                f"Expected arg(1).arg(0) == 0, got {solver.model()[y].arg(1).arg(0)}"
+            )
 
         class M(torch.nn.Module):
             def forward(self, x: TensorType([2, 3, Dyn])):
@@ -2324,7 +2605,9 @@ class TestSingleOperation(unittest.TestCase):
         self.assertEqual(solver.check(), z3.unsat)
 
 
-class ConstraintGeneration(unittest.TestCase):
+class ConstraintGeneration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_add_reshape(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: Dyn, y: Dyn):
@@ -2336,7 +2619,10 @@ class ConstraintGeneration(unittest.TestCase):
 
         generator = ConstraintGenerator(traced)
         new_constraints, counter = generator.generate_constraints(0)
-        assert len(new_constraints.conjucts) == 11
+        if len(new_constraints.conjucts) != 11:
+            raise AssertionError(
+                f"Expected len(conjucts) == 11, got {len(new_constraints.conjucts)}"
+            )
 
     def test_conv_reshape_add(self):
         class BasicBlock(torch.nn.Module):
@@ -2372,18 +2658,27 @@ class ConstraintGeneration(unittest.TestCase):
 
         generator = ConstraintGenerator(traced)
         new_constraints, counter = generator.generate_constraints(0)
-        assert len(new_constraints.conjucts) == 16
+        if len(new_constraints.conjucts) != 16:
+            raise AssertionError(
+                f"Expected len(conjucts) == 16, got {len(new_constraints.conjucts)}"
+            )
 
 
-class TestInternalConstraints(unittest.TestCase):
+class TestInternalConstraints(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_precision(self):
         c1 = BinConstraintT(Dyn, TVar("x"), op_precision)
         transformed, _ = transform_constraint(c1, 0)
-        assert transformed == T()
+        if transformed != T():
+            raise AssertionError(f"Expected transformed == T(), got {transformed}")
 
         c2 = BinConstraintT(TensorType([1, Dyn, 3]), TVar("x"), op_precision)
         transformed, counter = transform_constraint(c2, 0)
-        assert len(transformed.conjucts) == 7
+        if len(transformed.conjucts) != 7:
+            raise AssertionError(
+                f"Expected len(conjucts) == 7, got {len(transformed.conjucts)}"
+            )
 
     def test_matching(self):
         c1 = BinConstraintT(
@@ -2392,7 +2687,10 @@ class TestInternalConstraints(unittest.TestCase):
             op_matching,
         )
         transformed, _ = transform_constraint(c1, 0)
-        assert len(transformed.disjuncts) == 2
+        if len(transformed.disjuncts) != 2:
+            raise AssertionError(
+                f"Expected len(disjuncts) == 2, got {len(transformed.disjuncts)}"
+            )
 
     def test_consistency(self):
         c1 = BinConstraintT(
@@ -2400,9 +2698,15 @@ class TestInternalConstraints(unittest.TestCase):
         )
         transformed, count = transform_constraint(c1, 0)
 
-        assert len(transformed.disjuncts) == 5
+        if len(transformed.disjuncts) != 5:
+            raise AssertionError(
+                f"Expected len(disjuncts) == 5, got {len(transformed.disjuncts)}"
+            )
         transformed, count = transform_constraint(transformed, count)
-        assert len(transformed.disjuncts) == 5
+        if len(transformed.disjuncts) != 5:
+            raise AssertionError(
+                f"Expected len(disjuncts) == 5, got {len(transformed.disjuncts)}"
+            )
 
     # def test_apply_broadcasting(self):
     #     c1 = ApplyBroadcasting(TVar(1), TVar(2), TVar(3), TVar(4))
@@ -2411,7 +2715,9 @@ class TestInternalConstraints(unittest.TestCase):
 
 
 @skipIfNoTorchVision
-class TestResNet(unittest.TestCase):
+class TestResNet(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_resnet50_unsat(self):
         traced = symbolic_trace(models.resnet50())
         for n in traced.graph.nodes:
@@ -2441,7 +2747,11 @@ class TestResNet(unittest.TestCase):
         input = z3.Const(1, tensor_type)
         solver.add(input == tensor_type.tensor4(D(1, 1), D(1, 3), D(1, 224), D(1, 224)))
         self.assertEqual(solver.check(), z3.sat)
-        assert solver.model()[linear] == tensor_type.tensor2(D(1, res[0]), D(1, res[1]))
+        expected = tensor_type.tensor2(D(1, res[0]), D(1, res[1]))
+        if solver.model()[linear] != expected:
+            raise AssertionError(
+                f"Expected linear == {expected}, got {solver.model()[linear]}"
+            )
 
     def test_resnet502(self):
         traced = symbolic_trace(models.resnet50())
@@ -2459,7 +2769,11 @@ class TestResNet(unittest.TestCase):
         )
         solver.add(batch > 4)
         solver.check()
-        assert solver.model()[batch] == solver.model()[linear].arg(0).arg(1)
+        if solver.model()[batch] != solver.model()[linear].arg(0).arg(1):
+            raise AssertionError(
+                f"Expected batch == linear.arg(0).arg(1), "
+                f"got {solver.model()[batch]} != {solver.model()[linear].arg(0).arg(1)}"
+            )
 
     def test_resnet503(self):
         traced = symbolic_trace(models.resnet50())
@@ -2482,7 +2796,9 @@ class TestResNet(unittest.TestCase):
 
 
 @skipIfNoTorchVision
-class TestAlexNet(unittest.TestCase):
+class TestAlexNet(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_alexnet1(self):
         alexnet = models.alexnet()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(alexnet)
@@ -2503,35 +2819,54 @@ class TestAlexNet(unittest.TestCase):
             input == tensor_type.tensor4(D(1, 10), D(1, 3), D(1, 227), D(1, 227))
         )
         self.assertEqual(solver.check(), z3.sat)
-        assert solver.model()[conv] == tensor_type.tensor4(
-            D(1, 10), D(1, 64), D(1, 56), D(1, 56)
-        )
+        expected_conv = tensor_type.tensor4(D(1, 10), D(1, 64), D(1, 56), D(1, 56))
+        if solver.model()[conv] != expected_conv:
+            raise AssertionError(
+                f"Expected conv == {expected_conv}, got {solver.model()[conv]}"
+            )
 
         relu = z3.Const(7, tensor_type)
-        assert solver.model()[relu] == tensor_type.tensor4(
-            D(1, 10), D(1, 64), D(1, 56), D(1, 56)
-        )
+        expected_relu = tensor_type.tensor4(D(1, 10), D(1, 64), D(1, 56), D(1, 56))
+        if solver.model()[relu] != expected_relu:
+            raise AssertionError(
+                f"Expected relu == {expected_relu}, got {solver.model()[relu]}"
+            )
 
         maxpool = z3.Const(8, tensor_type)
-        assert solver.model()[maxpool] == tensor_type.tensor4(
-            D(1, 10), D(1, 64), D(1, 27), D(1, 27)
-        )
+        expected_maxpool = tensor_type.tensor4(D(1, 10), D(1, 64), D(1, 27), D(1, 27))
+        if solver.model()[maxpool] != expected_maxpool:
+            raise AssertionError(
+                f"Expected maxpool == {expected_maxpool}, got {solver.model()[maxpool]}"
+            )
 
         maxpool2 = z3.Const(42, tensor_type)
-        assert solver.model()[maxpool2] == tensor_type.tensor4(
-            D(1, 10), D(1, 256), D(1, 6), D(1, 6)
-        )
+        expected_maxpool2 = tensor_type.tensor4(D(1, 10), D(1, 256), D(1, 6), D(1, 6))
+        if solver.model()[maxpool2] != expected_maxpool2:
+            raise AssertionError(
+                f"Expected maxpool2 == {expected_maxpool2}, "
+                f"got {solver.model()[maxpool2]}"
+            )
 
         flatten = z3.Const(52, tensor_type)
-        assert solver.model()[flatten] == tensor_type.tensor2(D(1, 10), D(1, 9216))
+        expected_flatten = tensor_type.tensor2(D(1, 10), D(1, 9216))
+        if solver.model()[flatten] != expected_flatten:
+            raise AssertionError(
+                f"Expected flatten == {expected_flatten}, got {solver.model()[flatten]}"
+            )
 
         linear = z3.Const(64, tensor_type)
-        assert solver.model()[linear] == tensor_type.tensor2(D(1, 10), D(1, 4096))
+        expected_linear = tensor_type.tensor2(D(1, 10), D(1, 4096))
+        if solver.model()[linear] != expected_linear:
+            raise AssertionError(
+                f"Expected linear == {expected_linear}, got {solver.model()[linear]}"
+            )
 
         linear2 = z3.Const(109, tensor_type)
-        assert solver.model()[linear2] == tensor_type.tensor2(
-            D(1, res[0]), D(1, res[1])
-        )
+        expected_linear2 = tensor_type.tensor2(D(1, res[0]), D(1, res[1]))
+        if solver.model()[linear2] != expected_linear2:
+            raise AssertionError(
+                f"Expected linear2 == {expected_linear2}, got {solver.model()[linear2]}"
+            )
 
     def test_alexnet2(self):
         alexnet = models.alexnet()
@@ -2574,4 +2909,4 @@ class TestAlexNet(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

@@ -28,9 +28,7 @@ if [[ -z "${TRITON_ROCM_DIR}" ]]; then
     export TRITON_ROCM_DIR=third_party/amd/backend
 fi
 
-# Remove packaged libs and headers
-rm -rf $TRITON_ROCM_DIR/include/*
-
+# Remove packaged libs
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
 LIBELF_PATH="/usr/lib64/libelf.so.1"
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
@@ -87,6 +85,7 @@ done
 cp -r $ROCM_HOME/include/hip $TRITON_ROCM_DIR/include
 cp -r $ROCM_HOME/include/roctracer $TRITON_ROCM_DIR/include
 cp -r $ROCM_HOME/include/hsa $TRITON_ROCM_DIR/include
+cp -r $ROCM_HOME/include/hipblas-common $TRITON_ROCM_DIR/include
 
 # Copy linker
 mkdir -p $TRITON_ROCM_DIR/llvm/bin

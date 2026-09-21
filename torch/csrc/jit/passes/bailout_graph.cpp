@@ -2,14 +2,11 @@
 
 #include <ATen/core/function.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
-#include <unordered_set>
 #include <utility>
 
 namespace torch::jit {
@@ -55,7 +52,7 @@ struct BailOutGraphBuilderForNode {
   }
 
   Value* getOrAddInputForValue(Value* v) {
-    if (this->old_to_new_.count(v) == 0) {
+    if (!this->old_to_new_.contains(v)) {
       return addNewInputForValue(v);
     } else {
       return this->old_to_new_[v];

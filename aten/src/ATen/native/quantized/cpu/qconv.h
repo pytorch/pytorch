@@ -8,7 +8,7 @@ namespace native {
 class QConvoneDNN final {
  public:
 
-  C10_API static at::Tensor run_pointwise(
+  TORCH_API static at::Tensor run_pointwise(
       at::Tensor act, // contains quantized values but not QTensor
       double act_scale,
       int64_t act_zero_point,
@@ -27,7 +27,7 @@ class QConvoneDNN final {
       torch::List<std::optional<at::Scalar>> scalars,
       std::optional<std::string_view> algorithm);
 
-  C10_API static at::Tensor run_pointwise_tensor(
+  TORCH_API static at::Tensor run_pointwise_tensor(
       at::Tensor act, // contains quantized values but not QTensor
       at::Tensor act_scale,
       at::Tensor act_zero_point,
@@ -46,7 +46,7 @@ class QConvoneDNN final {
       torch::List<std::optional<at::Scalar>> scalars,
       std::optional<std::string_view> algorithm);
 
-  C10_API static at::Tensor run_pointwise_binary(
+  TORCH_API static at::Tensor run_pointwise_binary(
       at::Tensor act, // contains quantized values but not QTensor
       double act_scale,
       int64_t act_zero_point,
@@ -70,7 +70,7 @@ class QConvoneDNN final {
       torch::List<std::optional<at::Scalar>> unary_scalars,
       std::optional<std::string_view> unary_algorithm);
 
-  C10_API static at::Tensor run_pointwise_binary_tensor(
+  TORCH_API static at::Tensor run_pointwise_binary_tensor(
       at::Tensor act, // contains quantized values but not QTensor
       at::Tensor act_scale,
       at::Tensor act_zero_point,

@@ -330,8 +330,9 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
       _pair_int(*pad),
       _pair_int(*dilation),
       groups->toInt());
-#endif
+#else
   return false;
+#endif
 }
 
 bool isConv2d(const Node* node) {
@@ -416,7 +417,7 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
     }
   }
 
-  if (!scalars_.count(v)) {
+  if (!scalars_.contains(v)) {
     throw malformed_input("no scalar in Constant");
   }
 
@@ -470,7 +471,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     }
   }
 
-  if (!scalars_.count(v)) {
+  if (!scalars_.contains(v)) {
     throw malformed_input("no scalar in Constant");
   }
   return scalars_.at(v);
@@ -508,7 +509,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesFromSymbolicShape(
 
 std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     const torch::jit::Value* v) {
-  if (known_sizes_.count(v)) {
+  if (known_sizes_.contains(v)) {
     return known_sizes_.at(v);
   }
 
@@ -568,7 +569,7 @@ static bool constZeroDimTensorAsScalarArg(
       std::stringstream ss;
       ss << "Unsupported tensor dtype:" << dtype
          << " for converting constant 0-dim Tensor to scalar" << '\n';
-      throw unsupported_dtype(ss.str());
+      throw unsupported_dtype(std::move(ss).str());
   }
 }
 
@@ -795,7 +796,7 @@ static void parallelizeOuterLoops(LoopNest& l, const Bufs& bufs) {
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(std::move(st), bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
-  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
+  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), '\n');
   int64_t random_tr_seed = randomTransformsRequested();
   if (random_tr_seed) {
     if (random_tr_seed == -1)
@@ -939,7 +940,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   StmtPtr stmt = l.root_stmt();
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
-  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
+  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), '\n');
   return stmt;
 }
 
@@ -996,7 +997,7 @@ void TensorExprKernel::genInputDebugNames() {
     std::string sanitized_name = sanitizeName(input->debugName());
     // we could get fancier here, but name conflict is extremely unlikely
     while (name_set.count(sanitized_name)) {
-      sanitized_name.append("_");
+      sanitized_name.push_back('_');
     }
     value_to_name[input] = sanitized_name;
     name_set.insert(sanitized_name);
@@ -1063,8 +1064,9 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
     auto strides = stride_input[0] == StrideInput::TENSOR_CONT
         ? make_contiguous_strides(inputTensorDims)
         : make_channels_last_strides(inputTensorDims);
-    return fmap(
-        strides, [&](ExprPtr stride) { return ExprHandle(std::move(stride)); });
+    return fmap(std::move(strides), [&](ExprPtr stride) {
+      return ExprHandle(std::move(stride));
+    });
   }
 
   inputTensorStrides.resize(rank);
@@ -1235,7 +1237,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
 
 NNCLoweringFunction TensorExprKernel::getCustomLoweringFor(
     c10::Symbol op) const {
-  if (custom_lowerings_.count(op))
+  if (custom_lowerings_.contains(op))
     return custom_lowerings_.at(op);
   return nullptr;
 }
@@ -1271,11 +1273,11 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   // [0] [3] [1] [4] [2] [5]
   // When we are doing the re-ordering of values into the output tensor,
   // we are iterating per-element of the input, and we are fixed
-  // in indexing in to the output tensor at [i, j] = val
+  // in indexing into the output tensor at [i, j] = val
   // `val` we want here is equal to the indices for the output
   // tensor that would have given the same position as the output
   // The position is equal to the sum of stride[i] * index[i],
-  // and we can can calculate the equivalent indices in the
+  // and we can calculate the equivalent indices in the
   // output tensor strides by iteratively computing the index of
   // the biggest stride:
   // absolute = ...

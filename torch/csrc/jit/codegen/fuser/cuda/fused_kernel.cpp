@@ -122,14 +122,14 @@ FusedKernelCUDA::FusedKernelCUDA(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
 #if defined(USE_ROCM)
-  std::vector<const char*> args = {"--std=c++17"};
+  std::vector<const char*> args = {"--std=c++20"};
   args.push_back("-hip-pch");
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if !defined(USE_ROCM)
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
-      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // (since older driver doesn't necessarily recognize PTX emitted by new
       // toolkit);
       // Meanwhile, for forward compatibility (future device with
       // `compile_to_sass==false`), since SASS are not necessarily compatible,
@@ -140,7 +140,7 @@ FusedKernelCUDA::FusedKernelCUDA(
 #endif
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
-      "--std=c++17", compute.c_str(), "-default-device"};
+      "--std=c++20", compute.c_str(), "-default-device"};
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());

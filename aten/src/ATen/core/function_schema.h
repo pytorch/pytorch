@@ -219,9 +219,7 @@ struct TORCH_API SchemaArgument {
   SchemaArgType type;
   size_t index;
   SchemaArgument(SchemaArgType tpe, size_t idx) : type(tpe), index(idx) {}
-  bool operator==(const SchemaArgument& rhs) const {
-    return type == rhs.type && index == rhs.index;
-  }
+  bool operator==(const SchemaArgument& rhs) const = default;
 };
 
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
@@ -571,7 +569,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
     if (arg.N()) {
         N = std::to_string(*arg.N());
     }
-    out << "[" << N << "]";
+    out << '[' << N << ']';
   } else {
     out << unopt_type->str();
   }
@@ -582,15 +580,15 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   }
 
   if (is_opt) {
-    out << "?";
+    out << '?';
   }
 
   if (!arg.name().empty()) {
-    out << " " << arg.name();
+    out << ' ' << arg.name();
   }
 
   if (arg.default_value()) {
-    out << "=";
+    out << '=';
     if ((type->kind() == c10::TypeKind::StringType ||
         unopt_type->kind() == c10::TypeKind::StringType) &&
         arg.default_value().value().isString()) {
@@ -628,7 +626,7 @@ TORCH_API std::ostream& operator<<(std::ostream& out, const FunctionSchema& sche
 inline std::string toString(const FunctionSchema& schema) {
   std::ostringstream str;
   str << schema;
-  return str.str();
+  return std::move(str).str();
 }
 
 } // namespace c10

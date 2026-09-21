@@ -6,10 +6,13 @@ from collections.abc import Sequence
 from torch.onnx import errors
 from torch.onnx._internal.torchscript_exporter import registration
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 @common_utils.instantiate_parametrized_tests
 class TestGlobalHelpers(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "available_opsets, target, expected",
         [
@@ -48,6 +51,8 @@ class TestGlobalHelpers(common_utils.TestCase):
 
 
 class TestOverrideDict(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.override_dict: registration.OverrideDict[str, int] = (
@@ -168,6 +173,8 @@ class TestOverrideDict(common_utils.TestCase):
 
 
 class TestRegistrationDecorators(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self) -> None:
         registration.registry._registry.pop("test::test_op", None)
 
@@ -180,7 +187,8 @@ class TestRegistrationDecorators(common_utils.TestCase):
 
         self.assertTrue(registration.registry.is_registered_op("test::test_op", 9))
         function_group = registration.registry.get_function_group("test::test_op")
-        assert function_group is not None
+        if function_group is None:
+            raise AssertionError("function_group is None")
         self.assertEqual(function_group.get(9), test)
 
     def test_onnx_symbolic_registers_function_applied_decorator_when_provided(self):
@@ -199,7 +207,8 @@ class TestRegistrationDecorators(common_utils.TestCase):
             return
 
         function_group = registration.registry.get_function_group("test::test_op")
-        assert function_group is not None
+        if function_group is None:
+            raise AssertionError("function_group is None")
         registered_function = function_group[9]
         self.assertFalse(wrapper_called)
         registered_function()
@@ -230,7 +239,8 @@ class TestRegistrationDecorators(common_utils.TestCase):
 
         self.assertTrue(registration.registry.is_registered_op("test::test_op", 9))
         function_group = registration.registry.get_function_group("test::test_op")
-        assert function_group is not None
+        if function_group is None:
+            raise AssertionError("function_group is None")
         self.assertEqual(function_group.get(9), test)
 
     def test_custom_onnx_symbolic_overrides_existing_function(self):
@@ -247,7 +257,8 @@ class TestRegistrationDecorators(common_utils.TestCase):
             return "custom"
 
         function_group = registration.registry.get_function_group("test::test_op")
-        assert function_group is not None
+        if function_group is None:
+            raise AssertionError("function_group is None")
         self.assertEqual(function_group.get(9), test_custom)
 
 

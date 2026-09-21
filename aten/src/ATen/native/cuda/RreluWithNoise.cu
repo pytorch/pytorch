@@ -17,9 +17,7 @@
 namespace at::native {
 
 template <typename scalar_t, int unroll_factor, typename F>
-#if __CUDA_ARCH__ >= 350 || defined USE_ROCM
 C10_LAUNCH_BOUNDS_2(256, 4)
-#endif
 __global__ void rrelu_with_noise_cuda_kernel(
     int numel,
     PhiloxCudaState philox_args,
@@ -45,7 +43,7 @@ __global__ void rrelu_with_noise_cuda_kernel(
     auto rand = random_func(&state);
 
     // ensure that (&rand.x)[ii] is safe
-    static_assert(sizeof(rand)/sizeof(rand.x) == unroll_factor, "");
+    static_assert(sizeof(rand)/sizeof(rand.x) == unroll_factor);
 
     #pragma unroll
     for (int ii = 0; ii < unroll_factor; ii++) {

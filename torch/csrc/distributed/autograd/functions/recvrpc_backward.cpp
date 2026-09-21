@@ -1,4 +1,3 @@
-#include <ATen/core/functional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
@@ -38,7 +37,7 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
       c10::str(
           "Autograd context no longer valid! This usually ",
           "means the autograd context was cleaned up by a different thread due ",
-          "to an error before RecvRcpBackward had a chance to run"));
+          "to an error before RecvRpcBackward had a chance to run"));
 
   // Send the gradients over the wire and record the future in the autograd
   // context.

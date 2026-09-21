@@ -1,3 +1,4 @@
+# Owner(s): ["module: macos"]
 name: mac-build
 
 on:
@@ -53,6 +54,9 @@ on:
       build-outcome:
         value: ${{ jobs.build.outputs.build-outcome }}
         description: The outcome of the build step. This is used to influence test filtering logic later on.
+      build-environment:
+        value: ${{ jobs.build.outputs.build-environment }}
+        description: Top-level label for what's being built/tested.
 
 jobs:
   build:
@@ -65,6 +69,7 @@ jobs:
     outputs:
       build-outcome: ${{ steps.build.outcome }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Clean up disk space before running MacOS workflow
         uses: pytorch/test-infra/.github/actions/check-disk-space@main

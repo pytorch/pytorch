@@ -1,8 +1,14 @@
 #pragma once
 
+#include <ATen/ATen.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <cstring>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace c10d {
 namespace symmetric_memory {
@@ -13,6 +19,80 @@ bool allow_overlapping_devices();
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
 std::string getSymmMemBackendCUDA();
+
+// All-gather a fixed-size byte payload through the given ProcessGroup.
+// Uses ProcessGroup::all_gather_single (NCCL allgather for a NCCL-backed PG).
+// The payload is staged through a uint8 tensor on `device_idx`. Returns a
+// contiguous CPU tensor of world_size * nbytes uint8 elements.
+at::Tensor pg_all_gather_bytes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    const void* data,
+    size_t nbytes,
+    int device_idx);
+
+// Broadcast a fixed-size byte payload from rank `root` through the given
+// ProcessGroup. Same staging scheme as `pg_all_gather_bytes`. Returns a
+// contiguous CPU tensor of `nbytes` uint8 elements.
+at::Tensor pg_broadcast_bytes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    const void* data,
+    size_t nbytes,
+    int device_idx,
+    int root);
+
+// Blocking barrier over the given ProcessGroup, pinned to `device_idx` so the
+// backend does not have to guess which device to barrier on.
+void pg_barrier(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    int device_idx);
+
+// Templated wrapper around `pg_all_gather_bytes` matching the shape of
+// `StoreExchange::all_gather` so rendezvous code can swap transports without
+// caring about serialization.
+template <typename T>
+std::vector<T> pg_all_gather(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    int device_idx,
+    const T& val) {
+  static_assert(
+      std::is_trivially_copyable_v<T>,
+      "pg_all_gather requires a trivially copyable type");
+  at::Tensor flat = pg_all_gather_bytes(pg, &val, sizeof(T), device_idx);
+  const auto world_size = pg->getSize();
+  const size_t expected = static_cast<size_t>(world_size) * sizeof(T);
+  TORCH_CHECK(
+      static_cast<size_t>(flat.numel()) == expected,
+      "pg_all_gather: expected ",
+      expected,
+      " bytes but got ",
+      flat.numel());
+  std::vector<T> out(world_size);
+  std::memcpy(out.data(), flat.data_ptr(), expected);
+  return out;
+}
+
+// Templated wrapper around `pg_broadcast_bytes`. On non-source ranks `val` is
+// ignored and only used to size the payload.
+template <typename T>
+T pg_broadcast(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    int device_idx,
+    int root,
+    const T& val) {
+  static_assert(
+      std::is_trivially_copyable_v<T>,
+      "pg_broadcast requires a trivially copyable type");
+  at::Tensor flat = pg_broadcast_bytes(pg, &val, sizeof(T), device_idx, root);
+  TORCH_CHECK(
+      static_cast<size_t>(flat.numel()) == sizeof(T),
+      "pg_broadcast: expected ",
+      sizeof(T),
+      " bytes but got ",
+      flat.numel());
+  T out{};
+  std::memcpy(&out, flat.data_ptr(), sizeof(T));
+  return out;
+}
 
 class IpcChannel {
  public:
@@ -45,8 +125,8 @@ class IpcChannel {
 // SymmetricMemory implementation files.
 class StoreExchange {
  public:
-  StoreExchange(const std::string& store_prefix)
-      : store_prefix_(store_prefix) {}
+  StoreExchange(std::string store_prefix)
+      : store_prefix_(std::move(store_prefix)) {}
 
   // Put template function in header file so that compiler can easily access it.
   template <typename T>
@@ -61,8 +141,8 @@ class StoreExchange {
     peer_keys.reserve(world_size);
     for (int r = 0; r < world_size; ++r) {
       std::ostringstream oss;
-      oss << store_prefix_ << "/" << seq_id_ << "/" << r;
-      peer_keys.push_back(oss.str());
+      oss << store_prefix_ << '/' << seq_id_ << '/' << r;
+      peer_keys.push_back(std::move(oss).str());
     }
     ++seq_id_;
 
@@ -73,18 +153,14 @@ class StoreExchange {
       store->set(peer_keys[rank], payload);
     }
 
+    auto payloads = store->multiGet(peer_keys);
+
     std::vector<T> peer_vals;
     peer_vals.reserve(world_size);
     for (int r = 0; r < world_size; ++r) {
-      if (r == rank) {
-        peer_vals.push_back(val);
-        continue;
-      }
-      store->wait({peer_keys[r]});
-      auto payload = store->get(peer_keys[r]);
-      TORCH_CHECK(payload.size() == sizeof(T));
+      TORCH_CHECK(payloads[r].size() == sizeof(T));
       T peer_val{};
-      std::memcpy(&peer_val, payload.data(), sizeof(T));
+      std::memcpy(&peer_val, payloads[r].data(), sizeof(T));
       peer_vals.push_back(peer_val);
     }
     return peer_vals;
@@ -94,8 +170,11 @@ class StoreExchange {
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int world_size) {
-    // TODO: implement an efficient one?
-    all_gather(store, rank, world_size, 0);
+    (void)rank;
+    std::ostringstream oss;
+    oss << store_prefix_ << '/' << seq_id_;
+    ++seq_id_;
+    store->barrier(std::move(oss).str(), world_size);
   }
 
  private:

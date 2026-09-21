@@ -3,7 +3,7 @@ import contextlib
 import dataclasses
 import math
 import textwrap
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import inf
@@ -15,7 +15,7 @@ class __PrinterOptions:
     threshold: float = 1000
     edgeitems: int = 3
     linewidth: int = 80
-    sci_mode: Optional[bool] = None
+    sci_mode: bool | None = None
 
 
 PRINT_OPTS = __PrinterOptions()
@@ -291,7 +291,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
 
 # formatter2 is only used for printing complex tensors.
 # For complex tensors, formatter1 and formatter2 are the formatters for tensor.real
-# and tensor.imag respesectively
+# and tensor.imag respectively
 def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=None):
     dim = self.dim()
 
@@ -332,14 +332,6 @@ def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=N
 def _tensor_str(self, indent):
     if self.numel() == 0:
         return "[]"
-
-    if self.has_names():
-        # There are two main codepaths (possibly more) that tensor printing goes through:
-        # - tensor data can fit comfortably on screen
-        # - tensor data needs to be summarized
-        # Some of the codepaths don't fully support named tensors, so we send in
-        # an unnamed tensor to the formatting code as a workaround.
-        self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
 
@@ -469,9 +461,9 @@ def _str_intern(inp, *, tensor_contents=None):
     )
     if self.is_sparse:
         suffixes.append("size=" + str(tuple(self.shape)))
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        is_meta = self.is_meta or is_fake_tensor(self)
         if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
@@ -508,10 +500,10 @@ def _str_intern(inp, *, tensor_contents=None):
         torch.sparse_bsr,
         torch.sparse_bsc,
     }:
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         suffixes.append("size=" + str(tuple(self.shape)))
-        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        is_meta = self.is_meta or is_fake_tensor(self)
         if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
@@ -607,9 +599,9 @@ def _str_intern(inp, *, tensor_contents=None):
         tensor_str = repr(torch._from_functional_tensor(self))
     else:
         # Circular import problem, so we import it here
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        if self.is_meta or isinstance(self, FakeTensor):
+        if self.is_meta or is_fake_tensor(self):
             suffixes.append("size=" + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append("dtype=" + str(self.dtype))
@@ -668,9 +660,6 @@ def _str_intern(inp, *, tensor_contents=None):
     elif inp.requires_grad:
         suffixes.append("requires_grad=True")
 
-    if self.has_names():
-        suffixes.append(f"names={self.names}")
-
     if tangent is not None:
         suffixes.append(f"tangent={tangent}")
 
@@ -693,7 +682,8 @@ def _str_intern(inp, *, tensor_contents=None):
 
 def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
     level = torch._C._functorch.maybe_get_level(tensor)
-    assert level != -1
+    if level == -1:
+        raise AssertionError("expected functorch level to be >= 0, got -1")
 
     if torch._C._functorch.is_functionaltensor(tensor):
         # Since we're unwrapping the FunctionalTensorWrapper, we need to make sure
@@ -706,7 +696,8 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
     indented_value_repr = textwrap.indent(value_repr, " " * 4)
     if torch._C._functorch.is_batchedtensor(tensor):
         bdim = torch._C._functorch.maybe_get_bdim(tensor)
-        assert bdim != -1
+        if bdim == -1:
+            raise AssertionError("expected batch dimension to be >= 0, got -1")
         return (
             f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n{indented_value_repr}\n)"
         )

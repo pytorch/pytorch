@@ -8,7 +8,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 from torch.distributed.elastic.rendezvous import RendezvousStateError
 from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
@@ -32,7 +32,7 @@ class RendezvousBackendTestMixin(ABC):
         """Corrupts the state stored in the backend."""
 
     def _set_state(
-        self, state: bytes, token: Optional[Any] = None
+        self, state: bytes, token: Any | None = None
     ) -> tuple[bytes, Token, bool]:
         result = self._backend.set_state(state, token)
 

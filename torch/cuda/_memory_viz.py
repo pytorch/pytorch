@@ -97,30 +97,42 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
         import urllib.request
 
         print(f"Downloading flamegraph.pl to: {flamegraph_script}")
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pl") as f:
+        # Download to a temp file next to the target, then atomically move it
+        # into place so a concurrent reader never sees a partial file. The temp
+        # file lives in the same directory (same filesystem) so os.replace is
+        # atomic, and is created with delete=False + manual cleanup: moving a
+        # delete=True NamedTemporaryFile out from under its context manager makes
+        # __exit__ fail to unlink the now-missing file.
+        fd, tmp_name = tempfile.mkstemp(
+            suffix=".pl", dir=os.path.dirname(flamegraph_script) or None
+        )
+        os.close(fd)
+        try:
             urllib.request.urlretrieve(
                 "https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl",
-                f.name,
+                tmp_name,
             )
-            try:
-                os.chmod(f.name, 0o755)
-                os.rename(f.name, flamegraph_script)
-            except OSError:  # noqa: B001,E722
-                # Ok to skip, the file will be removed by tempfile
-                pass
+            os.chmod(tmp_name, 0o755)
+            os.replace(tmp_name, flamegraph_script)
+        finally:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
     args = [flamegraph_script, "--countname", "bytes"]
-    p = subprocess.Popen(
+    with subprocess.Popen(
         args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf-8"
-    )
-    assert p.stdin is not None
-    assert p.stdout is not None
-    p.stdin.write(flamegraph_lines)
-    p.stdin.close()
-    result = p.stdout.read()
-    p.stdout.close()
-    p.wait()
-    assert p.wait() == 0
-    return result
+    ) as p:
+        if p.stdin is None:
+            raise AssertionError("p.stdin is None")
+        if p.stdout is None:
+            raise AssertionError("p.stdout is None")
+        p.stdin.write(flamegraph_lines)
+        p.stdin.close()
+        result = p.stdout.read()
+        p.stdout.close()
+        p.wait()
+        if p.wait() != 0:
+            raise AssertionError(f"flamegraph process exited with code {p.wait()}")
+        return result
 
 
 def _write_blocks(f, prefix, blocks):
@@ -303,9 +315,10 @@ def segsum(data):
                     occupied[j] = m
         stream = "" if seg["stream"] == 0 else f", stream_{seg['stream']}"
         body = "".join(occupied)
-        assert (
-            seg_free_external + seg_free_internal + seg_allocated == seg["total_size"]
-        )
+        if seg_free_external + seg_free_internal + seg_allocated != seg["total_size"]:
+            raise AssertionError(
+                f"Segment size mismatch: {seg_free_external} + {seg_free_internal} + {seg_allocated} != {seg['total_size']}"
+            )
         stream = f" stream_{seg['stream']}" if seg["stream"] != 0 else ""
         if seg["total_size"] >= PAGE_SIZE:
             out.write(
@@ -317,7 +330,10 @@ def segsum(data):
     out.write(f"total_allocated: {Bytes(total_allocated)}\n")
     out.write(f"total_free: {_report_free(free_external, free_internal)}\n")
     out.write(legend)
-    assert free_internal + free_external + total_allocated == total_reserved
+    if free_internal + free_external + total_allocated != total_reserved:
+        raise AssertionError(
+            f"Memory accounting error: {free_internal} + {free_external} + {total_allocated} != {total_reserved}"
+        )
     return out.getvalue()
 
 
@@ -402,6 +418,10 @@ def trace(data):
                 out.write(
                     f"raise OutOfMemoryError # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n"
                 )
+            elif e["action"] == "annotate":
+                addr = e["addr"]
+                name, _, _ = allocation_addr_to_name.get(addr, (addr, None, None))
+                out.write(f"# annotate {name}: {e['user_metadata']}\n")
             else:
                 out.write(f"{e}\n")
         out.write(f"TOTAL MEM: {Bytes(count)}")
@@ -709,7 +729,7 @@ if __name__ == "__main__":
 
     description = (
         "Generate a flamegraph that shows segments (aka blocks) that have been added "
-        "or removed between two different memorys snapshots."
+        "or removed between two different memory snapshots."
     )
     compare_a = subparsers.add_parser("compare", description=description)
     compare_a.add_argument("before", help=pickled)

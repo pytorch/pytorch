@@ -19,11 +19,14 @@ if not file_path.exists():
     raise Exception(err_msg)  # noqa: TRY002
 
 spec = spec_from_file_location(module_name, file_path)
-assert spec is not None
+if spec is None:
+    raise AssertionError(f"Failed to load spec for {module_name}")
 module = module_from_spec(spec)
 sys.modules[module_name] = module
-assert spec.loader is not None
-assert module is not None
+if spec.loader is None:
+    raise AssertionError(f"spec.loader is None for {module_name}")
+if module is None:
+    raise AssertionError(f"module is None for {module_name}")
 spec.loader.exec_module(module)
 
 bounded_compute_graph_mapping = module.bounded_compute_graph_mapping

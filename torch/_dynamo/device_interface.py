@@ -20,12 +20,13 @@ import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 import torch
+from torch.utils._pallas import has_torch_tpu
 
 
-get_cuda_stream: Optional[Callable[[int], int]]
+get_cuda_stream: Callable[[int], int] | None
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
 else:
@@ -41,6 +42,29 @@ class DeviceInterface:
     This is a simple device runtime interface for Inductor. It enables custom
     backends to be integrated with Inductor in a device-agnostic semantic.
     """
+
+    @staticmethod
+    def get_cpp_device_options(
+        aot_mode: bool, compile_only: bool
+    ) -> (
+        tuple[
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+        ]
+        | None
+    ):
+        """Return device-specific C++ build options, if the backend provides them.
+
+        Out-of-tree backends may override this to return
+        ``(definitions, include_dirs, cflags, ldflags, library_dirs,
+        libraries, passthrough_args)`` for Inductor C++ compilation.
+        """
+        return None
 
     class device:
         def __new__(cls, device: torch.types.Device) -> Any:
@@ -130,6 +154,19 @@ class DeviceInterface:
     def get_device_properties(cls, device: torch.types.Device = None) -> Any:
         return cls.Worker.get_device_properties(device)
 
+    @classmethod
+    def get_cache_system_info(cls) -> dict[str, object] | None:
+        """Return stable, JSON-serializable metadata for the code cache key.
+
+        Returning None opts out. An empty dict still contributes metadata.
+        Implementations should return only metadata that invalidates generated
+        or autotuned code when changed, without unnecessarily initializing hardware.
+        Only called when is_available() returns True. This hook is sampled through
+        the cached CacheBase.get_system() path, so interfaces must be registered
+        and available before its first use.
+        """
+        return None
+
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         raise NotImplementedError
@@ -156,18 +193,67 @@ class DeviceInterface:
         """
         return False
 
+    @staticmethod
+    def is_gpu() -> bool:
+        """
+        Returns True if Inductor should treat this device as a GPU-class
+        accelerator (device guards, GPU codegen/fusion, cudagraph eligibility).
+        Defaults to False so unknown backends stay conservative until they opt in.
+        """
+        return False
+
+    @classmethod
+    def exposes_streams(cls) -> bool:
+        """
+        True when a subclass provides its own Stream. The base Stream is a
+        raising sentinel, so compare against it rather than None.
+
+        Overriding the Stream slot is the contract for stream support: it is
+        what opts a GPU-class device into stream guards (device_need_guard),
+        so stream-capable backends must override it. The override must be a
+        real, instantiable torch.Stream subclass: a placeholder that raises on
+        construction is still reported as stream-capable here and fails later,
+        at guard time.
+        """
+        return cls.Stream is not DeviceInterface.Stream
+
+    @classmethod
+    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
+        """Return the number of compute units, used for occupancy /
+        reduction heuristics / max-autotune heuristics.  Defaults to
+        reading the standard field ``multi_processor_count`` from device
+        properties; backends with a different property representation or
+        backend-specific fallback behavior must override."""
+        props = cls.get_device_properties(device)
+        mp_count = getattr(props, "multi_processor_count", None)
+        if mp_count is None:
+            raise AttributeError(
+                f"{cls.__name__} must override get_multi_processor_count "
+                f"because its device properties do not expose the standard "
+                f"field 'multi_processor_count'"
+            )
+        return mp_count
+
     @classmethod
     def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
         """
-        Raises a `RuntimeError` with the appropriate human-readable instructions
-        to resolve the issue if Triton is not available for the given device, or
-        the default device if `device` is `None`.
+        Raises a `TritonUnavailableError` with human-readable instructions if
+        the Triton backend for the given device (or the default device if
+        `device` is `None`) is not built. Implementations may raise a
+        different, more specific error when the device itself is not
+        Triton-capable (e.g. CUDA raises `GPUTooOldForTriton`), so callers
+        that only want an availability answer should check
+        `is_triton_capable()` first.
 
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
+        from torch._dynamo.exc import TritonUnavailableError
+
         if not cls.is_triton_capable():
-            raise RuntimeError("This device is not capable of supporting Triton")
+            raise TritonUnavailableError(
+                "This device is not capable of supporting Triton"
+            )
 
 
 class DeviceGuard:
@@ -181,7 +267,7 @@ class DeviceGuard:
     """
 
     def __init__(
-        self, device_interface: type[DeviceInterface], index: Optional[int]
+        self, device_interface: type[DeviceInterface], index: int | None
     ) -> None:
         self.device_interface = device_interface
         self.idx = index
@@ -205,6 +291,10 @@ class CudaInterface(DeviceInterface):
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
 
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
     # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
@@ -222,7 +312,10 @@ class CudaInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "cuda"
+                    if device.type != "cuda":
+                        raise AssertionError(
+                            f"Expected device type 'cuda', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -241,7 +334,6 @@ class CudaInterface(DeviceInterface):
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
     stream = staticmethod(torch.cuda.stream)  # type: ignore[assignment]
-    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
@@ -259,7 +351,7 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available()
 
     @staticmethod
-    def get_compute_capability(device: torch.types.Device = None) -> Union[int, str]:
+    def get_compute_capability(device: torch.types.Device = None) -> int | str:
         if torch.version.hip is None:
             major, min = torch.cuda.get_device_capability(device)
             return major * 10 + min
@@ -268,13 +360,18 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
+        # Use the Worker API (device properties cached in the main process
+        # before fork) instead of torch.cuda.get_device_properties directly, so
+        # the capability check stays safe when called from spawn-based compile
+        # workers.
         return (
             torch.version.hip is not None
-            or torch.cuda.get_device_properties(device).major >= 7
+            or CudaInterface.Worker.get_device_properties(device).major >= 7
         )
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        from torch._dynamo.exc import TritonUnavailableError
         from torch._inductor.exc import GPUTooOldForTriton
 
         if not CudaInterface.is_triton_capable(device):
@@ -285,12 +382,12 @@ class CudaInterface(DeviceInterface):
 
         if torch.version.hip is not None:
             if "amd" not in triton.backends.backends:
-                raise RuntimeError("triton not built with the 'amd' backend")
+                raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'nvidia' backend")
+            raise TritonUnavailableError("triton not built with the 'nvidia' backend")
 
 
-get_mtia_stream: Optional[Callable[[int], int]]
+get_mtia_stream: Callable[[int], int] | None
 if torch.mtia._is_compiled():
     from torch._C import _mtia_getCurrentRawStream as get_mtia_stream
 else:
@@ -301,6 +398,10 @@ class MtiaInterface(DeviceInterface):
     device = torch.mtia.device  # type: ignore[assignment]
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -319,7 +420,10 @@ class MtiaInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "mtia"
+                    if device.type != "mtia":
+                        raise AssertionError(
+                            f"Expected device type 'mtia', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -336,9 +440,20 @@ class MtiaInterface(DeviceInterface):
 
     current_device = staticmethod(torch.mtia.current_device)
     set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
-    device_count = staticmethod(torch.mtia.device_count)
+
+    # Unlike torch.cuda/torch.xpu, torch.mtia.device_count() has no
+    # _is_compiled() guard: it goes straight to at::detail::getMTIAHooks(),
+    # which latches a process-lifetime static on first call and would
+    # permanently shadow an MTIAHooks impl that registers later (e.g. a
+    # JIT-built extension loaded in a test's setUpClass). Report 0 until the
+    # registry has one, so no registry-driven consumer can latch the fallback.
+    @staticmethod
+    def device_count() -> int:
+        if not torch.mtia._is_compiled():
+            return 0
+        return torch.mtia.device_count()
+
     stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
-    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.mtia.current_stream)
     set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.mtia._set_stream_by_id)  # type: ignore[assignment]
@@ -356,6 +471,14 @@ class MtiaInterface(DeviceInterface):
         ret = torch.mtia.is_available()
         return ret
 
+    @classmethod
+    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
+        return getattr(
+            cls.get_device_properties(device),
+            "multi_processor_count",
+            64,
+        )
+
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         cc = torch.mtia.get_device_capability(device)
@@ -366,14 +489,16 @@ class MtiaInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def raise_if_triton_unavailable(evice: torch.types.Device = None) -> None:
+    def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "mtia" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'mtia' backend")
+            raise TritonUnavailableError("triton not built with the 'mtia' backend")
 
 
-get_xpu_stream: Optional[Callable[[int], int]]
+get_xpu_stream: Callable[[int], int] | None
 if torch.xpu._is_compiled():
     from torch._C import _xpu_getCurrentRawStream as get_xpu_stream
 else:
@@ -384,6 +509,10 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -402,7 +531,10 @@ class XpuInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "xpu"
+                    if device.type != "xpu":
+                        raise AssertionError(
+                            f"Expected device type 'xpu', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -421,7 +553,6 @@ class XpuInterface(DeviceInterface):
     set_device = staticmethod(torch.xpu.set_device)
     device_count = staticmethod(torch.xpu.device_count)  # type: ignore[has-type]
     stream = staticmethod(torch.xpu.stream)  # type: ignore[assignment]
-    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.xpu.current_stream)
     set_stream = staticmethod(torch.xpu.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)  # type: ignore[assignment]
@@ -436,6 +567,11 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def is_available() -> bool:
         return torch.xpu.is_available()
+
+    @classmethod
+    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
+        props = cls.get_device_properties(device)
+        return getattr(props, "multi_processor_count", None) or props.gpu_subslice_count
 
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
@@ -454,8 +590,10 @@ class XpuInterface(DeviceInterface):
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "intel" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'intel' backend")
+            raise TritonUnavailableError("triton not built with the 'intel' backend")
 
 
 @dataclass
@@ -469,8 +607,8 @@ class CpuInterface(DeviceInterface):
         def __init__(self, enable_timing: bool = True) -> None:
             self.time = 0.0
 
-        def elapsed_time(self, end_event: Any) -> float:
-            return (end_event.time - self.time) * 1000
+        def elapsed_time(self, other: Any) -> float:
+            return (other.time - self.time) * 1000
 
         def record(self, stream: Any = None) -> None:
             self.time = time.perf_counter()
@@ -518,14 +656,20 @@ class CpuInterface(DeviceInterface):
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "cpu" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'cpu' backend")
+            raise TritonUnavailableError("triton not built with the 'cpu' backend")
 
 
 class MpsInterface(DeviceInterface):
     @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
-        return torch.backends.mps.is_macos_or_newer(14, 0)
+        return True
 
     @classmethod
     def is_dtype_supported(
@@ -533,7 +677,7 @@ class MpsInterface(DeviceInterface):
     ) -> bool:
         if dtype in [torch.float64, torch.complex128]:
             return False
-        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
+        return True
 
     @staticmethod
     def is_available() -> bool:
@@ -564,19 +708,76 @@ class MpsInterface(DeviceInterface):
             return 0
 
 
+class TpuInterface(DeviceInterface):
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
+        return True
+
+    @classmethod
+    def is_dtype_supported(
+        cls, dtype: torch.dtype, including_emulation: bool = False
+    ) -> bool:
+        return dtype not in (
+            torch.float64,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.half,
+        )
+
+    @staticmethod
+    def is_available() -> bool:
+        return has_torch_tpu()
+
+    @staticmethod
+    def current_device() -> int:
+        return 0
+
+    @staticmethod
+    def get_compute_capability(device: torch.types.Device = None) -> str:
+        return ""
+
+    # pyrefly: ignore [bad-override]
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: torch.types.Device = None) -> Any:
+            return namedtuple("TPUProperties", ["multi_processor_count"])(
+                1  # type: ignore[arg-type]
+            )
+
+        @staticmethod
+        def current_device() -> int:
+            return 0
+
+
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
 
 def register_interface_for_device(
-    device: Union[str, torch.device], device_interface: type[DeviceInterface]
+    device: str | torch.device, device_interface: type[DeviceInterface]
 ) -> None:
+    """Register a DeviceInterface for a device type.
+
+    Registration must happen before ``torch._inductor.utils`` is imported:
+    the registry-derived GPU classification (GPU_TYPES / is_gpu() /
+    get_gpu_type()) is scanned exactly once, at that import. In-tree backends
+    satisfy this by construction (init_device_reg() runs inside the scan
+    itself). Out-of-tree backends register at package import, either
+    autoloaded during ``import torch`` (TORCH_DEVICE_BACKEND_AUTOLOAD) or via
+    an explicit ``import torch_npu``-style import, both of which precede any
+    import of inductor. Registering later is not supported and will not be
+    reflected in the snapshot.
+    """
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
+    from .variables.user_defined import UserDefinedClassVariable
+
+    UserDefinedClassVariable._in_graph_classes.cache_clear()
 
 
-def get_interface_for_device(device: Union[str, torch.device]) -> type[DeviceInterface]:
+def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
     if isinstance(device, torch.device):
         device = device.type
     if not _device_initialized:
@@ -595,18 +796,10 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
 def init_device_reg() -> None:
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
-    for i in range(torch.cuda.device_count()):
-        register_interface_for_device(f"cuda:{i}", CudaInterface)
-
     register_interface_for_device("xpu", XpuInterface)
-    for i in range(torch.xpu.device_count()):
-        register_interface_for_device(f"xpu:{i}", XpuInterface)
-
     register_interface_for_device("mtia", MtiaInterface)
-    for i in range(torch.mtia.device_count()):
-        register_interface_for_device(f"mtia:{i}", MtiaInterface)
-
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
+    register_interface_for_device("tpu", TpuInterface)
 
     _device_initialized = True

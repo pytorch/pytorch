@@ -994,7 +994,7 @@ void log_softmax_lastdim_kernel_impl(
 
 void log_softmax_kernel_impl(const Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(),
-    "softmax_kernel_impl",
+    "log_softmax_kernel_impl",
     [&] { vec_softmax<scalar_t, true>::apply(result, self, dim); });
 }
 

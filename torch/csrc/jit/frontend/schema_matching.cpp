@@ -4,10 +4,8 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
@@ -235,7 +233,7 @@ static Value* tryMatchArgument(
         }
       }
 
-      ostream << ss.str();
+      ostream << std::move(ss).str();
     }
 
     return nullptr;
@@ -249,7 +247,7 @@ std::optional<size_t> findInputWithName(
     bool is_aten) {
   for (const auto i : c10::irange(kwargs.size())) {
     // TS doesn't understand that the self argument in function
-    // scheams is renamed to input for the functional variant
+    // schemas is renamed to input for the functional variant
     if (is_aten && name == "self" && kwargs[i].name() == "input") {
       return i;
     }
@@ -364,7 +362,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
   }
 
   auto err = [&]() -> std::ostream& {
-    *failure_messages << "\n" << schema << ":\n";
+    *failure_messages << '\n' << schema << ":\n";
     return *failure_messages;
   };
 
@@ -549,7 +547,7 @@ MatchedSchema matchSchema(
           /*allow_conversions=*/true)) {
     return *result;
   }
-  throw(ErrorReport(loc) << failure_messages.str());
+  throw(ErrorReport(loc) << std::move(failure_messages).str());
 }
 
 static std::string prefixLine(
@@ -563,7 +561,7 @@ static std::string prefixLine(
     ss.put(c);
     was_newline = c == '\n';
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::pair<size_t, MatchedSchema> matchSchemas(
@@ -613,7 +611,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
                        << "The following variants are available:\n"
                        << prefixLine(failure_messages.str(), "  ")
                        << "\nThe original call is");
-  throw(ErrorReport(loc) << failure_messages.str());
+  throw(ErrorReport(loc) << std::move(failure_messages).str());
 }
 
 // pack outputs of a function following python rules. If there is a single value
@@ -751,7 +749,7 @@ Value* emitBuiltinCall(
     } else {
       error << "Here are some suggestions: \n";
       for (const auto& sym : close_symbols) {
-        error << "\t" << sym.toQualString() << "\n";
+        error << '\t' << sym.toQualString() << '\n';
       }
       error << "\nThe original call is";
     }

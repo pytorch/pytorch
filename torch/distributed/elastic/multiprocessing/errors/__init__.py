@@ -64,8 +64,8 @@ from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
 
-from .error_handler import ErrorHandler  # noqa: F401
-from .handlers import get_error_handler  # noqa: F401
+from .error_handler import ErrorHandler
+from .handlers import get_error_handler
 
 
 __all__ = [
@@ -185,7 +185,7 @@ _FAILURE_FORMAT_TEMPLATE = """[${idx}]:
   time      : ${time}
   host      : ${hostname}
   rank      : ${rank} (local_rank: ${local_rank})
-  exitcode  : ${exitcode} (pid: ${pid})
+  exitcode  : ${exitcode} (pid: ${pid}) ${signal_name}
   error_file: ${error_file}
   traceback : ${message}"""
 
@@ -240,9 +240,9 @@ class ChildFailedError(Exception):
     def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
-        assert (
-            self.failures
-        )  # does not make sense to create a ChildFaileError with no failures
+        # does not make sense to create a ChildFailedError with no failures
+        if not self.failures:
+            raise AssertionError
         super().__init__(self.format_msg())
 
     def get_first_failure(self) -> tuple[GlobalRank, ProcessFailure]:
@@ -294,6 +294,22 @@ class ChildFailedError(Exception):
                 .replace("\n", "\n  ")  # to properly indent the traceback
             )
 
+        # For signal failures, let the (build-swapped) handler append
+        # device-fault context (e.g. ROCm GPU faults) to the rendered message.
+        # Works on the local string, so error_file_data is never mutated, and it
+        # is a no-op in OSS (the base handler returns the message unchanged).
+        # Best-effort: never let a handler override break failure rendering.
+        if failure.exitcode < 0:
+            try:
+                msg = get_error_handler().maybe_enrich_signal_failure_message(
+                    msg, failure.error_file
+                )
+            except Exception:
+                logger.warning("Failed to enrich signal failure message", exc_info=True)
+
+        signal_name = failure.signal_name()
+        signal_name_str = f" ({signal_name})" if signal_name != _NOT_AVAILABLE else ""
+
         fmt = Template(_FAILURE_FORMAT_TEMPLATE).substitute(
             idx=idx,
             time=failure.timestamp_isoformat(),
@@ -302,6 +318,7 @@ class ChildFailedError(Exception):
             local_rank=failure.local_rank,
             exitcode=failure.exitcode,
             pid=failure.pid,
+            signal_name=signal_name_str,
             error_file=failure.error_file,
             message=msg,
         )
@@ -312,8 +329,8 @@ class ChildFailedError(Exception):
 
 
 def record(
-    fn: Callable[_P, _R], error_handler: Optional[ErrorHandler] = None
-) -> Callable[_P, Union[_R, None]]:
+    fn: Callable[_P, _R], error_handler: ErrorHandler | None = None
+) -> Callable[_P, _R | None]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -323,6 +340,7 @@ def record(
     ::
 
      error_handler = get_error_handler()
+     error_handler.set_entrypoint_fn_name(foobar.__qualname__)
      error_handler.initialize()
      try:
          foobar()
@@ -353,13 +371,17 @@ def record(
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f: Callable[_P, _R]) -> Callable[_P, Union[_R, None]]:
+    def wrap(f: Callable[_P, _R]) -> Callable[_P, _R | None]:
         @wraps(f)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):
-            assert error_handler is not None  # assertion for mypy type checker
+            if error_handler is None:
+                raise AssertionError  # assertion for mypy type checker
+            # f may be a functools.partial (or other callable) without a
+            # __qualname__; attribute the error to the fn name when available.
+            error_handler.set_entrypoint_fn_name(getattr(f, "__qualname__", None))
             error_handler.initialize()
             try:
-                return f(*args, **kwargs)
+                result = f(*args, **kwargs)
             except SystemExit as se:
                 # For run_path based entrypoints, SystemExit with code = 0 will never exit.
                 # Handling it here by returning a value:
@@ -384,6 +406,11 @@ def record(
             except Exception as e:
                 error_handler.record_exception(e)
                 raise
+            # Reached only when f() returned without raising. Kept outside the
+            # try so a subclass record_success() that raises is NOT caught by the
+            # handlers above (which would misreport success as a failure).
+            error_handler.record_success()
+            return result
 
         return wrapper
 

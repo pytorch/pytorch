@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import cmath
 import dataclasses
 import importlib
 import inspect
@@ -12,6 +13,7 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
+from torch._dynamo.testing import CompileCounter
 from torch._dynamo.trace_rules import (
     LEGACY_MOD_INLINELIST,
     load_object,
@@ -21,13 +23,20 @@ from torch._dynamo.trace_rules import (
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
-from torch._dynamo.utils import hashable, is_safe_constant, istype
+from torch._dynamo.utils import hashable, is_compile_supported, is_safe_constant, istype
 from torch._dynamo.variables import (
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfWindows,
+    TEST_CUDA,
+    TEST_XPU,
+)
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 try:
@@ -47,6 +56,7 @@ ignored_c_binding_in_graph_function_names = {
     "torch.sparse_csc_tensor",
     "torch.sparse_csr_tensor",
     "torch.cuda._get_device_properties",
+    "torch.xpu._get_device_properties",
     # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
@@ -71,7 +81,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch.resize_as_",
     "torch.resize_as_sparse_",
     "torch._C._data_address",
-    "torch._C._is_cow_tensor",
     "torch._lazy_clone",
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
@@ -164,7 +173,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
                     c_binding_in_graph_functions.add(obj)
 
     def _is_allowed_module_prefix(obj):
-        allowed_modules = ("torch", "math")
+        allowed_modules = ("torch", "math", "cmath")
         # torch.nn.modules.rnn is disallowed because these modules internally
         # flatten their parameters.  This flattening process will call
         # Tensor.set_ with a Storage, and Storages cannot be traced with
@@ -206,7 +215,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._lobpcg",
             "torch._logging",
             "torch._meta_registrations",
-            "torch._namedtensor_internals",
             "torch._numpy",
             "torch._sources",
             "torch._subclasses",
@@ -297,6 +305,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
     _find_torch_objects(torch)
     _find_torch_objects(math)
+    _find_torch_objects(cmath)
 
     return AllowedObjects(
         torch_object_ids,
@@ -335,10 +344,24 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             else:
                 self.assertTrue(
                     isinstance(mod, types.ModuleType),
-                    f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
+                    lambda msg: f"{msg}\n{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
                     "is not a python module, please check and correct it.",
                 )
 
+    @unittest.skipUnless(TEST_XPU or TEST_CUDA, "GPU is not available")
+    def test_gpu_manual_seed_functions_graph_break(self):
+        for name in (
+            f"torch.{GPU_TYPE}.manual_seed",
+            f"torch.{GPU_TYPE}.manual_seed_all",
+            f"torch.{GPU_TYPE}.random.manual_seed",
+            f"torch.{GPU_TYPE}.random.manual_seed_all",
+        ):
+            self.assertIs(
+                torch._dynamo.trace_rules.lookup(load_object(name)),
+                SkipFunctionVariable,
+            )
+
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(
         "This test keeps getting broken and our disable infra is not handling well. see #120627"
     )
@@ -414,6 +437,21 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
+    @parametrize("device", ("cuda", torch.device("cuda")))
+    def test_is_compile_supported_constant(self, device):
+        def fn(x, device):
+            if is_compile_supported(device):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(3)
+        expected = x + 1 if is_compile_supported(device) else x - 1
+        cnt = CompileCounter()
+        opt_fn = torch.compile(backend=cnt, fullgraph=True)(fn)
+        self.assertEqual(expected, opt_fn(x, device))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_force_inline_custom_function(self):
         mod, func = create_dummy_module_and_function()
 
@@ -443,12 +481,18 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ),
         ):
             # First adding the module to SKIP_DIRS so that it will be skipped by default.
-            torch._dynamo.trace_rules.add(mod.__name__)
-            x = torch.rand(3)
-            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-            ref = fn(x)
-            res = opt_fn(x)
-            self.assertEqual(ref, res)
+            skip_dirs_backup = torch._dynamo.trace_rules.SKIP_DIRS.copy()
+            skip_dirs_re_backup = torch._dynamo.trace_rules.SKIP_DIRS_RE
+            try:
+                torch._dynamo.trace_rules.add(mod.__name__)
+                x = torch.rand(3)
+                opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+                ref = fn(x)
+                res = opt_fn(x)
+                self.assertEqual(ref, res)
+            finally:
+                torch._dynamo.trace_rules.SKIP_DIRS = skip_dirs_backup
+                torch._dynamo.trace_rules.SKIP_DIRS_RE = skip_dirs_re_backup
 
     def test_no_special_handlers_for_torch_non_c_bindings(self):
         handlers = TorchInGraphFunctionVariable._get_handlers()
@@ -467,6 +511,9 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_assert",  # No global state (constant)
             "handle_nested_tensor",  # No global state
             "handle_current_stream",  # Safely implemented
+            "handle_synchronize",  # Device type from function identity or arg
+            "handle_functorch_autograd_grad",  # Only inspects placeholder metadata
+            "handle_set_tensor_requires_grad",  # Only re-reads the proxy's own metadata
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):
@@ -478,7 +525,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(
                 fn_name in torch_non_c_binding_in_graph_functions,
                 (
-                    f"torch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
+                    lambda msg: f"{msg}\ntorch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
                     "We expected all functions in `torch_non_c_binding_in_graph_functions` to be safe to cache.\n"
                     "Functions with special handlers may not be safe to cache, since they can close over global state.\n"
                     "If your handler/function is safe to cache, please add it to the list of safe handlers above.\n"
@@ -487,7 +534,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     def test_almost_impossible_missing_name(self):
-        class weird:  # noqa: UP004
+        class weird:
             def __getattribute__(self, name):
                 if name == "__name__":
                     raise AttributeError("test")
@@ -519,6 +566,35 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             frame_count_after > frame_count_before, "MLP did not survive skip files"
         )
+
+
+class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
+    def test_top_level_torch_exp_compiles_through_dynamo(self):
+        x = torch.randn(4)
+
+        # Sanity: lambda version should go through Dynamo
+        lambda_counter = CompileCounter()
+        opt_lambda = torch.compile(lambda t: torch.exp(t), backend=lambda_counter)
+        y_lambda = opt_lambda(x)
+        self.assertEqual(
+            lambda_counter.frame_count,
+            1,
+            "Sanity check failed: lambda version did not compile through Dynamo exactly once.",
+        )
+        # Regression target: torch.compile(torch.exp)
+        top_level_counter = CompileCounter()
+        opt_exp = torch.compile(torch.exp, backend=top_level_counter)
+        y_exp = opt_exp(x)
+        self.assertEqual(
+            top_level_counter.frame_count,
+            1,
+            "Expected torch.compile(torch.exp) to compile through Dynamo exactly once.",
+        )
+        # Numerical results should match
+        self.assertTrue(torch.allclose(y_lambda, y_exp))
+
+
+instantiate_parametrized_tests(TraceRuleTests)
 
 
 if __name__ == "__main__":

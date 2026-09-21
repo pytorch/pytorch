@@ -1,15 +1,7 @@
 #include <torch/nn/functional/batchnorm.h>
 #include <torch/nn/modules/batchnorm.h>
 
-#include <torch/cuda.h>
-#include <torch/types.h>
-
 #include <c10/util/Exception.h>
-
-#include <cstddef>
-#include <ostream>
-#include <utility>
-#include <vector>
 
 namespace torch::nn {
 

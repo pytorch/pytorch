@@ -55,12 +55,15 @@ class BenchmarkRunner:
     def run(self) -> None:
         torch.set_default_device("cuda")
         args = self.parser.parse_args()
+        # Set environment variables to control autoheuristic behavior
+        import os
+
         if args.use_heuristic:
-            torch._inductor.config.autoheuristic_use = self.name
-            torch._inductor.config.autoheuristic_collect = ""
+            os.environ["TORCHINDUCTOR_AUTOHEURISTIC_USE"] = self.name
+            os.environ["TORCHINDUCTOR_AUTOHEURISTIC_COLLECT"] = ""
         else:
-            torch._inductor.config.autoheuristic_use = ""
-            torch._inductor.config.autoheuristic_collect = self.name
+            os.environ["TORCHINDUCTOR_AUTOHEURISTIC_USE"] = ""
+            os.environ["TORCHINDUCTOR_AUTOHEURISTIC_COLLECT"] = self.name
         torch._inductor.config.autoheuristic_log_path = args.o
         if args.device is not None:
             torch.cuda.set_device(args.device)

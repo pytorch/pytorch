@@ -1,18 +1,17 @@
 from collections import defaultdict
 from collections.abc import Callable
-from typing import Optional, Union
 
 import torch
 from torch import nn, Tensor
 
 
 # Type helpers
-InputsType = Union[Tensor, tuple[Tensor, ...]]
+InputsType = Tensor | tuple[Tensor, ...]
 # A Getter takes in a device and returns a callable and the inputs to that callable
 GetterReturnType = tuple[Callable[..., Tensor], InputsType]
 GetterType = Callable[[torch.device], GetterReturnType]
 # V here refers to the v in either vjp, jvp, vhp or hvp
-VType = Union[None, Tensor, tuple[Tensor, ...]]
+VType = None | Tensor | tuple[Tensor, ...]
 # Type used to store timing results. The first key is the model name, the second key
 # is the task name, the result is a Tuple of: speedup, mean_before, var_before, mean_after, var_after.
 TimingResultType = dict[str, dict[str, tuple[float, ...]]]
@@ -78,7 +77,7 @@ def load_weights(mod: nn.Module, names: list[str], params: tuple[Tensor, ...]) -
 
 # Utilities to read/write markdown table-like content.
 def to_markdown_table(
-    res: TimingResultType, header: Optional[tuple[str, ...]] = None
+    res: TimingResultType, header: tuple[str, ...] | None = None
 ) -> str:
     if header is None:
         header = ("model", "task", "mean", "var")

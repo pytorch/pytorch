@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 
-#include <torch/csrc/jit/frontend/tree.h>
-
 namespace torch::jit {
 
 // Avoid storing objects with destructor in thread_local for mobile build.
@@ -80,13 +78,13 @@ static std::string get_stacked_errors(const std::vector<Call>& error_stack) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
       auto callee = it + 1;
 
-      msg << "'" << it->fn_name
+      msg << '\'' << it->fn_name
           << "' is being compiled since it was called from '" << callee->fn_name
           << "'\n";
       callee->caller_range.highlight(msg);
     }
   }
-  return msg.str();
+  return std::move(msg).str();
 }
 
 std::string ErrorReport::current_call_stack() {
@@ -99,13 +97,13 @@ std::string ErrorReport::current_call_stack() {
 
 const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
-  msg << "\n" << ss.str();
+  msg << '\n' << ss.str();
   msg << ":\n";
   context.highlight(msg);
 
   msg << get_stacked_errors(error_stack);
 
-  the_message = msg.str();
+  the_message = std::move(msg).str();
   return the_message.c_str();
 }
 

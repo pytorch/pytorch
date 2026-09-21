@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -107,9 +108,9 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(tangents_1, [1, 0])
         mm_1: "f32[2, 3]" = torch.ops.aten.mm.default(transpose_1, primals_3);  transpose_1 = primals_3 = None
         transpose_2: "f32[3, 2]" = torch.ops.prims.transpose.default(mm_1, [1, 0]);  mm_1 = None
@@ -289,7 +290,7 @@ class inner_f(torch.nn.Module):
             None,  # None
             None,  # None
         ], self._out_spec)
-""",  # noqa: B950
+""",
             )
 
             # Compile the result
@@ -361,9 +362,9 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, primals_4);  add = None
         mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, primals_4);  tangents_1 = primals_4 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(mul_3, [1, 0])
@@ -443,15 +444,15 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_5, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         transpose_1: "f32[3, 4]" = torch.ops.prims.transpose.default(primals_3, [1, 0]);  primals_3 = None
         mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(primals_5, transpose_1);  transpose_1 = None
         mul_2: "f32[4, 4]" = torch.ops.prims.mul.default(mm_1, 1.0);  mm_1 = None
-        mul_3: "f32[4]" = torch.ops.prims.mul.default(primals_4, 1.0);  primals_4 = None
-        broadcast_in_dim_1: "f32[4, 4]" = torch.ops.prims.broadcast_in_dim.default(mul_3, [4, 4], [1]);  mul_3 = None
-        add_1: "f32[4, 4]" = torch.ops.prims.add.default(mul_2, broadcast_in_dim_1);  mul_2 = broadcast_in_dim_1 = None
+        broadcast_in_dim_1: "f32[4, 4]" = torch.ops.prims.broadcast_in_dim.default(primals_4, [4, 4], [1]);  primals_4 = None
+        mul_3: "f32[4, 4]" = torch.ops.prims.mul.default(broadcast_in_dim_1, 1.0);  broadcast_in_dim_1 = None
+        add_1: "f32[4, 4]" = torch.ops.prims.add.default(mul_2, mul_3);  mul_2 = mul_3 = None
         transpose_2: "f32[4, 4]" = torch.ops.prims.transpose.default(tangents_2, [1, 0])
         mm_2: "f32[4, 3]" = torch.ops.aten.mm.default(transpose_2, primals_5);  transpose_2 = None
         transpose_3: "f32[3, 4]" = torch.ops.prims.transpose.default(mm_2, [1, 0]);  mm_2 = None
@@ -475,7 +476,7 @@ class inner_f(torch.nn.Module):
             as_strided,  # GradAOTOutput(grad_of=ParamAOTInput(target='linear2.bias'))
             None,  # None
         ], self._out_spec)
-""",  # noqa: B950
+""",
             )
 
             # Compile the result
@@ -973,6 +974,89 @@ class inner_f(torch.nn.Module):
 ('call_function', 't_3', {'pp_stage': 0})""",
             )
 
+    def test_annotate_fn_anchors_nested_functional_call(self):
+        import torch.nn.functional as F
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        @fx_traceback.annotate_fn({"module_fqn": "loss"})
+        def compute_loss(pred, labels):
+            return F.cross_entropy(pred, labels)
+
+        def fwd(pred, labels):
+            return compute_loss(pred, labels)
+
+        gm = make_fx(fwd, record_stack_traces=True)(
+            torch.randn(4, 8), torch.randint(0, 8, (4,))
+        )
+        decomp_traces = [
+            n.meta.get("stack_trace") or ""
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and any(p in n.name for p in ("log_softmax", "nll_loss"))
+        ]
+        self.assertTrue(decomp_traces)
+        for st in decomp_traces:
+            self.assertIn("compute_loss", st)
+
+    def test_annotate_fn_anchors_pure_tensor_ops(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        @fx_traceback.annotate_fn({"module_fqn": "decorated"})
+        def user_fn(x, y):
+            return (x * 2.0).sum() / y
+
+        def control_fn(x, y):
+            return (x * 2.0).sum() / y
+
+        x, y = torch.randn(4), torch.tensor(2.0)
+
+        gm = make_fx(lambda a, b: user_fn(a, b), record_stack_traces=True)(x, y)
+        anchored = [
+            n.meta.get("stack_trace") or ""
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and "user_fn" in (n.meta.get("stack_trace") or "")
+        ]
+        self.assertGreaterEqual(len(anchored), 3)
+
+        gm_ctl = make_fx(lambda a, b: control_fn(a, b), record_stack_traces=True)(x, y)
+        anchored_ctl = [
+            n.meta.get("stack_trace") or ""
+            for n in gm_ctl.graph.nodes
+            if n.op == "call_function"
+            and "control_fn" in (n.meta.get("stack_trace") or "")
+        ]
+        self.assertEqual(len(anchored_ctl), 0)
+
+    def test_annotate_fn_nested_with_module_forward(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        class Inner(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4, bias=False)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        inner = Inner()
+
+        @fx_traceback.annotate_fn({"module_fqn": "outer"})
+        def outer_user_fn(x):
+            return inner(x)
+
+        gm = make_fx(lambda a: outer_user_fn(a), record_stack_traces=True)(
+            torch.randn(2, 4)
+        )
+
+        mm_node = next(
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target.__name__ == "mm.default"
+        )
+        self.assertIn("stack_trace", mm_node.meta)
+        self.assertGreater(len(mm_node.meta["stack_trace"]), 0)
+
     @skipIfCrossRef
     def test_custom_op_stack_trace(self):
         @torch.library.custom_op("my_lib::foo", mutates_args={})
@@ -1091,6 +1175,173 @@ class inner_f(torch.nn.Module):
                     inputs,
                 )
         self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
+
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182599")
+    def test_no_annotation_on_gradient_acc_nodes(self):
+        """Test basic linear module with aot_export_joint_with_descriptors"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+                self.linear2 = nn.Linear(3, 2)
+
+            def forward(self, x):
+                with fx_traceback.annotate({"test": 1}):
+                    return self.linear(x) - self.linear2(x)
+
+        model = SimpleLinear()
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        graph_module = graph_capture(model, inputs, True)
+        add_nodes = graph_module.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.add.Tensor
+        )
+        self.assertEqual(len(add_nodes), 1)
+        gradient_acc_node = add_nodes[0]
+        self.assertTrue(gradient_acc_node.meta["is_gradient_acc"])
+        self.assertEqual(gradient_acc_node.meta.get("custom", {}), {})
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('call_function', 't', {'test': 1})
+('call_function', 'addmm', {'test': 1})
+('call_function', 't_1', {'test': 1})
+('call_function', 'addmm_1', {'test': 1})
+('call_function', 'sub', {'test': 1})
+('call_function', 'neg', {'test': 1})
+('call_function', 't_2', {'test': 1})
+('call_function', 'mm', {'test': 1})
+('call_function', 't_3', {'test': 1})
+('call_function', 'mm_1', {'test': 1})
+('call_function', 't_4', {'test': 1})
+('call_function', 'sum_1', {'test': 1})
+('call_function', 'view', {'test': 1})
+('call_function', 't_5', {'test': 1})
+('call_function', 't_6', {'test': 1})
+('call_function', 'mm_2', {'test': 1})
+('call_function', 't_7', {'test': 1})
+('call_function', 'mm_3', {'test': 1})
+('call_function', 't_8', {'test': 1})
+('call_function', 'sum_2', {'test': 1})
+('call_function', 'view_1', {'test': 1})
+('call_function', 't_9', {'test': 1})""",
+        )
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_annotate_invoke_subgraph_simple(self):
+        class Bar(nn.Module):
+            @torch.compiler.nested_compile_region
+            def forward(self, x):
+                with fx_traceback.annotate({"mod_name": "bar"}):
+                    y = x.sin()
+                    return y * 1
+
+        class MyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                with fx_traceback.annotate({"mod_name": "my_mod"}):
+                    z = self.bar(x)
+                return z - 1
+
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        model = MyMod()
+
+        # invoke_subgraph doesn't seem to work with with_export=False, no subgraph created
+        graph_module = graph_capture(model, inputs, with_export=True)
+
+        # Check seq_nr ordering for top-level graph
+        top_level_groups = fx_traceback._get_ordered_seq_nr_groups(graph_module)
+        self.assertEqual(
+            top_level_groups,
+            [
+                ["getitem", "getitem_1", "invoke_subgraph", "invoke_subgraph_1"],
+                ["sub"],
+            ],
+        )
+
+        # Check seq_nr ordering for repeated_subgraph0 (forward subgraph)
+        subgraph0_groups = fx_traceback._get_ordered_seq_nr_groups(
+            graph_module.repeated_subgraph0
+        )
+        self.assertEqual(subgraph0_groups, [["sin"], ["mul"]])
+
+        # Check seq_nr ordering for repeated_subgraph1 (backward/joint subgraph)
+        # Note that the backward graph of the invoke_subgraph here is the joint graph! It's a separately
+        # traced joint graph, so the seq_nr will not match the forward invoke_subgraph node's subgraph seq_nr.
+        subgraph1_groups = fx_traceback._get_ordered_seq_nr_groups(
+            graph_module.repeated_subgraph1
+        )
+        self.assertEqual(subgraph1_groups, [["cos", "mul_2", "sin"], ["mul", "mul_1"]])
+
+        # The annotation is not checked here because we used ignore_comments = True.
+        # The comments here are helpful for human to read and understand the unit test.
+        self.assertExpectedInline(
+            normalize_gm(graph_module.print_readable(print_output=False)),
+            """\
+class inner_f(torch.nn.Module):
+    def forward(self, primals, tangents):
+        primals_1: "f32[4, 3]"; tangents_1: "f32[4, 3]";
+
+        primals_1, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+        # Annotation: {'mod_name': 'my_mod', 'seq_nr': 11} File: test_aot_joint_with_descriptors.py:1161 in forward, code: z = self.bar(x)
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'fw_subgraph_0', primals_1);  repeated_subgraph0 = None
+        getitem: "f32[4, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        # Annotation: {'seq_nr': 12} File: test_aot_joint_with_descriptors.py:1162 in forward, code: return z - 1
+        sub: "f32[4, 3]" = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+
+        # Annotation: {'mod_name': 'my_mod', 'seq_nr': 11} File: test_aot_joint_with_descriptors.py:1161 in forward, code: z = self.bar(x)
+        repeated_subgraph1 = self.repeated_subgraph1
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'bw_subgraph_0_0', primals_1, tangents_1);  repeated_subgraph1 = primals_1 = tangents_1 = None
+        getitem_1: "f32[4, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return pytree.tree_unflatten([sub, getitem_1], self._out_spec)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]"):
+            # Annotation: {'mod_name': 'bar', 'seq_nr': -1} File: test_aot_joint_with_descriptors.py:1151 in forward, code: y = x.sin()
+            sin: "f32[4, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+
+            # Annotation: {'mod_name': 'bar', 'seq_nr': 0} File: test_aot_joint_with_descriptors.py:1152 in forward, code: return y * 1
+            mul: "f32[4, 3]" = torch.ops.aten.mul.Tensor(sin, 1);  sin = None
+            return (mul,)
+
+    class repeated_subgraph1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[4, 3]"):
+            # Annotation: {'mod_name': 'bar', 'seq_nr': 13} File: test_aot_joint_with_descriptors.py:1151 in forward, code: y = x.sin()
+            sin: "f32[4, 3]" = torch.ops.aten.sin.default(arg0_1)
+
+            # Annotation: {'mod_name': 'bar', 'seq_nr': 14} File: test_aot_joint_with_descriptors.py:1152 in forward, code: return y * 1
+            mul: "f32[4, 3]" = torch.ops.aten.mul.Tensor(sin, 1);  sin = None
+            mul_1: "f32[4, 3]" = torch.ops.aten.mul.Tensor(arg1_1, 1);  arg1_1 = None
+
+            # Annotation: {'mod_name': 'bar', 'seq_nr': 13} File: test_aot_joint_with_descriptors.py:1151 in forward, code: y = x.sin()
+            cos: "f32[4, 3]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+            mul_2: "f32[4, 3]" = torch.ops.aten.mul.Tensor(mul_1, cos);  mul_1 = cos = None
+            return (mul_2, mul)
+""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        # TODO (shangdiy): need to remove the annotation the forward subggraph's placeholders and output.
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('get_attr', 'repeated_subgraph0', {'mod_name': 'my_mod'})
+[('placeholder', 'arg0_1', {'mod_name': 'my_mod'}), ('call_function', 'sin', {'mod_name': 'bar'}), ('call_function', 'mul', {'mod_name': 'bar'}), ('output', 'output', {'mod_name': 'my_mod'})]
+('call_function', 'invoke_subgraph', {'mod_name': 'my_mod', 'call_id': 1})
+('call_function', 'getitem', {'mod_name': 'my_mod'})
+('get_attr', 'repeated_subgraph1', {'mod_name': 'my_mod'})
+[('placeholder', 'arg0_1', {'mod_name': 'my_mod'}), ('placeholder', 'arg1_1', {'mod_name': 'my_mod'}), ('call_function', 'sin', {'mod_name': 'bar'}), ('call_function', 'mul', {'mod_name': 'bar'}), ('call_function', 'mul_1', {'mod_name': 'bar'}), ('call_function', 'cos', {'mod_name': 'bar'}), ('call_function', 'mul_2', {'mod_name': 'bar'}), ('output', 'output', {'mod_name': 'my_mod'})]
+('call_function', 'invoke_subgraph_1', {'call_id': 1, 'mod_name': 'my_mod'})
+('call_function', 'getitem_1', {'mod_name': 'my_mod'})""",
+        )
 
 
 if __name__ == "__main__":

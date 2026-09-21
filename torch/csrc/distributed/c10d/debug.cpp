@@ -9,10 +9,8 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <string>
 
-#include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/distributed/c10d/logging.h>
 
 namespace c10d {
@@ -43,7 +41,8 @@ DebugLevel loadDebugLevelFromEnvironment() {
   } else if (level_str == "DETAIL") {
     level = DebugLevel::Detail;
   } else {
-    throw std::invalid_argument(
+    TORCH_CHECK_VALUE(
+        false,
         "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL.");
   }
 

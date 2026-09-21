@@ -3,8 +3,9 @@ import gc
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Optional
 from typing_extensions import Self
+
+from sympy.core.cache import clear_cache as clear_sympy_cache
 
 import torch._C._instruction_counter as i_counter
 import torch._dynamo.config as config
@@ -55,7 +56,7 @@ if log_to_scuba:
         # A unique number for each run of a particular workflow in a repository, e.g., 238742. Derived from GITHUB_RUN_NUMBER.
         28: optional string github_run_number_str;
         }
-        """,  # noqa: B950
+        """,
     )
 
 
@@ -114,7 +115,7 @@ class BenchmarkBase(ABC):
     def device(self) -> str:
         return self._device
 
-    def is_dynamic(self) -> Optional[bool]:
+    def is_dynamic(self) -> bool | None:
         return self._dynamic
 
     def description(self) -> str:
@@ -131,11 +132,23 @@ class BenchmarkBase(ABC):
     def _prepare_once(self) -> None:  # noqa: B027
         pass
 
+    @staticmethod
+    def _clear_sympy_interning_cache() -> None:
+        # Sympy's cacheit LRU caches double as an interning table: evictions
+        # mean structurally equal expressions stop being identity-equal, which
+        # permanently degrades ShapeEnv cache lookups (deep __eq__ instead of
+        # pointer comparison). Which entries got evicted depends on what
+        # happened to run earlier in the process (e.g. whether inductor was
+        # imported before or during the first measured compile), so clear the
+        # caches before each iteration to measure a deterministic cold state.
+        clear_sympy_cache()
+
     def _count_instructions(self) -> int:
         print(f"collecting instruction count for {self.name()}")
         results = []
         for i in range(self._num_iterations):
             self._prepare()
+            self._clear_sympy_interning_cache()
             id = i_counter.start()
             self._work()
             count = i_counter.end(id)
@@ -153,6 +166,7 @@ class BenchmarkBase(ABC):
             results = []
             for i in range(self._num_iterations):
                 self._prepare()
+                self._clear_sympy_interning_cache()
                 gc.collect()
                 # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner
                 # hence this will only count instruction count spent in compile_inner.

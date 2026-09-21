@@ -215,14 +215,17 @@ class TORCH_API Dispatcher final {
       DispatchKeySet dispatchKeySet,
       Stack* stack) const;
 
-  bool hasBackendFallbackForDispatchKey(DispatchKey dk) {
+  bool hasBackendFallbackForDispatchKey(DispatchKey dk) const {
     auto dispatch_ix = getDispatchTableIndexForDispatchKey(dk);
-    if (dispatch_ix < 0)
+    if (dispatch_ix < 0) {
       return false;
-    return backendFallbackKernels_[dispatch_ix].kernel.isValid();
+    }
+    const auto& kernel = backendFallbackKernels_[dispatch_ix].kernel;
+    return kernel.isValid();
   }
 
-  // Used by torchdeploy/multipy for multiple interpreters racing.
+  // Used by torchdeploy/multipy for multiple  // codespell:ignore: multipy
+  // interpreters racing.
   void waitForDef(const FunctionSchema& schema);
   void waitForImpl(
       const OperatorName& op_name,
@@ -414,7 +417,7 @@ class TORCH_API Dispatcher final {
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
 
   // This condition variable gets notified whenever we add a new def/impl to the
-  // dispatch table.  This is primarily used by multipy/torchdeploy, when
+  // dispatch table.  This is primarily used by multiply/torchdeploy, when
   // we have multiple interpreters trying to register to the dispatch table.
   // In this situation, whenever the non-primary interpreter would have tried
   // to register to the dispatch table, instead it will check to see if the
@@ -491,8 +494,16 @@ class TORCH_API OperatorHandle {
     return operatorDef_->op.getComputedKernelForDispatchKey(k);
   }
 
+  const KernelFunction& lookup(DispatchKeySet ks) const {
+    return operatorDef_->op.lookup(ks);
+  }
+
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();
+  }
+
+  const DispatchKeyExtractor& dispatchKeyExtractor() const {
+    return operatorDef_->op.dispatchKeyExtractor();
   }
 
   void checkInvariants() const {
@@ -551,10 +562,8 @@ class TORCH_API OperatorHandle {
   }
 
   template <typename F>
-  PyObject* getPythonOp(
-      c10::impl::PyInterpreter* self_interpreter,
-      F slow_accessor) const {
-    return operatorDef_->op.getPythonOp(self_interpreter, slow_accessor);
+  PyObject* getPythonOp(F slow_accessor) const {
+    return operatorDef_->op.getPythonOp(slow_accessor);
   }
 
   bool operator==(const OperatorHandle& other) const {

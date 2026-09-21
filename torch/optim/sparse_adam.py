@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Union
 
 import torch
 from torch import Tensor
@@ -15,7 +14,7 @@ class SparseAdam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
+        lr: float | Tensor = 1e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         maximize: bool = False,
@@ -158,7 +157,7 @@ SparseAdam.__doc__ = rf"""SparseAdam implements a masked version of the Adam alg
     It is important to not conflate a semantically sparse tensor (a tensor where many
     of its values are zeros) with a sparse layout tensor (a tensor where ``.is_sparse``
     returns ``True``). The SparseAdam approximation is intended for `semantically` sparse
-    tensors and the sparse layout is only a implementation detail. A clearer implementation
+    tensors and the sparse layout is only an implementation detail. A clearer implementation
     would be to use MaskedTensors, but those are experimental.
 
 

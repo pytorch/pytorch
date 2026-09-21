@@ -2,9 +2,7 @@
 
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/Context.h>
-#include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
-#include <ATen/core/Vitals.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
@@ -14,13 +12,10 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
-#include <c10/util/env.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
-#include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
 #endif
 
@@ -30,13 +25,13 @@
 
 #if defined(USE_ROCM)
 #include <miopen/version.h>
+#include <hipblaslt/hipblaslt-version.h>
 #endif
 
 #ifndef USE_ROCM
 #include <ATen/cuda/detail/LazyNVRTC.h>
 #endif
 
-#include <cuda.h>
 
 #include <sstream>
 #include <cstddef>
@@ -60,7 +55,7 @@ void set_magma_init_fn(void (*fn)()) {
 namespace {
 bool _hasPrimaryContext(DeviceIndex device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
+              "hasPrimaryContext expects a valid device index, but got device_index=", static_cast<int>(device_index));
   unsigned int ctx_flags = 0;
   // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
   // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
@@ -86,9 +81,6 @@ struct _Initializer {
 // let's not if we don't need to!)
 void CUDAHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
-  // Force the update to enable unit testing. This code get executed before unit tests
-  // have a chance to enable vitals.
-  at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
@@ -382,6 +374,16 @@ long CUDAHooks::versionMIOpen() const {
 #endif
 }
 
+long CUDAHooks::versionHipBLASLt() const {
+#if AT_ROCM_ENABLED()
+  return HIPBLASLT_VERSION_MAJOR * 10000 +
+         HIPBLASLT_VERSION_MINOR * 100 +
+         HIPBLASLT_VERSION_PATCH;
+#else
+  TORCH_CHECK(false, "Cannot query HipBLASLt version if ATen_cuda is not built with ROCm");
+#endif
+}
+
 long CUDAHooks::versionCUDART() const {
 #ifdef CUDART_VERSION
   return CUDART_VERSION;
@@ -411,16 +413,16 @@ std::string CUDAHooks::showConfig() const {
     // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
     if(v < 500) {
       // If major=xx, minor=yy then format -> xxyy
-      oss << (v / 100) << "." << (v % 10);
+      oss << (v / 100) << '.' << (v % 10);
     }
     else {
       // If major=xx, minor=yy & patch=zzzzz then format -> xxyyzzzzz
-      oss << (v / 10000000) << "." << (v / 100000 % 100) << "." << (v % 100000);
+      oss << (v / 10000000) << '.' << (v / 100000 % 100) << '.' << (v % 100000);
     }
 #else
-    oss << (v / 1000) << "." << (v / 10 % 100);
+    oss << (v / 1000) << '.' << (v / 10 % 100);
     if (v % 10 != 0) {
-      oss << "." << (v % 10);
+      oss << '.' << (v % 10);
     }
 #endif
   };
@@ -431,16 +433,16 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - HIP Runtime ";
 #endif
   printCudaStyleVersion(runtimeVersion);
-  oss << "\n";
+  oss << '\n';
 
   // TODO: Make HIPIFY understand CUDART_VERSION macro
 #if !defined(USE_ROCM)
   if (runtimeVersion != CUDART_VERSION) {
     oss << "  - Built with CUDA Runtime ";
     printCudaStyleVersion(CUDART_VERSION);
-    oss << "\n";
+    oss << '\n';
   }
-  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << "\n";
+  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << '\n';
 #endif
 
 #if !defined(USE_ROCM)
@@ -448,9 +450,9 @@ std::string CUDAHooks::showConfig() const {
 
 
   auto printCudnnStyleVersion = [&](size_t v) {
-    oss << (v / 1000) << "." << (v / 100 % 10);
+    oss << (v / 1000) << '.' << (v / 100 % 10);
     if (v % 100 != 0) {
-      oss << "." << (v % 100);
+      oss << '.' << (v % 100);
     }
   };
 
@@ -461,25 +463,25 @@ std::string CUDAHooks::showConfig() const {
   if (cudnnCudartVersion != CUDART_VERSION) {
     oss << "  (built against CUDA ";
     printCudaStyleVersion(cudnnCudartVersion);
-    oss << ")";
+    oss << ')';
   }
-  oss << "\n";
+  oss << '\n';
   if (cudnnVersion != CUDNN_VERSION) {
     oss << "    - Built with CuDNN ";
     printCudnnStyleVersion(CUDNN_VERSION);
-    oss << "\n";
+    oss << '\n';
   }
 #endif
 #else
   // TODO: Check if miopen has the functions above and unify
-  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
+  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << '.' << MIOPEN_VERSION_MINOR << '.' << MIOPEN_VERSION_PATCH << '\n';
 #endif
 
 #if AT_MAGMA_ENABLED()
-  oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
+  oss << "  - Magma " << MAGMA_VERSION_MAJOR << '.' << MAGMA_VERSION_MINOR << '.' << MAGMA_VERSION_MICRO << '\n';
 #endif
 
-  return oss.str();
+  return std::move(oss).str();
 }
 
 double CUDAHooks::batchnormMinEpsilonCuDNN() const {
@@ -539,6 +541,41 @@ bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex dev
       }
   }
   return false;
+}
+
+const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
+  static const std::vector<std::string> archs = {
+    "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60400
+    "gfx1200", "gfx1201",
+#endif
+#if ROCM_VERSION >= 70000
+    "gfx950",
+#endif
+#if ROCM_VERSION >= 71300
+    "gfx1100", "gfx1101", "gfx1151",
+#endif
+#if ROCM_VERSION >= 71400
+    "gfx1250",
+#endif
+  };
+  return archs;
+}
+
+const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
+  static const std::vector<std::string> archs = {
+    "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60300
+    "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
+#endif
+#if ROCM_VERSION >= 70000
+    "gfx950", "gfx1150", "gfx1151",
+#endif
+#if ROCM_VERSION >= 71400
+    "gfx1250"
+#endif
+  };
+  return archs;
 }
 #endif
 

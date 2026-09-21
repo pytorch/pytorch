@@ -13,10 +13,11 @@ import enum
 import functools
 import inspect
 import pickle
+import sys
 import warnings
-from collections.abc import Callable
-from typing import Any, Union
-from typing_extensions import deprecated
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from typing import Any, TypeVar
+from typing_extensions import deprecated, Self
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -54,6 +55,9 @@ from torch.package import PackageExporter, PackageImporter
 from torch.utils import set_module
 
 from ._serialization import validate_map_location
+
+
+_T = TypeVar("_T")
 
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
@@ -250,7 +254,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __setitem__(self, k, v):
         # Cases where sub-module can be re-assigned after ScriptModule construction
-        # 1. If the attr is an module interface type, it's guaranteed that the module is
+        # 1. If the attr is a module interface type, it's guaranteed that the module is
         #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
         # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
         #    and it's legit to swap a new module in.
@@ -280,7 +284,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
 class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):  # noqa: B902
+    def __init__(cls, name, bases, attrs):
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods: dict[str, Any] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))
@@ -351,6 +355,17 @@ class ScriptWarning(Warning):
 
 
 def script_method(fn):
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.script_method` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            FutureWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            FutureWarning,
+        )
     if not _enabled:
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
@@ -371,10 +386,10 @@ def script_method(fn):
 
 
 class ConstMap:
-    def __init__(self, const_mapping):
+    def __init__(self, const_mapping: Mapping[str, Any]) -> None:
         self.const_mapping = const_mapping
 
-    def __getattr__(self, attr):
+    def __getattr__(self, attr: str) -> Any:
         return self.const_mapping[attr]
 
 
@@ -445,7 +460,7 @@ if _enabled:
             _c [torch._C.ScriptObject]: The C++ object to which attribute lookups and method
                 calls are forwarded.
             _props [Dict[str, property]]: A dictionary of properties fetched from self._c and
-                exposed on this wrppaer.
+                exposed on this wrapper.
         """
 
         def __init__(self, cpp_class):
@@ -461,7 +476,7 @@ if _enabled:
 
             self.__dict__["_initializing"] = False
 
-        def __getattr__(self, attr):
+        def __getattr__(self, attr: str) -> Any:
             if self.__dict__.get("_initializing"):
                 return super().__getattr__(attr)  # type: ignore[misc]
 
@@ -470,7 +485,7 @@ if _enabled:
 
             return getattr(self._c, attr)
 
-        def __setattr__(self, attr, value):
+        def __setattr__(self, attr: str, value: Any) -> None:
             if self.__dict__.get("_initializing"):
                 return super().__setattr__(attr, value)
 
@@ -481,7 +496,9 @@ if _enabled:
 
         # Delegate calls to magic methods like __len__ to the C++ module backing the
         # RecursiveScriptClass.
-        def forward_magic_method(self, method_name, *args, **kwargs):
+        def forward_magic_method(
+            self, method_name: str, *args: Any, **kwargs: Any
+        ) -> Any:
             if not self._c._has_method(method_name):
                 raise TypeError
 
@@ -491,7 +508,7 @@ if _enabled:
         def __getstate__(self):
             raise pickle.PickleError("ScriptClasses cannot be pickled")
 
-        def __iadd__(self, other):
+        def __iadd__(self, other: Self) -> Self:
             if self._c._has_method("__iadd__"):
                 return self.forward_magic_method("__iadd__", other)
             else:
@@ -533,12 +550,12 @@ if _enabled:
 
         forward: Callable[..., Any] = _CachedForward()  # type: ignore[assignment]
 
-        def __getattr__(self, attr):
+        def __getattr__(self, attr: str) -> Any:
             if "_actual_script_module" not in self.__dict__:
                 return super().__getattr__(attr)
             return getattr(self._actual_script_module, attr)
 
-        def __setattr__(self, attr, value):
+        def __setattr__(self, attr: str, value: Any) -> None:
             if "_actual_script_module" not in self.__dict__:
                 # Unwrap torch.jit.Attribute into a regular setattr + record
                 # the provided type in __annotations__.
@@ -551,9 +568,9 @@ if _enabled:
                     # class in question, and not on a superclass (which would
                     # be wrong wrong wrong!).
                     # See also https://github.com/pytorch/pytorch/issues/39463
-                    if "__annotations__" not in self.__class__.__dict__:
-                        self.__class__.__annotations__ = {}
-                    self.__annotations__[attr] = value.type
+                    # Off the class: one without its own annotations gets a
+                    # fresh dict, not the superclass's, and writes persist.
+                    self.__class__.__annotations__[attr] = value.type
                     value = value.value
                 return super().__setattr__(attr, value)
 
@@ -774,7 +791,7 @@ if _enabled:
             warnings.warn(
                 "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
                 https://docs.pytorch.org/executorch/stable/getting-started.html",
-                DeprecationWarning,
+                FutureWarning,
                 stacklevel=2,
             )
             return self._c._save_for_mobile(*args, **kwargs)
@@ -787,25 +804,26 @@ if _enabled:
             warnings.warn(
                 "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
                 https://docs.pytorch.org/executorch/stable/getting-started.html",
-                DeprecationWarning,
+                FutureWarning,
                 stacklevel=2,
             )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
-        def save_to_buffer(self, *args, **kwargs):
+        def save_to_buffer(self, *args: Any, **kwargs: Any) -> Any:
             return self._c.save_to_buffer(*args, **kwargs)
 
-        def get_debug_state(self, *args, **kwargs):
+        def get_debug_state(self, *args: Any, **kwargs: Any) -> Any:
             return self._c.get_debug_state()
 
-        def extra_repr(self):
+        def extra_repr(self) -> str:
             return f"original_name={self.original_name}"
 
-        def graph_for(self, *args, **kwargs):
+        def graph_for(self, *args: Any, **kwargs: Any) -> Any:
             return self.forward.graph_for(self, *args, **kwargs)  # type: ignore[attr-defined]
 
         @property
         def original_name(self):
+            # pyrefly: ignore [unnecessary-comparison]
             if type(self) is str(self._c._type().name()):
                 return ""
             return str(self._c._type().name())
@@ -822,7 +840,7 @@ if _enabled:
             rcb = _jit_internal.createResolutionCallbackFromFrame(frames_up=1)
             self._c._define(self._concrete_type, src, rcb)
 
-        def __getattr__(self, attr):
+        def __getattr__(self, attr: str) -> Any:
             if "_initializing" not in self.__dict__:
                 raise RuntimeError(
                     "ScriptModule has not been initialized, did you forget to call super's init?"
@@ -846,7 +864,7 @@ if _enabled:
 
             return super().__getattr__(attr)
 
-        def __setattr__(self, attr, value):
+        def __setattr__(self, attr: str, value: Any) -> None:
             if self._initializing:
                 return super().__setattr__(attr, value)
 
@@ -873,17 +891,19 @@ if _enabled:
                 # It's fairly trivial to save enough info to warn in this case.
                 return super().__setattr__(attr, value)
 
-        def __copy__(self):
+        def __copy__(self) -> Self:
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
 
-        def __deepcopy__(self, memo):
+        def __deepcopy__(self, memo: dict[int, Any] | None) -> Self:
             return torch.jit._recursive.wrap_cpp_module(copy.deepcopy(self._c, memo))
 
         # Python magic methods do method lookups on an object's class type, instead of looking up
         # the method defines on the class instance. In order to continue to expose the magic methods
         # of builtin-containers (ModuleList, Sequential, ModuleDict) to Python, we
         # define magic methods here as a shim to the correct attribute.
-        def forward_magic_method(self, method_name, *args, **kwargs):
+        def forward_magic_method(
+            self, method_name: str, *args: Any, **kwargs: Any
+        ) -> Any:
             self_method = getattr(self, method_name)
             if getattr(self_method, "__func__", None) == getattr(
                 RecursiveScriptModule, method_name
@@ -891,10 +911,10 @@ if _enabled:
                 raise NotImplementedError
             return self_method(*args, **kwargs)
 
-        def __iter__(self):
+        def __iter__(self) -> Iterator[Any]:
             return self.forward_magic_method("__iter__")
 
-        def __getitem__(self, idx):
+        def __getitem__(self, idx: int) -> Any:
             return self.forward_magic_method("__getitem__", idx)
 
         def __len__(self):
@@ -905,7 +925,7 @@ if _enabled:
 
         # dir is defined by the base nn.Module, so instead of throwing if
         # it is not overridden, we call into the nn.Module __dir__ method
-        def __dir__(self):
+        def __dir__(self) -> Sequence[str]:
             self_method = self.__dir__
             if (
                 self_method.__func__  # type: ignore[attr-defined]
@@ -1057,7 +1077,10 @@ def call_prepare_scriptable_func_impl(obj, memo):
     for name, sub_module in obj.__dict__.items():
         if name == "_modules":
             for k, v in sub_module.items():
-                sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
+                # Mirror the elif below: skip already-scripted children (re-assigning
+                # a jit-ignored grandchild back into a ScriptModule would raise).
+                if isinstance(v, torch.nn.Module) and not isinstance(v, ScriptModule):
+                    sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
             new_obj_dict[name] = sub_module
         elif isinstance(sub_module, torch.nn.Module) and not isinstance(
             sub_module, ScriptModule
@@ -1116,7 +1139,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ):
     global type_trace_db
 
@@ -1251,12 +1274,12 @@ def _script_impl(
 
 
 def script(
-    obj,
-    optimize=None,
-    _frames_up=0,
-    _rcb=None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
-):
+    obj: Any,
+    optimize: None = None,
+    _frames_up: int = 0,
+    _rcb: Callable[[str], Any] | None = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
+) -> Any:
     r"""Script the function.
 
     Scripting a function or ``nn.Module`` will inspect the source code, compile
@@ -1458,6 +1481,17 @@ def script(
             # Run the scripted_model with actual inputs
             print(scripted_model([20]))
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.script` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            FutureWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            FutureWarning,
+        )
     if not _enabled:
         return obj
     try:
@@ -1555,8 +1589,11 @@ def _check_directly_compile_overloaded(obj):
         )
 
 
-def interface(obj):
+def interface(obj: _T) -> _T:
     r"""Decorate to annotate classes or modules of different types.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     This decorator can be used to define an interface that can be used to annotate
     classes or modules of different types. This can be used for to annotate a submodule
@@ -1603,6 +1640,10 @@ def interface(obj):
         user_fn_jit(impls, 0, val)
         user_fn_jit(impls, 1, val)
     """
+    warnings.warn(
+        "`torch.jit.interface` is deprecated. Please use `torch.compile` instead.",
+        FutureWarning,
+    )
     if not inspect.isclass(obj):
         raise RuntimeError("interface must be applied to a class")
     if not _is_new_style_class(obj):
@@ -1753,7 +1794,8 @@ class _ScriptProfile:
 
 
 def _unwrap_optional(x):
-    assert x is not None, "Unwrapping null optional"
+    if x is None:
+        raise AssertionError("Unwrapping null optional")
     return x
 
 

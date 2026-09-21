@@ -53,7 +53,7 @@ class InstanceNormImpl
            << "momentum=" << this->options.momentum() << ", "
            << "affine=" << this->options.affine() << ", "
            << "track_running_stats=" << this->options.track_running_stats()
-           << ")";
+           << ')';
   }
 };
 

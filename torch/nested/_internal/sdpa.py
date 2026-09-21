@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Optional
 
 import torch
 import torch.nn
@@ -27,7 +26,7 @@ def _validate_sdpa_input(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
     dropout_p=0.0,
     is_causal=False,
     scale=None,
@@ -56,7 +55,7 @@ def _validate_sdpa_input(
         )
     if query.dim() < 3 or key.dim() < 3 or value.dim() < 3:
         raise ValueError(
-            f"Expected query, key, and value to all be  at least 3 dimensional, but got query.dim: "
+            f"Expected query, key, and value to all be at least 3 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
     if query._ragged_idx != key._ragged_idx or query._ragged_idx != value._ragged_idx:
@@ -142,7 +141,8 @@ def _check_head_dim_size_cudnn_nested(params: SDPAParams, debug=False) -> bool:
 def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
     param: torch.Tensor, param_name: str, debug=False
 ) -> bool:
-    assert isinstance(param, NestedTensor), "param should be a jagged NT"
+    if not isinstance(param, NestedTensor):
+        raise AssertionError("param should be a jagged NT")
 
     if param._ragged_idx == 1:
         # num_head_dims is ragged
@@ -247,6 +247,21 @@ def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
     return True
 
 
+def _check_query_seq_len_cudnn_nested(params: SDPAParams, debug=False) -> bool:
+    query = params.query
+    if not isinstance(query, NestedTensor):
+        raise AssertionError("query should be a jagged NT")
+
+    if query._get_max_seqlen() <= 128:
+        if debug:
+            log.warning(
+                "cuDNN attention does not support nested tensor query sequence "
+                "length <= 128."
+            )
+        return False
+    return True
+
+
 def _can_use_flash_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     constraints = (
         _check_batch_size_nested,
@@ -263,6 +278,19 @@ def _can_use_efficient_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     constraints = (
         _check_batch_size_nested,
         _check_for_seq_len_0_nested,
+    )
+    for constraint in constraints:
+        if not constraint(params, debug):
+            return False
+    return True
+
+
+def _can_use_cudnn_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
+    constraints = (
+        _check_batch_size_nested,
+        _check_head_dim_size_cudnn_nested,
+        _check_for_seq_len_0_nested,
+        _check_query_seq_len_cudnn_nested,
     )
     for constraint in constraints:
         if not constraint(params, debug):
@@ -310,7 +338,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
 
     for backend in ordering:
         if backend == SDPBackend.CUDNN_ATTENTION:
-            if can_use_cudnn_attention(params):
+            if can_use_cudnn_attention(params) and _can_use_cudnn_sdpa_jagged(params):
                 return SDPBackend.CUDNN_ATTENTION
         if backend == SDPBackend.FLASH_ATTENTION:
             if can_use_flash_attention(params) and _can_use_flash_sdpa_jagged(params):
@@ -334,6 +362,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
     _can_use_math_sdpa_jagged(params, debug=True)
     log.warning("cuDNN attention kernel not used because:")
     can_use_cudnn_attention(params, debug=True)
+    _can_use_cudnn_sdpa_jagged(params, debug=True)
     return SDPBackend.ERROR
 
 
@@ -370,11 +399,12 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor) -> bool:
     # needing to call contiguous on the nested tensor input.
     # It checks that the storage offsets' adjacent_differences are a constant
     # multiple of the previous tensor in the nested tensor and that the strides
-    # are monitonically decreasing. This check is done after calling transpose on
+    # are monotonically decreasing. This check is done after calling transpose on
     # the nested tensor resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
 
     # Returns a boolean indicating if contiguous needs to be called for input
-    assert isinstance(tensor, NestedTensor)
+    if not isinstance(tensor, NestedTensor):
+        raise AssertionError("tensor must be a NestedTensor")
     offsets = tensor.offsets()
     strides = tensor._strides
 
@@ -668,8 +698,8 @@ def _autocast(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    attn_mask: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """
     [Autocasting SDPA for NJT]
 
@@ -714,7 +744,7 @@ def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
     dropout_p=0.0,
     is_causal=False,
     scale=None,
@@ -723,11 +753,12 @@ def jagged_scaled_dot_product_attention(
     query, key, value, attn_mask = _autocast(query, key, value, attn_mask)
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
     # for mypy, ugh
-    assert (
+    if not (
         isinstance(query, NestedTensor)
         and isinstance(key, NestedTensor)
         and isinstance(value, NestedTensor)
-    )
+    ):
+        raise AssertionError("query, key, and value must all be NestedTensor instances")
     from torch.nested._internal.nested_tensor import (
         nested_view_from_values_offsets_lengths,
     )

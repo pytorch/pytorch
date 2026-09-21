@@ -21,7 +21,6 @@ New operators:
 
 import functools
 from collections.abc import Sequence
-from typing import Optional
 
 import torch
 from torch import _C
@@ -134,7 +133,8 @@ def _native_layer_norm(
 def _glu(g: jit_utils.GraphContext, input, dim):
     dim_size = symbolic_helper._get_tensor_dim_size(input, dim)
     if dim_size is not None:
-        assert dim_size % 2 == 0
+        if dim_size % 2 != 0:
+            raise AssertionError(f"dim_size must be even, got {dim_size}")
 
     first, second = g.op("Split", input, axis_i=dim, num_outputs_i=2, outputs=2)
     return g.op("Mul", first, g.op("Sigmoid", second))
@@ -265,7 +265,7 @@ def linalg_vector_norm(
     g: jit_utils.GraphContext,
     self: torch._C.Value,
     ord: float,
-    dim: Optional[Sequence[int]],
+    dim: Sequence[int] | None,
     keepdim: bool,
     dtype: torch._C.Value,
 ):

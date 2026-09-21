@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
 #include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -203,7 +204,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   if (output_mask[1] || output_mask[2]) {
     std::tie(grad_weight, grad_bias) = at::mkldnn_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
-  return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor, Tensor, Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 Tensor mkldnn_linear_pointwise(
@@ -438,12 +439,12 @@ Tensor mkl_linear(
     auto K = origin_weight_t.size(1);
     auto N = origin_weight_t.size(0);
     const ideep::tensor& w = itensor_from_mkldnn(mkl_weight_t);
-    auto in_ptr = self_.data_ptr<float>();
+    auto in_ptr = self_.const_data_ptr<float>();
     auto weight_ptr = (float*)(w.get_data_handle());
     auto out_ptr = output.data_ptr<float>();
     if (bias.defined()) {
       auto bias_ = bias.is_contiguous() ? bias : bias.contiguous();
-      auto bias_ptr = bias_.data_ptr<float>();
+      const auto bias_ptr = bias_.const_data_ptr<float>();
       at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
         for (const auto d : c10::irange(begin, end)) {
           memcpy(out_ptr + d * N, bias_ptr, sizeof(float) * N);
@@ -507,11 +508,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out) {
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(mat1, mat2, "_scaled_mm");
 
   TORCH_INTERNAL_ASSERT((scale_a.numel() == 1 && scale_b.numel() == 1), "Now _scaled_mm only supports per-tensor scaling for CPU backend.");
   TORCH_CHECK(

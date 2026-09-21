@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 
@@ -10,6 +9,13 @@
 #endif
 
 #if !AT_CUDNN_ENABLED()
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cudnn_batch_norm_backward_native.h>
+#include <ATen/ops/cudnn_batch_norm_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -75,7 +81,6 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
-#include <ATen/cudnn/Utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -87,8 +92,7 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
 #include <ATen/ops/empty_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -442,7 +446,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
       grad_input_t, grad_weight_t, grad_bias_t};
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif

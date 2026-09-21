@@ -3,11 +3,10 @@ import os
 import re
 import warnings
 from collections.abc import Callable
-from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
@@ -143,7 +142,6 @@ class _WeakRefInfo:
         self.size = size
         self.element_size = element_size
         self.reftype = reftype
-        # pyrefly: ignore [read-only]
         self.device = device
         self.mem_consumed = self._calculate_mem_consumed()
 
@@ -180,7 +178,7 @@ class _WeakRefInfo:
         st: torch.UntypedStorage,
         device: torch.device,
         reftype: _RefType,
-        callback: Optional[Callable[[Self, weakref.ref], Any]] = None,
+        callback: Callable[[Self, weakref.ref], Any] | None = None,
     ) -> tuple[Self, weakref.ref]:
         """
         Creates a new ``_WeakRefInfo`` instance and a weak reference to a ``torch.UntypedStorage`` object,
@@ -213,7 +211,7 @@ def _get_mem_divisor(units: str) -> int:
         )
 
 
-def _rounding_fn(value: int, divisor: int, precision: int) -> Union[float, int]:
+def _rounding_fn(value: int, divisor: int, precision: int) -> float | int:
     return value if divisor == 1 else round(value / divisor, precision)
 
 
@@ -311,7 +309,7 @@ def _print_state_snapshots_tabular(
 
 
 class _UpdateType(Enum):
-    # These are used for tracking updates to the continuouly maintained memory snapshot.
+    # These are used for tracking updates to the continuously maintained memory snapshot.
     # ADD - When a new tensor storage is tracked
     # DEL - When a tensor storage is about to be finalized (garbage collected).
     # REF - When a tensor reference is updated, for instance, the gradients are marked as
@@ -369,7 +367,7 @@ class MemTracker(TorchDispatchMode):
         - If the tensors are not traceable or wrappable subclasses of ``torch.Tensor``, then the tracker does not know how to
             track their storages. File a Github issue if you have use-cases for this.
         - During AC in the backward pass there might be misattribution between activation and temp memory, but the peak memory
-          will be tracked accurately. This will be fixed in the next update by hooking intricately with ``torch.uitls.checkpoint``.
+          will be tracked accurately. This will be fixed in the next update by hooking intricately with ``torch.utils.checkpoint``.
     """
 
     def __init__(self) -> None:
@@ -378,9 +376,9 @@ class MemTracker(TorchDispatchMode):
         self._peak_mem: dict[torch.device, int] = {}
         self._peak_mem_snap: dict[torch.device, dict[str, int]] = {}
         self._param_to_grad_hook_handles = WeakIdKeyDictionary()
-        self._optimizer_hook_handles: Optional[
-            tuple[RemovableHandle, RemovableHandle]
-        ] = None
+        self._optimizer_hook_handles: tuple[RemovableHandle, RemovableHandle] | None = (
+            None
+        )
         # Dictionary to store the ``_WeakRefInfo`` instances corresponding to each tensor's storage.
         self._WINFO = WeakIdKeyDictionary()
         self._mod_tracker = ModTracker()
@@ -390,17 +388,16 @@ class MemTracker(TorchDispatchMode):
         self._in_opt: bool = False
         self._in_ac: bool = False
         # Weak references to the topmost AC module currently active
-        self._ac_mod: Optional[weakref.ref] = None
+        self._ac_mod: weakref.ref | None = None
         self._orig_resize = torch.UntypedStorage.resize_
-        self._orig_dtensor_dispatch = DTensor._op_dispatcher.dispatch
         self._depth = 0
 
     def _update_snap(
         self,
         u_type: _UpdateType,
         winfo: _WeakRefInfo,
-        old_mem_consumed: Optional[int] = None,
-        old_reftype: Optional[_RefType] = None,
+        old_mem_consumed: int | None = None,
+        old_reftype: _RefType | None = None,
     ) -> None:
         # Initialize a flag to track if the total memory might drop to zero after updates.
         maybe_zero = False
@@ -421,12 +418,14 @@ class MemTracker(TorchDispatchMode):
             dev_snap[_TOTAL_KEY] -= winfo.mem_consumed
             maybe_zero = True
         elif u_type == _UpdateType.REF:
-            assert old_reftype is not None
+            if old_reftype is None:
+                raise AssertionError
             # Adjust memory consumption between two reference types within the same device.
             dev_snap[old_reftype] -= winfo.mem_consumed
             dev_snap[winfo.reftype] += winfo.mem_consumed
         elif u_type == _UpdateType.SIZE:
-            assert old_mem_consumed is not None
+            if old_mem_consumed is None:
+                raise AssertionError
             # Adjust the memory consumed for a reference type due to a change in size.
             change = winfo.mem_consumed - old_mem_consumed
             dev_snap[winfo.reftype] += change
@@ -648,7 +647,8 @@ class MemTracker(TorchDispatchMode):
         #         used multiple times in the same iteration, which we allow and track.
         # For Case 1 and 3, we also initialize the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
         mod_name = self._mod_tracker.get_known_fqn(module)
-        assert mod_name is not None
+        if mod_name is None:
+            raise AssertionError
         if module not in self.memory_tracking:
             mod_stats = _ModMemStats(mod_name)
             param_mem, buffer_mem = self._track_module_params_and_buffers(
@@ -786,7 +786,7 @@ class MemTracker(TorchDispatchMode):
             self._optimizer_hook_handles = None
 
     def track_external(
-        self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
+        self, *external: nn.Module | optim.Optimizer | torch.Tensor
     ) -> None:
         """
         Track tensors and stateful objects like modules, optimizers etc. that are created outside the MemTracker.
@@ -794,7 +794,7 @@ class MemTracker(TorchDispatchMode):
         This method should be called before the ``MemTracker`` is used. Any tensors that are not module parameters, buffers,
         gradients activations, or optimizer states will be categorized as ``Other``. If you want them categorized with a
         custom name, please file a GitHub issue. Any tensors created outside the MemTracker and not supplied to this
-        method will not be be tracked by ``MemTracker``.
+        method will not be tracked by ``MemTracker``.
 
         Args:
             *external (Union[nn.Module, optim.Optimizer, torch.Tensor]): The external modules, optimizers, and
@@ -852,7 +852,7 @@ class MemTracker(TorchDispatchMode):
             tabulate (bool, optional): Whether to display the snapshot in a tabular format. Defaults to False.
         """
 
-        def natural_sort_key(s: str) -> list[Union[int, str]]:
+        def natural_sort_key(s: str) -> list[int | str]:
             return [
                 int(text) if text.isdigit() else text.lower()
                 for text in re.split("([0-9]+)", s)
@@ -878,26 +878,11 @@ class MemTracker(TorchDispatchMode):
         """
         self.memory_tracking.clear()
 
-    def _track_dtensor_dispatch(self) -> None:
-        def track_dtensor_dispatch(
-            op_call: torch._ops.OpOverload,
-            args: tuple[object, ...],
-            kwargs: dict[str, object],
-        ) -> object:
-            with (
-                self
-                if op_call in DTensor._op_dispatcher._custom_op_handlers
-                else nullcontext()
-            ):
-                return self._orig_dtensor_dispatch(op_call, args, kwargs)
-
-        DTensor._op_dispatcher.dispatch = track_dtensor_dispatch  # type: ignore[method-assign, assignment]
-
-    def _restore_dtensor_dispatch(self) -> None:
-        DTensor._op_dispatcher.dispatch = self._orig_dtensor_dispatch  # type: ignore[method-assign]
-
     def __enter__(self) -> "MemTracker":
         if self._depth == 0:
+            # None in eager, a FakeTensorMode instance in SAC.  Used in
+            # __torch_dispatch__ to skip DTensor propagation ops.
+            self._fake_mode_on_entry = active_fake_mode()
             self._register_global_optimizer_hook()
             self._mod_tracker.register_user_hooks(
                 self._pre_fw_hook,
@@ -906,7 +891,6 @@ class MemTracker(TorchDispatchMode):
                 self._post_bw_hook,
             )
             self._track_resize()
-            self._track_dtensor_dispatch()
             self._peak_mem_snap = self.get_tracker_snapshot()
             self._peak_mem = {
                 dev: dev_snap[_TOTAL_KEY]
@@ -924,31 +908,49 @@ class MemTracker(TorchDispatchMode):
             self._deregister_param_and_optimizer_hooks()
             self._mod_tracker.clear_user_hooks()
             self._restore_resize()
-            self._restore_dtensor_dispatch()
             self._mod_tracker.__exit__(*args)
         super().__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
+        # When running this mode with DTensor, ordinarily all modes will
+        # run **before** subclasses get a chance to run.
+        # Returning NotImplemented here gives us a chance to let DTensor
+        # run and desugar into local tensor ops, before `MemTracker` sees them.
+        if any(t == DTensor for t in types):
+            return NotImplemented
         if (
             func is torch.ops._c10d_functional.wait_tensor.default
             and active_fake_mode()
         ):
             # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
             # a new tensor which does not happen in eager mode, when a wait_tensor is called.
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index]
             res = args[0]
         else:
             res = func(*args, **kwargs or {})
-        # If we are tracking an optimizer state, we use the optimizer reference type.
-        # If we are in backward region and not in AC region, we use the backward reference type.
-        # Else we use the forward reference type.
-        if self._in_opt:
-            reftype = _MemRefType.OPT
-        elif self._mod_tracker.is_bw and not self._in_ac:
-            reftype = _MemRefType.TEMP
-        else:
-            reftype = _MemRefType.ACT
-        tree_map_only(torch.Tensor, partial(self._track, reftype), res)
-        peak_state = _ModState.PEAK_BW if self._mod_tracker.is_bw else _ModState.PEAK_FW
-        self._update_peak_stats(peak_state)
+        # DTensor sharding propagation may use a nested FakeTensorMode to
+        # compute output metadata (shapes, placements).  The real memory
+        # usage comes from the local op on shard data, which
+        # runs outside DTensor's fake mode.  We use identity comparison
+        # against the fake mode at tracker entry to skip propagation ops
+        # while still tracking local ops in both eager and SAC contexts.
+        #   - Eager (entry mode is None): real ops have no fake mode
+        #     (None is None), DTensor propagation ops are skipped (B is not None).
+        #   - SAC (entry mode is A): SAC ops run under mode A (A is A),
+        #     DTensor propagation ops are skipped (B is not A).
+        if active_fake_mode() is self._fake_mode_on_entry:
+            # If we are tracking an optimizer state, we use the optimizer reference type.
+            # If we are in backward region and not in AC region, we use the backward reference type.
+            # Else we use the forward reference type.
+            if self._in_opt:
+                reftype = _MemRefType.OPT
+            elif self._mod_tracker.is_bw and not self._in_ac:
+                reftype = _MemRefType.TEMP
+            else:
+                reftype = _MemRefType.ACT
+            tree_map_only(torch.Tensor, partial(self._track, reftype), res)
+            peak_state = (
+                _ModState.PEAK_BW if self._mod_tracker.is_bw else _ModState.PEAK_FW
+            )
+            self._update_peak_stats(peak_state)
         return res

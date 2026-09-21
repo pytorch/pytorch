@@ -91,7 +91,12 @@ def _dropout_helper(
 
     return (
         refs._uniform_helper(
-            self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
+            self.shape,
+            low=0.0,
+            high=1.0,
+            dtype=torch.float32,
+            device=self.device,
+            stride=self.stride(),
         )
         < val
     )
@@ -142,11 +147,10 @@ def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        # pyrefly: ignore [unsupported-operation]
         a = args[0]
         if "inplace" not in kwargs:
             kwargs["inplace"] = False
-        # pyrefly: ignore [unsupported-operation]
+
         if kwargs["inplace"]:
             torch._check(
                 "out" not in kwargs,
@@ -171,7 +175,7 @@ def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def celu(
-    a: TensorLikeType, alpha: Optional[NumberType] = None, inplace: bool = False
+    a: TensorLikeType, alpha: NumberType | None = None, inplace: bool = False
 ) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.celu
@@ -182,10 +186,18 @@ def celu(
 
     rhs: TensorLikeType
     if alpha is not None:
+        torch._check(
+            alpha != 0,
+            lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
+        )
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
+        torch._check(
+            alpha != 0,
+            lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
+        )
         rhs = alpha * torch.expm1(torch.true_divide(a, alpha))  # type: ignore[arg-type]
     else:
         rhs = torch.expm1(a)
@@ -277,6 +289,19 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return torch.where(torch.le(a, 0), 0, a)
 
 
+@_inplace_wrapper
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def hardsigmoid(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.hardsigmoid
+    """
+    return torch.clamp(a / 6 + 0.5, 0, 1)
+
+
 @register_decomposition(aten.channel_shuffle)
 @out_wrapper()
 def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
@@ -318,8 +343,8 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
 def group_norm(
     input: Tensor,
     num_groups: int,
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
     eps: float = 1e-5,
 ) -> Tensor:
     """
@@ -358,8 +383,8 @@ def group_norm(
 def layer_norm(
     input: Tensor,
     normalized_shape: ShapeType,
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
     eps: float = 1e-5,
 ) -> Tensor:
     """
@@ -435,9 +460,9 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 # CompositeImplicitAutograd - don't register decomp
 def softmax(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> TensorLikeType:
     # The error is for compat with regular PyTorch, which has this behavior
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
@@ -450,9 +475,9 @@ def softmax(
 # CompositeImplicitAutograd - don't register decomp
 def softmin(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> TensorLikeType:
     # The error is for compat with regular PyTorch, which has this behavior
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
@@ -472,7 +497,7 @@ def softmin(
 )
 def softplus(
     a: TensorLikeType,
-    beta: Optional[NumberType] = None,
+    beta: NumberType | None = None,
     threshold: NumberType = 20,
     inplace: bool = False,
 ) -> TensorLikeType:
@@ -519,9 +544,11 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
     torch._check(
-        lambd >= 0,
-        lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
+        0 <= lambd <= torch.finfo(a.dtype).max,
+        lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
     )
+    if a.dtype in (torch.bfloat16, torch.float16):
+        lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
     # We implement this in one torch.where to generate better code in the backward
     # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
     # We multiply by 0 for dealing with nans
@@ -556,11 +583,9 @@ def _check_reduction_value(reduction: str):
         raise ValueError(f"{reduction} is not a valid value for reduction")
 
 
-# This helper function maps depreciated arguments, "size_average" and "reduce"
+# This helper function maps deprecated arguments, "size_average" and "reduce"
 # to their corresponding "reduction" string argument
-def _get_string_reduction_arg(
-    *, size_average: Optional[bool], reduce: Optional[bool]
-) -> str:
+def _get_string_reduction_arg(*, size_average: bool | None, reduce: bool | None) -> str:
     if size_average is None:
         size_average = True
     if reduce is None:
@@ -582,8 +607,8 @@ def _get_string_reduction_arg(
 def l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     """
@@ -606,8 +631,8 @@ def l1_loss(
 def smooth_l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
     beta: float = 1.0,
 ) -> TensorLikeType:
@@ -627,7 +652,7 @@ def smooth_l1_loss(
         )
     else:
         loss = torch.abs(input - target)
-        # pyrefly: ignore [unsupported-operation]
+
         loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
         return _apply_loss_reduction(loss, reduction)
 
@@ -636,9 +661,9 @@ def smooth_l1_loss(
 # CompositeImplicitAutograd - don't register decomp
 def log_softmax(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> TensorLikeType:
     # The error is for compat with regular PyTorch, which has this behavior
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
@@ -674,8 +699,8 @@ def margin_ranking_loss(
 def mse_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     if size_average is not None or reduce is not None:
@@ -708,7 +733,7 @@ def hinge_embedding_loss(
 def _nll_loss_nd(
     input: TensorLikeType,
     target: TensorLikeType,
-    weight: Optional[TensorLikeType],
+    weight: TensorLikeType | None,
     reduction: str,
     ignore_index: int,
 ) -> TensorLikeType:
@@ -731,14 +756,14 @@ def _nll_loss_nd(
     # TODO: This check does not work with FakeTensor inputs; See Issue #85834
     # Explicit cast for class_check to bool; See Issue #78071
     """
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
     num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
     valid_classes_mask = torch.logical_and(
         (flat_target >= 0), (flat_target < num_classes)
     )
     class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
     torch._check(
-        isinstance(target, FakeTensor) or bool(class_check.item()),
+        is_fake_tensor(target) or bool(class_check.item()),
         lambda: "A target class is out-of-bounds and not the ignore index.",
     )
     """
@@ -793,10 +818,10 @@ def _nll_loss_nd(
 def nll_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    weight: Optional[TensorLikeType] = None,
-    size_average: Optional[bool] = None,
+    weight: TensorLikeType | None = None,
+    size_average: bool | None = None,
     ignore_index: int = -100,
-    reduce: Optional[bool] = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     """
@@ -876,7 +901,7 @@ def nll_loss(
 def huber_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    reduction: Union[str, int] = "mean",
+    reduction: str | int = "mean",
     delta: float = 1.0,
 ) -> TensorLikeType:
     """
@@ -921,7 +946,7 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
 def threshold(
     a: TensorLikeType,
     threshold: NumberType,
-    value: Union[bool, int, float],
+    value: bool | int | float,
     inplace: bool = False,
 ) -> TensorLikeType:
     """
@@ -944,8 +969,8 @@ def triplet_margin_loss(
     p: float = 2,
     eps: float = 1e-6,
     swap: bool = False,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     if size_average is not None or reduce is not None:
@@ -977,9 +1002,8 @@ def _triplet_margin_with_distance_loss(
     positive: TensorLikeType,
     negative: TensorLikeType,
     *,
-    distance_function: Optional[
-        Callable[[TensorLikeType, TensorLikeType], TensorLikeType]
-    ] = None,
+    distance_function: Callable[[TensorLikeType, TensorLikeType], TensorLikeType]
+    | None = None,
     margin: float = 1.0,
     swap: bool = False,
     reduction: str = "mean",
@@ -1015,7 +1039,49 @@ def _triplet_margin_with_distance_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
-@register_decomposition(aten.hardtanh)
+def _hardtanh(
+    a: TensorLikeType,
+    min_val: NumberType = -1,
+    max_val: NumberType = 1,
+    inplace: bool = False,
+    *,
+    check_bounds: bool,
+) -> TensorLikeType:
+    if inplace:
+        raise NotImplementedError
+    if utils.is_boolean_dtype(a.dtype):
+        raise NotImplementedError("Bool inputs not supported for hardtanh")
+
+    # preserve legacy behavior of boundaries not causing type promotion
+    if utils.is_integer_dtype(a.dtype):
+        min_val = int(min_val)  # type: ignore[arg-type]
+        max_val = int(max_val)  # type: ignore[arg-type]
+
+    if check_bounds and min_val > max_val:  # type: ignore[operator]
+        raise ValueError("min_val cannot be greater than max_val")
+
+    return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+
+
+@register_decomposition([aten.hardtanh.default, aten.hardtanh.out])
+@_inplace_wrapper
+@out_wrapper()
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def _aten_hardtanh(
+    a: TensorLikeType,
+    min_val: NumberType = -1,
+    max_val: NumberType = 1,
+    inplace: bool = False,
+) -> TensorLikeType:
+    return _hardtanh(
+        a, min_val=min_val, max_val=max_val, inplace=inplace, check_bounds=False
+    )
+
+
 @_inplace_wrapper
 @out_wrapper()
 @elementwise_unary_scalar_wrapper
@@ -1032,24 +1098,9 @@ def hardtanh(
     """
     Reference implementation of torch.nn.functional.hardtanh
     """
-    if inplace:
-        raise NotImplementedError
-    if utils.is_boolean_dtype(a.dtype):
-        raise RuntimeError("Bool inputs not supported for hardtanh")
-
-    # preserve legacy behavior of boundaries not causing type promotion
-    if utils.is_integer_dtype(a.dtype):
-        min_val = int(min_val)  # type: ignore[arg-type]
-        max_val = int(max_val)  # type: ignore[arg-type]
-        if not (a.dtype != torch.uint8 or (min_val >= 0 and max_val >= 0)):
-            raise RuntimeError(
-                "Cannot do hardtanh on an unsigned type with negative limits"
-            )
-
-    if min_val > max_val:  # type: ignore[operator]
-        raise ValueError("min_val cannot be greater than max_val")
-
-    return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+    return _hardtanh(
+        a, min_val=min_val, max_val=max_val, inplace=inplace, check_bounds=True
+    )
 
 
 @register_decomposition(aten.gelu)
@@ -1093,9 +1144,9 @@ def poisson_nll_loss(
     target: TensorLikeType,
     log_input: bool = True,
     full: bool = False,
-    size_average: Optional[bool] = None,
+    size_average: bool | None = None,
     eps: float = 1e-8,
-    reduce: Optional[bool] = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     """
@@ -1236,6 +1287,21 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    # Matches the eager check; without it the division below raises
+    # ZeroDivisionError for upscale_factor=0.
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    # Eager also rejects a factor whose square overflows int64 (TORCH_CHECK_VALUE ->
+    # ValueError). Without it `upscale_factor**2` below is an arbitrary-precision
+    # Python int, so the view() built from it fails with an internal shape error
+    # instead of this message.
+    torch._check_value(
+        upscale_factor <= torch.iinfo(torch.int64).max // upscale_factor,
+        lambda: f"upscale factor is too large, (upscale_factor)^2 overflowed: "
+        f"upscale_factor={upscale_factor}",
+    )
     batch = self.shape[:-3]
     C_out = self.shape[-3] // upscale_factor**2
     HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
@@ -1264,6 +1330,16 @@ def pixel_unshuffle(self: Tensor, downscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_unshuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    # Matches the eager check; without it the division below raises
+    # ZeroDivisionError for downscale_factor=0.
+    torch._check(
+        downscale_factor > 0,
+        lambda: f"pixel_unshuffle expects a positive downscale_factor, but got {downscale_factor}",
+    )
+    # Deliberately no int64-overflow check here. Unlike pixel_shuffle, eager never
+    # squares the factor before using it -- it only tests H and W for divisibility --
+    # so a huge downscale_factor raises the ordinary divisibility RuntimeError. Adding
+    # an overflow check would introduce a divergence rather than remove one.
     batch = self.shape[:-3]
     C_out = self.shape[-3] * downscale_factor**2
     HW_out = (self.shape[-2] // downscale_factor, self.shape[-1] // downscale_factor)

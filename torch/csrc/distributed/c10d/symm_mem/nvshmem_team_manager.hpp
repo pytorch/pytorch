@@ -12,8 +12,12 @@
 // include only the nvshmem host library headers:
 // #include <nvshmem_host.h>
 // It translates into the following two lines:
+#if !defined(USE_ROCM)
 #include <host/nvshmem_api.h>
 #include <host/nvshmemx_api.h>
+#else
+#include <rocshmem/rocshmem.hpp>
+#endif
 // For maximum compatibility, we use the "host/" style for now.
 
 namespace c10d::nvshmem_extension {
@@ -45,14 +49,14 @@ class TeamManager {
       const std::vector<int>& global_ranks) {
     auto [team_pool, pool_updated] =
         group_to_team_pool(group_name, global_ranks, 1);
-    // Return the fist available team
+    // Return the first available team
     return team_pool[0];
   }
 
   // Get n teams for a group.
   // The first element of the returned pair is the team pool on host side.
   // The second element of the returned pair is the team pool on device side.
-  // This API must be call with a device guard.
+  // This API must be called with a device guard.
   std::pair<const TeamPool&, nvshmem_team_t*> get_n_teams(
       const std::string& group_name,
       const std::vector<int>& global_ranks,

@@ -1,14 +1,13 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
-#include <ATen/FunctionalInverses.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/irange.h>
+
+#include <atomic>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -263,6 +262,9 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
   is_symbolic_ = other->is_symbolic_;
+  // Must travel with view_metas_: the flag describes that chain, and
+  // _functionalize_is_multi_output_view reports it to AOTAutograd.
+  is_multi_output_view_ = other->is_multi_output_view_;
   // FREEZE the old storage, preventing mutations to it.
   // this is a huge pain to handle properly in all cases, so we ban it.
   functional_storage_impl()->freeze();
@@ -435,7 +437,7 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_slot_.load_pyobj_interpreter()->detach(this);
+    auto r = (*c10::impl::getGlobalPyInterpreter())->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -723,8 +725,7 @@ bool isFunctionalTensor(const std::optional<Tensor>& t) {
 bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) { return false; }
   auto functional_count = 0;
-  for (const auto i : c10::irange(t_list.size())) {
-    auto const & e= t_list[i];
+  for (const std::optional<Tensor>& e : t_list) {
     if (!e.has_value() || !e->defined()) { continue; }
     if (isFunctionalTensor(e)) {
       ++functional_count;
@@ -793,12 +794,30 @@ void mutate_view_meta(const at::Tensor& self, const std::shared_ptr<functionaliz
   self_impl->mutate_view_meta(meta);
 }
 
+namespace {
+// Constant-initialized, so registering from another translation unit's static
+// initializer cannot race with this one's construction.
+std::atomic<MultiOutputViewMarker> multi_output_view_marker{nullptr};
+}
+
+void setMultiOutputViewMarker(MultiOutputViewMarker fn) {
+  multi_output_view_marker.store(fn, std::memory_order_release);
+}
+
 Tensor apply_view_meta_sequence(
     const Tensor& base,
     const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence) {
   Tensor r = base;
   for (auto& vm : sequence) {
     r = vm->forward(r);
+    if (vm->is_multi_output) {
+      // See [Note: multi-output view replay]. `forward` rebuilt this output as
+      // a single-output view, so autograd does not know it came from an op
+      // returning several views and would let the user mutate it in place.
+      if (auto mark = multi_output_view_marker.load(std::memory_order_acquire)) {
+        mark(r);
+      }
+    }
   }
   return r;
 }
@@ -867,6 +886,18 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
         "The composite op functionalization fallback expects its inputs all not to be functional tensors");
       auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
       (*stack)[arguments_begin + idx] = t_new;
+    } else if (ivalue.isList()) {
+      // Handle nested lists containing tensor lists (e.g., Tensor[][]).
+      auto list = ivalue.toList();
+      for (const auto i : c10::irange(list.size())) {
+        const auto& elem = list.get(i);
+        if (elem.isTensorList()) {
+          auto tensors = elem.toTensorList();
+          TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(tensors),
+            "The composite op functionalization fallback expects its inputs all not to be functional tensors");
+          list.set(i, c10::IValue(at::functionalization::impl::to_functional_tensor(tensors)));
+        }
+      }
     }
   }
 
@@ -910,6 +941,17 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
       at::functionalization::impl::sync(opt_tensors);
       auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
       (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isList()) {
+      // Handle nested lists containing tensor lists (e.g., Tensor[][]).
+      auto list = ivalue.toList();
+      for (const auto i : c10::irange(list.size())) {
+        const auto& elem = list.get(i);
+        if (elem.isTensorList()) {
+          auto tensors = elem.toTensorList();
+          at::functionalization::impl::sync(tensors);
+          list.set(i, c10::IValue(at::functionalization::impl::from_functional_tensor(tensors)));
+        }
+      }
     }
   }
 }

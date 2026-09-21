@@ -337,11 +337,16 @@ GPUs.
 Since workers rely on Python {py:mod}`multiprocessing`, worker launch behavior is
 different on Windows compared to Unix.
 
-- On Unix, {func}`fork()` is the default {py:mod}`multiprocessing` start method.
+- On Unix, The default {py:mod}`multiprocessing` start method is {func}`forkserver`
+  for Python >= 3.14; {func}`fork` for Python < 3.14.
   Using {func}`fork`, child workers typically can access the {attr}`dataset` and
-  Python argument functions directly through the cloned address space.
-- On Windows or MacOS, {func}`spawn()` is the default {py:mod}`multiprocessing` start method.
-  Using {func}`spawn()`, another interpreter is launched which runs your main script,
+  Python argument functions directly through the cloned address space. This can have a fast start up,
+  but can lead to problems with multi-threaded applications. On Unix platforms that support it, {func}`forkserver`
+  starts a separate server process first, and all new worker processes are then spawned by that server,
+  providing safer isolation than {func}`fork` (especially with threads)
+  while avoiding some of the overhead of pure {func}`spawn`.
+- On Windows and MacOS, {func}`spawn` is the default {py:mod}`multiprocessing` start method.
+  Using {func}`spawn`, another interpreter is launched which runs your main script,
   followed by the internal worker function that receives the {attr}`dataset`,
   {attr}`collate_fn` and other arguments through {py:mod}`pickle` serialization.
 
@@ -475,7 +480,9 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.utils.data.random_split
+.. currentmodule:: torch.utils.data.dataset
+
+.. autofunction:: random_split
 ```
 
 ```{eval-rst}
@@ -507,6 +514,14 @@ for batch_ndx, sample in enumerate(loader):
 
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.utils.data.graph
+
+.. autofunction:: traverse
+
+.. autofunction:: traverse_dps
+```
+
 % These modules are documented as part of torch/data listing them here for
 
 % now until we have a clearer fix
@@ -529,4 +544,43 @@ for batch_ndx, sample in enumerate(loader):
 
 ```{eval-rst}
 .. py:module:: torch.utils.data.datapipes.utils
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data.datapipes.utils.decoder
+
+.. autofunction:: basichandlers
+
+.. autofunction:: handle_extension
+```
+
+```{eval-rst}
+.. automodule:: torch.utils.data.datapipes.utils.common
+
+.. currentmodule:: torch.utils.data.datapipes.utils.common
+
+.. autofunction:: validate_input_col
+
+```
+
+```{eval-rst}
+.. automodule:: torch.utils.data.datapipes.iter.streamreader
+
+.. currentmodule:: torch.utils.data.datapipes.iter.streamreader
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    StreamReaderIterDataPipe
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data.datapipes.utils.common
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    StreamWrapper
 ```

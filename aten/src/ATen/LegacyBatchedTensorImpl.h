@@ -144,7 +144,7 @@ inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(BatchDimsRef bdims) {
 }
 
 inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
-  out << "(lvl=" << bdim.level() << ", dim=" << bdim.dim() << ")";
+  out << "(lvl=" << bdim.level() << ", dim=" << bdim.dim() << ')';
   return out;
 }
 

@@ -12,13 +12,17 @@ import shutil
 import sys
 import tempfile
 import time
-import unittest
 from concurrent.futures import wait
 from concurrent.futures._base import ALL_COMPLETED
 from concurrent.futures.thread import ThreadPoolExecutor
 from unittest import mock
 
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def write(max: int, sleep: float, file: str):
@@ -28,8 +32,11 @@ def write(max: int, sleep: float, file: str):
             time.sleep(sleep)
 
 
-class TailLogTest(unittest.TestCase):
+class TailLogTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
         self.threadpool = ThreadPoolExecutor()
 
@@ -100,27 +107,31 @@ class TailLogTest(unittest.TestCase):
         }
 
         dst = os.path.join(self.test_dir, "tailed_stdout.log")
-        tail = TailLog(
-            name="writer", log_files=log_files, dst=dst, interval_sec=interval_sec
-        ).start()
-        # sleep here is intentional to ensure that the log tail
-        # can gracefully handle and wait for non-existent log files
-        time.sleep(interval_sec * 10)
+        with open(dst, "w", encoding="utf8", buffering=1) as dst_file:
+            tail = TailLog(
+                name="writer",
+                log_files=log_files,
+                dst=dst_file,
+                interval_sec=interval_sec,
+            ).start()
+            # sleep here is intentional to ensure that the log tail
+            # can gracefully handle and wait for non-existent log files
+            time.sleep(interval_sec * 10)
 
-        futs = []
-        for local_rank, file in log_files.items():
-            f = self.threadpool.submit(
-                write, max=max, sleep=interval_sec * local_rank, file=file
-            )
-            futs.append(f)
+            futs = []
+            for local_rank, file in log_files.items():
+                f = self.threadpool.submit(
+                    write, max=max, sleep=interval_sec * local_rank, file=file
+                )
+                futs.append(f)
 
-        wait(futs, return_when=ALL_COMPLETED)
-        self.assertFalse(tail.stopped())
-        tail.stop()
+            wait(futs, return_when=ALL_COMPLETED)
+            self.assertFalse(tail.stopped())
+            tail.stop()
 
         actual: dict[int, set[int]] = {}
-        with open(dst) as dst_file:
-            for line in dst_file:
+        with open(dst, encoding="utf8") as read_dst_file:
+            for line in read_dst_file:
                 header, num = line.split(":")
                 nums = actual.setdefault(header, set())
                 nums.add(int(num))
@@ -256,4 +267,8 @@ class TailLogTest(unittest.TestCase):
         tail = TailLog("writer", log_files={0: self.test_dir}, dst=sys.stdout).start()
         tail.stop()
 
-        mock_logger.error.assert_called_once()
+        mock_logger.exception.assert_called_once()
+
+
+if __name__ == "__main__":
+    run_tests()

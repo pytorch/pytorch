@@ -1,12 +1,12 @@
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
-#include <c10/core/ScalarType.h>
-#include <c10/core/DeviceType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <cstdint>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 
 
 #ifdef USE_FLASH_ATTENTION
@@ -50,6 +50,16 @@ namespace FLASH_NAMESPACE {
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
+
+static_assert(sizeof(at::PhiloxCudaState) <= sizeof(Flash_fwd_params::philox_args),
+              "Flash_fwd_params::philox_args buffer is too small for at::PhiloxCudaState");
+static_assert(alignof(at::PhiloxCudaState) <= alignof(decltype(Flash_fwd_params::philox_args)),
+              "Flash_fwd_params::philox_args buffer is under-aligned for at::PhiloxCudaState");
+static_assert(std::is_trivially_copyable<at::PhiloxCudaState>::value,
+              "at::PhiloxCudaState must be trivially copyable: it is placement-new'd into "
+              "philox_args and the whole Flash_fwd_params is copied by value to the device kernel "
+              "(so the bytes must be memcpy-safe); this also guarantees a trivial destructor, so "
+              "the placement-new needs no matching delete");
 
 
 void set_params_fprop(Flash_fwd_params &params,
@@ -352,7 +362,7 @@ std::tuple<at::Tensor, at::Tensor> set_params_splitkv(Flash_fwd_params &params, 
         TORCH_CHECK(params.num_splits <= 128, "num_splits > 128 not supported");
     }
 
-    return std::make_tuple(softmax_lse_accum, out_accum);
+    return std::make_tuple(std::move(softmax_lse_accum), std::move(out_accum));
 }
 
 void set_params_alibi(Flash_fwd_params &params, std::optional<at::Tensor> &alibi_slopes_, int batch_size, int num_heads){
@@ -489,7 +499,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
     const int head_size = round_multiple(head_size_og, 8);
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
@@ -548,7 +558,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         rng_state = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
         params.rng_state = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
-        params.philox_args = philox_state;
+        new (params.philox_args) at::PhiloxCudaState(philox_state);
     }
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
@@ -590,7 +600,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                int window_size_right,
                const float softcap,
                const bool return_softmax,
-               std::optional<at::Generator> gen_) {
+               std::optional<at::Generator> gen_,
+               int num_splits) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm80_or_newer = (dprops->major * 10) >= 80;
@@ -709,7 +720,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
     const int head_size = round_multiple(head_size_og, 8);
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(max_seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(max_seqlen_k, 128);
 
@@ -763,11 +774,10 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     params.page_block_size = page_block_size;
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
-    if (seqlenq_ngroups_swapped) {
-        // Only apply split-k for decoding
+    if (paged_KV || seqlenq_ngroups_swapped) {
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
-                           head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
+                           head_size_rounded, p_dropout, num_splits, dprops, opts);
     }
 
     // [Note] BC breaking change to flash seed/offset
@@ -787,7 +797,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         rng_state = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
         params.rng_state = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
-        params.philox_args = philox_state;
+        new (params.philox_args) at::PhiloxCudaState(philox_state);
     }
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
@@ -809,7 +819,15 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         softmax_lse = softmax_lse.reshape({num_heads * max_seqlen_q, batch_size});
     }
 
-    return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
+    return {
+        std::move(out),
+        std::move(q_padded),
+        std::move(k_padded),
+        std::move(v_padded),
+        std::move(softmax_lse),
+        std::move(rng_state),
+        std::move(_unused),
+        std::move(p)};
 }
 
 void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream) {
@@ -891,7 +909,11 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
         const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
         at::Tensor softmax_d = at::empty({0, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
-        return {dq, dk, dv, softmax_d};
+        return {
+            std::move(dq),
+            std::move(dk),
+            std::move(dv),
+            std::move(softmax_d)};
     }
 
     TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
@@ -906,7 +928,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
@@ -1017,7 +1039,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     if (is_dropout) {
         params.rng_state = philox_seed.data_ptr<uint64_t>();
     }
-    params.philox_args = philox_args;
+    new (params.philox_args) at::PhiloxCudaState(philox_args);
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
 
@@ -1121,7 +1143,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(max_seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(max_seqlen_k, 128);
 
@@ -1245,7 +1267,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     if (is_dropout) {
         params.rng_state = philox_seed.data_ptr<uint64_t>();
     }
-    params.philox_args = philox_args;
+    new (params.philox_args) at::PhiloxCudaState(philox_args);
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
 
@@ -1391,7 +1413,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
     const int head_size = round_multiple(head_size_og, 8);
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
@@ -1540,7 +1562,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    return {out, softmax_lse};
+    return {std::move(out), std::move(softmax_lse)};
 }
 
 } // namespace pytorch_fmha

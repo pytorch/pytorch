@@ -66,8 +66,8 @@ class C10_API FatalSignalHandler {
  private:
   void installFatalSignalHandlers();
   void uninstallFatalSignalHandlers();
-  static void fatalSignalHandlerStatic(int signum);
-  void fatalSignalHandler(int signum);
+  static void fatalSignalHandlerStatic(int signum, siginfo_t* info, void* ctx);
+  void fatalSignalHandler(int signum, siginfo_t* info);
   virtual void fatalSignalHandlerPostProcess();
   struct sigaction* getPreviousSigaction(int signum);
   const char* getSignalName(int signum);

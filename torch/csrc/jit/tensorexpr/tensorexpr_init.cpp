@@ -1,6 +1,4 @@
-#include <pybind11/functional.h>
 #include <pybind11/operators.h>
-#include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/utils/pybind.h>
@@ -11,11 +9,14 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+
+#ifdef TORCH_ENABLE_LLVM
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#endif
 
 #include <utility>
 
@@ -86,7 +87,7 @@ void initTensorExprBindings(PyObject* module) {
               [](const ExprHandle& self) {
                 std::stringstream ss;
                 ss << self;
-                return ss.str();
+                return std::move(ss).str();
               })
           .def(py::self + py::self)
           .def(py::self * py::self)
@@ -225,7 +226,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const ExprHandle& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(py::init<Dtype>())
       .def(py::init<const std::string&, Dtype>());
@@ -397,7 +398,7 @@ void initTensorExprBindings(PyObject* module) {
       .def("__str__", [](Stmt& self) {
         std::stringstream ss;
         ss << self;
-        return ss.str();
+        return std::move(ss).str();
       });
   py::class_<Store, Stmt, std::shared_ptr<Store>>(te, "Store")
       .def_static(
@@ -701,7 +702,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const LoopNest& self) {
             std::stringstream ss;
             ss << *self.root_stmt();
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "root_stmt",

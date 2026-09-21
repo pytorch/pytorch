@@ -50,9 +50,7 @@ py::handle type_caster<c10::SymInt>::cast(
     } else {
       // Wrap the C++ into Python
       auto inner = py::cast(si.toSymNode());
-      if (!inner) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(inner);
       return torch::get_symint_class()(inner).release();
     }
   } else {
@@ -162,5 +160,4 @@ py::handle type_caster<c10::Scalar>::cast(
     TORCH_INTERNAL_ASSERT(0, "unrecognized scalar type ", scalar.type());
   }
 }
-
 } // namespace pybind11::detail

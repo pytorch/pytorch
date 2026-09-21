@@ -1,11 +1,7 @@
-#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 namespace torch::jit {
 
@@ -106,7 +102,7 @@ std::optional<Value*> tryInsertConstant(
   } else if (val.isDevice()) {
     std::stringstream ss;
     ss << val.toDevice();
-    n->s_(attr::value, ss.str());
+    n->s_(attr::value, std::move(ss).str());
     n->output()->setType(DeviceObjType::get());
   } else if (val.isGenerator()) {
     auto generator = val.toGenerator();

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 from torch import Tensor
@@ -10,6 +10,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
@@ -29,11 +30,11 @@ class Adadelta(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1.0,
+        lr: float | Tensor = 1.0,
         rho: float = 0.9,
         eps: float = 1e-6,
         weight_decay: float = 0,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         *,
         capturable: bool = False,
         maximize: bool = False,
@@ -132,7 +133,7 @@ class Adadelta(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -249,7 +250,7 @@ def _single_tensor_adadelta(
     acc_deltas: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     rho: float,
     eps: float,
     weight_decay: float,
@@ -299,7 +300,7 @@ def _single_tensor_adadelta(
 
         if torch.is_complex(param):
             delta = torch.view_as_complex(delta)
-        param.add_(delta, alpha=-lr)
+        param.add_(delta, alpha=-lr)  # type: ignore[arg-type]
 
 
 def _multi_tensor_adadelta(
@@ -309,7 +310,7 @@ def _multi_tensor_adadelta(
     acc_deltas: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     rho: float,
     eps: float,
     weight_decay: float,
@@ -405,7 +406,7 @@ def _multi_tensor_adadelta(
             torch._foreach_mul_(deltas, -lr)
             torch._foreach_add_(device_params, deltas)
         else:
-            torch._foreach_add_(device_params, deltas, alpha=-lr)
+            torch._foreach_add_(device_params, deltas, alpha=-lr)  # type: ignore[arg-type]
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adadelta)
@@ -418,21 +419,16 @@ def adadelta(
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     capturable: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     differentiable: bool = False,
     has_complex: bool = False,
     *,
-    lr: float,
+    lr: float | Tensor,
     rho: float,
     eps: float,
     weight_decay: float,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs Adadelta algorithm computation.
-
-    See :class:`~torch.optim.Adadelta` for details.
-    """
-
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
     if not torch.compiler.is_compiling() and not all(
@@ -471,3 +467,6 @@ def adadelta(
         capturable=capturable,
         has_complex=has_complex,
     )
+
+
+adadelta.__doc__ = _functional_api_doc.format(optimizer="Adadelta")

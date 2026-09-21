@@ -5,7 +5,7 @@ import copy
 import functools
 import math
 import threading
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -56,18 +56,24 @@ def two_tensor_fsdp_post_all_gather(
     metadata: Any,
     param_dtype: torch.dtype,
     *,
-    out: Optional[torch.Tensor] = None,
-) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
-    assert metadata is None, f"{metadata}"
+    out: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+    if metadata is not None:
+        raise AssertionError(f"Expected metadata to be None, got {metadata}")
     a, b = all_gather_outputs
     if out is not None:
-        assert isinstance(out, TwoTensor), f"{type(out)}"
+        if not isinstance(out, TwoTensor):
+            raise AssertionError(f"Expected TwoTensor, got {type(out)}")
         if a.dtype == param_dtype:
-            assert a.untyped_storage().data_ptr() == out.a.untyped_storage().data_ptr()
-            assert b.untyped_storage().data_ptr() == out.b.untyped_storage().data_ptr()
+            if a.untyped_storage().data_ptr() != out.a.untyped_storage().data_ptr():
+                raise AssertionError("a storage data_ptr mismatch with out.a")
+            if b.untyped_storage().data_ptr() != out.b.untyped_storage().data_ptr():
+                raise AssertionError("b storage data_ptr mismatch with out.b")
         else:
-            assert out.a.dtype == param_dtype, f"{out.a.dtype} {param_dtype}"
-            assert out.b.dtype == param_dtype, f"{out.b.dtype} {param_dtype}"
+            if out.a.dtype != param_dtype:
+                raise AssertionError(f"out.a dtype {out.a.dtype} != {param_dtype}")
+            if out.b.dtype != param_dtype:
+                raise AssertionError(f"out.b dtype {out.b.dtype} != {param_dtype}")
             out.a.copy_(a)
             out.b.copy_(b)
         return
@@ -102,7 +108,8 @@ class BFloat16AllGatherTensor(torch.Tensor):
         module: nn.Module,
         mp_policy: MixedPrecisionPolicy,
     ) -> tuple[tuple[torch.Tensor, ...], Any]:
-        assert mesh.ndim == 1, f"{mesh.ndim}"
+        if mesh.ndim != 1:
+            raise AssertionError(f"Expected mesh.ndim == 1, got {mesh.ndim}")
         mesh_size = mesh.size()
         requires_padding = outer_size[0] % mesh_size != 0
         if requires_padding and self._pad_in_pre_all_gather:
@@ -122,11 +129,15 @@ class BFloat16AllGatherTensor(torch.Tensor):
         metadata: Any,
         param_dtype: torch.dtype,
         *,
-        out: Optional[torch.Tensor] = None,
-    ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
-        assert metadata is None, f"{metadata}"
+        out: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+        if metadata is not None:
+            raise AssertionError(f"Expected metadata to be None, got {metadata}")
         (tensor,) = all_gather_outputs
-        assert tensor.dtype == torch.bfloat16, f"{tensor.dtype}"
+        if tensor.dtype != torch.bfloat16:
+            raise AssertionError(
+                f"Expected tensor.dtype == torch.bfloat16, got {tensor.dtype}"
+            )
         if out is not None:
             with _unsafe_preserve_version_counter(out):
                 out.copy_(tensor)
@@ -143,7 +154,10 @@ class BFloat16AllGatherTensor(torch.Tensor):
             if pad_in_pre_all_gather is None:
                 pad_in_pre_all_gather = x._pad_in_pre_all_gather
             else:
-                assert pad_in_pre_all_gather == x._pad_in_pre_all_gather
+                if pad_in_pre_all_gather != x._pad_in_pre_all_gather:
+                    raise AssertionError(
+                        f"pad_in_pre_all_gather mismatch: {pad_in_pre_all_gather} vs {x._pad_in_pre_all_gather}"
+                    )
             return x._data
 
         out = func(
@@ -331,11 +345,15 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             metadata: Any,
             param_dtype: torch.dtype,
             *,
-            out: Optional[torch.Tensor] = None,
-        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
             (tensor,) = all_gather_outputs
-            assert metadata is None, f"{metadata}"
-            assert tensor.dtype == torch.bfloat16, f"{tensor.dtype}"
+            if metadata is not None:
+                raise AssertionError(f"Expected metadata to be None, got {metadata}")
+            if tensor.dtype != torch.bfloat16:
+                raise AssertionError(
+                    f"Expected tensor.dtype == torch.bfloat16, got {tensor.dtype}"
+                )
             if out is not None:
                 with _unsafe_preserve_version_counter(out):
                     out.copy_(tensor)
@@ -375,7 +393,144 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             model(inp).sum().backward()
             optim.step()
             optim.zero_grad()
-        assert tls.ran_pre_all_gather
+        if not tls.ran_pre_all_gather:
+            raise AssertionError("Expected tls.ran_pre_all_gather to be True")
+
+    @skip_if_lt_x_gpu(1)
+    def test_release_all_gather_outputs_after_post_all_gather(self):
+        self.run_subtests(
+            {"reshard_after_forward": [True, False]},
+            self._test_release_all_gather_outputs_after_post_all_gather,
+        )
+
+    def _test_release_all_gather_outputs_after_post_all_gather(
+        self, reshard_after_forward: bool
+    ):
+        tls = threading.local()
+        tls.num_post_all_gather_calls = 0
+
+        def fsdp_pre_all_gather(
+            self,
+            mesh: DeviceMesh,
+            outer_size: torch.Size,
+            outer_stride: tuple[int, ...],
+            module: nn.Module,
+            mp_policy: MixedPrecisionPolicy,
+        ) -> tuple[tuple[torch.Tensor, ...], Any]:
+            del mesh, outer_size, outer_stride, module, mp_policy
+            return (self,), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            self,
+            all_gather_outputs: tuple[torch.Tensor, ...],
+            metadata: Any,
+            param_dtype: torch.dtype,
+            *,
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+            del self
+            if metadata is not None:
+                raise AssertionError(f"Expected metadata to be None, got {metadata}")
+            (tensor,) = all_gather_outputs
+            if tensor.dtype != param_dtype:
+                raise AssertionError(
+                    f"Expected tensor dtype {param_dtype}, got {tensor.dtype}"
+                )
+            tls.num_post_all_gather_calls += 1
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(tensor)
+                return None
+            transformed = tensor.clone()
+            return transformed, (transformed,)
+
+        def fsdp_should_release_all_gather_outputs_after_post_all_gather(
+            self,
+        ) -> bool:
+            del self
+            return True
+
+        test_device = self.device
+
+        class InspectLinear(nn.Linear):
+            def __init__(self) -> None:
+                super().__init__(8, 8, device=test_device)
+                self.storage_observations: list[
+                    tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]
+                ] = []
+
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                state = fully_shard.state(self)
+                param_group = state._fsdp_param_group
+                if param_group is None:
+                    raise AssertionError("Expected an FSDP parameter group")
+                fsdp_params = {
+                    fsdp_param._module_info.param_name: fsdp_param
+                    for fsdp_param in param_group.fsdp_params
+                }
+                weight = fsdp_params["weight"]
+                bias = fsdp_params["bias"]
+                self.storage_observations.append(
+                    (
+                        tuple(
+                            tensor.untyped_storage().size()
+                            for tensor in weight.all_gather_outputs
+                        ),
+                        tuple(
+                            tensor.untyped_storage().size()
+                            for tensor in weight._unsharded_inner_tensors
+                        ),
+                        tuple(
+                            tensor.untyped_storage().size()
+                            for tensor in bias.all_gather_outputs
+                        ),
+                    )
+                )
+                return super().forward(input)
+
+        model = InspectLinear()
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+        local_weight = model.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
+        local_weight.fsdp_should_release_all_gather_outputs_after_post_all_gather = (
+            fsdp_should_release_all_gather_outputs_after_post_all_gather.__get__(
+                local_weight
+            )
+        )
+
+        inp = torch.randn((2, 8), device=device_type)
+        for _ in range(2):
+            output = model(inp)
+            weight_outputs, weight_inner_tensors, bias_outputs = (
+                model.storage_observations[-1]
+            )
+            self.assertTrue(all(size == 0 for size in weight_outputs))
+            self.assertTrue(all(size > 0 for size in weight_inner_tensors))
+            self.assertTrue(all(size > 0 for size in bias_outputs))
+
+            output.sum().backward()
+            state = fully_shard.state(model)
+            param_group = state._fsdp_param_group
+            if param_group is None:
+                raise AssertionError("Expected an FSDP parameter group")
+            for fsdp_param in param_group.fsdp_params:
+                self.assertTrue(
+                    all(
+                        tensor.untyped_storage().size() == 0
+                        for tensor in fsdp_param.all_gather_outputs
+                    )
+                )
+                self.assertTrue(
+                    all(
+                        tensor.untyped_storage().size() == 0
+                        for tensor in fsdp_param._unsharded_inner_tensors
+                    )
+                )
+
+        expected_post_all_gather_calls = 4 if reshard_after_forward else 2
+        self.assertEqual(tls.num_post_all_gather_calls, expected_post_all_gather_calls)
 
     @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_outer_size_stride(self):
@@ -385,9 +540,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         only some ranks may require padding, in which case only those ranks
         will error out and the all-gather will timeout.
         """
-        assert self.world_size >= 2, (
-            f"Assumes world size of at least 2 but got {self.world_size=}"
-        )
+        if self.world_size < 2:
+            raise AssertionError(
+                f"Assumes world size of at least 2 but got {self.world_size=}"
+            )
         model = MLP(dim=3, dim_multiplier=3)
         for module in model.modules():
             for param_name, param in module.named_parameters(recurse=False):
@@ -435,8 +591,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             metadata: Any,
             param_dtype: torch.dtype,
             *,
-            out: Optional[torch.Tensor] = None,
-        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
             (tensor,) = all_gather_outputs
             if out is not None:
                 return

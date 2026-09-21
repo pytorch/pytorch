@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
-from typing import Optional
 
 import torch
 import torch.distributed
@@ -9,7 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.optim import Adam, AdamW, SGD
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class MyModule(torch.nn.Module):
@@ -56,14 +59,14 @@ class MyDummyFnOptimizer:
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
-    def step_param(self, param: Tensor, grad: Optional[Tensor]):
+    def step_param(self, param: Tensor, grad: Tensor | None):
         # call the custom optimizer step_param implementation
         with torch.no_grad():
             raise RuntimeError(
                 "MyDummyFnOptimizer does not support step_param() as of now"
             )
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         # call the custom optimizer step implementation
         with torch.no_grad():
             raise RuntimeError("MyDummyFnOptimizer does not support step() as of now")
@@ -80,6 +83,8 @@ if torch.distributed.is_available():
     not torch.distributed.is_available(), "These are testing distributed functions"
 )
 class TestFunctionalOptimParity(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _validate_parameters(self, params_1, params_2):
         for p1, p2 in zip(params_1, params_2):
             self.assertEqual(p1, p2)

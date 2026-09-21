@@ -3,7 +3,6 @@
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 #include <limits>
-#include <queue>
 
 #include <c10/util/Enumerate.h>
 #include <c10/util/FbcodeMaps.h>
@@ -54,10 +53,11 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   }
   TORCH_CHECK(
       expected == source[curPos],
-      "Parser error: expected '{}' at position {}, but found '{}'.",
-      expected,
-      curPos,
-      source[curPos]);
+      fmt::format(
+          "Parser error: expected '{}' at position {}, but found '{}'.",
+          expected,
+          curPos,
+          source[curPos]));
   curPos++;
   return curPos;
 }
@@ -85,7 +85,7 @@ Graph::Graph()
 
 std::string Graph::getUniqueValueName() {
   auto name = fmt::format("v{}", uniqueValueName_);
-  while (values_.find(name) != values_.end()) {
+  while (values_.contains(name)) {
     name = fmt::format("v{}", uniqueValueName_++);
   }
   return name;
@@ -194,6 +194,9 @@ std::ostream& operator<<(std::ostream& out, const Type& ty) {
               break;
             case Type::Kind::TensorList:
               out << "TensorList";
+              break;
+            case Type::Kind::NestedTensorList:
+              out << "NestedTensorList";
               break;
             case Type::Kind::OptionalTensorList:
               out << "OptionalTensorList";
@@ -418,6 +421,10 @@ Node* Graph::createListPack(std::vector<Value*> inputs, const Type& inputType) {
     node->addOutput(name, Type::Kind::TensorList);
   } else if (inputType == Type::Kind::SymInt) {
     node->addOutput(name, Type::Kind::SymIntList);
+  } else if (inputType == Type::Kind::TensorList) {
+    // For nested tensor lists (List[List[Tensor]]), the inner lists are
+    // TensorList type. We output a NestedTensorList type.
+    node->addOutput(name, Type::Kind::NestedTensorList);
   }
 
   return node;
@@ -460,17 +467,14 @@ Value* Graph::createConstantSymIntValue(int value) {
 }
 
 Value* Graph::getValue(std::string_view name) const {
-  // TODO: can eliminate this string copy by enabling heterogeneous lookup for
-  // the container
-  return values_.at(std::string(name)).get();
+  auto it = values_.find(name);
+  TORCH_CHECK_INDEX(it != values_.end(), "Unknown value: ", name);
+  return it->second.get();
 }
 
 Value* Graph::tryGetValue(std::string_view name) const {
-  // TODO: can eliminate this string copy by enabling heterogeneous lookup for
-  // the container
-  const auto key = std::string(name);
-  if (values_.find(key) != values_.end()) {
-    return values_.at(key).get();
+  if (auto it = values_.find(name); it != values_.end()) {
+    return it->second.get();
   }
   return nullptr;
 }
@@ -528,7 +532,7 @@ bool Graph::cleanupDeadNodes() {
       if (!producer) {
         continue;
       }
-      if (!visited.count(producer)) {
+      if (!visited.contains(producer)) {
         visited.insert(producer);
         visitStack.push_back(producer);
       }
@@ -539,13 +543,31 @@ bool Graph::cleanupDeadNodes() {
   std::vector<Node*> toRemove;
   for (auto& n : nodes()) {
     if (n.target() == "prim.Input" || n.target() == "prim.Output" ||
-        visited.count(&n)) {
+        visited.contains(&n)) {
       continue;
     }
     toRemove.push_back(&n);
   }
 
   const bool mutated = !toRemove.empty();
+
+  if (mutated && VLOG_IS_ON(1)) {
+    c10::FastMap<std::string_view, int> removedByTarget;
+    for (const auto* n : toRemove) {
+      removedByTarget[n->target()]++;
+    }
+    VLOG(1) << "cleanupDeadNodes: removing " << toRemove.size()
+            << " dead nodes. Breakdown by op:";
+    // Sort by count descending for readability
+    std::vector<std::pair<std::string_view, int>> sorted(
+        removedByTarget.begin(), removedByTarget.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+      return a.second > b.second;
+    });
+    for (const auto& [target, count] : sorted) {
+      VLOG(1) << "  " << target << ": " << count;
+    }
+  }
 
   // Remove nodes in reverse order to handle input/output dependencies
   for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it) {
@@ -570,9 +592,10 @@ void Graph::lint() const {
   for (const auto& node : nodes()) {
     TORCH_CHECK(node.owningGraph() == this);
   }
-  // Check that every list type is either produced by a prim.ListPack or
-  // immediately consumed by a prim.ListUnpack. We make use of this invariant
-  // to retrieve list elements in `getListElements`.
+  // Check that every used list type is either produced by a prim.ListPack or
+  // immediately consumed by a prim.ListUnpack. An unused list output is valid
+  // for a reachable multi-output operator: cleanupDeadNodes cannot remove one
+  // output without removing the producer and its other, live outputs.
   for (const auto& [_, value] : values_) {
     if (value->type().kind() != Type::Kind::TensorList) {
       continue;
@@ -580,9 +603,10 @@ void Graph::lint() const {
     const bool producedByListPack =
         value->producer(/* resolve_folded = */ true)->target() ==
         "prim.ListPack";
+    const bool unused = value->users().empty();
     const bool consumedByListUnpack = value->users().size() == 1 &&
         value->users()[0]->target() == "prim.ListUnpack";
-    TORCH_CHECK(producedByListPack || consumedByListUnpack);
+    TORCH_CHECK(unused || producedByListPack || consumedByListUnpack);
   }
 
   auto getNames = [](const auto& values) {
@@ -606,7 +630,23 @@ void Graph::finalize() {
       userOutputs_.emplace_back(getValue(*outputName));
     } else {
       if (constantIndex < constantOutputs_.size()) {
-        userOutputs_.emplace_back(std::move(constantOutputs_[constantIndex]));
+        // Copy the constant rather than moving it, because finalize() may be
+        // called multiple times (e.g. after constant folding). Moving would
+        // leave constantOutputs_ entries in a moved-from state, causing
+        // subsequent calls to produce empty strings/vectors.
+        // Constant is non-copyable due to unique_ptr<Graph>, so we use
+        // std::visit to copy each alternative individually.
+        userOutputs_.emplace_back(std::visit(
+            [](const auto& val) -> Constant {
+              using T = std::decay_t<decltype(val)>;
+              if constexpr (is_same_v<T, std::unique_ptr<Graph>>) {
+                TORCH_CHECK(false, "Graph constant outputs cannot be copied");
+                return Constant(None{});
+              } else {
+                return Constant(val);
+              }
+            },
+            constantOutputs_[constantIndex]));
         constantIndex++;
       } else {
         TORCH_CHECK(false, "No more constant outputs available");
@@ -780,7 +820,7 @@ void Graph::removeNode(Node* n) {
 void Graph::removeValue(Value* value) {
   // TODO: assuming not removing from constantSymIntValues_
   TORCH_CHECK(value->users().empty(), "Cannot erase a value with users.");
-  auto it = values_.find(std::string(value->name()));
+  auto it = values_.find(value->name());
   TORCH_CHECK(
       it != values_.end(),
       "Attempted to erase a value not in graph ",
@@ -924,10 +964,7 @@ void Value::addUser(Node* node) {
 }
 
 void Value::eraseUser(Node* node) {
-  users_.erase(
-      std::remove_if(
-          users_.begin(), users_.end(), [&](Node* el) { return el == node; }),
-      users_.end());
+  std::erase(users_, node);
 }
 
 std::vector<const Value*> Value::getListElements() const {
@@ -936,6 +973,11 @@ std::vector<const Value*> Value::getListElements() const {
     for (const auto& tv : p->inputs()) {
       ret.push_back(tv.value);
     }
+  } else if (users().empty()) {
+    // A non-ListPack value has explicit element Values only when a ListUnpack
+    // consumes it. An unused list therefore has no structural elements to
+    // return.
+    return ret;
   } else {
     TORCH_CHECK(users().size() == 1);
     const auto listUnpack = users()[0];
@@ -1031,9 +1073,27 @@ std::ostream& operator<<(std::ostream& out, const Constant& constant) {
         } else if constexpr (is_same_v<T, c10::Layout>) {
           out << kLayoutPrefix << arg;
         } else if constexpr (is_same_v<T, c10::Device>) {
-          out << kDevicePrefix << "{" << arg << "}";
+          out << kDevicePrefix << '{' << arg << '}';
         } else if constexpr (is_same_v<T, vector<string>>) {
           out << fmt::format("[{}]", fmt::join(arg, ","));
+        } else if constexpr (is_same_v<T, vector<vector<int64_t>>>) {
+          out << '[';
+          for (const auto& [idx, inner_list] : c10::enumerate(arg)) {
+            if (idx > 0) {
+              out << ", ";
+            }
+            out << fmt::format("{}", fmt::streamed(inner_list));
+          }
+          out << ']';
+        } else if constexpr (is_same_v<T, vector<vector<double>>>) {
+          out << '[';
+          for (const auto& [idx, inner_list] : c10::enumerate(arg)) {
+            if (idx > 0) {
+              out << ", ";
+            }
+            out << fmt::format("{}", fmt::streamed(inner_list));
+          }
+          out << ']';
         } else if constexpr (is_same_v<T, unique_ptr<Graph>>) {
           out << fmt::format("<subgraph>");
           VLOG(0) << "Subgraph pretty print is not implemented";
@@ -1054,16 +1114,16 @@ void printValue(std::ostream& out, const Value* v) {
 }
 
 void printNamedArgument(std::ostream& out, const NamedArgument& nv) {
-  out << nv.name << "=" << *nv.value;
+  out << nv.name << '=' << *nv.value;
 }
 
 void printAttribute(std::ostream& out, const Attribute& nv) {
-  out << nv.name << "=" << nv.value;
+  out << nv.name << '=' << nv.value;
 }
 } // namespace
 
 std::ostream& operator<<(std::ostream& out, const Value& v) {
-  out << "%" << v.name();
+  out << '%' << v.name();
   // If a list, distinguish it by adding a []
   // Looks like %my_list[]
   if (v.type() == Type::Kind::TensorList) {
@@ -1085,14 +1145,14 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
     printList(out, false, node.inputs(), [](std::ostream& out, const auto& nv) {
       out << *nv.value;
     });
-    out << ")";
+    out << ')';
     return out;
   }
 
   printList(out, false, node.outputs_, printValue);
 
   out << " = ";
-  out << node.target_ << "(";
+  out << node.target_ << '(';
   printList(out, false, node.inputs_, printNamedArgument);
   if (!node.inputs_.empty() && !node.attributes_.empty()) {
     // Emit a connective ',' between inputs and attributes.
@@ -1100,13 +1160,13 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
   }
 
   printList(out, false, node.attributes_, printAttribute);
-  out << ")";
+  out << ')';
   return out;
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& graph) {
   for (const auto& node : graph.nodes_) {
-    out << node << "\n";
+    out << node << '\n';
   }
   return out;
 }
@@ -1133,8 +1193,7 @@ c10::Device convertDevice(std::string_view symbol) {
   TORCH_CHECK(indexValue.has_value(), "Invalid device index format");
   int64_t deviceIndex = indexValue.value();
   TORCH_CHECK(
-      deviceIndex >= std::numeric_limits<c10::DeviceIndex>::min() &&
-          deviceIndex <= std::numeric_limits<c10::DeviceIndex>::max(),
+      std::in_range<c10::DeviceIndex>(deviceIndex),
       "Device index out of range for int8_t");
   device.set_index(static_cast<c10::DeviceIndex>(deviceIndex));
   return device;
@@ -1602,7 +1661,7 @@ std::string graphToString(const Graph& g, bool include_signature) {
     ss << g.signature();
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 } // namespace torch::nativert

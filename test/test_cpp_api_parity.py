@@ -21,6 +21,8 @@ import torch.testing._internal.common_utils as common
 PRINT_CPP_SOURCE = False
 
 devices = ["cpu", "cuda"]
+if common.TEST_PRIVATEUSE1:
+    devices.append(common.TEST_PRIVATEUSE1_DEVICE_TYPE)
 
 PARITY_TABLE_PATH = os.path.join(
     os.path.dirname(__file__), "cpp_api_parity", "parity-tracker.md"
@@ -65,18 +67,32 @@ for test_params_dicts, test_instance_class in [
             expected_test_params_dicts.append(test_params_dict)
 
 # Assert that all NN module/functional test dicts appear in the parity test
-assert len(
+_test_torch_nn_count = len(
     [name for name in TestCppApiParity.__dict__ if "test_torch_nn_" in name]
-) == len(expected_test_params_dicts) * len(devices)
+)
+_expected_count = len(expected_test_params_dicts) * len(devices)
+if _test_torch_nn_count != _expected_count:
+    raise AssertionError(
+        f"expected {_expected_count} test_torch_nn_ tests, got {_test_torch_nn_count}"
+    )
 
 # Assert that there exists auto-generated tests for `SampleModule` and `sample_functional`.
-# 4 == 2 (number of test dicts that are not skipped) * 2 (number of devices)
-assert len([name for name in TestCppApiParity.__dict__ if "SampleModule" in name]) == 4
-# 4 == 2 (number of test dicts that are not skipped) * 2 (number of devices)
-assert (
-    len([name for name in TestCppApiParity.__dict__ if "sample_functional" in name])
-    == 4
+# 2 == number of test dicts that are not skipped
+_expected_sample_count = 2 * len(devices)
+_sample_module_count = len(
+    [name for name in TestCppApiParity.__dict__ if "SampleModule" in name]
 )
+if _sample_module_count != _expected_sample_count:
+    raise AssertionError(
+        f"expected {_expected_sample_count} SampleModule tests, got {_sample_module_count}"
+    )
+_sample_functional_count = len(
+    [name for name in TestCppApiParity.__dict__ if "sample_functional" in name]
+)
+if _sample_functional_count != _expected_sample_count:
+    raise AssertionError(
+        f"expected {_expected_sample_count} sample_functional tests, got {_sample_functional_count}"
+    )
 
 module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
 functional_impl_check.build_cpp_tests(

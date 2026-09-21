@@ -52,6 +52,7 @@ struct alignas(1) Float8_e4m3fnuz {
   inline C10_HOST_DEVICE Float8_e4m3fnuz(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;
+  inline C10_HOST_DEVICE bool isinf() const;
 };
 
 inline std::ostream& operator<<(
@@ -70,7 +71,7 @@ namespace detail {
 inline C10_HOST_DEVICE uint8_t fp8e4m3fnuz_from_fp32_value(float f) {
   /*
    * Binary representation of 256.0f, which is the first value not representable
-   * (i.e. the first value which would overflow in to the sign bit, resulting in
+   * (i.e. the first value which would overflow into the sign bit, resulting in
    * a NaN) in fp8e4m3fnuz range:
    * 1 0000 000 - fp8e4m3fnuz
    * 0 10000111 00000000000000000000000 - fp32
@@ -158,6 +159,11 @@ inline C10_HOST_DEVICE Float8_e4m3fnuz::operator float() const {
 
 inline C10_HOST_DEVICE bool Float8_e4m3fnuz::isnan() const {
   return x == 0b10000000;
+}
+
+inline C10_HOST_DEVICE bool Float8_e4m3fnuz::isinf() const {
+  // Note: fp8e4m3fnuz does not have infinity, so this always returns false.
+  return false;
 }
 
 /// Arithmetic

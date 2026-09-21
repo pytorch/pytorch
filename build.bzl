@@ -158,6 +158,7 @@ GENERATED_H = [
     "Functions.h",
     "NativeFunctions.h",
     "NativeMetaFunctions.h",
+    "NativeAotStubs.h",
     "FunctionalInverses.h",
     "RedispatchFunctions.h",
     "RegistrationDeclarations.h",
@@ -186,7 +187,6 @@ GENERATED_H_CORE = [
     "core/TensorBody.h",
     "MethodOperators.h",
     "core/aten_interned_strings.h",
-    "core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [
@@ -213,6 +213,7 @@ GENERATED_CPP_MTIA = [
 
 GENERATED_CPP = [
     "Functions.cpp",
+    "NativeAotStubs.cpp",
     "RegisterBackendSelect.cpp",
     "RegisterCPU_0.cpp",
     "RegisterCPU_1.cpp",
@@ -312,12 +313,22 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/autograd/generated/VariableType_2.cpp",
     "torch/csrc/autograd/generated/VariableType_3.cpp",
     "torch/csrc/autograd/generated/VariableType_4.cpp",
+    "torch/csrc/autograd/generated/VariableType_5.cpp",
+    "torch/csrc/autograd/generated/VariableType_6.cpp",
+    "torch/csrc/autograd/generated/VariableType_7.cpp",
+    "torch/csrc/autograd/generated/VariableType_8.cpp",
+    "torch/csrc/autograd/generated/VariableType_9.cpp",
     "torch/csrc/autograd/generated/ViewFuncs.cpp",
     "torch/csrc/autograd/generated/TraceType_0.cpp",
     "torch/csrc/autograd/generated/TraceType_1.cpp",
     "torch/csrc/autograd/generated/TraceType_2.cpp",
     "torch/csrc/autograd/generated/TraceType_3.cpp",
     "torch/csrc/autograd/generated/TraceType_4.cpp",
+    "torch/csrc/autograd/generated/TraceType_5.cpp",
+    "torch/csrc/autograd/generated/TraceType_6.cpp",
+    "torch/csrc/autograd/generated/TraceType_7.cpp",
+    "torch/csrc/autograd/generated/TraceType_8.cpp",
+    "torch/csrc/autograd/generated/TraceType_9.cpp",
     "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
     "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
     "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
@@ -327,6 +338,7 @@ GENERATED_AUTOGRAD_CPP = [
 
 GENERATED_AOTI_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp",
 ]
 
 GENERATED_AOTI_CUDA_CPP = [

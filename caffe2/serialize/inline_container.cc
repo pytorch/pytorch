@@ -11,7 +11,6 @@
 #include <thread>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/Backend.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
@@ -245,7 +244,11 @@ void PyTorchStreamReader::valid(const char* what, const char* info) {
       what,
       info,
       ": ",
-      mz_zip_get_error_string(err));
+      mz_zip_get_error_string(err),
+      ". This is an internal miniz error. If you are seeing this error, there "
+      "is a high likelihood that your checkpoint file is corrupted. "
+      "This can happen if the checkpoint was not saved properly, "
+      "was transferred incorrectly, or the file was modified after saving.");
 }
 
 constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
@@ -420,7 +423,7 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
               recordOff + startPos, (char*)dst + startPos, threadReadSize);
         }
         readSizes[i] = size;
-        LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
+        LOG(INFO) << "Thread " << i << " read [" << startPos << '-' << endPos
                   << "] " << "from " << name << " of size " << n;
         TORCH_CHECK(
             threadReadSize == size,
@@ -734,7 +737,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
           file_name,
           std::ofstream::out | std::ofstream::trunc | std::ofstream::binary
         );
-    } catch (const std::ios_base::failure& e) {
+    } catch (const std::ios_base::failure&) {
 #ifdef _WIN32
       // Windows have verbose error code, we prefer to use it than std errno.
       uint32_t error_code = GetLastError();
@@ -773,8 +776,20 @@ void PyTorchStreamWriter::writeRecord(
     bool compress) {
   AT_ASSERT(!finalized_);
   AT_ASSERT(!archive_name_plus_slash_.empty());
-  TORCH_INTERNAL_ASSERT(
-      files_written_.count(name) == 0, "Tried to serialize file twice: ", name);
+  if (files_written_.count(name) > 0) {
+    // Allow multiple writes for triton binaries
+    bool is_triton_extension =
+        c10::ends_with(name, ".so") ||
+        c10::ends_with(name, ".cubin") ||
+        c10::ends_with(name, ".hsaco");
+
+    if (is_triton_extension) {
+      LOG(WARNING) << "File '" << name << "' is being serialized multiple times";
+      return;
+    }
+
+    TORCH_INTERNAL_ASSERT(false, "Tried to serialize file twice: ", name);
+  }
   if (name == kSerializationIdRecordName && serialization_id_.empty()) {
     // In case of copying records from another file, skip writing a different
     // serialization_id than the one computed in this writer.
@@ -902,7 +917,7 @@ void PyTorchStreamWriter::writeSerializationId() {
     serialization_id_oss << std::setfill('0') << std::setw(20)
                          << combined_record_name_hash << std::setfill('0')
                          << std::setw(20) << combined_uncomp_crc32_;
-    serialization_id_ = serialization_id_oss.str();
+    serialization_id_ = std::move(serialization_id_oss).str();
     writeRecord(
         kSerializationIdRecordName,
         serialization_id_.c_str(),

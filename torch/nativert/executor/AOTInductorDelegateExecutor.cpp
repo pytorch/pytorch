@@ -1,11 +1,8 @@
 #include <torch/nativert/executor/AOTInductorDelegateExecutor.h>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
-#include <c10/util/Logging.h>
 
 #include <torch/csrc/export/pt2_archive_constants.h>
-#include <torch/csrc/utils/generated_serialization_types.h>
 #include <torch/nativert/executor/Weights.h>
 
 namespace torch::nativert {
@@ -136,13 +133,15 @@ AOTIDelegateExecutor::AOTIDelegateExecutor(
   // commitWeights here because it's invoked from Executor's ctor already.
 }
 
-void AOTIDelegateExecutor::initWeights(std::shared_ptr<Weights> weights) {
+void AOTIDelegateExecutor::initWeights(
+    const std::shared_ptr<Weights>& weights) {
   // Do nothing for AOTI, as AOTI's .so already contains the weights.
   LOG(INFO)
       << "Skipping initWeights for AOTI to use original weights from .so file.";
 }
 
-void AOTIDelegateExecutor::processWeights(std::shared_ptr<Weights> weights) {
+void AOTIDelegateExecutor::processWeights(
+    const std::shared_ptr<Weights>& weights) {
   LOG(INFO) << "AOTIDelegateExecutor processing weights";
   std::unordered_map<std::string, at::Tensor*> new_weights;
   for (const auto& [original_fqn, name] : weight_names_map_) {

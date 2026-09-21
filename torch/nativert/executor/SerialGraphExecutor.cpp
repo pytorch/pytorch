@@ -1,3 +1,4 @@
+#include <ATen/record_function.h>
 #include <torch/nativert/executor/ExecutionPlanner.h>
 #include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/SerialGraphExecutor.h>
@@ -17,6 +18,11 @@ std::vector<c10::IValue> SerialGraphExecutor::executeWithPrefilledFrame(
   executionFrame.withManagedMemory([&](const LayoutManager* layout_manager) {
     // Execute kernels for all nodes except prim.Input and prim.Output
     for (NodeIndex nodeIdx = 1; nodeIdx < nodeKernels_.size() - 1; ++nodeIdx) {
+      if (executorConfig_.enableOpProfiling) {
+        RECORD_FUNCTION(
+            nodeKernels_[nodeIdx]->node()->target(),
+            c10::ArrayRef<const c10::IValue>{});
+      }
       nodeKernels_[nodeIdx]->compute(executionFrame);
 
 #ifndef NDEBUG
@@ -27,7 +33,7 @@ std::vector<c10::IValue> SerialGraphExecutor::executeWithPrefilledFrame(
 
       // don't free intermediate values when static memory planning is enabled
       if (executorConfig_.tryFreeUnmanagedValuesAfterUse) {
-        // Free the intermediate values that are no used anymore
+        // Free the intermediate values that are not used anymore
         for (const auto& valueKey : execPlan_->valuesToFree[nodeIdx]) {
           executionFrame.releaseValueIfNeeded(valueKey);
         }

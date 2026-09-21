@@ -7,7 +7,7 @@
 
 namespace at {
 namespace native {
-C10_API Tensor mkldnn_convolution_pointwise(
+TORCH_API Tensor mkldnn_convolution_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
@@ -19,7 +19,7 @@ C10_API Tensor mkldnn_convolution_pointwise(
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm);
 
-C10_API Tensor mkldnn_convolution_pointwise_binary(
+TORCH_API Tensor mkldnn_convolution_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
@@ -34,7 +34,7 @@ C10_API Tensor mkldnn_convolution_pointwise_binary(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm);
 
-C10_API Tensor& mkldnn_convolution_pointwise_binary_(
+TORCH_API Tensor& mkldnn_convolution_pointwise_binary_(
     Tensor& other_t,
     const Tensor& input_t,
     const Tensor& weight_t,

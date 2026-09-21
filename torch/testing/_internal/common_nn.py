@@ -17,14 +17,14 @@ import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo, TEST_WITH_ROCM
+    gradcheck, gradgradcheck, MI300_ARCH, set_default_dtype, skipIfRocmArch, skipIfTorchDynamo, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Union, Any
+from typing import Any
 from collections.abc import Callable
 from collections.abc import Sequence
 
@@ -36,7 +36,8 @@ def get_reduction(m):
     result = getattr(m, 'reduction', None)
     if result is None:
         result = _Reduction.legacy_get_string(getattr(m, 'sizeAverage', None), True, emit_warning=False)
-    assert result is not None
+    if result is None:
+        raise AssertionError("Expected result to not be None")
     return result
 
 
@@ -109,7 +110,9 @@ module_tests = [
         input_size=(4, 10),
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
         with_tf32=True,
-        tf32_precision=0.005,
+        # See no_bias variant below for rationale; same K=10 shape, seed-
+        # dependent realization near the AMD XF32 envelope (issue #155216).
+        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
         default_dtype=torch.double,
     ),
     dict(
@@ -120,9 +123,10 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
         with_tf32=True,
-        tf32_precision=0.005,
-        # ROCM: skipping tf32 test on gfx94 archs due to tolerance issue.
-        test_cuda=not (TEST_WITH_ROCM and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName),
+        # AMD XF32 at K=10 sits right at the 0.005 envelope (ideal 5.2e-3;
+        # ideal NV-TF32 2.3e-3). ROCm tolerance relaxed to cover the
+        # seed-dependent realization; see https://github.com/jeffdaily/tf32_analysis.
+        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
         default_dtype=torch.double,
     ),
     dict(
@@ -507,7 +511,7 @@ def nllloss_no_reduce_test():
 
 def nllloss_no_reduce_ignore_index_test():
     t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -610,7 +614,7 @@ def nllloss2d_no_reduce_test():
 
 def nllloss2d_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss2d_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -667,7 +671,7 @@ def nlllossNd_no_reduce_test():
 
 def nlllossNd_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLossNd_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -2588,6 +2592,11 @@ def get_new_module_tests():
             desc='multilayer_coder',
             with_tf32=True,
             tf32_precision=0.05 if SM90OrLater else 0.03,
+            # gfx942 runs TF32 on the XF32 hardware path; this K=4 multilayer entry
+            # amplifies the TF32-class per-gemm error to 4e-3..2e-2 relative on every
+            # compare, which no absolute tolerance describes. The _fp32 sibling keeps
+            # the correctness coverage; see https://github.com/pytorch/pytorch/issues/196605.
+            tf32_decorator=skipIfRocmArch(MI300_ARCH),
             default_dtype=torch.double,
         ),
         dict(
@@ -2737,7 +2746,8 @@ def kldivloss_reference(input, target, reduction='mean', log_target=False):
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         reduction='mean'):
-    assert input.dim() >= 3
+    if input.dim() < 3:
+        raise AssertionError(f"Expected input.dim() >= 3, got {input.dim()}")
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
@@ -2763,7 +2773,8 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
 
 def cross_entropy_loss_prob_target_reference(input, target, weight=None, reduction='mean',
                                              label_smoothing=0.0):
-    assert input.dim() >= 2
+    if input.dim() < 2:
+        raise AssertionError(f"Expected input.dim() >= 2, got {input.dim()}")
 
     input = torch.log_softmax(input, 1)
     C = input.size(1)
@@ -2772,7 +2783,8 @@ def cross_entropy_loss_prob_target_reference(input, target, weight=None, reducti
     weight = weight.view(1, C, *(1 for _ in input.shape[2:]))
 
     if label_smoothing > 0.0:
-        assert label_smoothing <= 1.0
+        if label_smoothing > 1.0:
+            raise AssertionError(f"Expected label_smoothing <= 1.0, got {label_smoothing}")
         target = (target * (1 - label_smoothing) + label_smoothing / C)
 
     output = -(input * target * weight).sum(dim=1)
@@ -2796,7 +2808,8 @@ def cross_entropy_loss_indices_target_reference(input, target, weight=None, igno
     if label_smoothing == 0.0:
         return nllloss
 
-    assert 0.0 < label_smoothing <= 1.0
+    if not (0.0 < label_smoothing <= 1.0):
+        raise AssertionError(f"Expected 0.0 < label_smoothing <= 1.0, got {label_smoothing}")
 
     input = torch.log_softmax(input, 1)
     C = input.size(1)
@@ -2837,6 +2850,29 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
             input, target, weight=weight, reduction=reduction,
             ignore_index=ignore_index, label_smoothing=label_smoothing
         )
+
+
+def linear_cross_entropy_loss_reference(input, linear_weight, target,
+                                        linear_bias=None,
+                                        weight=None,
+                                        ignore_index=None,
+                                        reduction='mean',
+                                        label_smoothing=0.0):
+    num_classes = linear_weight.shape[0]
+    out_features = linear_weight.shape[1:-1]
+    in_features = linear_weight.shape[-1]
+    num_batches = input.shape[:-1]
+    logits = F.linear(
+        input,
+        linear_weight.reshape((-1, in_features)),
+        linear_bias.reshape(-1) if linear_bias is not None else None,
+    ).reshape((*num_batches, num_classes, *out_features))
+    ignore_index = ignore_index if ignore_index is not None else -100
+    return F.cross_entropy(
+        logits, target, weight=weight,
+        reduction=reduction, ignore_index=ignore_index,
+        label_smoothing=label_smoothing
+    )
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
@@ -2909,7 +2945,8 @@ def multilabelmarginloss_reference(input, target, reduction='mean'):
     # make everything 2-dimensional
     input_dim = input.dim()
     if input.dim() < 2:
-        assert target.dim() < 2
+        if target.dim() >= 2:
+            raise AssertionError(f"Expected target.dim() < 2, got {target.dim()}")
         input = input.unsqueeze(0) if input.dim() == 1 else input.unsqueeze(0).unsqueeze(0)
         target = target.unsqueeze(0) if target.dim() == 1 else target.unsqueeze(0).unsqueeze(0)
 
@@ -3080,7 +3117,8 @@ loss_reference_fns: dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
-    'CrossEntropyLoss': cross_entropy_loss_reference
+    'CrossEntropyLoss': cross_entropy_loss_reference,
+    'LinearCrossEntropyLoss': linear_cross_entropy_loss_reference,
 }
 
 
@@ -3225,7 +3263,7 @@ class NNTestCase(TestCase):
     @abstractmethod
     def _backward(self, module: nn.Module,
                   input: _TensorOrTensors, output: torch.Tensor,
-                  grad_output: Union[torch.Tensor, Sequence[torch.Tensor]],
+                  grad_output: torch.Tensor | Sequence[torch.Tensor],
                   create_graph: bool = False):
         raise NotImplementedError
 
@@ -3285,7 +3323,7 @@ class NNTestCase(TestCase):
 
             if jacobian_input:
                 for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input), strict=True):
-                    jacobian_x[:, i] = d_x.contiguous().view(-1)
+                    jacobian_x[:, i] = d_x.reshape(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
@@ -3344,8 +3382,15 @@ class TestBase:
                 if name in {'constructor_args', 'extra_args'}:
                     kwargs[name] = ()
                 else:
-                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or its size!")
         self._extra_kwargs = kwargs
+        # Lazily drawn args (input, target, constructor args), cached so repeated
+        # reads within one test agree. The instance is shared by every generated
+        # test_nn variant, so ModuleTest/CriterionTest clear this on entry to
+        # __call__ and test_cuda: a sibling's leftover entry skips a draw and shifts
+        # the RNG position of every later draw (the input in __call__, the
+        # parameters in test_cuda), so the in-suite configuration would differ from
+        # the standalone repro. Subclasses with their own entry points do not clear.
         self._arg_cache = {}
 
     def get_name(self):
@@ -3374,7 +3419,8 @@ class TestBase:
         return self._get_arg('extra_args', True)
 
     def _get_arg(self, name, unpack):
-        assert name in self._required_arg_names
+        if name not in self._required_arg_names:
+            raise AssertionError(f"Expected name '{name}' to be in required arg names")
 
         if name not in self._arg_cache:
             fn_name = name + '_fn'
@@ -3385,8 +3431,10 @@ class TestBase:
             elif fn_name in self._extra_kwargs:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
-                assert size_name in self._extra_kwargs, \
-                    f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                if size_name not in self._extra_kwargs:
+                    raise AssertionError(
+                        f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                    )
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):
@@ -3428,6 +3476,7 @@ class ModuleTest(TestBase):
             self.default_dtype = torch.get_default_dtype()
 
     def __call__(self, test_case):
+        self._arg_cache.clear()
         with set_default_dtype(self.default_dtype):
             module = self.constructor(*self.constructor_args)
             input = self._get_input()
@@ -3471,7 +3520,10 @@ class ModuleTest(TestBase):
                 dim = d + 1
                 break
         noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
+        if not (noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()):
+            raise AssertionError(
+                f"Expected noncontig to be non-contiguous or have numel <= 1, got numel={noncontig.numel()}"
+            )
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
 
@@ -3510,9 +3562,13 @@ class ModuleTest(TestBase):
 
                 test_case.assertEqual(out, output)
                 test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
-                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
+                # Parameter grads can differ by a few ulps between runs when the backward
+                # accumulates atomically (e.g. embedding_dense_backward's fused path since
+                # #172454); use the same bound as the grad-input compare above.
+                test_case.assertEqual(test_case._get_parameters(module)[1], d_param, atol=1e-4, rtol=0)
 
     def test_cuda(self, test_case):
+        self._arg_cache.clear()
         if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
 
@@ -3643,7 +3699,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         num_inputs = len(input_tuple)
 
         def fn_to_gradcheck(*inputs_and_params, **kwargs):
-            assert not kwargs
+            if kwargs:
+                raise AssertionError(f"Expected no kwargs, got {kwargs}")
             return test_case._forward(module, inputs_and_params[:num_inputs])
 
         # gradcheck doesn't support operators that take in dense inputs but
@@ -3651,7 +3708,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
         # is a slightly different version of gradcheck that can handle this.
         if self.has_sparse_gradients:
-            assert num_inputs == 1
+            if num_inputs != 1:
+                raise AssertionError(f"Expected num_inputs == 1, got {num_inputs}")
             test_input_jacobian = torch.is_floating_point(input_tuple[0])
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
@@ -3682,7 +3740,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
 
             # check_inplace doesn't support multiple input tensors, since we don't have any modules
             # that modify the inputs in-place and that accept more than one input
-            assert len(input_tuple) == 1
+            if len(input_tuple) != 1:
+                raise AssertionError(f"Expected len(input_tuple) == 1, got {len(input_tuple)}")
             input = input_tuple[0]
 
             module_ip = self.constructor(*self.constructor_args, inplace=True)
@@ -3843,6 +3902,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             self.default_dtype = torch.get_default_dtype()
 
     def __call__(self, test_case):
+        self._arg_cache.clear()
         with set_default_dtype(self.default_dtype):
             module = self.constructor(*self.constructor_args)
             input = self._get_input()
@@ -3880,6 +3940,8 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
                 gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def test_cuda(self, test_case, dtype, extra_args=None):
+        self._arg_cache.clear()
+
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)

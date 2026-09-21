@@ -2,12 +2,9 @@
 #undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/interned_strings.h>
-#include <cstdint>
 #include <cstring>
 #include <mutex>
-#include <sstream>
 #include <string>
-#include <c10/util/Exception.h>
 #include <ATen/core/interned_strings_class.h>
 
 namespace c10 {
@@ -131,6 +128,5 @@ bool Symbol::is_nvprims() const { return ns() == namespaces::nvprims; }
 bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 bool Symbol::is_user() const { return ns() == namespaces::user; }
 bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
-bool Symbol::is_dimname() const { return ns() == namespaces::dimname; }
 
 } // namespace c10

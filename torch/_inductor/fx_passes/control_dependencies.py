@@ -8,11 +8,15 @@ operations (e.g., collective_start -> mm -> wait), this pass wraps operations
 with control_deps to make dependencies explicit.
 """
 
-from typing import Any
+from operator import attrgetter
+from typing import cast
 
 import torch.fx as fx
+import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -20,14 +24,20 @@ class ControlDeps(HigherOrderOperator):
     """
     Higher-order operator that enforces ordering by making dependencies explicit.
 
-    Schema: control_deps(additional_deps, target, *args, **kwargs) -> result
+    Schema: control_deps(additional_deps, subgraph, *args, **kwargs) -> result
     where:
     - additional_deps: tuple of tensors that must be computed before this op
+      (ordering-only, not a real data use)
     - subgraph: GraphModule containing the exact operation to execute
-    - args/kwargs: arguments for the target function
+    - *args: pass-through arguments forwarded to the subgraph
 
-    This ensures all tensors in additional_deps are computed before the target
-    executes, creating explicit scheduling dependencies.
+    Semantics:
+    - All tensors in additional_deps are computed before the subgraph executes.
+    - Pass-through args (inputs returned unchanged by the subgraph) are
+      versioned: future readers are ordered after all subgraph operations
+      via a rename chain (OrderingOutput).  This ensures that consumers of
+      a pass-through value cannot be scheduled before the subgraph's sync
+      ops (e.g. wait_event) complete.
     """
 
     def __init__(self) -> None:
@@ -49,16 +59,38 @@ class ControlDeps(HigherOrderOperator):
             raise TypeError(
                 f"subgraph must be GraphModule or callable, got {type(subgraph).__name__}"
             )
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(additional_deps, subgraph, *args, **kwargs)
 
 
 control_deps = ControlDeps()
+
+# control_deps wraps side-effecting ops (e.g. record_event, wait_event)
+# and must not be eliminated by DCE even when its outputs are unused.
+from torch.fx.node import has_side_effect
+
+
+has_side_effect(control_deps)
 
 
 # Register fake implementation for tracing
 @register_fake(control_deps)
 def _(additional_deps, subgraph, *args, **kwargs):
     """Fake tensor implementation - execute the subgraph."""
+    return subgraph(*args, **kwargs)
+
+
+# Register eager execution implementation
+@control_deps.py_impl(DispatchKey.CompositeExplicitAutograd)
+def control_deps_eager(additional_deps, subgraph, *args, **kwargs):
+    """Eager implementation - just execute the subgraph."""
+    return subgraph(*args, **kwargs)
+
+
+# Autograd impl needed because additional_deps tensors may have autograd state,
+# causing dispatch through AutogradCUDA even in post-autograd graphs.
+@control_deps.py_impl(DispatchKey.Autograd)
+def control_deps_autograd(additional_deps, subgraph, *args, **kwargs):
     return subgraph(*args, **kwargs)
 
 
@@ -73,6 +105,31 @@ def get_subgraph_name(gm: fx.GraphModule, name):
         i += 1
 
     return f"{name}_{i}"
+
+
+def _extract_unique_nodes(
+    args: tuple[fx.node.Argument, ...], kwargs: dict[str, fx.node.Argument]
+) -> tuple[list[fx.Node], list[fx.node.Argument], pytree.TreeSpec]:
+    """Extract unique fx.Node instances from args/kwargs using pytree.
+
+    Args:
+        args: The positional arguments (may contain nested structures with fx.Node)
+        kwargs: The keyword arguments (may contain nested structures with fx.Node)
+
+    Returns:
+        - Ordered list of unique fx.Node instances (preserves first occurrence order)
+        - Flattened list of all items from args/kwargs
+        - The pytree spec for reconstructing the original structure
+    """
+    flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
+    flat_args_kwargs = cast(list[fx.node.Argument], flat_args_kwargs)
+    unique_nodes: list[fx.Node] = []
+    seen: OrderedSet[fx.Node] = OrderedSet()
+    for item in flat_args_kwargs:
+        if isinstance(item, fx.Node) and item not in seen:
+            unique_nodes.append(item)
+            seen.add(item)
+    return unique_nodes, flat_args_kwargs, spec
 
 
 def preserve_node_ordering(
@@ -101,7 +158,8 @@ def preserve_node_ordering(
 
     # Process each node that needs additional dependencies
     for dependent_node, dep_nodes in additional_deps_map.items():
-        assert dependent_node.op == "call_function", dependent_node.op
+        if dependent_node.op != "call_function":
+            raise AssertionError(dependent_node.op)
 
         original_name = dependent_node.name
         original_args = dependent_node.args
@@ -114,7 +172,8 @@ def preserve_node_ordering(
         subgraph_module = _create_subgraph_for_node(graph, dependent_node)
 
         owning_mod = graph.owning_module
-        assert owning_mod is not None
+        if owning_mod is None:
+            raise AssertionError("expected graph to have an owning_module")
         subgraph_attr_name = get_subgraph_name(owning_mod, original_name)
         setattr(graph.owning_module, subgraph_attr_name, subgraph_module)
 
@@ -126,11 +185,8 @@ def preserve_node_ordering(
             # Create get_attr node for the subgraph
             get_subgraph = graph.get_attr(subgraph_attr_name)
 
-            # add additional args
-            node_args = [a for a in original_args if isinstance(a, fx.Node)]
-            for value in original_kwargs.values():
-                if isinstance(value, fx.Node):
-                    node_args.append(value)
+            # Extract unique nodes from nested args/kwargs
+            node_args, _, _ = _extract_unique_nodes(original_args, original_kwargs)
 
             # Create with temporary name first
             ordered_node = graph.call_function(
@@ -148,6 +204,14 @@ def preserve_node_ordering(
         ordered_node.meta = original_meta
         # this will be constrained on the target node in subgraph if it exists
         ordered_node.meta.pop("eager_input_vals", None)
+        # The wrapped operation retains its fallback metadata in the subgraph.
+        # The control_deps HOP itself must use its dedicated lowering because
+        # FallbackKernel cannot handle its Subgraph argument.
+        ordered_node.meta.pop("should_fallback", None)
+        custom_meta = ordered_node.meta.get("custom")
+        if isinstance(custom_meta, dict) and "fallback_to_eager" in custom_meta:
+            ordered_node.meta["custom"] = custom_meta.copy()
+            ordered_node.meta["custom"].pop("fallback_to_eager")
 
         # Replace all uses of the original node with the ordered version
         dependent_node.replace_all_uses_with(ordered_node)
@@ -162,9 +226,11 @@ def preserve_node_ordering(
         replacements[dependent_node] = ordered_node
 
 
-def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
+def _create_subgraph_for_node(
+    graph: fx.Graph, node: fx.Node, additional_deps=None
+) -> fx.GraphModule:
     """
-    Create a subgraph that exactly recreates a node's operation.
+    Create a subgraph that exactly recreates a node's operation optionally passing through additional dependencies.
 
     The subgraph takes only the fx.Node arguments and recreates the operation
     with the exact target, args structure, and kwargs.
@@ -172,55 +238,70 @@ def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
     Args:
         graph: The parent graph
         node: The node to wrap in a subgraph
+        additional_deps: Additional dependencies to pass through the subgraph
 
     Returns:
         A GraphModule containing the subgraph
     """
     # Get the owning module
-    # torch.distributed.breakpoint(0)
     owning_module = graph.owning_module
+    if owning_module is None:
+        raise AssertionError("graph.owning_module must not be None")
 
     # Create a new graph for the subgraph
     subgraph = fx.Graph(owning_module)
 
-    new_args: list[Any] = []
-    placeholder_idx = 0
-    for _, arg in enumerate(node.args):
-        if not isinstance(arg, fx.Node):
-            new_args.append(arg)
-            continue
+    # Extract unique nodes and get flattened structure + spec
+    unique_nodes, flat_args_kwargs, spec = _extract_unique_nodes(node.args, node.kwargs)
 
-        placeholder = subgraph.placeholder(f"arg_{placeholder_idx}")
-        placeholder_idx += 1
-        if "val" in arg.meta:
-            placeholder.meta.update(arg.meta)
-        new_args.append(placeholder)  # type: ignore[arg-type]
+    # Create placeholders for each unique node
+    node_to_placeholder: dict[fx.Node, fx.Node] = {}
+    for idx, orig_node in enumerate(unique_nodes):
+        placeholder = subgraph.placeholder(f"arg_{idx}")
+        if "val" in orig_node.meta:
+            placeholder.meta.update(orig_node.meta)
+        elif orig_node.op == "get_attr" and isinstance(orig_node.target, str):
+            placeholder.meta["val"] = attrgetter(orig_node.target)(owning_module)
+        node_to_placeholder[orig_node] = placeholder
 
-    new_kwargs: dict[str, Any] = {}
-    for key, value in node.kwargs.items():
-        if not isinstance(value, fx.Node):
-            new_kwargs[key] = value
-            continue
+    # Replace fx.Node instances with their placeholders
+    def replace_nodes(item: fx.node.Argument) -> fx.node.Argument:
+        if isinstance(item, fx.Node):
+            return node_to_placeholder[item]
+        return item
 
-        placeholder = subgraph.placeholder(f"kwarg_{key}")
-        if "val" in value.meta:
-            placeholder.meta.update(value.meta)
+    additional_deps_placeholders = []
+    for idx, dep in enumerate(additional_deps or ()):
+        placeholder = subgraph.placeholder(f"dep_{idx}")
+        if "val" in dep.meta:
+            placeholder.meta.update(dep.meta)
+        additional_deps_placeholders.append(placeholder)
 
-        new_kwargs[key] = placeholder  # type: ignore[assignment]
+    new_flat = [replace_nodes(item) for item in flat_args_kwargs]
+    new_args, new_kwargs = cast(
+        tuple[tuple[fx.node.Argument, ...], dict[str, fx.node.Argument]],
+        pytree.tree_unflatten(new_flat, spec),
+    )
 
     # Recreate the exact original operation in the subgraph
-    assert callable(node.target)
+    if not callable(node.target):
+        raise AssertionError(f"expected node.target to be callable, got {node.target}")
     result = subgraph.call_function(
         node.target,
         tuple(new_args),
-        new_kwargs,  # type: ignore[arg-type]
+        new_kwargs,
     )
 
     # Copy metadata from the original node
     result.meta.update(node.meta)
 
-    out = subgraph.output(result)
-    if "val" in result.meta:
-        out.meta["val"] = result.meta["val"]
+    if additional_deps_placeholders:
+        outputs = tuple([result] + additional_deps_placeholders)
+        out = subgraph.output(outputs)
+        out.meta["val"] = tuple(output.meta.get("val") for output in outputs)
+    else:
+        out = subgraph.output(result)
+        if "val" in result.meta:
+            out.meta["val"] = result.meta["val"]
 
-    return fx.GraphModule(owning_module, subgraph)
+    return _LazyGraphModule(owning_module, subgraph)

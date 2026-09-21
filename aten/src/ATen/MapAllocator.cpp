@@ -7,7 +7,6 @@
 #define AT_ATOMIC_IPC_REFCOUNT 1
 #endif
 
-#include <c10/core/CPUAllocator.h>
 
 #include <c10/util/error.h>
 #ifdef _WIN32
@@ -296,20 +295,21 @@ MapAllocator::MapAllocator(WithFd /*unused*/, std::string_view filename, int fd,
 #ifdef HAVE_POSIX_FALLOCATE
           if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
             for (;;) {
-              if (posix_fallocate(fd, 0, static_cast<off_t>(size)) == 0) {
+              int err = posix_fallocate(fd, 0, static_cast<off_t>(size));
+              if (err == 0) {
                 break;
               }
 
-              if (errno == EINTR) {
+              if (err == EINTR) {
                 continue;
               }
 
-              if (errno == EINVAL || errno == EOPNOTSUPP) {
+              if (err == EINVAL || err == EOPNOTSUPP) {
                 // the underlying filesystem does not support the operation
                 break;
               }
 
-              TORCH_CHECK(false, "unable to allocate shared memory(shm) for file <", filename_, ">: ", c10::utils::str_error(errno), " (", errno, ")");
+              TORCH_CHECK(false, "unable to allocate shared memory(shm) for file <", filename_, ">: ", c10::utils::str_error(err), " (", err, ")");
             }
           }
 #endif

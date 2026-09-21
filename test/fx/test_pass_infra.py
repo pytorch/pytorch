@@ -9,7 +9,11 @@ from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 # Pass that uses PassBase and returns a PassResult (best scenario)
@@ -58,6 +62,8 @@ class AddModule(torch.nn.Module):
 
 
 class TestPassManager(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pass_manager(self):
         """
         Tests that the pass manager runs the passes correctly.
@@ -80,7 +86,10 @@ class TestPassManager(TestCase):
 
         res = pm(traced_m)
         modified_m = res.graph_module
-        assert isinstance(modified_m, fx.GraphModule)
+        if not isinstance(modified_m, fx.GraphModule):
+            raise AssertionError(
+                f"Expected modified_m to be fx.GraphModule, got {type(modified_m)}"
+            )
 
         # Check that all call_function nodes are divs
         for node in modified_m.graph.nodes:

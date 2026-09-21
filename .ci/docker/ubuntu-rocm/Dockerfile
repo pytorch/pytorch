@@ -5,6 +5,7 @@ FROM ubuntu:${UBUNTU_VERSION}
 ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
+ENV PIP_NO_CACHE_DIR=1
 
 # Set AMD gpu targets to build for
 ARG PYTORCH_ROCM_ARCH
@@ -13,6 +14,7 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
+RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev && rm -rf /var/lib/apt/lists/*
 
 # Install user
 COPY ./common/install_user.sh install_user.sh
@@ -23,15 +25,19 @@ ARG KATEX
 COPY ./common/install_docs_reqs.sh install_docs_reqs.sh
 RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
-# Install conda and other packages (e.g., numpy, pytest)
-ARG ANACONDA_PYTHON_VERSION
+# Install python (via deadsnakes) into a venv and the CI requirements
+ARG PYTHON_VERSION
+ARG PYTHON_FREETHREADED
 ARG BUILD_ENVIRONMENT
-ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
-ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
-COPY requirements-ci.txt /opt/conda/requirements-ci.txt
-COPY ./common/install_conda.sh install_conda.sh
+ENV PYTHON_VERSION=$PYTHON_VERSION
+ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
+ENV VENV_PATH=/opt/python-${PYTHON_VERSION}-venv
+ENV VIRTUAL_ENV=${VENV_PATH}
+ENV PATH=${VENV_PATH}/bin:$PATH
+COPY requirements-ci.txt /opt/requirements-ci.txt
+COPY ./common/install_python.sh install_python.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
+RUN bash ./install_python.sh && rm install_python.sh common_utils.sh /opt/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -43,34 +49,17 @@ ARG CLANG_VERSION
 COPY ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
-# (optional) Install vision packages like OpenCV
-ARG VISION
-COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
-ENV INSTALLED_VISION ${VISION}
-
 # Install rocm
 ARG ROCM_VERSION
-RUN mkdir ci_commit_pins
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
+ARG THEROCK_INDEX_URL
+ARG USE_MSLK
+ENV ROCM_VERSION=${ROCM_VERSION}
 COPY ./common/install_rocm.sh install_rocm.sh
-RUN bash ./install_rocm.sh
-RUN rm install_rocm.sh common_utils.sh
-RUN rm -r ci_commit_pins
-COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
-RUN rm install_rocm_magma.sh
-ADD ./common/install_miopen.sh install_miopen.sh
-RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
-ENV ROCM_PATH /opt/rocm
-ENV PATH /opt/rocm/bin:$PATH
-ENV PATH /opt/rocm/hcc/bin:$PATH
-ENV PATH /opt/rocm/hip/bin:$PATH
-ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV PATH /opt/rocm/llvm/bin:$PATH
-ENV MAGMA_HOME /opt/rocm/magma
+RUN bash ./install_rocm.sh && rm install_rocm.sh
+
+# ROCm environment is written by install_rocm.sh to /etc/rocm_env.sh and sourced
+# by CI scripts. TheRock installs ROCm under the Python environment, not /opt/rocm.
+
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 
@@ -79,25 +68,7 @@ COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
 
-# (optional) Install UCC
-ARG UCX_COMMIT
-ARG UCC_COMMIT
-ENV UCX_COMMIT $UCX_COMMIT
-ENV UCC_COMMIT $UCC_COMMIT
-ENV UCX_HOME /usr
-ENV UCC_HOME /usr
-ADD ./common/install_ucc.sh install_ucc.sh
-RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
-
-COPY ./common/install_openssl.sh install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-RUN bash ./install_openssl.sh
-ENV OPENSSL_DIR /opt/openssl
-
 ARG INDUCTOR_BENCHMARKS
-ARG ANACONDA_PYTHON_VERSION
-ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface-requirements.txt huggingface-requirements.txt
@@ -105,12 +76,6 @@ COPY ci_commit_pins/timm.txt timm.txt
 COPY ci_commit_pins/torchbench.txt torchbench.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-requirements.txt torchbench.txt
-
-# (optional) Install non-default Ninja version
-ARG NINJA_VERSION
-COPY ./common/install_ninja.sh install_ninja.sh
-RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
-RUN rm install_ninja.sh
 
 ARG TRITON
 # Install triton, this needs to be done before sccache because the latter will
@@ -123,8 +88,17 @@ RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
 
+# Install Rust toolchain (needed to build the torch._rust extension).
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
+COPY ./common/patches /opt/cache/patches
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
 
@@ -133,12 +107,13 @@ COPY ./common/install_openmpi.sh install_openmpi.sh
 RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
 RUN rm install_openmpi.sh
 
-# Include BUILD_ENVIRONMENT environment variable in image
+# Install rocm-origami
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/rocm-origami.txt rocm-origami.txt
+RUN bash -c 'source /etc/rocm_env.sh && source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
+
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
-# Install LLVM dev version (Defined in the pytorch/builder github repository)
-COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]

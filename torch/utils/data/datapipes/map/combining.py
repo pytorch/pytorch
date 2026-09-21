@@ -16,7 +16,7 @@ class ConcaterMapDataPipe(MapDataPipe):
     r"""
     Concatenate multiple Map DataPipes (functional name: ``concat``).
 
-    The new index of is the cumulative sum of source DataPipes.
+    The new index is the cumulative sum of source DataPipes.
     For example, if there are 2 source DataPipes both with length 5,
     index 0 to 4 of the resulting `ConcatMapDataPipe` would refer to
     elements of the first DataPipe, and 5 to 9 would refer to elements
@@ -42,6 +42,7 @@ class ConcaterMapDataPipe(MapDataPipe):
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `MapDataPipe`")
+        # pyrefly: ignore [unsafe-overlap]
         if not all(isinstance(dp, Sized) for dp in datapipes):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes  # type: ignore[assignment]
@@ -67,7 +68,7 @@ class ZipperMapDataPipe(MapDataPipe[tuple[_T_co, ...]]):
     r"""
     Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
 
-    This MataPipe is out of bound as soon as the shortest input DataPipe is exhausted.
+    This MapDataPipe is out of bounds as soon as the shortest input DataPipe is exhausted.
 
     Args:
         *datapipes: Map DataPipes being aggregated
@@ -89,6 +90,7 @@ class ZipperMapDataPipe(MapDataPipe[tuple[_T_co, ...]]):
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `MapDataPipe`")
+        # pyrefly: ignore [unsafe-overlap]
         if not all(isinstance(dp, Sized) for dp in datapipes):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes

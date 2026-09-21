@@ -1,5 +1,3 @@
-# pyre-strict
-
 """Exception classes for PyTorch Inductor runtime caching.
 
 This module defines a hierarchy of exceptions used throughout the caching system.
@@ -8,9 +6,8 @@ for user-facing errors that also inherit from TypeError for compatibility.
 """
 
 from threading import Lock
-from typing import Any
 
-from filelock import FileLock
+from filelock import BaseFileLock
 
 
 class CacheError(Exception):
@@ -54,7 +51,7 @@ class FileLockTimeoutError(SystemError):
     limit, indicating that the lock could not be acquired within the allotted time.
     """
 
-    def __init__(self, flock: FileLock, timeout: float) -> None:
+    def __init__(self, flock: BaseFileLock, timeout: float) -> None:
         """Initialize the file lock timeout error with detailed lock information.
 
         Args:
@@ -83,24 +80,6 @@ class KeyEncodingError(UserError):
     """
 
 
-class KeyPicklingError(KeyEncodingError):
-    """Error raised when a cache key cannot be pickled for serialization.
-
-    This typically occurs when trying to cache objects with keys that contain
-    non-serializable components, lambda functions, or other unpickleable types.
-    """
-
-    def __init__(self, key: Any) -> None:
-        """Initialize the key pickling error with detailed key information.
-
-        Args:
-            key: The cache key that failed to be pickled.
-        """
-        super().__init__(
-            f"Failed to pickle cache key with type {type(key)} and value {key!r}."
-        )
-
-
 class ValueEncodingError(UserError):
     """Base class for errors that occur during cache value encoding operations.
 
@@ -109,81 +88,9 @@ class ValueEncodingError(UserError):
     """
 
 
-class ValuePicklingError(ValueEncodingError):
-    """Error raised when a cache value cannot be pickled for serialization.
-
-    This occurs when trying to cache objects that contain non-serializable
-    components, file handles, network connections, or other unpickleable types.
-    """
-
-    def __init__(self, value: Any) -> None:
-        """Initialize the value pickling error with detailed value information.
-
-        Args:
-            value: The cache value that failed to be pickled.
-        """
-        super().__init__(
-            f"Failed to pickle cache value with type {type(value)} and value {value!r}."
-        )
-
-
 class ValueDecodingError(UserError):
     """Base class for errors that occur during cache value decoding operations.
 
     Raised when cached values cannot be properly decoded during retrieval.
     This includes deserialization, decompression, or other decoding-related failures.
     """
-
-
-class ValueUnPicklingError(ValueDecodingError):
-    """Error raised when cached value data cannot be unpickled during retrieval.
-
-    This typically indicates corruption, version incompatibility, or missing
-    dependencies required to reconstruct the cached object.
-    """
-
-    def __init__(self, pickled_value: bytes) -> None:
-        """Initialize the value unpickling error with the problematic data.
-
-        Args:
-            pickled_value: The bytes that failed to be unpickled.
-        """
-        super().__init__(
-            f"Failed to unpickle cache value from pickled value {pickled_value!r}."
-        )
-
-
-class CustomParamsEncoderRequiredError(UserError):
-    pass
-
-
-class CustomResultEncoderRequiredError(UserError):
-    pass
-
-
-class CustomResultDecoderRequiredError(UserError):
-    pass
-
-
-class DeterministicCachingDisabledError(UserError):
-    pass
-
-
-class DeterministicCachingRequiresStrongConsistencyError(UserError):
-    pass
-
-
-class StrictDeterministicCachingKeyNotFoundError(UserError):
-    pass
-
-
-class DeterministicCachingInvalidConfigurationError(UserError):
-    pass
-
-
-class StrictDeterministicCachingInsertionError(UserError):
-    pass
-
-
-class DeterministicCachingIMCDumpConflictError(SystemError):
-    pass

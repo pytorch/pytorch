@@ -40,8 +40,24 @@ test_python_all() {
 test_python_mps() {
   setup_test_python
 
-  time python test/run_test.py --verbose --mps
-  MTL_CAPTURE_ENABLED=1 ${CONDA_RUN} python3 test/test_mps.py --verbose -k test_metal_capture
+  time PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --verbose --mps
+  # Run scalar binary ops under the Metal shader validation layer to catch
+  # bad buffer address spaces (e.g. read-only setBytes bound to a writable arg).
+  MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 python3 test/test_mps.py --verbose -k test_add_sub
+  # Metal capture is flaky, so retry it a few times before giving up.
+  for _ in 1 2 3; do
+    MTL_CAPTURE_ENABLED=1 python3 test/test_mps.py --verbose -k test_metal_capture && break
+  done
+
+  assert_git_not_dirty
+}
+
+test_python_openreg() {
+  setup_test_python
+
+  git submodule update --init --depth 1 third_party/googletest
+
+  time python test/run_test.py --openreg --verbose
 
   assert_git_not_dirty
 }
@@ -93,14 +109,12 @@ test_libtorch() {
 }
 
 test_custom_backend() {
-  print_cmake_info
-
   echo "Testing custom backends"
   pushd test/custom_backend
   rm -rf build && mkdir build
   pushd build
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -115,15 +129,13 @@ test_custom_backend() {
 }
 
 test_custom_script_ops() {
-  print_cmake_info
-
   echo "Testing custom script operators"
   pushd test/custom_operator
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -137,15 +149,13 @@ test_custom_script_ops() {
 }
 
 test_jit_hooks() {
-  print_cmake_info
-
   echo "Testing jit hooks in cpp"
   pushd test/jit_hooks
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -216,8 +226,6 @@ pip_benchmark_deps() {
 
 
 test_torchbench_perf() {
-  print_cmake_info
-
   echo "Launching torchbench setup"
   pip_benchmark_deps
   torchbench_setup_macos
@@ -243,8 +251,6 @@ test_torchbench_perf() {
 }
 
 test_torchbench_smoketest() {
-  print_cmake_info
-
   echo "Launching torchbench setup"
   pip_benchmark_deps
   # shellcheck disable=SC2119,SC2120
@@ -306,8 +312,6 @@ test_torchbench_smoketest() {
 }
 
 test_aoti_torchbench_smoketest() {
-  print_cmake_info
-
   echo "Launching AOTInductor torchbench setup"
   pip_benchmark_deps
   # shellcheck disable=SC2119,SC2120
@@ -348,7 +352,6 @@ test_aoti_torchbench_smoketest() {
 }
 
 test_hf_perf() {
-  print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   pip_benchmark_deps
@@ -364,7 +367,6 @@ test_hf_perf() {
 }
 
 test_timm_perf() {
-  print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   pip_benchmark_deps
@@ -393,6 +395,8 @@ elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
   test_torchbench_smoketest "${SHARD_NUMBER}"
 elif [[ $TEST_CONFIG == *"aot_inductor_perf_smoketest"* ]]; then
   test_aoti_torchbench_smoketest "${SHARD_NUMBER}"
+elif [[ $TEST_CONFIG == *"openreg"* ]]; then
+  test_python_openreg
 elif [[ $TEST_CONFIG == *"mps"* ]]; then
   test_python_mps
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then

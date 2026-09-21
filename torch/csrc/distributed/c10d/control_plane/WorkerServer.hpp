@@ -19,9 +19,14 @@ class TORCH_API WorkerServer : public c10::intrusive_ptr_target {
 
   void shutdown();
 
+  int port() {
+    return port_;
+  }
+
  private:
   httplib::Server server_;
   std::thread serverThread_;
+  int port_;
 };
 
 } // namespace c10d::control_plane

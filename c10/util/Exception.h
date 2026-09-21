@@ -11,6 +11,7 @@
 #include <exception>
 #include <memory>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -236,7 +237,9 @@ struct C10_API WarnAlways {
 // Like Error, but we always report the C++ backtrace, instead of only
 // reporting when TORCH_SHOW_CPP_STACKTRACES
 class C10_API ErrorAlwaysShowCppStacktrace : public Error {
+ public:
   using Error::Error;
+  ErrorAlwaysShowCppStacktrace(SourceLocation source_location, std::string msg);
   const char* what_without_backtrace() const noexcept override {
     return what();
   }
@@ -246,60 +249,80 @@ class C10_API ErrorAlwaysShowCppStacktrace : public Error {
 // lazily inside a kernel (See: advanced indexing).  These turn into
 // IndexError when they cross to Python.
 class C10_API IndexError : public Error {
+ public:
   using Error::Error;
+  IndexError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for invalid values.  These turn into
 // ValueError when they cross to Python.
 class C10_API ValueError : public Error {
+ public:
   using Error::Error;
+  ValueError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for invalid types.  These turn into
 // TypeError when they cross to Python.
 class C10_API TypeError : public Error {
+ public:
   using Error::Error;
+  TypeError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for functionality that is not implemented.  These turn into
 // NotImplementedError when they cross to Python.
 class C10_API NotImplementedError : public Error {
+ public:
   using Error::Error;
+  NotImplementedError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for buffer-related errors, e.g. trying to create a DLPack of
 // an unsupported device.  These turn into BufferError when they cross to
 // Python.
 class C10_API BufferError : public Error {
+ public:
   using Error::Error;
+  BufferError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
+ public:
   using Error::Error;
+  EnforceFiniteError(SourceLocation source_location, std::string msg);
 };
 
 // Used in Onnxifi backend lowering.  These turn into
 // ExitException when they cross to Python.
 class C10_API OnnxfiBackendSystemError : public Error {
+ public:
   using Error::Error;
+  OnnxfiBackendSystemError(SourceLocation source_location, std::string msg);
 };
 
 // Used for numerical errors from the linalg module. These
 // turn into LinAlgError when they cross into Python.
 class C10_API LinAlgError : public Error {
+ public:
   using Error::Error;
+  LinAlgError(SourceLocation source_location, std::string msg);
 };
 
 class C10_API OutOfMemoryError : public Error {
+ public:
   using Error::Error;
+  OutOfMemoryError(SourceLocation source_location, std::string msg);
 };
 
 // Used for handling syntactic errors in input arguments.
 // These turn into SyntaxError when the cross into Python.
 class C10_API SyntaxError : public Error {
+ public:
   using Error::Error;
+  SyntaxError(SourceLocation source_location, std::string msg);
 };
 
 // Raised when accelerator API call hits an error.
@@ -308,8 +331,8 @@ class C10_API AcceleratorError : public Error {
   int32_t error_code;
 
  public:
-  AcceleratorError(SourceLocation loc, int32_t code, const std::string& msg)
-      : Error(loc, msg), error_code(code) {}
+  AcceleratorError(SourceLocation loc, int32_t code, std::string msg)
+      : Error(loc, std::move(msg)), error_code(code) {}
   int32_t get_error_code() const {
     return error_code;
   }
@@ -318,31 +341,41 @@ class C10_API AcceleratorError : public Error {
 // Base error type for all distributed errors.
 // These turn into DistError when they cross into Python.
 class C10_API DistError : public Error {
+ public:
   using Error::Error;
+  DistError(SourceLocation source_location, std::string msg);
 };
 
 // Used for collective communication library errors from the distributed module.
 // These turn into DistBackendError when they cross into Python.
 class C10_API DistBackendError : public DistError {
+ public:
   using DistError::DistError;
+  DistBackendError(SourceLocation source_location, std::string msg);
 };
 
 // Used for errors originating from the store.
 // These turn into DistStoreError when they cross into Python.
 class C10_API DistStoreError : public DistError {
+ public:
   using DistError::DistError;
+  DistStoreError(SourceLocation source_location, std::string msg);
 };
 
 // Used for errors originating from the TCP/IP stack and not from collective
 // libraries. These turn into DistNetworkError when they cross into Python.
 class C10_API DistNetworkError : public DistError {
+ public:
   using DistError::DistError;
+  DistNetworkError(SourceLocation source_location, std::string msg);
 };
 
 // Raised when a queue is empty and a non-blocking pop is called.
 // Translated to torch.distributed.QueueEmptyError in Python
 class C10_API DistQueueEmptyError : public DistStoreError {
+ public:
   using DistStoreError::DistStoreError;
+  DistQueueEmptyError(SourceLocation source_location, std::string msg);
 };
 
 // A utility function to return an exception std::string by prepending its
@@ -360,8 +393,9 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // narrowing conversion Here the static cast is used to pass the build. if this
 // is used inside a lambda the __func__ macro expands to operator(), which isn't
 // very useful, but hard to fix in a macro so suppressing the warning.
-#define C10_THROW_ERROR(err_type, msg) \
-  throw ::c10::err_type(               \
+#define C10_THROW_ERROR(err_type, msg)                       \
+  /* @allow-raw-throw: this macro is the c10 throw itself */ \
+  throw ::c10::err_type(                                     \
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
 #define C10_BUILD_ERROR(err_type, msg) \
@@ -379,7 +413,11 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // ----------------------------------------------------------------------------
 
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_RETHROW(e, ...) throw
+#define TORCH_RETHROW(e, ...)                       \
+  do {                                              \
+    (void)e; /* Suppress unused variable warning */ \
+    throw;                                          \
+  } while (false)
 #else
 #define TORCH_RETHROW(e, ...)               \
   do {                                      \
@@ -543,32 +581,34 @@ namespace c10::detail {
 // useful when certain headers are used in a libtorch-independent way,
 // e.g. when Vectorized<T> is used in AOTInductor generated code.
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK(cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    throw std::runtime_error(TORCH_CHECK_MSG( \
-        cond,                                 \
-        "",                                   \
-        __func__,                             \
-        ", ",                                 \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
-        ", ",                                 \
-        __VA_ARGS__));                        \
+#define TORCH_CHECK(cond, ...)                             \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                    \
+    /* @allow-raw-throw: this macro is the check itself */ \
+    throw std::runtime_error(TORCH_CHECK_MSG(              \
+        cond,                                              \
+        "",                                                \
+        __func__,                                          \
+        ", ",                                              \
+        __FILE__,                                          \
+        ":",                                               \
+        __LINE__,                                          \
+        ", ",                                              \
+        __VA_ARGS__));                                     \
   }
 #else
-#define TORCH_CHECK(cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    throw std::runtime_error(TORCH_CHECK_MSG( \
-        cond,                                 \
-        "",                                   \
-        __func__,                             \
-        ", ",                                 \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
-        ", ",                                 \
-        ##__VA_ARGS__));                      \
+#define TORCH_CHECK(cond, ...)                             \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                    \
+    /* @allow-raw-throw: this macro is the check itself */ \
+    throw std::runtime_error(TORCH_CHECK_MSG(              \
+        cond,                                              \
+        "",                                                \
+        __func__,                                          \
+        ", ",                                              \
+        __FILE__,                                          \
+        ":",                                               \
+        __LINE__,                                          \
+        ", ",                                              \
+        ##__VA_ARGS__));                                   \
   }
 #endif
 
@@ -614,9 +654,19 @@ namespace c10::detail {
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   while (false)                               \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+// In release: TORCH_INTERNAL_ASSERT_DEBUG_ONLY is a no-op, so return
+// __VA_ARGS__ as a fallback. In debug: crashes via
+// TORCH_INTERNAL_ASSERT(false), so no return is emitted (avoids
+// -Wunreachable-code-return).
+#define TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(...) \
+  do {                                             \
+    return __VA_ARGS__;                            \
+  } while (0)
 #else
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+#define TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(...) \
+  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(false))
 #endif
 
 // TODO: We're going to get a lot of similar looking string literals
@@ -704,32 +754,36 @@ namespace c10::detail {
 
 #ifndef FATAL_IF
 #ifdef C10_USE_GLOG
-#define FATAL_IF(condition)                                              \
-  condition ? (void)0                                                    \
-            : ::c10::LoggerVoidify() &                                   \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::google::GLOG_FATAL) \
+#define FATAL_IF(condition)                                           \
+  condition ? (void)0                                                 \
+            : ::c10::LoggerVoidify() &                                \
+          ::c10::MessageLogger(                                       \
+              ::c10::SourceLocation::current(), ::google::GLOG_FATAL) \
               .stream()
 #else
-#define FATAL_IF(condition)            \
-  condition ? (void)0                  \
-            : ::c10::LoggerVoidify() & \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL).stream()
+#define FATAL_IF(condition)                                        \
+  condition ? (void)0                                              \
+            : ::c10::LoggerVoidify() &                             \
+          ::c10::MessageLogger(                                    \
+              ::c10::SourceLocation::current(), ::c10::GLOG_FATAL) \
+              .stream()
 #endif
 #endif
 
 #ifndef NON_FATAL_IF
 #ifdef C10_USE_GLOG
-#define NON_FATAL_IF(condition)                                \
-  condition ? (void)0                                          \
-            : ::c10::LoggerVoidify() &                         \
-          ::c10::MessageLogger(                                \
-              __FILE__, __LINE__, ::google::GLOG_FATAL, false) \
-              .stream()
-#else
 #define NON_FATAL_IF(condition)                                              \
   condition ? (void)0                                                        \
             : ::c10::LoggerVoidify() &                                       \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL, false) \
+          ::c10::MessageLogger(                                              \
+              ::c10::SourceLocation::current(), ::google::GLOG_FATAL, false) \
+              .stream()
+#else
+#define NON_FATAL_IF(condition)                                           \
+  condition ? (void)0                                                     \
+            : ::c10::LoggerVoidify() &                                    \
+          ::c10::MessageLogger(                                           \
+              ::c10::SourceLocation::current(), ::c10::GLOG_FATAL, false) \
               .stream()
 #endif
 #endif

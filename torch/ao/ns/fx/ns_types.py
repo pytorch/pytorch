@@ -1,6 +1,6 @@
 import enum
 from collections.abc import Callable
-from typing import Any, NamedTuple, Union
+from typing import Any, NamedTuple
 
 from torch.fx.graph import Node
 
@@ -63,4 +63,4 @@ NSResultsType = dict[str, dict[str, dict[str, list[NSSingleResultType]]]]
 # `F.conv1d` for a `call_function` conv node
 # `nn.Conv1d` for a `call_module` node calling the forward of a `nn.Conv1d` module
 # `'sigmoid'` for a `call_method` node calling `x.sigmoid()`
-NSNodeTargetType = Union[Callable, str]
+NSNodeTargetType = Callable | str

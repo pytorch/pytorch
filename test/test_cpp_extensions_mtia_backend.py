@@ -52,6 +52,17 @@ class TestCppExtensionMTIABackend(common.TestCase):
     @classmethod
     def setUpClass(cls):
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+        # Regression test for the ordering bug that caused PR #190326 to be
+        # reverted: importing torch._inductor.utils used to eagerly call
+        # torch.mtia.device_count(), which latches an empty MTIAHooksInterface
+        # into a process-lifetime static before this class's real hooks
+        # extension registers below, permanently breaking every MTIA call.
+        # Force that import here so it always precedes the extension load.
+        # (aliased, not "import torch._inductor.utils": a bare import would
+        # bind the local name "torch" and shadow the module-level import
+        # used above.)
+        from torch._inductor import utils as _unused_inductor_utils  # noqa: F401
+
         build_dir = tempfile.mkdtemp()
         # Load the fake device guard impl.
         cls.module = torch.utils.cpp_extension.load(
@@ -91,6 +102,12 @@ class TestCppExtensionMTIABackend(common.TestCase):
         self.assertTrue(user_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    def test_is_current_stream_capturing(self):
+        was_initialized = torch.mtia.is_initialized()
+        self.assertFalse(torch.mtia.is_current_stream_capturing())
+        self.assertEqual(torch.mtia.is_initialized(), was_initialized)
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_stream_context(self):
@@ -139,6 +156,31 @@ class TestCppExtensionMTIABackend(common.TestCase):
 
         with torch.mtia.device(device_1):
             self.assertTrue(torch.mtia.current_device() == device_1.index)
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    def test_default_generators(self):
+        # Trigger lazy initialization first by calling current_stream()
+        torch.mtia.current_stream()
+        device_count = torch.mtia.device_count()
+
+        # Verify the interface exists and is properly initialized
+        self.assertTrue(hasattr(torch.mtia, "default_generators"))
+        self.assertIsInstance(torch.mtia.default_generators, tuple)
+        self.assertEqual(len(torch.mtia.default_generators), device_count)
+
+        # Verify we can access generators by device index
+        gen_0 = torch.mtia.default_generators[0]
+        gen_1 = torch.mtia.default_generators[1]
+        self.assertIsInstance(gen_0, torch.Generator)
+        self.assertIsInstance(gen_1, torch.Generator)
+        # Different devices should have different generator objects
+        self.assertIsNot(gen_0, gen_1)
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    def test_new_generator(self):
+        # Verify we can create a generator via the hooks interface
+        gen = torch.Generator(device="mtia:0")
+        self.assertIsInstance(gen, torch.Generator)
 
 
 if __name__ == "__main__":

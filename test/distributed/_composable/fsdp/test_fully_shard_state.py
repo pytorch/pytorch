@@ -4,17 +4,17 @@ import copy
 
 import torch.nn as nn
 from torch.distributed.fsdp import FSDPModule, fully_shard
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 class TestFullyShardState(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 1
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_state(self):
         """
         Tests the ability to get the state object from a fully sharded module.
@@ -30,7 +30,6 @@ class TestFullyShardState(FSDPTestMultiThread):
         # Check that each `fully_shard` call constructs a distinct state object
         self.assertEqual(len(set(all_states)), num_mlps + 1)
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_reapply(self):
         model = MLP(8)
         fully_shard(model)
@@ -40,7 +39,6 @@ class TestFullyShardState(FSDPTestMultiThread):
         ):
             fully_shard(model)
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_cls(self):
         # Check that we only swap class for the module passed to `fully_shard`
         model = MLP(8)
@@ -63,7 +61,6 @@ class TestFullyShardState(FSDPTestMultiThread):
         self.assertTrue(isinstance(sliced_model, nn.Sequential))
         self.assertFalse(isinstance(sliced_model, FSDPModule))
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_unsupported_module_cls(self):
         regex = (
             r"fully\_shard does not support containers that do not implement forward"
@@ -75,7 +72,6 @@ class TestFullyShardState(FSDPTestMultiThread):
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model)
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_deepcopy(self):
         model = MLP(8)
         fully_shard(model)

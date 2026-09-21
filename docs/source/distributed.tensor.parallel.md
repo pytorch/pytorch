@@ -26,6 +26,11 @@ The entrypoint to parallelize your `nn.Module` using Tensor Parallelism is:
 .. autofunction::  parallelize_module
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.tensor.parallel.api
+.. autofunction:: parallelize_module
+```
+
 Tensor Parallelism supports the following parallel styles:
 
 ```{eval-rst}
@@ -90,3 +95,13 @@ Parallelized cross-entropy loss computation (loss parallelism), is supported via
 :::{warning}
     The loss_parallel API is experimental and subject to change.
 :::
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.tensor.parallel.loss
+.. autofunction:: loss_parallel
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.tensor.parallel.input_reshard
+.. autofunction:: input_reshard
+```

@@ -12,7 +12,7 @@ from torch import distributed as dist, Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
@@ -96,7 +96,7 @@ class Min10:
         return mean(self.data)
 
 
-class TestForwardOverlapWorldSizeOne(FSDPTest):
+class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
     @property
     def world_size(self):
         return 1
@@ -104,9 +104,9 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
     def _dist_train(self):
         rank = self.rank
         world_size = self.world_size
-        # Save the original torch.distributed.all_gather_into_tensor function since we will
+        # Save the original torch.distributed.all_gather_single function since we will
         # patch it to include an artificial delay.
-        orig_all_gather = torch.distributed.all_gather_into_tensor
+        orig_all_gather = torch.distributed.all_gather_single
 
         def run(compute_cycles, all_gather_cycles):
             has_params = all_gather_cycles > 0
@@ -143,7 +143,8 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
                     all_gather_called = True
                     if torch.cuda.is_available():
                         torch.cuda._sleep(all_gather_cycles)
-                    assert orig_all_gather
+                    if not orig_all_gather:
+                        raise AssertionError("Expected orig_all_gather to be truthy")
                     return orig_all_gather(*args, **kwargs)
 
                 # forward pass
@@ -151,9 +152,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
                 # Even though both e1 & e2 are on the compute stream, since
                 # compute depends on all_gather, e2-e1 includes all_gather time.
                 e1.record()
-                with patch(
-                    "torch.distributed.all_gather_into_tensor", _delayed_all_gather
-                ):
+                with patch("torch.distributed.all_gather_single", _delayed_all_gather):
                     out = model(batch)
                     if has_params and world_size > 1:
                         self.assertTrue(all_gather_called)

@@ -1,13 +1,13 @@
 import os
 import sys
 from collections.abc import Callable
-from typing import Optional
 
 import torch
 from torch.types import Storage
 
 
 __all__: list[str] = [
+    "is_available",
     "gds_register_buffer",
     "gds_deregister_buffer",
     "GdsFile",
@@ -21,12 +21,38 @@ def _dummy_fn(name: str) -> Callable:
     return fn
 
 
-if not hasattr(torch._C, "_gds_register_buffer"):
-    assert not hasattr(torch._C, "_gds_deregister_buffer")
-    assert not hasattr(torch._C, "_gds_register_handle")
-    assert not hasattr(torch._C, "_gds_deregister_handle")
-    assert not hasattr(torch._C, "_gds_load_storage")
-    assert not hasattr(torch._C, "_gds_save_storage")
+def is_available() -> bool:
+    r"""Return ``True`` if GPUDirect Storage (GDS) support is built in.
+
+    This requires a Linux build with ``USE_CUFILE`` enabled (the default) and
+    with cuFile (CUDA) or hipFile (ROCm) available at build time. See
+    :ref:`rocm-gds` for the ROCm requirements.
+    """
+    return torch._C._has_gds
+
+
+# Without GDS built in, install dummy stubs so the API raises a clear error.
+if not is_available():
+    if hasattr(torch._C, "_gds_deregister_buffer"):
+        raise AssertionError(
+            "_gds_deregister_buffer exists but _gds_register_buffer does not"
+        )
+    if hasattr(torch._C, "_gds_register_handle"):
+        raise AssertionError(
+            "_gds_register_handle exists but _gds_register_buffer does not"
+        )
+    if hasattr(torch._C, "_gds_deregister_handle"):
+        raise AssertionError(
+            "_gds_deregister_handle exists but _gds_register_buffer does not"
+        )
+    if hasattr(torch._C, "_gds_load_storage"):
+        raise AssertionError(
+            "_gds_load_storage exists but _gds_register_buffer does not"
+        )
+    if hasattr(torch._C, "_gds_save_storage"):
+        raise AssertionError(
+            "_gds_save_storage exists but _gds_register_buffer does not"
+        )
     # Define functions
     torch._C.__dict__["_gds_register_buffer"] = _dummy_fn("_gds_register_buffer")
     torch._C.__dict__["_gds_deregister_buffer"] = _dummy_fn("_gds_deregister_buffer")
@@ -37,7 +63,9 @@ if not hasattr(torch._C, "_gds_register_buffer"):
 
 
 def gds_register_buffer(s: Storage) -> None:
-    """Registers a storage on a CUDA device as a cufile buffer.
+    """Registers a storage on a CUDA device as a GDS buffer.
+
+    This is a wrapper around ``cuFileBufRegister`` (CUDA) / ``hipFileBufRegister`` (ROCm).
 
     Example::
 
@@ -53,7 +81,9 @@ def gds_register_buffer(s: Storage) -> None:
 
 
 def gds_deregister_buffer(s: Storage) -> None:
-    """Deregisters a previously registered storage on a CUDA device as a cufile buffer.
+    """Deregisters a previously registered GDS buffer.
+
+    This is a wrapper around ``cuFileBufDeregister`` (CUDA) / ``hipFileBufDeregister`` (ROCm).
 
     Example::
 
@@ -70,12 +100,13 @@ def gds_deregister_buffer(s: Storage) -> None:
 
 
 class GdsFile:
-    r"""Wrapper around cuFile.
+    r"""Wrapper around a file registered with the GPUDirect Storage (GDS) driver.
 
-    cuFile is a file-like interface to the GPUDirect Storage (GDS) API.
+    cuFile (CUDA) and hipFile (ROCm) are file-like interfaces to the GDS API.
 
     See the `cufile docs <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api>`_
-    for more details.
+    and the `hipFile docs <https://rocm.docs.amd.com/projects/hipFile/en/latest/>`_
+    for more details, and :ref:`rocm-gds` for ROCm specifics.
 
     Args:
         filename (str): Name of the file to open.
@@ -107,7 +138,7 @@ class GdsFile:
         self.filename = filename
         self.flags = flags
         self.fd = os.open(filename, flags | os.O_DIRECT)  # type: ignore[attr-defined]
-        self.handle: Optional[int] = None
+        self.handle: int | None = None
         self.register_handle()
 
     def __del__(self) -> None:
@@ -116,52 +147,49 @@ class GdsFile:
         os.close(self.fd)
 
     def register_handle(self) -> None:
-        """Registers file descriptor to cuFile Driver.
+        """Registers file descriptor to the GDS driver.
 
-        This is a wrapper around ``cuFileHandleRegister``.
+        This is a wrapper around ``cuFileHandleRegister`` (CUDA) / ``hipFileHandleRegister`` (ROCm).
         """
-        assert self.handle is None, (
-            "Cannot register a handle that is already registered."
-        )
+        if self.handle is not None:
+            raise AssertionError("Cannot register a handle that is already registered.")
         self.handle = torch._C._gds_register_handle(self.fd)
 
     def deregister_handle(self) -> None:
-        """Deregisters file descriptor from cuFile Driver.
+        """Deregisters file descriptor from the GDS driver.
 
-        This is a wrapper around ``cuFileHandleDeregister``.
+        This is a wrapper around ``cuFileHandleDeregister`` (CUDA) / ``hipFileHandleDeregister`` (ROCm).
         """
-        assert self.handle is not None, (
-            "Cannot deregister a handle that is not registered."
-        )
+        if self.handle is None:
+            raise AssertionError("Cannot deregister a handle that is not registered.")
         torch._C._gds_deregister_handle(self.handle)
         self.handle = None
 
     def load_storage(self, storage: Storage, offset: int = 0) -> None:
         """Loads data from the file into the storage.
 
-        This is a wrapper around ``cuFileRead``. ``storage.nbytes()`` of data
-        will be loaded from the file at ``offset`` into the storage.
+        This is a wrapper around ``cuFileRead`` (CUDA) / ``hipFileRead`` (ROCm).
+        ``storage.nbytes()`` of data will be loaded from the file at ``offset``
+        into the storage.
 
         Args:
             storage (Storage): Storage to load data into.
             offset (int, optional): Offset into the file to start loading from. (Default: 0)
         """
-        assert self.handle is not None, (
-            "Cannot load data from a file that is not registered."
-        )
+        if self.handle is None:
+            raise AssertionError("Cannot load data from a file that is not registered.")
         torch._C._gds_load_storage(self.handle, storage, offset)
 
     def save_storage(self, storage: Storage, offset: int = 0) -> None:
         """Saves data from the storage into the file.
 
-        This is a wrapper around ``cuFileWrite``. All bytes of the storage
-        will be written to the file at ``offset``.
+        This is a wrapper around ``cuFileWrite`` (CUDA) / ``hipFileWrite`` (ROCm).
+        All bytes of the storage will be written to the file at ``offset``.
 
         Args:
             storage (Storage): Storage to save data from.
             offset (int, optional): Offset into the file to start saving to. (Default: 0)
         """
-        assert self.handle is not None, (
-            "Cannot save data to a file that is not registered."
-        )
+        if self.handle is None:
+            raise AssertionError("Cannot save data to a file that is not registered.")
         torch._C._gds_save_storage(self.handle, storage, offset)

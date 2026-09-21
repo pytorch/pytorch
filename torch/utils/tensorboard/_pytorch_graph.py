@@ -21,7 +21,7 @@ methods_OP = [
     "outputsSize",
     "scopeName",
 ]
-# Some additional methods to explure for methods_IO are
+# Some additional methods to explore for methods_IO are
 #
 #   'unique' (type int)
 #   'type' (type <Tensor<class 'torch._C.Type'>>)
@@ -199,7 +199,7 @@ class GraphPy:
                 self.unique_name_to_scoped_name[key] = node.scope + "/" + node.debugName
                 if node.scope == "" and self.shallowest_scope_name:
                     self.unique_name_to_scoped_name[node.debugName] = (
-                        # pyrefly: ignore [unsupported-operation]
+
                         self.shallowest_scope_name + "/" + node.debugName
                     )
 

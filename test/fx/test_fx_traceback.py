@@ -1,16 +1,62 @@
 # Owner(s): ["module: fx"]
 
 import torch
-from torch._inductor.compile_fx import aot_export_module
+from torch._functorch.aot_autograd import aot_export_module
 from torch.export import default_decompositions
 from torch.fx.traceback import get_graph_provenance_json, NodeSource, NodeSourceAction
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 CREATE_STR = NodeSourceAction.CREATE.name.lower()
 
 
 class TestFXNodeSource(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_node_source_shallow_copies_provenance_list(self):
+        ancestor = NodeSource(
+            node=None,
+            pass_name="ancestor_pass",
+            action=NodeSourceAction.CREATE,
+        )
+        original_provenance = [ancestor]
+        node = torch.fx.Graph().placeholder("x")
+        node.meta["from_node"] = original_provenance
+
+        node_source = NodeSource(
+            node=node,
+            pass_name="current_pass",
+            action=NodeSourceAction.CREATE,
+        )
+        original_provenance.append(
+            NodeSource(
+                node=None,
+                pass_name="later_pass",
+                action=NodeSourceAction.CREATE,
+            )
+        )
+
+        self.assertIsNot(node_source.from_node, original_provenance)
+        self.assertEqual(node_source.from_node, [ancestor])
+        self.assertIs(node_source.from_node[0], ancestor)
+        self.assertEqual(
+            node_source.to_dict()["from_node"],
+            [
+                {
+                    "name": "",
+                    "target": "",
+                    "graph_id": -1,
+                    "pass_name": "ancestor_pass",
+                    "action": CREATE_STR,
+                    "from_node": [],
+                }
+            ],
+        )
+
     def test_node_source(self):
         node_source = NodeSource(
             node=None, pass_name="test_pass", action=NodeSourceAction.CREATE
@@ -159,7 +205,10 @@ class TestFXNodeSource(TestCase):
         # node decomposed from same ancestor node should have same from_node info
         for node in decomposed_ep.graph.nodes:
             if node.op not in {"placeholder", "output"}:
-                assert "from_node" in node.meta
+                if "from_node" not in node.meta:
+                    raise AssertionError(
+                        f"Expected 'from_node' in node.meta for node {node.name}"
+                    )
 
         node_name_to_from_node = {
             node.name: node.meta["from_node"]
@@ -280,7 +329,4 @@ class TestFXNodeSource(TestCase):
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test is not currently used and should be "
-        "enabled in discover_tests.py if required."
-    )
+    raise_on_run_directly("test/test_fx.py")

@@ -2,7 +2,6 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 
 #include <fcntl.h>
-#include <sys/stat.h>
 #include <cassert>
 #include <cstdint>
 
@@ -276,7 +275,7 @@ off_t refresh(
     while (size > pos) {
       file.read(tmpKey);
       file.read(tmpValue);
-      if (tmpKey.compare(0, deletePrefix.size(), deletePrefix) == 0) {
+      if (tmpKey.starts_with(deletePrefix)) {
         cache.erase(tmpKey.substr(deletePrefix.size()));
       } else {
         cache[tmpKey] = std::move(tmpValue);
@@ -357,20 +356,21 @@ std::vector<uint8_t> FileStore::compareSet(
   // Always refresh since even though the key exists in the cache,
   // it might be outdated
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
-  if ((cache_.count(regKey) == 0 && expectedValue.empty()) ||
-      (cache_.count(regKey) != 0 && cache_[regKey] == expectedValue)) {
+  const auto it = cache_.find(regKey);
+  if ((it == cache_.end() && expectedValue.empty()) ||
+      (it != cache_.end() && it->second == expectedValue)) {
     // if the key does not exist and currentValue arg is empty or
     // the key does exist and current value is what is expected, then set it
     file.seek(0, SEEK_END);
     file.write(regKey);
     file.write(desiredValue);
     return desiredValue;
-  } else if (cache_.count(regKey) == 0) {
+  } else if (it == cache_.end()) {
     // if the key does not exist
     return expectedValue;
   }
   // key exists but current value is not expected
-  return cache_[regKey];
+  return it->second;
 }
 
 std::vector<uint8_t> FileStore::get(const std::string& key) {
@@ -381,7 +381,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     File file(path_, O_RDONLY, timeout_);
     auto lock = file.lockShared();
     auto size = file.size();
-    if (cache_.count(regKey) == 0 && size == pos_) {
+    if (!cache_.contains(regKey) && size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
       l.unlock();
@@ -402,8 +402,8 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     // Always refresh since even though the key exists in the cache,
     // it might be outdated
     pos_ = refresh(file, pos_, cache_, deletePrefix_);
-    if (cache_.count(regKey) != 0) {
-      return cache_[regKey];
+    if (auto it = cache_.find(regKey); it != cache_.end()) {
+      return it->second;
     }
   }
 }
@@ -462,7 +462,7 @@ bool FileStore::check(const std::vector<std::string>& keys) {
 
   for (const auto& key : keys) {
     std::string regKey = regularPrefix_ + key;
-    if (cache_.count(regKey) == 0) {
+    if (!cache_.contains(regKey)) {
       return false;
     }
   }
@@ -490,6 +490,19 @@ void FileStore::wait(
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
+}
+
+std::vector<std::string> FileStore::listKeys() {
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDONLY, timeout_);
+  auto lock = file.lockShared();
+  pos_ = refresh(file, pos_, cache_, deletePrefix_);
+  std::vector<std::string> keys;
+  keys.reserve(cache_.size());
+  for (const auto& kv : cache_) {
+    keys.push_back(kv.first.substr(regularPrefix_.size()));
+  }
+  return keys;
 }
 
 } // namespace c10d

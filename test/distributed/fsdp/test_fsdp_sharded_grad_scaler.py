@@ -5,7 +5,6 @@ import functools
 import itertools
 import sys
 import unittest
-from typing import Optional
 
 import torch
 from torch import distributed as dist
@@ -24,7 +23,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     DummyProcessGroup,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     NestedWrappedModule,
     NonUniformReqGradNWM,
     subtest_name,
@@ -163,7 +162,7 @@ class TestShardGradScaler(TestCase):
         self.assertTrue(ret_val is None)
 
 
-class TestShardedGradScalerParityWithDDP(FSDPTest):
+class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
     def _get_init_modes_for_test(self, cpu_offload):
         modes = [DEVICEInitMode.DEVICE_AFTER, DEVICEInitMode.DEVICE_BEFORE]
         # Note that DEVICEInitMode.DEVICE_NEVER works currently only with CPU
@@ -180,9 +179,9 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
     def test_fsdp_ddp_parity_with_grad_scaler(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
-        mixed_precision: Optional[str],
-        use_orig_params: Optional[str],
+        sharding_strategy: ShardingStrategy | None,
+        mixed_precision: str | None,
+        use_orig_params: str | None,
     ):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         mp = (
@@ -313,7 +312,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                         _grad_scaler.get_scale(),
                         orig_scale * _grad_scaler.get_backoff_factor(),
                         (
-                            f"rank: {self.rank} iter: {iter} expect origin scale {orig_scale} "
+                            lambda msg: f"{msg}\nrank: {self.rank} iter: {iter} expect origin scale {orig_scale} "
                             f"to be backed off by {_grad_scaler.get_backoff_factor()} "
                             f"but got {_grad_scaler.get_scale()}"
                         ),
@@ -323,7 +322,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                         _grad_scaler.get_scale(),
                         orig_scale,
                         (
-                            f"rank: {self.rank} iter: {iter} expect same scale {orig_scale} "
+                            lambda msg: f"{msg}\nrank: {self.rank} iter: {iter} expect same scale {orig_scale} "
                             f"but got {_grad_scaler.get_scale()}"
                         ),
                     )
@@ -336,7 +335,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                             param,
                             orig_param,
                             (
-                                f"rank: {self.rank} iter: {iter} expect the same params before "
+                                lambda msg: f"{msg}\nrank: {self.rank} iter: {iter} expect the same params before "
                                 f"and after optim.step but got {param} vs {orig_param}"
                             ),
                         )
@@ -345,14 +344,14 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                             param,
                             orig_param,
                             (
-                                f"rank: {self.rank} iter: {iter} expect the updated params after "
+                                lambda msg: f"{msg}\nrank: {self.rank} iter: {iter} expect the updated params after "
                                 f"optim.step but got {param} vs {orig_param}"
                             ),
                         )
             self.assertEqual(
                 scaled_losses[0],
                 scaled_losses[1],
-                f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
+                lambda msg: f"{msg}\niter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
             )
 
 

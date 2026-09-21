@@ -1,16 +1,14 @@
 # mypy: allow-untyped-defs
 import functools
-import math
 import operator
 from typing import *  # noqa: F403
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
-from .nested_tensor import NestedTensor
+from .nested_tensor import _jagged_numel, NestedTensor
 
 
 __all__: list[Any] = []
@@ -23,16 +21,10 @@ def _get_padding_value(dtype, padding_type):
         return (
             torch.finfo(dtype).max if padding_type == "max" else torch.finfo(dtype).min
         )
-    elif dtype == torch.int64:
-        # Largest int64 value exactly representable in float64 (IEEE 754 double precision).
-        # Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
-        int64_safe_max = (1 << 53) - 1
-        int64_safe_min = -int64_safe_max
-        return int64_safe_max if padding_type == "max" else int64_safe_min
     else:
-        return (
-            torch.iinfo(dtype).max if padding_type == "max" else torch.iinfo(dtype).min
-        )
+        # For integer dtypes, use infinity sentinels which the C++ implementation
+        # clamps to dtype min/max, avoiding precision loss through double.
+        return float("inf") if padding_type == "max" else float("-inf")
 
 
 def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
@@ -46,7 +38,8 @@ def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     if canonicalize:
         dim = canonicalize_dims(ndim, dim)
 
-    assert dim >= 0 and dim < ndim  # pyrefly: ignore [unsupported-operation]
+    if not (dim >= 0 and dim < ndim):  # pyrefly: ignore [unsupported-operation]
+        raise AssertionError(f"dim {dim} out of range for ndim {ndim}")
 
     # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
     # For other dims, subtract 1 to convert to inner space.
@@ -93,9 +86,10 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     """
     from torch._prims_common import canonicalize_dims
 
-    assert isinstance(dims, (tuple, list)), (
-        f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
-    )
+    if not isinstance(dims, (tuple, list)):
+        raise AssertionError(
+            f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
+        )
 
     wrapped_dims = [
         canonicalize_dims(ndim, d) for d in dims
@@ -249,7 +243,7 @@ def register_func(tables, aten_ops, schema_str):
 register_jagged_func = functools.partial(register_func, JAGGED_OPS_TABLE)
 
 
-def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
+def lookup_jagged(func, *args, **kwargs) -> Callable | None:
     dispatch_func = JAGGED_OPS_TABLE.get(func, None)
     if dispatch_func is not None:
         return dispatch_func
@@ -311,7 +305,8 @@ def jagged_unary_pointwise(func, *args, **kwargs):
 
 def jagged_binary_pointwise(func, *args, **kwargs):
     a, b = args[0], args[1]
-    assert isinstance(a, NestedTensor) or isinstance(b, NestedTensor)
+    if not (isinstance(a, NestedTensor) or isinstance(b, NestedTensor)):
+        raise AssertionError("At least one of the arguments must be a NestedTensor")
 
     mismatch_error_msg = (
         "cannot call binary pointwise function {} with inputs of shapes {} and {}"
@@ -437,7 +432,7 @@ def jagged_torch_function(func, *args, **kwargs):
     if func.__name__ == "share_memory_":
         nt = args[0]
 
-        if nt.is_cuda:
+        if not nt.is_cpu and not nt.is_meta:
             return nt
 
         names, _ = nt.__tensor_flatten__()
@@ -452,8 +447,8 @@ def jagged_torch_function(func, *args, **kwargs):
     if func.__name__ == "is_shared":
         nt = args[0]
 
-        if nt.is_cuda:
-            return False
+        if not nt.is_cpu and not nt.is_meta:
+            return True
 
         names, _ = nt.__tensor_flatten__()
         if not names:
@@ -512,9 +507,7 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return len(args[0]._size)
 
     if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
-        if args[0]._lengths is not None:
-            return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
-        return args[0]._values.numel()
+        return _jagged_numel(args[0], func)
 
     if func is torch.ops.aten.sym_stride.default:
         return args[0]._strides
@@ -608,9 +601,10 @@ def clone_default(func, *args, **kwargs):
             from .nested_tensor import jagged_from_list
 
             # TODO: We probably want the output to have the same ragged structure / nested int.
-            assert inp._ragged_idx == 1, (
-                "NJT with ragged_idx != 1 not supported for contiguous clone"
-            )
+            if inp._ragged_idx != 1:
+                raise AssertionError(
+                    "NJT with ragged_idx != 1 not supported for contiguous clone"
+                )
             contig, _ = jagged_from_list(inp.unbind(), offsets=None)
             return contig
 
@@ -698,7 +692,7 @@ def to_copy_default(func, *args, **kwargs):
     if inp._lengths is not None:
         new_lengths = inp._lengths.to(device=new_values.device)
 
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import is_fake_tensor
     from torch._subclasses.functional_tensor import (
         FunctionalTensor,
         mb_unwrap_functional_tensor,
@@ -706,10 +700,11 @@ def to_copy_default(func, *args, **kwargs):
 
     ragged_source = inp._offsets if inp._lengths is None else inp._lengths
     new_thing = new_offsets if new_lengths is None else new_lengths
-    if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
+    if is_fake_tensor(new_thing) or isinstance(new_thing, FunctionalTensor):
         # Temporary hack until we have the union find
         tgt = mb_unwrap_functional_tensor(new_thing)
         src = mb_unwrap_functional_tensor(ragged_source)
+        # pyrefly: ignore[missing-attribute]
         tgt.nested_int_memo = src.nested_int_memo
     else:
         _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
@@ -769,6 +764,8 @@ register_jagged_func(torch.ops.aten.detach.default, "self: jt_all")(
     "self: jt_all",
 )
 def like_factory_default(func, *args, **kwargs):
+    from torch._subclasses.fake_tensor import is_fake_tensor
+
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -794,7 +791,6 @@ def like_factory_default(func, *args, **kwargs):
     if inp.device != new_values.device:
         # Update the nested int registry to indicate that the ragged structure is the same
         # between the two offsets / lengths on different devices.
-        from torch._subclasses.fake_tensor import FakeTensor
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
             mb_unwrap_functional_tensor,
@@ -804,10 +800,11 @@ def like_factory_default(func, *args, **kwargs):
 
         ragged_source = inp._offsets if inp._lengths is None else inp._lengths
         new_thing = new_offsets if new_lengths is None else new_lengths
-        if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
+        if is_fake_tensor(new_thing) or isinstance(new_thing, FunctionalTensor):
             # Temporary hack until we have the union find
             tgt = mb_unwrap_functional_tensor(new_thing)
             src = mb_unwrap_functional_tensor(ragged_source)
+            # pyrefly: ignore[missing-attribute]
             tgt.nested_int_memo = src.nested_int_memo
         else:
             _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
@@ -1138,7 +1135,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
-    def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None) -> None:
+    def _torch_check(_lengths: list[int], _offsets: list[int] | None = None) -> None:
         # This torch._check are needed for torch.compile
         # symbolic shapes processing.
         # offsets and lengths are symbolic variables during compilation,
@@ -1242,7 +1239,8 @@ def cat_default(func, *args, **kwargs):
 
     # Convert any non-nested to nested
     nested = [t for t in tensors if t.is_nested]
-    assert len(nested) > 0
+    if len(nested) == 0:
+        raise AssertionError("At least one tensor must be nested")
     first = nested[0]
     tensors = [t if t.is_nested else t.expand_as(first) for t in tensors]
 
@@ -1395,7 +1393,8 @@ def expand_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     size = new_kwargs["size"]
 
-    assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
+    if "implicit" in new_kwargs and new_kwargs.pop("implicit"):
+        raise AssertionError("implicit expand is not supported")
     if not raggedness_matches(inp, size):
         raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
 
@@ -1962,7 +1961,10 @@ def index_put_(func, *args, **kwargs):
 
     indices = new_kwargs.pop("indices")
 
-    assert len(indices) <= inp.dim()
+    if len(indices) > inp.dim():
+        raise AssertionError(
+            f"Too many indices: got {len(indices)} but tensor has {inp.dim()} dimensions"
+        )
 
     if len(indices) < inp._ragged_idx + 1:
         if not inp.is_contiguous():
@@ -2066,7 +2068,10 @@ def mean_dim(func, *args, **kwargs):
     )
 
     if reduce_on_ragged and not reduce_on_batch:
-        assert not reduce_on_non_batch
+        if reduce_on_non_batch:
+            raise AssertionError(
+                "Cannot reduce on both ragged and non-batch dimensions without also reducing on batch"
+            )
         # calculate an intermediate sum and leave the dim in for normalization purposes
         keepdim = new_kwargs["keepdim"]
         new_kwargs["keepdim"] = True

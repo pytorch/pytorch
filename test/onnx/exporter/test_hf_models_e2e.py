@@ -10,20 +10,23 @@ import transformers
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class DynamoExporterHfModelsTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
             model,
             args,
             kwargs=kwargs,
             dynamo=True,
-            fallback=False,
             verbose=False,
             **options,
         )
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         return onnx_program
 
     def test_onnx_export_huggingface_llm_models_with_kv_cache(self):

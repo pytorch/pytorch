@@ -111,7 +111,7 @@ static std::optional<at::Tensor> runTorchSlice_opset10(
   if (inputTensorValues.size() < minSliceInputCount ||
       inputTensorValues.size() > maxSliceInputCount) {
     TORCH_WARN(
-        "Constant folding - Invalid number of inputs found for opset opset >= 10 onnx::Slice op. "
+        "Constant folding - Invalid number of inputs found for opset >= 10 onnx::Slice op. "
         "Constant folding not applied.");
     return std::nullopt;
   }
@@ -545,9 +545,8 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
 static bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
   auto parentNode = val->node();
   return (parentNode->kind() == prim::Param &&
-          valsToParamsMap.find(val) !=
-              valsToParamsMap
-                  .end()) || // Checks val is a parameter and not a real input
+          valsToParamsMap.contains(
+              val)) || // Checks val is a parameter and not a real input
       (parentNode->kind() == onnx::Constant && !parentNode->mustBeNone() &&
        parentNode->kindOf(attr::value) ==
            AttributeKind::t); // Check other types?
@@ -555,7 +554,7 @@ static bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
 
 static bool hasParamInput(Node* n, const ValueToParamPairMap& valsToParamsMap) {
   for (auto input : n->inputs()) {
-    if (valsToParamsMap.find(input) != valsToParamsMap.end()) {
+    if (valsToParamsMap.contains(input)) {
       return true;
     }
   }
@@ -682,7 +681,7 @@ static void ConstantFoldONNX(
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
     // Next we remove the current node that has been replaced by
     // an initializer. But before we start de-wiring this node,
-    // we check if any parents of this nodes were onnx::Constant
+    // we check if any parents of this node were onnx::Constant
     // and remove them first, and then remove the current node.
     // If the parent was an initializer (not onnx::Constant) then
     // they are all removed by the eraseUnusedBlockInputs() call

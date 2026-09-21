@@ -1,8 +1,10 @@
 """GitHub Label Utilities."""
 
+from __future__ import annotations
+
 import json
 from functools import lru_cache
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 from github_utils import gh_fetch_url_and_headers, GitHubComment
 
@@ -13,6 +15,9 @@ if TYPE_CHECKING:
     from trymerge import GitHubPR
 
 BOT_AUTHORS = ["github-actions", "pytorchmergebot", "pytorch-bot"]
+
+# Label that marks a PR as excluded from release notes.
+NOT_USER_FACING_LABEL = "topic: not user facing"
 
 LABEL_ERR_MSG_TITLE = "This PR needs a `release notes:` label"
 LABEL_ERR_MSG = f"""# {LABEL_ERR_MSG_TITLE}
@@ -63,9 +68,10 @@ def gh_get_labels(org: str, repo: str) -> list[str]:
     update_labels(labels, info)
 
     last_page = get_last_page_num_from_header(header)
-    assert last_page > 0, (
-        "Error reading header info to determine total number of pages of labels"
-    )
+    if last_page <= 0:
+        raise AssertionError(
+            f"Error reading header info to determine total number of pages of labels, got last_page={last_page}"
+        )
     for page_number in range(2, last_page + 1):  # skip page 1
         _, info = request_for_labels(prefix + f"&page={page_number}")
         update_labels(labels, info)
@@ -74,7 +80,7 @@ def gh_get_labels(org: str, repo: str) -> list[str]:
 
 
 def gh_add_labels(
-    org: str, repo: str, pr_num: int, labels: Union[str, list[str]], dry_run: bool
+    org: str, repo: str, pr_num: int, labels: str | list[str], dry_run: bool
 ) -> None:
     if dry_run:
         print(f"Dryrun: Adding labels {labels} to PR {pr_num}")
@@ -105,11 +111,11 @@ def get_release_notes_labels(org: str, repo: str) -> list[str]:
     ]
 
 
-def has_required_labels(pr: "GitHubPR") -> bool:
+def has_required_labels(pr: GitHubPR) -> bool:
     pr_labels = pr.get_labels()
     # Check if PR is not user facing
     is_not_user_facing_pr = any(
-        label.strip() == "topic: not user facing" for label in pr_labels
+        label.strip() == NOT_USER_FACING_LABEL for label in pr_labels
     )
     return is_not_user_facing_pr or any(
         label.strip() in get_release_notes_labels(pr.org, pr.project)

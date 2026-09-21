@@ -1,10 +1,9 @@
-# mypy: ignore-errors
 import logging
 import multiprocessing as mp
 import os
 import random
+import re
 import sys
-from typing import Optional
 
 
 # Add parent directory to path so we can import torchfuzz as a module
@@ -14,7 +13,12 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 import torch
-from torchfuzz.codegen import convert_graph_to_python_code, create_program_file
+from torchfuzz.codegen import (
+    convert_graph_to_python_code,
+    create_program_file,
+    get_template_names,
+    initialize_codegen,
+)
 from torchfuzz.ops_fuzzer import fuzz_operation_graph, fuzz_spec
 from torchfuzz.runner import ProgramRunner
 from torchfuzz.visualize_graph import visualize_operation_graph
@@ -49,13 +53,37 @@ def _parse_supported_ops_with_weights(spec: str) -> tuple[list[str], dict[str, f
     return ops, weights
 
 
+def _resolve_generate_only_path(
+    pattern: str, seed: int, *, require_marker: bool = False
+) -> str:
+    """Resolve a --generate-only file pattern for a given seed.
+
+    A contiguous run of '?' characters is replaced by the seed, left-padded with
+    zeros to the number of '?' characters. All '?' characters must be contiguous.
+    When ``require_marker`` is True, the pattern must contain at least one '?'.
+    """
+    runs = re.findall(r"\?+", pattern)
+    if len(runs) > 1:
+        raise ValueError(
+            f"--generate-only pattern {pattern!r} must keep all '?' characters together"
+        )
+    if not runs:
+        if require_marker:
+            raise ValueError(
+                f"--generate-only pattern {pattern!r} must contain a '?' to be replaced by the seed"
+            )
+        return pattern
+    return re.sub(r"\?+", str(seed).zfill(len(runs[0])), pattern)
+
+
 def fuzz_and_execute(
-    seed: Optional[int] = None,
-    max_depth: Optional[int] = None,
+    seed: int | None = None,
+    max_depth: int | None = None,
     log_at_faluire: bool = False,
     template: str = "default",
-    supported_ops: Optional[list[str]] = None,
-    op_weights: Optional[dict[str, float]] = None,
+    supported_ops: list[str] | None = None,
+    op_weights: dict[str, float] | None = None,
+    generate_only: str | None = None,
 ) -> None:
     """
     Generate a fuzzed operation stack, convert it to Python code, and execute it.
@@ -211,6 +239,15 @@ def fuzz_and_execute(
             len(python_code),
         )
 
+        if generate_only is not None:
+            output_path = _resolve_generate_only_path(generate_only, seed)
+            output_dir = os.path.dirname(os.path.abspath(output_path))
+            os.makedirs(output_dir, exist_ok=True)
+            with open(output_path, "w") as f:
+                f.write(python_code)
+            print(f"Generated program written to {output_path}")
+            return
+
         logger.debug("⏱️  Step 4: Executing Python code...")
         start_time = time.time()
 
@@ -237,18 +274,30 @@ def fuzz_and_execute(
         sys.exit(1)
 
 
-if __name__ == "__main__":
+def main() -> None:
     import argparse
 
+    # Initialize the device plugin once up front so argparse choices reflect the
+    # active plugin's templates.
+    initialize_codegen()
+    template_names = get_template_names()
+    default_template = "default" if "default" in template_names else template_names[0]
+
     try:
+        # pyrefly: ignore[missing-import]  # sibling module, only importable when this dir is on sys.path
         from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
     except ImportError:
         # If importing as a module fails, import from the same directory
         import os
+
+        # NB: latent bug - `import sys` here shadows the module-level `sys` with a
+        # local binding, so the `sys.exit(...)` calls below raise NameError when the
+        # `try` import succeeds. Left as-is; fixing it needs a test first.
         import sys
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, current_dir)
+        # pyrefly: ignore[missing-import]  # sibling module, resolved via the sys.path insert above
         from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
 
     # Set up command-line argument parsing
@@ -263,9 +312,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--template",
-        choices=["default", "dtensor", "unbacked"],
-        default="default",
-        help="Template to use for code generation (default: default)",
+        choices=template_names,
+        default=default_template,
+        help=(
+            "Template to use for code generation "
+            f"(default: {default_template}; from active TORCHFUZZ_DEVICE_MODULE plugin)"
+        ),
     )
     parser.add_argument(
         "--supported-ops",
@@ -301,6 +353,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Pick a random seed and keep iterating until finding a failure (exits with non-zero code)",
     )
+    parser.add_argument(
+        "--generate-only",
+        type=str,
+        metavar="FILEPATTERN",
+        help=(
+            "Generate the fuzz program(s) and save to FILEPATTERN without running them. "
+            "A contiguous run of '?' in the pattern is replaced by the seed, left-padded "
+            "with zeros to the number of '?' characters (e.g. /tmp/program-?.py -> "
+            "/tmp/program-12.py). A '?' is required in multi-seed (--start/--count) mode. "
+            "Incompatible with --stop-at-first-failure."
+        ),
+    )
 
     # Legacy arguments
     parser.add_argument(
@@ -321,14 +385,29 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=getattr(logging, args.log_level), format="%(levelname)s: %(message)s"
     )
-    logger = logging.getLogger(__name__)
+
+    # Validate --generate-only up front (fail fast before any work).
+    if args.generate_only is not None:
+        if args.stop_at_first_failure:
+            print(
+                "❌ Error: --generate-only cannot be used with --stop-at-first-failure"
+            )
+            # pyrefly: ignore[unbound-name]  # latent bug: `sys` is local to main() via the except-branch import
+            sys.exit(1)
+        # Multi-seed mode requires a '?' so generated files don't collide.
+        if args.start is not None or args.count is not None:
+            try:
+                _resolve_generate_only_path(args.generate_only, 0, require_marker=True)
+            except ValueError as e:
+                print(f"❌ Error: {e}")
+                sys.exit(1)
 
     # Determine execution mode
     if args.seed is not None or args.single:
         # Single seed execution mode
         print("Running single fuzz_and_execute...")
         # Parse supported ops and any inline weights from that flag
-        parsed_supported_ops: Optional[list[str]] = None
+        parsed_supported_ops: list[str] | None = None
         parsed_weights: dict[str, float] = {}
         if args.supported_ops:
             parsed_supported_ops, parsed_weights = _parse_supported_ops_with_weights(
@@ -341,6 +420,7 @@ if __name__ == "__main__":
             template=args.template,
             supported_ops=parsed_supported_ops,
             op_weights=(parsed_weights if parsed_weights else None),
+            generate_only=args.generate_only,
         )
     elif args.stop_at_first_failure:
         # Stop-at-first-failure mode
@@ -397,6 +477,7 @@ if __name__ == "__main__":
                 verbose=args.verbose,
                 template=args.template,
                 supported_ops=args.supported_ops,
+                generate_only=args.generate_only,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")
@@ -413,3 +494,10 @@ if __name__ == "__main__":
             "  python fuzzer.py --start 0 --count 1000       # Run multi-process fuzzing"
         )
         print("  python fuzzer.py --start 100 --count 50 -p 8  # Use 8 processes")
+        print(
+            "  python fuzzer.py --seed 12 --generate-only /tmp/program-?.py  # Save program only"
+        )
+
+
+if __name__ == "__main__":
+    main()

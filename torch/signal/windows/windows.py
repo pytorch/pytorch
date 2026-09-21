@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable, Iterable
 from math import sqrt
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import torch
 from torch import Tensor
@@ -44,7 +44,7 @@ window_common_args = merge_dicts(
 def _add_docstr(*args: str) -> Callable[[_T], _T]:
     r"""Adds docstrings to a given decorated function.
 
-    Specially useful when then docstrings needs string interpolation, e.g., with
+    Especially useful when the docstrings need string interpolation, e.g., with
     str.format().
     REMARK: Do not use this function if the docstring doesn't need string
     interpolation, just write a conventional docstring.
@@ -133,12 +133,12 @@ Examples::
 def exponential(
     M: int,
     *,
-    center: Optional[float] = None,
+    center: float | None = None,
     tau: float = 1.0,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -220,9 +220,9 @@ def cosine(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -294,9 +294,9 @@ def gaussian(
     *,
     std: float = 1.0,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -358,11 +358,11 @@ Keyword args:
 
 Examples::
 
-    >>> # Generates a symmetric gaussian window with a standard deviation of 1.0.
+    >>> # Generates a symmetric Kaiser window with a shape parameter of 12.0.
     >>> torch.signal.windows.kaiser(5)
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
-    >>> # Generates a periodic gaussian window and standard deviation equal to 0.9.
-    >>> torch.signal.windows.kaiser(5, sym=False,std=0.9)
+    >>> # Generates a periodic Kaiser window and shape parameter equal to 0.9.
+    >>> torch.signal.windows.kaiser(5, sym=False, beta=0.9)
     tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00, 5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
 """.format(
         **window_common_args,
@@ -373,9 +373,9 @@ def kaiser(
     *,
     beta: float = 12.0,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -465,9 +465,9 @@ def hamming(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_hamming(
@@ -519,9 +519,9 @@ def hann(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_hamming(
@@ -573,9 +573,9 @@ def blackman(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -634,9 +634,9 @@ def bartlett(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -710,9 +710,9 @@ def general_cosine(
     *,
     a: Iterable,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -803,9 +803,9 @@ def general_hamming(
     *,
     alpha: float = 0.54,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_cosine(
@@ -854,7 +854,7 @@ References::
 
 Examples::
 
-    >>> # Generates a symmetric Nutall window.
+    >>> # Generates a symmetric Nuttall window.
     >>> torch.signal.windows.general_hamming(5, sym=True)
     tensor([3.6280e-04, 2.2698e-01, 1.0000e+00, 2.2698e-01, 3.6280e-04])
 
@@ -867,9 +867,9 @@ def nuttall(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_cosine(

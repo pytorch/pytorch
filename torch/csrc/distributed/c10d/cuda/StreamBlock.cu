@@ -3,7 +3,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/cuda/StreamBlock.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -85,7 +85,7 @@ __launch_bounds__(1, 1) void kernel_barrier(int32_t* value, size_t timeout_ms) {
 
 StreamBlock::StreamBlock(std::chrono::milliseconds timeout)
     : comm_{
-      // We need to pin the memory since we access the CPU memory directly form
+      // We need to pin the memory since we access the CPU memory directly from
       // the GPU.
       at::zeros({2}, at::TensorOptions().dtype(at::kInt)).pin_memory()
     },

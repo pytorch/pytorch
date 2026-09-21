@@ -2,10 +2,8 @@
 #include <torch/csrc/utils/tensor_list.h>
 
 #include <c10/util/irange.h>
-#include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_scalars.h>
 
 using namespace at;
@@ -25,13 +23,11 @@ static PyObject* recursive_to_list(
   }
   auto n = sizes[dim];
   auto list = THPObjectPtr(PyList_New(n));
-  if (!list)
-    throw python_error();
+  TORCH_CHECK_PYTHON(list);
   for (const auto i : c10::irange(n)) {
     PyObject* obj = recursive_to_list(
         data, sizes, strides, dim + 1, scalarType, elementSize);
-    if (!obj)
-      throw python_error();
+    TORCH_CHECK_PYTHON(obj);
     PyList_SET_ITEM(list.get(), i, obj);
     auto advance_data_ptr = strides[dim] * elementSize;
     TORCH_INTERNAL_ASSERT(data || (advance_data_ptr == 0));
@@ -61,6 +57,7 @@ PyObject* tensor_to_list(const Tensor& tensor) {
   if (!data.device().is_cpu()) {
     pybind11::gil_scoped_release no_gil;
     data = data.toBackend(Backend::CPU);
+    data = recursive_unwrap(data);
   }
   TORCH_CHECK(
       tensor.numel() == 0 || data.const_data_ptr(),

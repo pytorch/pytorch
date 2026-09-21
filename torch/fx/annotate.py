@@ -1,11 +1,15 @@
-# mypy: allow-untyped-defs
+from typing import Any
+
 from torch.fx.proxy import Proxy
 
 from ._compatibility import compatibility
 
 
+__all__ = ["annotate"]
+
+
 @compatibility(is_backward_compatible=False)
-def annotate(val, type):
+def annotate(val: Any, type: type) -> Any:
     """
     Annotates a Proxy object with a given type.
 

@@ -1,18 +1,18 @@
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -44,6 +44,7 @@
 #include <ATen/ops/_wrapped_linear_prepack.h>
 #include <ATen/ops/_wrapped_quantized_linear_prepacked.h>
 #include <ATen/ops/addmm.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/convolution.h>
@@ -75,6 +76,18 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
 }
 } // namespace
 
+namespace torch::aot_inductor {
+const char* get_last_error() {
+  const auto& error_msg =
+      torch::csrc::shim::details::get_torch_exception_what();
+  return error_msg.empty() ? nullptr : error_msg.c_str();
+}
+
+void set_last_error(const char* msg) {
+  torch::csrc::shim::details::set_torch_exception_what(msg ? msg : "");
+}
+} // namespace torch::aot_inductor
+
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
 #define AOTI_TORCH_DEVICE_TYPE_IMPL(device_str, device_type) \
@@ -99,6 +112,8 @@ AOTI_TORCH_DTYPE_IMPL(float8_e5m2, Float8_e5m2)
 AOTI_TORCH_DTYPE_IMPL(float8_e4m3fn, Float8_e4m3fn)
 AOTI_TORCH_DTYPE_IMPL(float8_e5m2fnuz, Float8_e5m2fnuz)
 AOTI_TORCH_DTYPE_IMPL(float8_e4m3fnuz, Float8_e4m3fnuz)
+AOTI_TORCH_DTYPE_IMPL(float8_e8m0fnu, Float8_e8m0fnu)
+AOTI_TORCH_DTYPE_IMPL(float4_e2m1fn_x2, Float4_e2m1fn_x2)
 AOTI_TORCH_DTYPE_IMPL(bfloat16, BFloat16)
 AOTI_TORCH_DTYPE_IMPL(float16, Half)
 AOTI_TORCH_DTYPE_IMPL(float32, Float)
@@ -250,10 +265,11 @@ AOTITorchError aoti_torch_strlist_to_ivalue(
     C10IValueHandle* ivalue) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::string> vec;
-    for (int64_t i = 0; i < len; i++) {
-      vec.push_back(std::string(val[i]));
+    vec.reserve(len);
+    for (const auto i : c10::irange(len)) {
+      vec.emplace_back(val[i]);
     }
-    c10::IValue* t = new c10::IValue(vec);
+    c10::IValue* t = new c10::IValue(std::move(vec));
     *ivalue = reinterpret_cast<C10IValueHandle>(t);
   });
 }
@@ -1121,7 +1137,7 @@ AOTITorchError aoti_record_function_start(
     }
 
     std::vector<c10::IValue> recordInputs(n_inputs);
-    for (size_t i = 0; i < n_inputs; i++) {
+    for (const auto i : c10::irange(n_inputs)) {
       recordInputs[i] = *reinterpret_cast<c10::IValue*>(inputs[i]);
     }
 
@@ -1188,7 +1204,7 @@ AOTITorchError aoti_torch_index_put_out(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;
     indices_.reserve(num_indices);
-    for (size_t i = 0; i < num_indices; i++) {
+    for (const auto i : c10::irange(num_indices)) {
       indices_.emplace_back(
           pointer_to_optional(tensor_handle_to_tensor_pointer(indices[i])));
     }
@@ -1229,9 +1245,16 @@ void aoti_torch_save_tensor_handle(
     const char* kernel_name) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
-  // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  auto cwd = c10::filesystem::current_path();
-  auto tmp_folder = cwd / "tmp" / "aoti_torch";
+  // Save tensor to tmp .pt file for tensors and can be torch.load'ed later.
+  // Defaults to <cwd>/tmp/aoti_torch so schedulers that collect a job's working
+  // directory pick the dumps up; AOTI_TORCH_SAVE_DIR writes them elsewhere.
+  // Read per call rather than cached, so a caller can redirect dumps per test
+  // or per session within one process.
+  const std::optional<std::string> save_dir_env =
+      c10::utils::get_env("AOTI_TORCH_SAVE_DIR");
+  auto tmp_folder = (save_dir_env.has_value() && !save_dir_env->empty())
+      ? c10::filesystem::path(*save_dir_env)
+      : c10::filesystem::current_path() / "tmp" / "aoti_torch";
   if (!c10::filesystem::exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
@@ -1244,8 +1267,13 @@ void aoti_torch_save_tensor_handle(
       return;
     }
   }
-  std::string tensor_filepath_to_save = tmp_folder.string() + launch_prefix +
-      "_" + kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
+  // Join as a path component: plain concatenation had no separator, so files
+  // landed beside the created directory rather than inside it.
+  std::string tensor_filepath_to_save =
+      (tmp_folder /
+       (std::string(launch_prefix) + "_" + kernel_name + "_" + tensor_name +
+        "_" + t->device().str() + ".pt"))
+          .string();
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
@@ -1261,7 +1289,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 
   // Display message
-  std::cout << "[";
+  std::cout << '[';
   if (msg) {
     std::cout << "  " << msg;
   }
@@ -1270,7 +1298,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   // Print exact tensor values for small size tensors
   const int64_t numel = t->numel();
   if (numel <= AOTI_TORCH_MAX_NUMEL_TO_PRINT) {
-    std::cout << *t << "\n";
+    std::cout << *t << '\n';
   }
 
   // Print summary stats of the tensor
@@ -1305,8 +1333,9 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
       // (similar for max) Skip printing min/max value for complex type tensors
       // here if encountered complex (rare occasions), suggest to print
       // out the whole value of the tensor.
-      std::cout << "Min value: " << t->to(float_dtype).min().item() << '\n';
-      std::cout << "Max value: " << t->to(float_dtype).max().item() << '\n';
+      auto [min_t, max_t] = at::aminmax(t->to(float_dtype));
+      std::cout << "Min value: " << min_t.item() << '\n';
+      std::cout << "Max value: " << max_t.item() << '\n';
     } else {
       // Set the numel threshold to print as 256 to avoid printing out too much
       // More info for aten native cuda kernel for "min_all_cuda" implementation
@@ -1316,7 +1345,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
         std::cout
             << "[INFO] Aten built-in function `min_all_cuda/max_all_cuda` not implemented for current dtype: "
             << t->dtype() << ". Printing out the whole value:\n"
-            << *t << "\n";
+            << *t << '\n';
       }
     }
   }
@@ -1340,13 +1369,11 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
     AtenTensorHandle* flatten_tensor_args) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(
-        proxy_executor != nullptr,
-        "Unable to find a proxy executor to run custom ops.",
-        "Please check if there is a json file generated",
-        "in the same directory as the so,",
-        "or use torch._inductor.aoti_compile_and_package",
-        "to package everything into a PT2 artifact.");
-
+        proxy_executor,
+        "Unable to find a proxy executor to run custom ops. Please check if "
+        "there is a json file generated in the same directory as the so, or use "
+        "torch._inductor.aoti_compile_and_package to package everything into a "
+        "PT2 artifact.");
     ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
     executor->call_function(
         extern_node_index,
@@ -1355,6 +1382,17 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
         num_tensors,
         flatten_tensor_args);
   });
+}
+
+void aoti_torch_check(
+    bool cond,
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg) {
+  if (C10_UNLIKELY_OR_CONST(!cond)) {
+    ::c10::detail::torchCheckFail(func, file, line, msg);
+  }
 }
 
 void aoti_torch_warn(

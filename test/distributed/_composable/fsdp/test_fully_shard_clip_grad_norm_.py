@@ -2,7 +2,6 @@
 
 import copy
 import functools
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -12,7 +11,13 @@ from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
+from torch.testing._internal.common_utils import (
+    MI350_ARCH,
+    run_tests,
+    skipIfRocmArch,
+    TEST_XPU,
+    xfailIf,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -26,14 +31,14 @@ device_type = torch.device(get_devtype())
 class _TestClipGradNormBase(FSDPTest):
     def _test_clip_grad_norm(
         self,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
+        max_norm: float | int,
+        norm_type: float | int,
         ref_model: nn.Module,
         ref_optim: torch.optim.Optimizer,
         model: nn.Module,
         optim: torch.optim.Optimizer,
         inp: torch.Tensor,
-        dp_mesh: Optional[DeviceMesh] = None,
+        dp_mesh: DeviceMesh | None = None,
     ):
         vector_norm_fn = functools.partial(torch.linalg.vector_norm, ord=norm_type)
         dp_mesh = dp_mesh or init_device_mesh(device_type.type, (self.world_size,))
@@ -124,6 +129,7 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
 
     @skip_if_lt_x_gpu(4)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
+    @skipIfRocmArch(MI350_ARCH)
     def test_clip_grad_norm_2d(self):
         for norm_type in (2, 1, 3, float("inf")):
             dp_size = 2

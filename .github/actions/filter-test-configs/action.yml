@@ -20,6 +20,10 @@ inputs:
       A comma-separated list of test configurations from the test matrix to keep,
       The empty list means we are going to keep every configurations by defaults
     default: ""
+  ignore-test-config-labels:
+    required: false
+    description: Ignore test-config/* PR labels when filtering the test matrix.
+    default: "false"
   job-name:
     type: string
     required: false
@@ -53,10 +57,19 @@ outputs:
   ci-td-distributed:
     description: True if ci-td-distributed label was on PR or [ci-td-distributed] in PR body.
     value: ${{ steps.filter.outputs.ci-td-distributed }}
+  labels:
+    description: The list of labels from the PR
+    value: ${{ steps.filter.outputs.labels }}
 
 runs:
   using: composite
   steps:
+    - name: Setup uv
+      if: ${{ !env.UV_PYTHON }}
+      uses: pytorch/test-infra/.github/actions/setup-uv@main
+      with:
+        python-version: "3.12"
+
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       env:
@@ -68,9 +81,8 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
-          # PyYAML 6.0 doesn't work with MacOS x86 anymore
-          # This must run on Python-3.7 (AmazonLinux2) so can't use request=3.32.2
-          python3 -m pip install requests==2.27.1 pyyaml==6.0.2
+          # Pre-fetch dependencies to cache them for later uv run calls
+          uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python -c "import requests, yaml; print('Dependencies ready')"
 
     - name: Parse ref
       id: parse-ref
@@ -80,7 +92,7 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        python3 "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
+        uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
 
     - name: Get the job name
       id: get-job-name
@@ -133,11 +145,12 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        python3 "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
+        uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
           --selected-test-configs "${{ inputs.selected-test-configs }}" \
+          ${{ inputs.ignore-test-config-labels == 'true' && '--ignore-test-config-labels' || '' }} \
           --pr-number "${PR_NUMBER}" \
           --tag "${TAG}" \
           --event-name "${EVENT_NAME}" \
@@ -155,6 +168,9 @@ runs:
 
         echo
         echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
+
+        echo
+        echo "Is ci-no-td label set? ${{ steps.filter.outputs.ci-no-td }}"
 
         echo
         echo "Reenabled issues? ${{ steps.filter.outputs.reenabled-issues }}"

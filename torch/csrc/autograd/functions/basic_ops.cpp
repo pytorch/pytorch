@@ -7,7 +7,6 @@
 
 #include <ATen/ATen.h>
 
-#include <memory>
 #include <utility>
 
 namespace torch::autograd {
@@ -39,7 +38,7 @@ auto DelayedError::apply(variable_list&& inputs) -> variable_list {
     outputs.emplace_back(var.defined() ? var.tensor_data() : at::Tensor());
   }
   return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
-    return std::make_shared<Error>(msg, std::move(next_edges));
+    return c10::make_intrusive<Error>(msg, std::move(next_edges));
   });
 }
 
@@ -51,7 +50,7 @@ auto UndefinedGrad::apply(variable_list&& inputs) -> variable_list {
         var.defined() ? var.clone().tensor_data() : at::Tensor());
   }
   return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
-    return std::make_shared<UndefinedGradBackward>(std::move(next_edges));
+    return c10::make_intrusive<UndefinedGradBackward>(std::move(next_edges));
   });
 }
 

@@ -47,7 +47,8 @@ class EnableAllLayers:
         for l in levels:
             if not l.is_positional():
                 d = l.dim()
-                assert isinstance(d, Dim)
+                if not isinstance(d, Dim):
+                    raise AssertionError(f"Expected Dim, got {type(d)}")
                 self.levels_to_dim.append(d)
 
         # Sort by level for stable ordering
@@ -67,9 +68,8 @@ class EnableAllLayers:
         to_remove = self.levels_start + len(self.levels_to_dim) - 1
         for i in range(len(self.levels_to_dim)):
             popped = torch._C._functorch._vmap_decrement_nesting()
-            assert popped == to_remove - i, (
-                f"Expected layer {to_remove - i}, got {popped}"
-            )
+            if popped != to_remove - i:
+                raise AssertionError(f"Expected layer {to_remove - i}, got {popped}")
 
     def from_batched(self, batchedtensor: torch.Tensor, has_device: bool) -> Tensor:
         """
@@ -91,13 +91,17 @@ class EnableAllLayers:
 
         while torch._C._functorch.is_batchedtensor(tensor):
             level = torch._C._functorch.maybe_get_level(tensor)
-            assert level is not None
-            assert level >= self.levels_start and level < self.levels_start + len(
-                self.levels_to_dim
-            )
+            if level is None:
+                raise AssertionError("Expected level to be non-None")
+            if not (
+                level >= self.levels_start
+                and level < self.levels_start + len(self.levels_to_dim)
+            ):
+                raise AssertionError(f"Level {level} out of range")
             dim = DimEntry(self.levels_to_dim[level - self.levels_start])
             bdim = torch._C._functorch.maybe_get_bdim(tensor)
-            assert bdim is not None
+            if bdim is None:
+                raise AssertionError("Expected bdim to be non-None")
             levels.insert(bdim, dim)
             tensor = torch._C._functorch.get_unwrapped(tensor)
 

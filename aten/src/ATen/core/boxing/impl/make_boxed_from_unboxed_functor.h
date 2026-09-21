@@ -95,8 +95,7 @@ using supported_primitive_arg_types = guts::typelist::typelist<
     c10::Device,
     c10::DeviceIndex,
     c10::Layout,
-    c10::MemoryFormat,
-    at::Dimname>;
+    c10::MemoryFormat>;
 
 // We have an unboxed functor in hand that takes C++ arguments, and
 // we're building a boxed functor wrapper for it that takes IValues.
@@ -451,6 +450,7 @@ struct ivalue_to_arg<c10::SymIntArrayRef, AllowDeprecatedTypes> final {
     if (v.isIntList()) {
       std::vector<c10::SymInt> r;
       auto src = v.toIntList();
+      r.reserve(src.size());
       std::transform(
           src.begin(), src.end(), std::back_inserter(r), [](int64_t i) {
             return c10::SymInt(i);
@@ -469,6 +469,7 @@ struct ivalue_to_arg<c10::OptionalArray<c10::SymInt>, AllowDeprecatedTypes>
     if (v.isIntList()) {
       std::vector<c10::SymInt> r;
       auto src = v.toIntList();
+      r.reserve(src.size());
       std::transform(
           src.begin(), src.end(), std::back_inserter(r), [](int64_t i) {
             return c10::SymInt(i);
@@ -731,6 +732,22 @@ struct push_outputs<void, AllowDeprecatedTypes> final {
   static void copy(int /*dummy*/, Stack* /*stack*/) {}
 };
 
+// decay_if_tuple ensures that if T is a tuple, all of its elements are decayed.
+// This is useful for kernels that return a tuple of references (e.g., Tensor&),
+// to avoid dangling references after the stack is dropped.
+template <typename T>
+struct decay_if_tuple {
+  using type = std::decay_t<T>;
+};
+
+template <typename... Args>
+struct decay_if_tuple<std::tuple<Args...>> {
+  using type = std::tuple<std::decay_t<Args>...>;
+};
+
+template <typename T>
+using decay_if_tuple_t = typename decay_if_tuple<T>::type;
+
 // make_boxed_from_unboxed_functor
 
 template <class KernelFunctor, bool AllowDeprecatedTypes>
@@ -761,7 +778,7 @@ struct make_boxed_from_unboxed_functor final {
       // we actually store it by value and don't get a dangling reference. This
       // is only required because some kernels still return `Tensor&`. [Note:
       // VC++ and 'std': ambiguous symbol]
-      using ReturnType_ = ::std::decay_t<ReturnType>;
+      using ReturnType_ = decay_if_tuple_t<ReturnType>;
       ReturnType_ output = call_functor_with_args_from_stack<
           KernelFunctor,
           AllowDeprecatedTypes>(functor, dispatchKeySet, stack);

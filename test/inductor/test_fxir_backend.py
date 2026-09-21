@@ -7,7 +7,7 @@ import itertools
 import operator
 import unittest
 from collections.abc import Callable
-from typing import Optional
+from unittest.mock import MagicMock
 
 import sympy
 
@@ -16,17 +16,23 @@ import torch._inductor.codegen.common as common
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.utils import same
-from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._higher_order_ops.triton_kernel_wrap import (
+    kernel_side_table,
+    triton_kernel_wrapper_mutation,
+)
 from torch._inductor import config
+from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen, UnbackedSymbolDefsLine
 from torch._inductor.codegen.wrapper_fxir import (
     FxConverter,
     replace_floor_div,
     WrapperFxCodegen,
 )
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -36,24 +42,25 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    patch_custom_fallback_pass,
     requires_gpu,
-    TRITON_HAS_CPU,
 )
 from torch.utils._sympy.functions import FloorDiv
 
 
 try:
-    from .test_control_flow import CondModels
+    from .test_control_flow import CondModels, SwitchModels
 except ImportError:
     from test_control_flow import (
         CondModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
+        SwitchModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
     )
 
 if HAS_GPU:
     import triton
     import triton.language as tl
 
-    from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
+    from torch.testing._internal.triton_utils import add_kernel, add_kernel_2d_autotuned
 
 test_config = {
     "compile_threads": 1,
@@ -97,7 +104,7 @@ class FxirTestCase(InductorTestCase):
         args,
         expected_num_triton_kernels: int = 1,
         metadata_only: bool = False,
-        compile_kwargs: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
     ):
         if compile_kwargs is None:
             compile_kwargs = {}
@@ -147,6 +154,19 @@ class FxirTestCase(InductorTestCase):
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.add, args)
+
+    def test_standard_kernel_omits_empty_launch_kwargs(self):
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+
+        # launch_kwargs is only needed when user Triton backend options must be
+        # replayed. Omitting the empty case keeps standard FXIR HOP calls
+        # compatible with downstream py_impls that have fixed keyword-only
+        # signatures matching the original HOP payload.
+        self.assertNotIn("launch_kwargs", triton_node.kwargs)
 
     def test_device_type(self):
         """
@@ -257,7 +277,8 @@ class FxirTestCase(InductorTestCase):
 
         def get_offset(node: torch.fx.Node) -> int:
             (input_, shape, stride, offset) = node.args
-            assert isinstance(offset, int)
+            if not isinstance(offset, int):
+                raise AssertionError
             return offset
 
         # Check for 2 views, one of which is offset.
@@ -323,6 +344,55 @@ class FxirTestCase(InductorTestCase):
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 1)
 
+    def test_reinterpret_view_floordiv_offset_dynamic(self):
+        """
+        Test that ReinterpretView with a FloorDiv offset emits valid FX IR
+        with SymInt metadata when dynamic shapes are enabled.
+        """
+
+        def foo(x):
+            n = x.shape[0]
+            return x.narrow(0, n // 2, n // 2).contiguous() + 1
+
+        args = [torch.randn(16, 4, device=self.device)]
+        (gm,) = self._compile_and_check(
+            foo, args, compile_kwargs={"dynamic": True}, metadata_only=True
+        )
+
+        as_strided_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.as_strided
+        )
+        for node in as_strided_nodes:
+            offset = node.args[3] if len(node.args) > 3 else None
+            if offset is not None and isinstance(offset, torch.fx.Node):
+                val = offset.meta.get("val")
+                if val is not None:
+                    self.assertNotIsInstance(
+                        val,
+                        torch.SymFloat,
+                        "ReinterpretView offset should be SymInt, not SymFloat",
+                    )
+
+    def test_reshape_fallback(self):
+        """
+        Test falling back to aten.reshape. This uses a custom pass to enable more fallbacks.
+        """
+
+        def always_fallback(node: torch.fx.Node) -> bool:
+            return True
+
+        def foo(x):
+            return x.reshape((2, 5))
+
+        args = (torch.randn(10, device=self.device),)
+        with patch_custom_fallback_pass(always_fallback):
+            (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+        # Check for the reshape.
+        (reshape_node,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.reshape.default
+        )
+
     def test_extern_multi_output(self):
         """
         Test an extern kernel with multiple outputs.
@@ -373,7 +443,7 @@ class FxirTestCase(InductorTestCase):
 
         # Expect separate forward and backward graphs.
         (forward_gm, backward_gm) = self._compile_and_check(
-            foo, (x, y), expected_num_triton_kernels=3
+            foo, (x, y), expected_num_triton_kernels=4
         )
 
     def test_custom_compiler(self):
@@ -516,7 +586,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_dynamic_launch_grid_calc(self):
         """
-        Test the dyanmic launch grid calculation.
+        Test the dynamic launch grid calculation.
         """
 
         func = torch.add
@@ -600,6 +670,7 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
         self.assertEqual(num_fallback, 1)
 
+    @config.patch("partitioned_scatter_enabled", False)
     def test_index_put_fallback(self):
         """
         Test the deterministic fallback for index_put.
@@ -657,6 +728,30 @@ class FxirTestCase(InductorTestCase):
         # Check for subgraphs.
         subgm_getattrs = list(gm.graph.find_nodes(op="get_attr"))
         self.assertEqual(len(subgm_getattrs), 2)
+        for subgm_getattr in subgm_getattrs:
+            target = subgm_getattr.name
+            self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
+
+    @parametrize("idx", (0, 1, 2))
+    def test_switch_subgraph(self, idx: int):
+        x = torch.randn((2, 3), device=self.device)
+        idx_tensor = torch.tensor(idx, device=self.device)
+        model = SwitchModels.Simple()
+        gm = self._compile_and_check(
+            model, [idx_tensor, x], expected_num_triton_kernels=4
+        )[-1]
+
+        # The FX graph should call torch.ops.higher_order.switch (not cond).
+        switch_nodes = list(
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.switch
+            )
+        )
+        self.assertEqual(len(switch_nodes), 1)
+
+        # Each branch should be a subgraph GraphModule attached as an attribute.
+        subgm_getattrs = list(gm.graph.find_nodes(op="get_attr"))
+        self.assertEqual(len(subgm_getattrs), 3)
         for subgm_getattr in subgm_getattrs:
             target = subgm_getattr.name
             self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
@@ -831,7 +926,9 @@ class AOTFxirTestCase(InductorTestCase):
             gm = torch._inductor.aot_compile(
                 ep.module(), inp, options={"fx_wrapper": True, **test_config}
             )
-            self.assertTrue(same(model(*inp), gm(*inp)))
+            # Flatten args for fx_wrapper gm
+            flat_args, _ = pytree.tree_flatten(inp)
+            self.assertTrue(same(model(*inp), gm(*flat_args)))
 
             for node in gm.graph.nodes:
                 if (
@@ -849,6 +946,54 @@ class AOTFxirTestCase(InductorTestCase):
 
         inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
         self.check(M(), inp)
+
+    @requires_gpu()
+    def test_aoti_fx_parallel_compile_reloads_triton_kernel(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        shutdown_compile_workers()
+        try:
+            with config.patch(worker_start_method="subprocess", compile_threads=4):
+                with fresh_cache():
+                    AsyncCompile.wait_pool_ready()
+                    self.assertTrue(AsyncCompile.use_process_pool())
+
+                    inp = (
+                        torch.ones(3, device=self.device),
+                        torch.ones(3, device=self.device),
+                    )
+                    with torch.no_grad():
+                        ep = torch.export.export(M(), inp)
+                        gm = torch._inductor.aot_compile(
+                            ep.module(),
+                            inp,
+                            options={
+                                "fx_wrapper": True,
+                                **test_config,
+                                "compile_threads": 4,
+                            },
+                        )
+
+                    triton_nodes = [
+                        node
+                        for node in gm.graph.nodes
+                        if (
+                            node.op == "call_function"
+                            and node.target == triton_kernel_wrapper_mutation
+                        )
+                    ]
+                    self.assertEqual(len(triton_nodes), 1)
+                    kernel = kernel_side_table.get_kernel(
+                        triton_nodes[0].kwargs["kernel_idx"]
+                    )
+                    self.assertIsNotNone(kernel.fn)
+
+                    flat_args, _ = pytree.tree_flatten(inp)
+                    self.assertTrue(same(M().to(self.device)(*inp), gm(*flat_args)))
+        finally:
+            shutdown_compile_workers()
 
     def test_aoti_fx_const(self):
         class M(torch.nn.Module):
@@ -890,6 +1035,23 @@ class AOTFxirTestCase(InductorTestCase):
             inp,
             dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
         )
+
+    def test_custom_triton_view_arg(self):
+        # The mm output's halves reach the kernel as reinterpret_tensor(...) views.
+        n = 8
+
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                t = torch.mm(x, w).view(-1)
+                output = torch.zeros(n, device=x.device)
+                add_kernel[(1,)](t[:n], t[n:], output, n, BLOCK_SIZE=n)
+                return output
+
+        inp = (
+            torch.randn(2 * n, 4, device=self.device),
+            torch.randn(4, 1, device=self.device),
+        )
+        self.check(Model().to(device=self.device), inp, strict=True)
 
     def test_custom_triton_autotune_dynamic(self):
         class Model(torch.nn.Module):
@@ -1014,12 +1176,12 @@ class AOTFxirTestCase(InductorTestCase):
             gm.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
+    true_graph_0 = self.true_graph_0
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
-    return [buf1, buf2]""",  # noqa: B950
+    return [buf1, buf2]""",
         )
 
     def test_dims_dynamic_outer_static_padded_inner(self):
@@ -1182,6 +1344,149 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             compiled_out = compiled(*args)
             self.assertEqual(compiled_out.shape, shape)
 
+    def test_reshape_dynamic_ph(self):
+        """
+        Test dynamic scalars using SymInts placeholder
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x, shape):
+                return torch.reshape(x, shape) + 2
+
+        ds = {
+            "x": (torch.export.Dim.AUTO, torch.export.Dim.AUTO),
+            "shape": [torch.export.Dim.AUTO, torch.export.Dim.AUTO],
+        }
+        args = (torch.randn((12, 14), device=self.device), [6, 28])
+        self.check(TestModule(), args, ds)
+
+    def test_reshape_dynamic_tmd(self):
+        """
+        Test dynamic reshape using shape dependent information
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                new_shape = [x.shape[0] // 2, x.shape[1] * 2]
+                return torch.reshape(x, new_shape) + 2
+
+        ds = {
+            "x": (torch.export.Dim.AUTO, torch.export.Dim.AUTO),
+        }
+        args = (torch.randn((12, 14), device=self.device),)
+        self.check(TestModule(), args, ds)
+
+    def test_extern_kernel_irnode_kwargs(self):
+        """
+        Test that IR nodes passed as kwargs to extern kernels are properly materialized.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, data, offsets):
+                return torch.segment_reduce(data, "sum", offsets=offsets)
+
+        length = 10
+        data = torch.randn(length, device=self.device)
+        offsets = torch.tensor([0, 3, 7, length], dtype=torch.int64, device=self.device)
+
+        self.check(TestModule(), (data, offsets))
+
+    def test_compound_symint_graph_input(self):
+        """A compound symbolic graph input binds to a single placeholder.
+
+        The branches close over 2 * y.shape[0] + 1, so the lifted argument
+        reaches the converter as a sympy.Add rather than a single Symbol.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = 2 * y.shape[0] + 1
+
+                def true_fn(t):
+                    return t + a
+
+                # Identical branches would share one Triton kernel between
+                # two separately converted subgraphs, which FX conversion
+                # cannot resolve.
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4))
+        gm = self.check(M(), inp, dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}))
+
+        # The lifted argument is a placeholder of the branch subgraphs, not of
+        # the parent graph. Check each branch on its own: one symbolic
+        # placeholder holding the whole expression, so neither branch fell back
+        # to taking the constituent symbol instead.
+        branches = [
+            submod
+            for name, submod in gm.named_modules()
+            if name and isinstance(submod, torch.fx.GraphModule)
+        ]
+        self.assertEqual(len(branches), 2, "expected the two cond subgraphs")
+        for branch in branches:
+            symbolic = [
+                node.meta["val"]
+                for node in branch.graph.find_nodes(op="placeholder")
+                if isinstance(node.meta.get("val"), torch.SymInt)
+            ]
+            self.assertEqual(len(symbolic), 1)
+            expr = symbolic[0].node.expr
+            (sym,) = expr.free_symbols
+            self.assertEqual(expr, 2 * sym + 1)
+
+    def test_nonlinear_compound_input_rejected(self):
+        """A compound input the solver cannot invert fails with a clear error.
+
+        y.shape[0] * y.shape[0] lifts as s**2, which the solver does not invert
+        to recover s.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = y.shape[0] * y.shape[0]
+
+                def true_fn(t):
+                    return t + a
+
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4))
+        with self.assertRaisesRegex(InductorError, "Cannot solve input expression"):
+            self.check(M(), inp, dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}))
+
+    def test_underdetermined_compound_input_rejected(self):
+        """A compound input holding two unknowns fails with a clear error.
+
+        The branches close over y.shape[0] + z.shape[0] but take neither
+        tensor, so one bound value would have to determine both symbols.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0] + z.shape[0]
+
+                def true_fn(t):
+                    return t + a
+
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4, 6))
+        with self.assertRaisesRegex(InductorError, "leaves these symbols undefined"):
+            self.check(
+                M(),
+                inp,
+                dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
+            )
+
 
 class TestReplaceFloorDiv(InductorTestCase):
     """
@@ -1309,8 +1614,26 @@ class TestReplaceFloorDiv(InductorTestCase):
         self._check(expr)
 
 
+class TestUnbackedSymbolDefs(InductorTestCase):
+    """Tests for FxConverter._generate_unbacked_symbol_defs."""
+
+    def test_empty_bindings_returns_before_buffer_lookup(self):
+        # A line with no unbacked symbols must return before the output-buffer
+        # lookup: such kernels are not recorded in buffer_to_node, so the lookup
+        # would KeyError. Fails without the early-return guard, passes with it.
+        conv = MagicMock(spec=FxConverter)
+        conv.gm = MagicMock()
+        conv.buffer_to_node = {}
+        line = MagicMock(spec=UnbackedSymbolDefsLine)
+        # output_name is set so that, absent the guard, the buffer_to_node lookup
+        # is actually reached and raises KeyError (its documented failure mode).
+        line.output_name = "buf0"
+        line.unbacked_bindings = {}
+        self.assertIsNone(FxConverter._generate_unbacked_symbol_defs(conv, line))
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU or TRITON_HAS_CPU:
+    if HAS_GPU:
         run_tests(needs="filelock")

@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 from torch import Tensor
 
@@ -86,11 +84,11 @@ class Test(torch.jit.ScriptModule):
         return (input, sum)
 
     @torch.jit.script_method
-    def optionalIntIsNone(self, input: Optional[int]) -> bool:
+    def optionalIntIsNone(self, input: int | None) -> bool:
         return input is None
 
     @torch.jit.script_method
-    def intEq0None(self, input: int) -> Optional[int]:
+    def intEq0None(self, input: int) -> int | None:
         if input == 0:
             return None
         return input
@@ -112,9 +110,12 @@ class Test(torch.jit.ScriptModule):
     @torch.jit.script_method
     def testNonContiguous(self):
         x = torch.tensor([100, 200, 300])[::2]
-        assert not x.is_contiguous()
-        assert x[0] == 100
-        assert x[1] == 300
+        if x.is_contiguous():
+            raise AssertionError("expected non-contiguous tensor")
+        if x[0] != 100:
+            raise AssertionError("expected x[0] == 100")
+        if x[1] != 300:
+            raise AssertionError("expected x[1] == 300")
         return x
 
     @torch.jit.script_method

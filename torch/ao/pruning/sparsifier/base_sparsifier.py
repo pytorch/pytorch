@@ -171,7 +171,7 @@ class BaseSparsifier(abc.ABC):
             self.make_config_from_model(model)
 
         # TODO: Remove the configuration by reference ('module')
-        # pyrefly: ignore [not-iterable]
+
         for module_config in self.config:
             if not isinstance(module_config, dict):
                 raise AssertionError(
@@ -187,7 +187,7 @@ class BaseSparsifier(abc.ABC):
             tensor_fqn = local_args.get("tensor_fqn", None)
             if tensor_fqn is None:
                 raise AssertionError(
-                    "tensor_fqn is a required argument in the sparsity config which"
+                    "tensor_fqn is a required argument in the sparsity config which "
                     "replaces previous `module` and [module]`fqn` arguments"
                 )
 

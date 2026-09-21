@@ -3,7 +3,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from functools import wraps
-from typing import Concatenate, Generic, Optional, Protocol
+from typing import Concatenate, Generic, Protocol
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -119,7 +119,6 @@ def contract(
             all_orig_named_buffers: list[dict[str, torch.Tensor]] = []
             all_orig_named_modules: list[dict[str, nn.Module]] = []
 
-            # pyrefly: ignore [bad-assignment]
             for module in modules:
                 default_all_state: dict[Callable, _State] = OrderedDict()
                 default_registry: dict[str, RegistryItem] = OrderedDict()
@@ -146,11 +145,8 @@ def contract(
                 all_state.setdefault(func, state)
                 registry.setdefault(func.__name__, registry_item)
 
-                # pyrefly: ignore [missing-attribute]
                 all_orig_named_params.append(OrderedDict(module.named_parameters()))
-                # pyrefly: ignore [missing-attribute]
                 all_orig_named_buffers.append(OrderedDict(module.named_buffers()))
-                # pyrefly: ignore [missing-attribute]
                 all_orig_named_modules.append(OrderedDict(module.named_modules()))
 
             updated = func(inp_module, *args, **kwargs)
@@ -165,13 +161,9 @@ def contract(
             all_new_named_params: list[dict[str, nn.Parameter]] = []
             all_new_named_buffers: list[dict[str, torch.Tensor]] = []
             all_new_named_modules: list[dict[str, nn.Module]] = []
-            # pyrefly: ignore [bad-assignment]
             for module in updated_modules:
-                # pyrefly: ignore [missing-attribute]
                 all_new_named_params.append(OrderedDict(module.named_parameters()))
-                # pyrefly: ignore [missing-attribute]
                 all_new_named_buffers.append(OrderedDict(module.named_buffers()))
-                # pyrefly: ignore [missing-attribute]
                 all_new_named_modules.append(OrderedDict(module.named_modules()))
 
             num_orig_modules = len(all_orig_named_modules)
@@ -234,7 +226,6 @@ def contract(
             # TODO: verify that installed distributed paradigms are compatible with
             # each other.
 
-            # pyrefly: ignore [bad-return]
             return updated
 
         def get_state(module: nn.Module) -> _State:
@@ -250,7 +241,7 @@ def contract(
     return inner  # type: ignore[return-value]
 
 
-def _get_registry(module: nn.Module) -> Optional[dict[str, RegistryItem]]:
+def _get_registry(module: nn.Module) -> dict[str, RegistryItem] | None:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name. If no API has been applied, then this

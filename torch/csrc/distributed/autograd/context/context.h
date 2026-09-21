@@ -28,26 +28,26 @@ class TORCH_API DistAutogradContext {
   // Records a 'send' autograd function for this context with the provided
   // message id.
   void addSendFunction(
-      const std::shared_ptr<SendRpcBackward>& func,
+      const c10::intrusive_ptr<SendRpcBackward>& func,
       int64_t autograd_message_id);
 
   // Records a 'recv' autograd function for this context with the provided
   // message id.
   void addRecvFunction(
-      std::shared_ptr<RecvRpcBackward>& func,
+      c10::intrusive_ptr<RecvRpcBackward>& func,
       int64_t autograd_message_id);
 
   // Given an autograd_message_id, retrieve the appropriate send function.
-  std::shared_ptr<SendRpcBackward> retrieveSendFunction(
+  c10::intrusive_ptr<SendRpcBackward> retrieveSendFunction(
       int64_t autograd_message_id);
 
   // Return all send functions for this context.
-  std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>> sendFunctions()
-      const;
+  std::unordered_map<int64_t, c10::intrusive_ptr<SendRpcBackward>>
+  sendFunctions() const;
 
   // Return all recv functions for this context.
-  std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>> recvFunctions()
-      const;
+  std::unordered_map<int64_t, c10::intrusive_ptr<RecvRpcBackward>>
+  recvFunctions() const;
 
   // Adds a future message recording an outstanding RPC.
   void addOutstandingRpc(const c10::intrusive_ptr<rpc::JitFuture>& jitFuture);
@@ -122,11 +122,11 @@ class TORCH_API DistAutogradContext {
   std::unordered_set<rpc::worker_id_t> knownWorkerIds_;
 
   // Map from autograd_message_id to appropriate 'send' autograd function.
-  std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
+  std::unordered_map<int64_t, c10::intrusive_ptr<SendRpcBackward>>
       sendAutogradFunctions_;
 
   // Map from autograd_message_id to appropriate 'recv' autograd function.
-  std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>>
+  std::unordered_map<int64_t, c10::intrusive_ptr<RecvRpcBackward>>
       recvAutogradFunctions_;
 
   // Gradients accumulated in this context so far. The key is the variable on

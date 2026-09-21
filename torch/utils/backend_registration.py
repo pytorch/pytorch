@@ -17,6 +17,62 @@ __all__ = [
 _privateuse1_backend_name = "privateuseone"
 
 
+def _rename_profiler_activity(backend_name: str) -> None:
+    """Mirror the privateuse1 rename in ProfilerActivity so users can write e.g.
+    ProfilerActivity.<backend_name> instead of ProfilerActivity.PrivateUse1."""
+    from torch._C._profiler import ProfilerActivity
+
+    alias = backend_name.upper()
+    setattr(ProfilerActivity, alias, ProfilerActivity.PrivateUse1)
+
+    pu1 = ProfilerActivity.PrivateUse1
+    original_repr = ProfilerActivity.__repr__
+    original_str = ProfilerActivity.__str__
+
+    def custom_repr(self):
+        if self == pu1:
+            return f"<ProfilerActivity.{alias}: {pu1.value}>"
+        return original_repr(self)
+
+    def custom_str(self):
+        if self == pu1:
+            return f"ProfilerActivity.{alias}"
+        return original_str(self)
+
+    ProfilerActivity.__repr__ = custom_repr
+    ProfilerActivity.__str__ = custom_str
+    ProfilerActivity.name = property(  # type: ignore[assignment]
+        lambda self: alias if self == pu1 else original_str(self).split(".")[-1]
+    )
+
+
+def _rename_device_type(backend_name: str) -> None:
+    from torch._C._autograd import DeviceType
+
+    alias = backend_name.upper()
+    setattr(DeviceType, alias, DeviceType.PrivateUse1)
+
+    pu1 = DeviceType.PrivateUse1
+    original_repr = DeviceType.__repr__
+    original_str = DeviceType.__str__
+
+    def custom_repr(self):
+        if self == pu1:
+            return f"<DeviceType.{alias}: {pu1.value}>"
+        return original_repr(self)
+
+    def custom_str(self):
+        if self == pu1:
+            return f"DeviceType.{alias}"
+        return original_str(self)
+
+    DeviceType.__repr__ = custom_repr
+    DeviceType.__str__ = custom_str
+    DeviceType.name = property(  # type: ignore[assignment]
+        lambda self: alias if self == pu1 else original_str(self).split(".")[-1]
+    )
+
+
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     Rename the privateuse1 backend device to make it more convenient to use as a device name within PyTorch APIs.
@@ -56,6 +112,13 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (5) ``set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'foo') -> None``
         Sets the random number generator state of the specified "foo" device.
 
+    Note(inductor): To defer the Inductor integration of the device out of import
+    time, BackendModule may define an optional ``_inductor_backend_init`` no-arg
+    callable. Inductor invokes it on each torch.compile / ``compile_fx()`` /
+    AOTInductor compilation until the device is registered; it must call
+    ``torch._inductor.codegen.common.register_backend_for_device`` itself. See
+    ``docs/source/accelerator/autoload.md`` for details.
+
     And there are some common funcs:
 
     (1) ``is_available() -> bool``
@@ -79,6 +142,8 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _rename_privateuse1_backend(backend_name)
     global _privateuse1_backend_name
     _privateuse1_backend_name = backend_name
+    _rename_profiler_activity(backend_name)
+    _rename_device_type(backend_name)
 
 
 def _check_register_once(module, attr) -> None:
@@ -181,14 +246,15 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
     if not hasattr(torch.Tensor, custom_backend_name):
         raise RuntimeError(
             f"Can not automatically generate {custom_backend_name}() method for torch.nn.Module."
-            f"Because torch.Tensor doesn't has the method {custom_backend_name}()."
-            f"For this error, you can try setting for_tensor=True."
+            f" Because torch.Tensor doesn't have the method {custom_backend_name}()."
+            f" For this error, you can try setting for_tensor=True."
         )
 
     def wrap_module_to(
+        # pyrefly: ignore [invalid-type-var]
         self: torch.nn.modules.module.T,
         device: int | torch.device | None = None,
-    ) -> torch.nn.modules.module.T:
+    ) -> torch.nn.modules.module.T:  # pyrefly: ignore [invalid-type-var]
         r"""Move all model parameters and buffers to the custom device.
 
         This also makes associated parameters and buffers different objects. So
@@ -219,9 +285,9 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
         raise RuntimeError(
             f"Can not automatically generate is_{custom_backend_name}() or "
             f"{custom_backend_name}() method for torch.nn.utils.rnn.PackedSequence."
-            f"Because torch.Tensor doesn't has the method is_{custom_backend_name}()"
-            f"or {custom_backend_name}()."
-            f"For this error, you can try setting for_tensor=True."
+            f" Because torch.Tensor doesn't have the method is_{custom_backend_name}()"
+            f" or {custom_backend_name}()."
+            f" For this error, you can try setting for_tensor=True."
         )
 
     @property  # type: ignore[misc]
@@ -251,15 +317,13 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
             device (int, optional): if specified, all parameters will be copied to that device
         """
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
-            # pyrefly: ignore [not-iterable]
             *args,
             **kwargs,
         )
         if ex.device.type == custom_backend_name:
-            # pyrefly: ignore [not-iterable]
             return self.to(*args, **kwargs)
         kwargs.update({"device": custom_backend_name})
-        # pyrefly: ignore [not-iterable]
+
         return self.to(*args, **kwargs)
 
     _check_register_once(torch.nn.utils.rnn.PackedSequence, custom_backend_name)
@@ -516,6 +580,6 @@ def _setup_privateuseone_for_python_backend(
         hook = _DummyPrivateUse1Hook()
     if device_guard is None:
         device_guard = _DummyDeviceGuard()
-    torch._register_device_module(rename, backend_module)
+    torch._register_device_module(rename, backend_module)  # type: ignore[bad-argument-type]
     torch._C._acc.register_python_privateuseone_hook(hook)
     torch._C._acc.register_python_privateuseone_device_guard(device_guard)

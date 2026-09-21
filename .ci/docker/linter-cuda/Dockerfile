@@ -17,6 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends libomp-dev && a
 COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 
+# Install clang
+ARG CLANG_VERSION
+COPY ./common/install_clang.sh install_clang.sh
+RUN bash ./install_clang.sh && rm install_clang.sh
+
 # Install conda and other packages (e.g., numpy, pytest)
 ARG PYTHON_VERSION
 ARG PIP_CMAKE
@@ -31,9 +36,9 @@ RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt
 ARG CUDA_VERSION
 COPY ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
-COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu* install_cusparselt.sh
+RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl* install_cusparselt.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 

@@ -158,7 +158,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         # TODO @ansley: add `Union` once landed
 
         # NB: Even though `Tuple` is a "container", we don't want to
-        # check for it here. `Tuple` functions as an type with an
+        # check for it here. `Tuple` functions as a type with an
         # "infinite" number of subtypes, in the sense that you can have
         # `Tuple[())]`, `Tuple[T1]`, `Tuple[T2]`, `Tuple[T1, T2]`,
         # `Tuple[T2, T1]` and so on, and none of these subtypes can be

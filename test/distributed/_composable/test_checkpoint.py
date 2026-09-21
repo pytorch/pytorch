@@ -85,7 +85,8 @@ class MultiInputModel(nn.Module):
         self.w = nn.Parameter(torch.randn((100, 100), device=device))
 
     def forward(self, xs: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
-        assert len(xs) == 2, f"Expects 2 args but got {len(xs)}"
+        if len(xs) != 2:
+            raise AssertionError(f"Expects 2 args but got {len(xs)}")
         x, y = xs
         z = x + y
         z = z @ self.w

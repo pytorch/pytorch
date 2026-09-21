@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -14,9 +13,9 @@ __all__ = ["MixtureSameFamily"]
 class MixtureSameFamily(Distribution):
     r"""
     The `MixtureSameFamily` distribution implements a (batch of) mixture
-    distribution where all component are from different parameterizations of
+    distribution where all components are from different parameterizations of
     the same distribution type. It is parameterized by a `Categorical`
-    "selecting distribution" (over `k` component) and a component
+    "selecting distribution" (over `k` components) and a component
     distribution, i.e., a `Distribution` with a rightmost batch shape
     (equal to `[k]`) which indexes each (batch of) component.
 
@@ -45,7 +44,7 @@ class MixtureSameFamily(Distribution):
 
     Args:
         mixture_distribution: `torch.distributions.Categorical`-like
-            instance. Manages the probability of selecting component.
+            instance. Manages the probability of selecting components.
             The number of categories must match the rightmost batch
             dimension of the `component_distribution`. Must have either
             scalar `batch_shape` or `batch_shape` matching
@@ -61,7 +60,7 @@ class MixtureSameFamily(Distribution):
         self,
         mixture_distribution: Categorical,
         component_distribution: Distribution,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         self._mixture_distribution = mixture_distribution
         self._component_distribution = component_distribution
@@ -74,7 +73,7 @@ class MixtureSameFamily(Distribution):
 
         if not isinstance(self._component_distribution, Distribution):
             raise ValueError(
-                "The Component distribution need to be an "
+                "The Component distribution needs to be an "
                 "instance of torch.distributions.Distribution"
             )
 
@@ -89,7 +88,7 @@ class MixtureSameFamily(Distribution):
                     f"batch_shape`({cdbs})"
                 )
 
-        # Check that the number of mixture component matches
+        # Check that the number of mixture components matches
         km = self._mixture_distribution.logits.shape[-1]
         kc = self._component_distribution.batch_shape[-1]
         if km is not None and kc is not None and km != kc:
@@ -103,7 +102,10 @@ class MixtureSameFamily(Distribution):
         event_shape = self._component_distribution.event_shape
         self._event_ndims = len(event_shape)
         super().__init__(
-            batch_shape=cdbs, event_shape=event_shape, validate_args=validate_args
+            # pyrefly: ignore [bad-argument-type]
+            batch_shape=cdbs,
+            event_shape=event_shape,
+            validate_args=validate_args,
         )
 
     def expand(self, batch_shape, _instance=None):

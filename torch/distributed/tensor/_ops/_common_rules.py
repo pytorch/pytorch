@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import string
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -44,7 +44,7 @@ def einop_rule(
     op_schema: OpSchema,
     *,
     linearity: bool = False,
-    enforce_sharding: Optional[dict[str, int]] = None,
+    enforce_sharding: dict[str, int] | None = None,
 ) -> OutputSharding:
     """
     Propagate the sharding of inputs to output for ops whose data moves according to einsum notation.
@@ -82,7 +82,7 @@ def einop_rule(
 
     def merge_sharding(dim: str, a: int, b: int) -> int:
         # merge the sharding of inputs if it's able to merge, i.e. we can merge
-        # replicate and shard to shard, but this will trigger an reshard operation
+        # replicate and shard to shard, but this will trigger a reshard operation
         if a != b:
             if a == -1 or b == -1:
                 # reshard the replicate to match the sharded one
@@ -120,7 +120,8 @@ def einop_rule(
                 dim_to_sharding[dim] = merge_sharding(
                     dim, dim_to_sharding[dim], mesh_dim
                 )
-                assert dim_to_size[dim] == input_spec.shape[idx]
+                if dim_to_size[dim] != input_spec.shape[idx]:
+                    raise AssertionError
 
             # after merging sharding, we check if there're multiple
             # sharding on the same mesh dim.
@@ -142,7 +143,7 @@ def einop_rule(
             op_schema, input_dims, input_specs, dim_to_sharding, []
         )
     else:
-        # It's a op that support linearity, but not all input arguments are partial
+        # It's an op that supports linearity, but not all input arguments are partial
         # we fail the sharding propagation with suggestion to make all inputs be
         # partial on the corresponding mesh dim (all inputs should be partial for
         # the mesh dims in order to execute locally and delay the sum reduction)
@@ -165,13 +166,17 @@ def einop_rule(
                         d in input_dim
                         and input_spec.dim_map[input_dim.index(d)] == mesh_dim
                     ):
-                        assert input_spec.tensor_meta is not None
+                        if input_spec.tensor_meta is None:
+                            raise AssertionError
                         global_shape = input_spec.tensor_meta.shape
                         local_shape, _ = compute_local_shape_and_global_offset(
-                            global_shape, input_spec.mesh, input_spec.placements
+                            global_shape,
+                            input_spec.mesh,
+                            input_spec.placements,
+                            skip_offset=True,
                         )
                         cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
-                # pyrefly: ignore [bad-argument-type]
+
                 costs.append(cost)
             d_to_keep_sharding = dims[costs.index(max(costs))]
             for d in dims:
@@ -207,7 +212,8 @@ def einop_rule(
     # XXX: since we still need to have intermediate shape calculation, we need
     # to pass in the shape here. We should remove this once sharding decomp works
     # for ops like addmm
-    assert input_specs[0].tensor_meta is not None
+    if input_specs[0].tensor_meta is None:
+        raise AssertionError
     tensor_meta = TensorMeta(
         torch.Size(output_shape),
         input_specs[0].tensor_meta.stride,

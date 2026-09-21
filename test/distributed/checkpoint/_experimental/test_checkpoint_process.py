@@ -20,7 +20,11 @@ from torch.distributed.checkpoint._experimental.checkpoint_writer import (
     CheckpointWriterConfig,
 )
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def subprocess_init_fn(name: str, parent_pid: int) -> None:
@@ -28,11 +32,12 @@ def subprocess_init_fn(name: str, parent_pid: int) -> None:
 
     This is similar to the subprocess_init_routine in checkpointing_test.py.
     """
-    assert name == "test-checkpointer", f"Unexpected subprocess name: {name}"
-    assert os.getpid() != parent_pid, "This was supposed to run in a different process"
-    assert os.getppid() == parent_pid, (
-        "This was supposed to run as a child to main process"
-    )
+    if name != "test-checkpointer":
+        raise AssertionError(f"Unexpected subprocess name: {name}")
+    if os.getpid() == parent_pid:
+        raise AssertionError("This was supposed to run in a different process")
+    if os.getppid() != parent_pid:
+        raise AssertionError("This was supposed to run as a child to main process")
 
 
 def failing_subprocess_init_fn(name: str, parent_pid: int) -> None:
@@ -90,17 +95,19 @@ def shared_tensor_verifier_init_fn(**kwargs: Any) -> CheckpointWriter:
             if "shared_tensor" in state_dict:
                 shared_tensor = state_dict["shared_tensor"]
                 # Critical assertion: shared tensor should remain in shared memory in subprocess
-                assert shared_tensor.is_shared(), (
-                    "Shared tensor should be in shared memory in subprocess"
-                )
+                if not shared_tensor.is_shared():
+                    raise AssertionError(
+                        "Shared tensor should be in shared memory in subprocess"
+                    )
 
                 shared_tensor[0] = 42.0
 
             if "regular_tensor" in state_dict:
                 # Note: ForkingPickler moves regular tensors to shared memory during IPC - this is acceptable
-                assert state_dict["regular_tensor"].is_shared(), (
-                    "Regular tensor should also be in shared memory in subprocess"
-                )
+                if not state_dict["regular_tensor"].is_shared():
+                    raise AssertionError(
+                        "Regular tensor should also be in shared memory in subprocess"
+                    )
 
             return None
 
@@ -113,6 +120,8 @@ def shared_tensor_verifier_init_fn(**kwargs: Any) -> CheckpointWriter:
 
 class TestRequestTypes(TestCase):
     """Test the request/response data structures."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_request_type_enum(self) -> None:
         """Test RequestType enum values."""
@@ -143,6 +152,8 @@ class TestRequestTypes(TestCase):
 class TestCheckpointProcessConfig(TestCase):
     """Test CheckpointProcessConfig configuration."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_default_options(self) -> None:
         """Test default CheckpointProcessConfig."""
         options = CheckpointProcessConfig()
@@ -160,6 +171,8 @@ class TestCheckpointProcessConfig(TestCase):
 
 
 class TestCheckpointProcess(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         """Set up common test fixtures."""
@@ -260,16 +273,7 @@ class TestCheckpointProcess(TestCase):
         # Wait for initialization
         checkpoint_process.process_creation_future.result()
 
-        # Create a Future that resolves to the state dict
-        from concurrent.futures import ThreadPoolExecutor
-
-        executor = ThreadPoolExecutor(max_workers=1)
-
-        def get_state_dict():
-            time.sleep(0.1)  # Simulate some processing time
-            return self.test_state_dict
-
-        future_state_dict = executor.submit(get_state_dict)
+        future_state_dict = Future()
 
         # Create a temporary directory for the checkpoint
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -277,6 +281,7 @@ class TestCheckpointProcess(TestCase):
 
             # Write checkpoint with Future state dict
             write_future = checkpoint_process.write(future_state_dict, checkpoint_path)
+            future_state_dict.set_result(self.test_state_dict)
 
             # Wait for completion
             write_future.result()
@@ -287,7 +292,6 @@ class TestCheckpointProcess(TestCase):
             )
             self.assertTrue(os.path.exists(expected_file))
 
-        executor.shutdown(wait=True)
         checkpoint_process.close()
 
     def test_checkpoint_write_with_kwargs(self) -> None:
@@ -455,7 +459,7 @@ class TestCheckpointProcess(TestCase):
             shared_tensor[0][0],
             42.0,
             places=6,
-            msg=f"Expected subprocess signature 42.0, got {shared_tensor[0]}. "
+            msg=lambda msg: f"{msg}\nExpected subprocess signature 42.0, got {shared_tensor[0]}. "
             f"Shared memory not working - subprocess modifications not visible!",
         )
 

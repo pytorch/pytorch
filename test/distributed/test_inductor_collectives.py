@@ -3,17 +3,19 @@ import datetime
 import functools
 import unittest
 from collections import Counter
-from typing import Optional
+from unittest import mock
 from unittest.mock import patch
 
 import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
+import torch._inductor.comms as comms
 import torch.distributed as c10d
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 import torch.distributed._functional_collectives as _functional_collectives
+from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import same
@@ -22,17 +24,41 @@ from torch._inductor.comms import (
     ReorderInfo,
     sink_waits_iterative,
 )
-from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
+from torch._inductor.compile_fx import (
+    compile_fx as inductor_compile_fx,
+    compile_fx_inner,
+)
+from torch._inductor.dependencies import WeakDep
+from torch._inductor.fx_passes.bucketing import (
+    _ALL_DTYPES,
+    _compute_foreach_groups,
+    _insert_fn_trace_before_node,
+    _match_dim0_padded_cat,
+    _pre_bucket_all_gather,
+    _pre_bucket_reduce_scatter,
+    _trace as bucketing_trace,
+    _unpack_bucketed_all_gather_output,
+    all_gather_merge_fn_to_trace_custom_ops,
+    is_all_gather_into_tensor,
+    is_all_reduce_tensor,
+    is_all_to_all_tensor,
+    is_reduce_scatter_tensor,
+    merge_reduce_scatter_bucket,
+    reduce_scatter_merge_fn_to_trace_custom_ops,
+)
+from torch._inductor.memory import SNodeMemory
 from torch._inductor.scheduler import (
-    _get_mm_like_fn,
+    _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     get_estimate_runtime_cache,
     get_estimate_runtime_cache_key_from_snode,
 )
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
+from torch._subclasses import FakeTensorMode
 from torch.distributed.distributed_c10d import GroupMember
+from torch.distributed.tensor.placement_types import Shard
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
@@ -40,18 +66,699 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedSingleProcTestCase,
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
+    requires_gloo,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
     TEST_XPU,
     xfailIf,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+# Opaque custom op so torch.compile traces the coalescing manager into the graph
+# (Dynamo otherwise graph-breaks on it) and reduce-overhead captures the
+# coalesced collective into a cudagraph. Used by
+# TestCollectivesMultiProc.test_coalescing_manager_reduce_overhead.
+@torch.library.custom_op(
+    "test_inductor_collectives::coalesced_all_gather", mutates_args=()
+)
+def _coalesced_all_gather(
+    inp: torch.Tensor, world_size: int, group_name: str
+) -> torch.Tensor:
+    group = c10d.distributed_c10d._resolve_process_group(group_name)
+    out = inp.new_empty(inp.numel() * world_size)
+    with c10d._coalescing_manager(group=group, device=inp.device, async_ops=True) as cm:
+        c10d.all_gather_single(out, inp)
+    cm.wait()
+    return out
+
+
+@_coalesced_all_gather.register_fake
+def _(inp, world_size, group_name):
+    return inp.new_empty(inp.numel() * world_size)
+
+
+class TestBucketingTrace(torch._dynamo.test_case.TestCase):
+    def _make_hinted_unbacked_chunked_fake_inputs(self, *, hint=None):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        with fake_mode:
+            u = fake_mode.shape_env.create_unbacked_symint()
+            if hint is not None:
+                torch._dynamo.override_optimization_hint(u, hint)
+            return torch.empty(u // 2, 4), torch.empty(u // 2, 4)
+
+    def test_trace_ignores_ambient_pending_unbacked_symbols(self):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        x = fake_mode.from_tensor(torch.randn(2, 2), static_shapes=True)
+        ambient = fake_mode.shape_env.create_unbacked_symint().node.expr
+        self.assertIn(ambient, fake_mode.shape_env.pending_fresh_unbacked_symbols)
+
+        gm = bucketing_trace(lambda x: x + 1, (x,))
+
+        self.assertIn(ambient, fake_mode.shape_env.pending_fresh_unbacked_symbols)
+        FileCheck().check("aten.add").run(gm.code)
+
+    def test_all_gather_bucket_trace_accepts_hinted_unbacked_chunk_numel(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs(hint=8)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_all_gather").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertTrue(any("16*((u0//2))" in shape for shape in symbolic_shapes))
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.split_with_sizes_copy.out
+                for node in gm.graph.nodes
+            )
+        )
+
+    def test_all_gather_bucket_trace_uses_fused_unpack_for_static_shapes(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+            y = torch.empty(5, 2)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(
+            targets.count(torch.ops.aten.split_with_sizes_copy.out),
+            1,
+        )
+        self.assertNotIn(torch.ops.aten.split_with_sizes.default, targets)
+
+    def test_all_gather_singleton_bucket_does_not_copy_unpack(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+
+        gm = bucketing_trace(
+            lambda value: all_gather_merge_fn_to_trace_custom_ops(
+                [value],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32],
+                0,
+            ),
+            (x,),
+        )
+
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.split_with_sizes_copy.out
+                for node in gm.graph.nodes
+            )
+        )
+
+    def test_all_gather_group_size_one_does_not_copy_unpack(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+            y = torch.empty(5, 2)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                1,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.split_with_sizes_copy.out
+                for node in gm.graph.nodes
+            )
+        )
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_fused_all_gather_unpack_handles_mixed_dtypes(self):
+        group_size = 2
+        expected_bfloat16 = torch.arange(
+            6,
+            device="cuda",
+            dtype=torch.bfloat16,
+        ).reshape(group_size, 3)
+        expected_float32 = torch.arange(
+            8,
+            device="cuda",
+            dtype=torch.float32,
+        ).reshape(group_size, 4)
+        expected_empty = torch.empty(
+            group_size,
+            0,
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        rank_major_bytes = torch.cat(
+            [
+                torch.cat(
+                    [
+                        expected_bfloat16[rank].view(torch.uint8),
+                        expected_float32[rank].view(torch.uint8),
+                        expected_empty[rank].view(torch.uint8),
+                    ]
+                )
+                for rank in range(group_size)
+            ]
+        )
+
+        unpack = functools.partial(
+            _unpack_bucketed_all_gather_output,
+            ins_sizes=[torch.Size((3,)), torch.Size((2, 2)), torch.Size((0,))],
+            ins_split_sizes=[6, 16, 0],
+            out_dtypes=[torch.bfloat16, torch.float32, torch.bfloat16],
+            group_size=group_size,
+            bucket_dtype=torch.uint8,
+        )
+        gm = make_fx(unpack)(rank_major_bytes)
+        compiled = compile_fx_inner(gm, [rank_major_bytes])
+
+        FileCheck().check_count(
+            "torch.ops.aten.split_with_sizes_copy.out(", count=1, exactly=True
+        ).run(compiled.source_code)
+        actual = compiled([rank_major_bytes])
+
+        self.assertEqual(actual[0], expected_bfloat16.flatten())
+        self.assertEqual(actual[1], expected_float32.reshape(4, 2))
+        self.assertEqual(actual[2].numel(), 0)
+        self.assertTrue(all(output.is_contiguous() for output in actual))
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_all_gather_unpack_handles_all_empty_outputs(self):
+        actual = _unpack_bucketed_all_gather_output(
+            torch.empty(2, 0, device="cuda", dtype=torch.uint8),
+            [torch.Size((0,)), torch.Size((0, 3))],
+            [0, 0],
+            [torch.float32, torch.bfloat16],
+            2,
+            torch.uint8,
+        )
+
+        self.assertEqual(actual[0].shape, (0,))
+        self.assertEqual(actual[1].shape, (0, 3))
+        self.assertTrue(all(output.is_contiguous() for output in actual))
+
+    def test_all_gather_bucket_trace_accepts_unhinted_unbacked_chunk_numel(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs()
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_all_gather").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.split_with_sizes_copy.out
+                for node in gm.graph.nodes
+            )
+        )
+
+    def test_all_gather_foreach_groups_ignore_tensor_shape(self):
+        inputs = [torch.empty(3), torch.empty(2, 4), torch.empty(0)]
+
+        self.assertIsNone(
+            _compute_foreach_groups(inputs, [torch.float32] * len(inputs))
+        )
+
+    def test_all_gather_foreach_groups_preserve_dtype_pairs(self):
+        inputs = [
+            torch.empty(3, dtype=torch.bfloat16),
+            torch.empty(4, dtype=torch.bfloat16),
+            torch.empty(5, dtype=torch.float32),
+            torch.empty(6, dtype=torch.bfloat16),
+        ]
+
+        self.assertEqual(
+            _compute_foreach_groups(
+                inputs,
+                [
+                    torch.bfloat16,
+                    torch.float32,
+                    torch.float32,
+                    torch.bfloat16,
+                ],
+            ),
+            [0, 3, -1, 1, -1, 2],
+        )
+
+    def test_all_gather_foreach_groups_isolate_noncontiguous_inputs(self):
+        inputs = [
+            torch.empty(3),
+            torch.empty(8)[::2],
+            torch.empty(5),
+        ]
+
+        self.assertEqual(
+            _compute_foreach_groups(inputs, [torch.float32] * len(inputs)),
+            [0, 2, -1, 1],
+        )
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_pre_bucket_all_gather_foreach_handles_different_lengths(self):
+        inputs = [
+            torch.arange(3, device="cuda", dtype=torch.bfloat16),
+            torch.arange(8, device="cuda", dtype=torch.bfloat16).reshape(2, 4).T,
+            torch.empty(0, device="cuda", dtype=torch.bfloat16),
+            torch.arange(5, device="cuda", dtype=torch.bfloat16),
+        ]
+        out_dtypes = [torch.bfloat16] * len(inputs)
+
+        actual = _pre_bucket_all_gather(
+            inputs,
+            1,
+            torch.bfloat16,
+            [_ALL_DTYPES.index(dtype) for dtype in out_dtypes],
+            0,
+            _compute_foreach_groups(inputs, out_dtypes),
+        )
+
+        expected = torch.cat([value.reshape(-1) for value in inputs])
+        self.assertEqual(actual, expected)
+
+    def test_reduce_scatter_bucket_trace_preserves_hinted_unbacked_chunk_shapes(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs(hint=8)
+
+        gm = bucketing_trace(
+            lambda a, b: reduce_scatter_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                "sum",
+                torch.float32,
+                torch.device("cuda"),
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_reduce_scatter").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertTrue(any("(u0//4)" in shape for shape in symbolic_shapes))
+
+    def test_pre_bucket_reduce_scatter_chunk_cat_handles_uneven_and_empty(self):
+        group_size = 4
+        inputs = [
+            torch.arange(20, dtype=torch.float32).reshape(5, 4),
+            torch.arange(12, dtype=torch.float32).reshape(6, 2),
+            torch.empty(0, 3),
+        ]
+
+        rank_chunks = []
+        for rank in range(group_size):
+            chunks = []
+            for value in inputs:
+                if value.numel() == 0:
+                    continue
+                chunk_size = (value.shape[0] + group_size - 1) // group_size
+                chunk = value.narrow(
+                    0,
+                    min(rank * chunk_size, value.shape[0]),
+                    max(
+                        0,
+                        min(chunk_size, value.shape[0] - rank * chunk_size),
+                    ),
+                ).flatten()
+                chunks.append(
+                    torch.nn.functional.pad(
+                        chunk,
+                        (0, chunk_size * value[0].numel() - chunk.numel()),
+                    )
+                )
+            rank_chunks.append(torch.cat(chunks))
+        expected = torch.cat(rank_chunks)
+
+        actual = _pre_bucket_reduce_scatter(
+            inputs,
+            group_size,
+            list(range(len(inputs))),
+        )
+
+        self.assertEqual(actual, expected)
+        packed_second_input = torch.nn.functional.pad(inputs[1], (0, 0, 0, 2))
+        self.assertEqual(
+            _pre_bucket_reduce_scatter(
+                [inputs[0], packed_second_input, inputs[2]],
+                group_size,
+                [0],
+            ),
+            expected,
+        )
+        self.assertEqual(
+            _pre_bucket_reduce_scatter(
+                [torch.empty(0, 3), torch.empty(4, 0)],
+                group_size,
+                [0, 1],
+            ).numel(),
+            0,
+        )
+
+    def test_pre_bucket_reduce_scatter_preserves_packed_symbolic_numel(self):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        with fake_mode:
+            symbolic_size = fake_mode.shape_env.create_unbacked_symint()
+            logical_input = torch.empty(5, 4)
+            packed_input = torch.empty(symbolic_size, 3)
+            output = _pre_bucket_reduce_scatter(
+                [logical_input, packed_input],
+                2,
+                [0],
+            )
+
+        self.assertEqual(
+            output.shape[0].node.expr,
+            24 + 3 * symbolic_size.node.expr,
+        )
+
+    def test_match_dim0_padded_cat(self):
+        def padded_input(value):
+            chunks, _ = Shard(0)._split_tensor(
+                value,
+                4,
+                with_padding=True,
+                contiguous=True,
+            )
+            return torch.cat(chunks, dim=-2)
+
+        def add_reduce_scatter_consumer(gm, cat):
+            output = next(node for node in gm.graph.nodes if node.op == "output")
+            with gm.graph.inserting_before(output):
+                reduce_scatter = gm.graph.call_function(
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    args=(cat, "sum", 4, "0"),
+                )
+            output.args = (reduce_scatter,)
+            return reduce_scatter
+
+        gm = make_fx(padded_input)(torch.empty(5, 4, device="meta"))
+        cat = next(
+            node for node in gm.graph.nodes if node.target == torch.ops.aten.cat.default
+        )
+        reduce_scatter = add_reduce_scatter_consumer(gm, cat)
+
+        match = _match_dim0_padded_cat(cat, 4)
+
+        self.assertIsNotNone(match)
+        src, packing_nodes = match
+        self.assertEqual(src.op, "placeholder")
+        self.assertIn(cat, packing_nodes)
+
+        split = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.split.Tensor
+        )
+        split.args = (*split.args, -2)
+        self.assertIsNotNone(_match_dim0_padded_cat(cat, 4))
+
+        cat.args = (cat.args[0], -4)
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+        cat.args = (cat.args[0], -2)
+
+        pad = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.constant_pad_nd.default
+        )
+        original_args = pad.args
+        original_kwargs = pad.kwargs
+        pad.args = pad.args[:2]
+        pad.kwargs = {"value": 1}
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+        pad.args = original_args
+        pad.kwargs = original_kwargs
+
+        with gm.graph.inserting_before(reduce_scatter):
+            source_fanout = gm.graph.call_function(
+                torch.ops.aten.neg.default,
+                args=(src,),
+            )
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+        gm.graph.erase_node(source_fanout)
+
+        with gm.graph.inserting_before(reduce_scatter):
+            cat_fanout = gm.graph.call_function(
+                torch.ops.aten.neg.default,
+                args=(cat,),
+            )
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+        gm.graph.erase_node(cat_fanout)
+
+        cat_inputs = list(cat.args[0])
+        cat_inputs[0], cat_inputs[1] = cat_inputs[1], cat_inputs[0]
+        cat.args = (cat_inputs,)
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+
+    def test_match_dim0_padded_cat_rejects_symbolic_shapes(self):
+        def padded_input(value):
+            chunks, _ = Shard(0)._split_tensor(
+                value,
+                4,
+                with_padding=True,
+                contiguous=True,
+            )
+            return torch.cat(chunks, dim=0)
+
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        with fake_mode:
+            symbolic_size = fake_mode.shape_env.create_unbacked_symint()
+            value = torch.empty(symbolic_size, 4)
+
+        gm = make_fx(padded_input)(value)
+        cat = next(
+            node
+            for node in reversed(tuple(gm.graph.nodes))
+            if node.target == torch.ops.aten.cat.default
+        )
+
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+
+    def test_reduce_scatter_bucket_fuses_dim0_padded_cat(self):
+        def padded_input(value):
+            chunks, _ = Shard(0)._split_tensor(
+                value,
+                4,
+                with_padding=True,
+                contiguous=True,
+            )
+            return torch.cat(chunks, dim=0)
+
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(5, 4)
+            y = torch.empty(7, 2)
+            z = torch.empty(8, 3)
+        gm = make_fx(lambda x, y, z: (padded_input(x), padded_input(y), z))(x, y, z)
+        graph = gm.graph
+        output = next(node for node in graph.nodes if node.op == "output")
+        packed_inputs = output.args[0]
+        waits = []
+        reduce_scatters = []
+        with graph.inserting_before(output):
+            for packed_input in packed_inputs:
+                reduce_scatter = graph.call_function(
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    args=(packed_input, "sum", 4, "0"),
+                )
+                output_shape = (packed_input.meta["val"].shape[0] // 4,) + tuple(
+                    packed_input.meta["val"].shape[1:]
+                )
+                reduce_scatter.meta["val"] = packed_input.meta["val"].new_empty(
+                    output_shape
+                )
+                wait = graph.call_function(
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    args=(reduce_scatter,),
+                )
+                wait.meta["val"] = reduce_scatter.meta["val"]
+                reduce_scatters.append(reduce_scatter)
+                waits.append(wait)
+        output.args = (tuple(waits),)
+
+        _, replacements = merge_reduce_scatter_bucket(
+            graph,
+            reduce_scatters,
+            mode="custom_ops",
+        )
+        graph.lint()
+
+        pre_bucket = next(
+            node
+            for node in graph.nodes
+            if node.target == torch.ops.bucketing._pre_bucket_reduce_scatter.default
+        )
+        self.assertEqual(
+            [node.op for node in pre_bucket.args[0]],
+            ["placeholder", "placeholder", "placeholder"],
+        )
+        targets = {node.target for node in graph.nodes}
+        self.assertNotIn(torch.ops.aten.split.Tensor, targets)
+        self.assertNotIn(torch.ops.aten.constant_pad_nd.default, targets)
+        self.assertNotIn(torch.ops.aten.new_zeros.default, targets)
+        self.assertNotIn(torch.ops.aten.cat.default, targets)
+        self.assertEqual(
+            [replacements[wait].meta["val"].shape for wait in waits],
+            [torch.Size((2, 4)), torch.Size((2, 2)), torch.Size((2, 3))],
+        )
+
+    def test_replacement_updates_layout_dependent_user_metadata(self):
+        graph = torch.fx.Graph()
+        base = graph.placeholder("base")
+        original = graph.call_function(
+            torch.ops.aten.as_strided.default,
+            args=(base, [2, 4], [4, 1], 0),
+        )
+        transposed = graph.call_function(
+            torch.ops.aten.transpose.int,
+            args=(original, 0, 1),
+        )
+        graph.output(transposed)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            base_val = torch.empty(32)
+            original_val = torch.as_strided(base_val, (2, 4), (4, 1), 0)
+            transposed_val = original_val.transpose(0, 1)
+        base.meta["val"] = base_val
+        original.meta["val"] = original_val
+        transposed.meta["val"] = transposed_val
+
+        def replacement_fn(x):
+            return [torch.as_strided(x, (2, 4), (8, 1), 0)]
+
+        _insert_fn_trace_before_node(
+            gm.graph,
+            replacement_fn,
+            (base_val,),
+            original,
+            [base],
+            [original],
+        )
+
+        self.assertEqual(transposed.meta["val"].stride(), (1, 8))
+
+
+class TestSimpleOverlap(torch._dynamo.test_case.TestCase):
+    def test_preserves_fake_dep_ordering(self):
+        class FakeBuffer:
+            def __init__(self, name):
+                self.name = name
+
+            def get_name(self):
+                return self.name
+
+        class FakeSNode:
+            def __init__(self, name, kind, outputs, deps=()):
+                self.name = name
+                self.kind = kind
+                self.outputs = [FakeBuffer(output) for output in outputs]
+                self.unmet_dependencies = deps
+
+            def get_outputs(self):
+                return self.outputs
+
+            def get_name(self):
+                return self.name
+
+        sync_coll = FakeSNode("sync_coll", "sync_collective", ["sync_out"])
+        compute = FakeSNode("compute", "compute", ["compute_out"])
+        async_coll = FakeSNode(
+            "async_coll",
+            "async_collective",
+            ["async_out"],
+            [WeakDep("sync_out", mutating_buf="async_out", is_fake=True)],
+        )
+
+        def memory_tracking(snodes):
+            return (
+                0,
+                dict.fromkeys(snodes, (0, 0)),
+                {snode: SNodeMemory(0, 0) for snode in snodes},
+                {},
+                {},
+                {},
+            )
+
+        with (
+            mock.patch.object(comms, "_initialize_memory_tracking", memory_tracking),
+            mock.patch.object(
+                comms,
+                "contains_async_collective",
+                lambda snode: snode.kind == "async_collective",
+            ),
+            mock.patch.object(comms, "contains_wait", lambda snode: False),
+        ):
+            self.assertEqual(
+                comms.simple_overlap([sync_coll, compute, async_coll]),
+                [sync_coll, async_coll, compute],
+            )
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -94,7 +801,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             example = functools.partial(
                 example,
                 **self.get_world_trs(),
@@ -132,7 +841,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             matmul_cat_col = functools.partial(
                 matmul_cat_col,
                 **self.get_world_trs(),
@@ -162,7 +873,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         def func(x):
             y = x * x
-            y = dist.all_reduce(y, op=dist.ReduceOp.SUM)
+            dist.all_reduce(y, op=dist.ReduceOp.SUM)
             x = torch.nn.functional.silu(x)
             return x * y
 
@@ -171,7 +882,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             "triton.cudagraph_trees": True,
         }
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             compiled_func = torch.compile(
                 func, backend="inductor", fullgraph=True, options=options, dynamic=None
             )
@@ -185,6 +898,43 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 for _ in range(3):
                     compiled_out = compiled_func(x)
                     self.assertEqual(golden_out, compiled_out)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_manager_reduce_overhead(self):
+        # An async coalescing manager around a fast-path collective used to
+        # stash the gathered tensors on the discarded per-call Work, so
+        # cm.wait() never freed them and reduce-overhead cudagraph capture
+        # failed its "not tracked as outputs" pool check. The gathered buffer is
+        # an intermediate here (consumed by + 1), so the leak is not masked by
+        # being a graph output.
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+
+            def f(inp):
+                gathered = torch.ops.test_inductor_collectives.coalesced_all_gather(
+                    inp, self.world_size, group_name
+                )
+                return gathered + 1
+
+            compiled = torch.compile(f, mode="reduce-overhead")
+            inp = torch.full((16,), self.rank + 1.0, device=self.device)
+            expected = (
+                torch.cat(
+                    [
+                        torch.full((16,), r + 1.0, device=self.device)
+                        for r in range(self.world_size)
+                    ]
+                )
+                + 1
+            )
+            for _ in range(3):  # warmup iters before cudagraph capture kicks in
+                self.assertEqual(compiled(inp), expected)
+            torch.cuda.synchronize(device=self.device)
 
     def test_c10d_functional_tagged_pt2_compliant(self):
         op = torch.ops._c10d_functional.all_reduce.default
@@ -212,7 +962,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             eager_func = functools.partial(
                 eager_func,
                 **self.get_world_trs(),
@@ -251,7 +1003,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inductor_func = functools.partial(
                 inductor_func,
                 **self.get_world_trs(),
@@ -269,8 +1023,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1728
-    @skipIfRocm
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1728
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
         from torch._inductor.utils import run_and_get_code
@@ -278,7 +1030,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         def all_reduce_non_functional_eager(x):
             y = x * x
             work = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
-            assert isinstance(work, torch.distributed.Work)
+            if not isinstance(work, torch.distributed.Work):
+                raise AssertionError(
+                    f"Expected torch.distributed.Work, got {type(work)}"
+                )
             return work, y
 
         def all_reduce_wait(work, y):  # potentially compiled
@@ -292,7 +1047,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             # will not match eager.
             return y * y
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             x = torch.ones(12800, 12800, device=self.device) + self.rank
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
@@ -363,7 +1120,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             e = d + ar
             return (e,)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inputs = torch.ones(4, 4, device=self.device) + self.rank
             compiled = torch.compile(func)
             out = compiled(inputs, **self.get_world_trs())
@@ -378,7 +1137,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 tensor, src_dst_pairs, ranks, tag
             )
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inputs = (
                 # rank0: [0., 1.], rank1: [2., 3.]
                 torch.arange(2, dtype=torch.float32, device=self.device)
@@ -409,11 +1170,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             def forward(self, x, world_size, tag, ranks, group_size):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
-                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                res = _functional_collectives.all_gather_single(y, 0, ranks, tag)
                 out = torch.cat(torch.chunk(res, world_size, dim=0), dim=last_dim)
                 return out
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             model = Model().to(self.device)
             model_compiled = torch.compile(model)
             inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
@@ -429,12 +1192,35 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch.distributed.all_gather(tensor_list, tensor)
             return tensor_list
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             func_compiled = torch.compile(func)
             inp = torch.tensor(self.rank, dtype=torch.long, device=self.device)
             out = func_compiled(inp, self.world_size)
             correct = func(inp, self.world_size)
             self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_list_input(self):
+        def func(output, inputs):
+            torch.distributed.reduce_scatter(output, inputs)
+            return output
+
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            inputs = [
+                torch.ones(4, 4, device=self.device) * (self.rank + i)
+                for i in range(self.world_size)
+            ]
+            output = torch.empty(4, 4, device=self.device)
+            correct = torch.empty(4, 4, device=self.device)
+            func_compiled = torch.compile(func, fullgraph=True)
+            func_compiled(output, inputs)
+            func(correct, inputs)
+            self.assertTrue(same(output, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -448,11 +1234,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
                 y = y.transpose_(0, last_dim).contiguous()
-                _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                _functional_collectives.all_gather_single(y, 0, ranks, tag)
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             model = Model().to(self.device)
             model_compiled = torch.compile(model)
             inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
@@ -479,7 +1267,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             example = functools.partial(
                 example,
                 **self.get_world_trs(),
@@ -506,7 +1296,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             example = functools.partial(
                 example,
                 **self.get_world_trs(),
@@ -546,7 +1338,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return out
 
         with (
-            _dynamo_dist_per_rank_init(self.rank, self.world_size),
+            _dynamo_dist_per_rank_init(
+                self.rank, self.world_size, rdvz_file=self.file_name
+            ),
             torch._dynamo.config.patch(
                 dynamic_shapes=True,
                 capture_dynamic_output_shape_ops=True,
@@ -706,7 +1500,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return torch.ops.custom_ns.foo(a2a)
 
         with (
-            _dynamo_dist_per_rank_init(self.rank, self.world_size),
+            _dynamo_dist_per_rank_init(
+                self.rank, self.world_size, rdvz_file=self.file_name
+            ),
             torch._dynamo.config.patch(
                 dynamic_shapes=True,
                 capture_dynamic_output_shape_ops=True,
@@ -715,7 +1511,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch.library._scoped_library("custom_ns", "FRAGMENT") as lib,
         ):
             lib.define(
-                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"  # noqa: B950
+                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"
             )
             lib.impl("alltoall_autograd", alltoall_autograd, "Autograd")
             lib.impl("alltoall_autograd", alltoall_autograd, "Meta")
@@ -791,7 +1587,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             out = a2a / a2a.sum(dim=0)
             return out
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inputs = (
                 torch.ones(self.world_size, self.world_size, device=self.device)
                 * (self.rank + 1),
@@ -814,6 +1612,85 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_async_collective_tensor_input_polymorphism(self):
+        # A compiled region whose input alternates between an AsyncCollectiveTensor
+        # (the native all-gather output) and the resolved plain Tensor must not
+        # recompile on the tensor-class guard: the two produce an equivalent
+        # graph (the runtime wrapper unwraps ACT). See
+        # VariableBuilder.wrap_tensor / UnwrapCollectiveTensorSource.
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def step(x, w):
+                return (x @ w).sum()
+
+            torch.manual_seed(1234)
+            x = torch.randn(8, 8, device=self.device)
+            w_shard = torch.randn(4, 8, device=self.device)
+            for i in range(6):
+                w = _functional_collectives.all_gather_tensor(
+                    w_shard, gather_dim=0, group=list(range(self.world_size))
+                )
+                # Step 0 traces with the ACT; odd steps resolve to a plain
+                # Tensor before the compiled region.
+                if i % 2 == 1:
+                    w = torch.ops._c10d_functional.wait_tensor(w)
+                eager = (
+                    x
+                    @ torch.ops._c10d_functional.wait_tensor(
+                        _functional_collectives.all_gather_tensor(
+                            w_shard, gather_dim=0, group=list(range(self.world_size))
+                        )
+                    )
+                ).sum()
+                self.assertEqual(step(x, w), eager)
+            # ACT and Tensor share one compiled graph -- no class-guard recompile.
+            self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_async_collective_tensor_input_polymorphism_backward(self):
+        # Backward through an ACT input (a real all-gather output) must match eager
+        # across the ACT/Tensor alternation and not recompile on the class change.
+        # Uses a real collective because grad flows through the all-gather autograd,
+        # not through a directly-constructed ACT wrapper.
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def step(x, w):
+                return (x @ w).sum()
+
+            for i in range(6):
+                torch.manual_seed(1234)
+                x = torch.randn(8, 8, device=self.device)
+                w_shard = torch.randn(4, 8, device=self.device, requires_grad=True)
+                w = _functional_collectives.all_gather_tensor(
+                    w_shard, gather_dim=0, group=list(range(self.world_size))
+                )
+                if i % 2 == 1:
+                    w = torch.ops._c10d_functional.wait_tensor(w)
+                step(x, w).backward()
+
+                w_shard_ref = w_shard.detach().clone().requires_grad_(True)
+                w_ref = torch.ops._c10d_functional.wait_tensor(
+                    _functional_collectives.all_gather_tensor(
+                        w_shard_ref, gather_dim=0, group=list(range(self.world_size))
+                    )
+                )
+                (x @ w_ref).sum().backward()
+                self.assertEqual(w_shard.grad, w_shard_ref.grad)
+            self.assertEqual(cnt.frame_count, 1)
 
 
 @instantiate_parametrized_tests
@@ -864,7 +1741,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(debug=True)
+    @torch._inductor.config.patch(
+        {
+            "debug": True,
+            "aten_distributed_optimizations.enable_simple_overlap": False,
+        }
+    )
     def test_inductor_steal_buffer(self):
         """
         it's ok and optimal if inductor allreduce mutates the buffer of an intermediate
@@ -898,6 +1780,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def _test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
@@ -967,7 +1852,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor(self):
         def func(inp):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
+            ar = _functional_collectives.all_gather_single(inp, 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -984,7 +1869,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor_pg(self):
         def func(inp, *, pg):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, pg)
+            ar = _functional_collectives.all_gather_single(inp, 0, pg)
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1001,7 +1886,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather(self):
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 out,
                 inp,
                 pg,
@@ -1018,11 +1903,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
 
         # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
-        assert counter.op_count == 3
-        assert same(outputs, correct_outputs)
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather_list(self):
@@ -1044,15 +1934,19 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
-        assert same(outputs, correct_outputs)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather_args_match(self):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 output_tensor=out,
                 input_tensor=inp,
                 group=pg,
@@ -1070,16 +1964,21 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
 
         # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
-        assert counter.op_count == 3
-        assert same(outputs, correct_outputs)
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
         def func(inp, out, *, pg):
-            torch.distributed.reduce_scatter_tensor(
+            torch.distributed.reduce_scatter_single(
                 out,
                 inp,
                 group=pg,
@@ -1096,11 +1995,82 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
 
         # should test more precisely, but the 3 is supposed to be (reduce_scatter, wait, copy_)
-        assert counter.op_count == 3
-        assert same(outputs, correct_outputs)
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        local_size = [4, 4]
+        # single-proc test
+        inputs = [torch.ones(local_size, device=self.device)]
+        outputs = torch.empty(local_size, device=self.device)
+        correct_outputs = torch.empty(local_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_size_mismatch(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([8, 4], device=self.device)]
+        outputs = torch.empty([4, 4], device=self.device)
+        compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Exception,
+            "reduce_scatter requires every input_list element to have the same size as output",
+        ):
+            compiled(outputs, inputs, pg=GroupMember.WORLD)
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_scalar(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([], device=self.device)]
+        outputs = torch.empty([], device=self.device)
+        correct_outputs = torch.empty([], device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @parametrize(
         "pg_mode",
@@ -1137,7 +2107,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         elif pg_mode == "kwargs_none":
             kwargs["group"] = None
         else:
-            assert pg_mode == "unspecified"
+            if pg_mode != "unspecified":
+                raise AssertionError(f"Unexpected pg_mode: {pg_mode}")
 
         inputs_compiled = torch.ones(2, device=self.device)
         inputs_eager = torch.ones(2, device=self.device)
@@ -1145,10 +2116,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(inputs_compiled, *args, **kwargs)
         func(inputs_eager, *args, **kwargs)
 
-        assert counter.frame_count == 1
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
         # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
-        assert counter.op_count == 3
-        assert same(inputs_compiled, inputs_eager)
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(inputs_compiled, inputs_eager):
+            raise AssertionError("Expected inputs_compiled to match inputs_eager")
 
     def test_dynamo_rewrite_dist_all_to_all_single(self):
         def func(output, input, pg):
@@ -1165,8 +2141,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(output_compiled, input_compiled, GroupMember.WORLD)
         func(output_eager, input_eager, GroupMember.WORLD)
 
-        assert counter.frame_count == 1
-        assert same(output_compiled, output_eager)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(output_compiled, output_eager):
+            raise AssertionError("Expected output_compiled to match output_eager")
 
     @parametrize(
         "reduce_op",
@@ -1221,7 +2201,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             elif source == "group.WORLD":
                 group = torch.distributed.group.WORLD
             else:
-                assert source == "_get_default_group"
+                if source != "_get_default_group":
+                    raise AssertionError(f"Unexpected source: {source}")
                 group = torch.distributed.distributed_c10d._get_default_group()
 
             torch.distributed.all_reduce(
@@ -1249,7 +2230,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
             # there should be no graph break
-            torch.distributed.reduce_scatter_tensor(out, inp, group=pg, async_op=False)
+            torch.distributed.reduce_scatter_single(out, inp, group=pg, async_op=False)
 
         local_size = [4, 4]
         # single-proc test
@@ -1262,13 +2243,18 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
-        assert counter.op_count == 3
-        assert same(outputs, correct_outputs)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     def test_dynamo_graphbreaks_unsupported_async_op(self):
         def func(inp, out, *, pg):
-            work = torch.distributed.reduce_scatter_tensor(
+            work = torch.distributed.reduce_scatter_single(
                 out, inp, group=pg, async_op=True
             )
             work.wait()
@@ -1284,9 +2270,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 0
-        assert counter.op_count == 0
-        assert same(outputs, correct_outputs)
+        if counter.frame_count != 0:
+            raise AssertionError(
+                f"Expected frame_count == 0, got {counter.frame_count}"
+            )
+        if counter.op_count != 0:
+            raise AssertionError(f"Expected op_count == 0, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     def test_dynamo_pg_var(self):
         def func(inp, *, pg):
@@ -1300,14 +2291,19 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         outputs = compiled(inputs, pg=GroupMember.WORLD)
         correct_outputs = func(inputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
-        assert counter.op_count == 1
-        assert same(outputs, correct_outputs)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if counter.op_count != 1:
+            raise AssertionError(f"Expected op_count == 1, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_reduce_scatter_tensor(self):
         def func(inp):
-            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
+            ar = _functional_collectives.reduce_scatter_single(inp, "sum", 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1337,15 +2333,22 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert counter.frame_count == 1
-        assert counter.op_count == 3  # It generates 2 getattr to unpack the array
-        assert same(out, correct)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if counter.op_count != 3:  # It generates 2 getattr to unpack the array
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(out, correct):
+            raise AssertionError("Expected out to match correct")
 
-    # This doesn't work in all cases, and now we properly loudly error.
-    # See: https://github.com/pytorch/pytorch/issues/151240
-    # When differentiable funcols are implemented can revert.
-    @unittest.expectedFailure
     def test_backwards(self):
+        """
+        It's probably not that common to need backwards support for collectives.
+
+        However, I wanted to at least see if it was possible to support it as a design goal.
+        """
+
         def func(inp):
             ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
@@ -1413,7 +2416,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1460,7 +2464,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1487,7 +2492,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -1532,10 +2537,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
         # TODO make the test case more interesting and validate the actual desired behavior
-        assert node_stats is not None
+        if node_stats is None:
+            raise AssertionError("Expected node_stats to not be None")
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 1)
         for stats in node_stats.values():
@@ -1545,7 +2552,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_all_gather_bucket(self, bucket_mode):
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1594,7 +2601,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with (
             torch._inductor.config.patch(
                 {
-                    "bucket_all_gathers_fx": bucket_mode,
+                    "bucket_all_gathers_bucket_mode": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                     "runtime_estimations_mms_benchmark": True,
                 }
@@ -1614,12 +2621,55 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         (
             FileCheck()
             .check("= torch.ops._c10d_functional.all_gather_into_tensor")
-            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
+            .check_not("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
             .check("= torch.ops._c10d_functional.all_gather_into_tensor")
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_all_gather_bucket_copy_cat_fusion(self):
+        """Bucketed all_gather merge uses copy_(cat(...)) which inductor fuses
+        into 1 Triton kernel instead of N kernels from _foreach_copy_."""
+
+        def func(ag_0, ag_1, ag_2, *, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1, group_size, group_name
+            )
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2, group_size, group_name
+            )
+            return (
+                torch.ops.c10d_functional.wait_tensor(ag_0_out),
+                torch.ops.c10d_functional.wait_tensor(ag_1_out),
+                torch.ops.c10d_functional.wait_tensor(ag_2_out),
+            )
+
+        inputs = [torch.ones(64, device="cuda") for _ in range(3)]
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "all",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # Bucketed merge should produce 1 copy kernel (fused copy_(cat(...))),
+        # not 3 separate kernels from _foreach_copy_.
+        num_triton_kernels = code.count("def triton_")
+        self.assertEqual(
+            num_triton_kernels,
+            1,
+            lambda msg: f"{msg}\nExpected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+        )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
@@ -1671,12 +2721,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
 
-        # shouldnt have bucketed
+        # shouldn't have bucketed
         FileCheck().check_count("wait_tensor.default(", 2, exactly=True).run(code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reduce_scatter_bucket(self, bucket_mode):
         def func(x, w, rs_0, rs_1, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1718,7 +2768,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             with torch._inductor.config.patch(
                 {
-                    "bucket_reduce_scatters_fx": bucket_mode,
+                    "bucket_reduce_scatters_fx": "all",
+                    "bucket_reduce_scatters_bucket_mode": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                 }
             ):
@@ -1740,11 +2791,55 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
             out = compiled(*inputs, **self.get_world_trs())
             correct = f(*inputs, **self.get_world_trs())
-            assert same(out, correct), f"{out} va {correct}"
+            if not same(out, correct):
+                raise AssertionError(
+                    f"Expected out to match correct: {out} vs {correct}"
+                )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_dedup_reduce_scatter(self):
+        def func(rs_0, rs_1, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_0, "avg", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_1, "avg", group_size, group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops._c10d_functional.wait_tensor(rs_1_out)
+            return rs_0_out + rs_1_out
+
+        rs_0 = torch.ones(4, 128, device="cuda")
+        rs_1 = torch.ones(4, 128, device="cuda")
+        inputs = [rs_0, rs_1]
+
+        with torch._inductor.config.patch(
+            {
+                "dedup_reduce_scatters": True,
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+
+        FileCheck().check_count(
+            "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+            count=1,
+            exactly=True,
+        ).run(code)
+
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all"])
+    @parametrize(
+        "bucket_mode", ["all"]
+    )  # "all" is just a placeholder, there is only one bucketmode
     def test_all_reduce_bucket(self, bucket_mode):
         def func(x, w, ar_0, ar_1, tag, ranks, group_size):
             y = torch.mm(x, w)
@@ -1773,16 +2868,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = [x, w, ar_0, ar_1]
         f(*inputs, **self.get_world_trs())
 
-        def _pass(g):
-            from torch._inductor.fx_passes.bucketing import bucket_all_reduce
-
-            bucket_all_reduce(g.owning_module, lambda _: 2000)
-
-        torch._inductor.config.post_grad_custom_post_pass = _pass
-
         with torch._inductor.config.patch(
             {
                 "reorder_for_compute_comm_overlap": False,
+                "bucket_all_reduces_fx": bucket_mode,
             }
         ):
             compiled = torch.compile(f)
@@ -1801,11 +2890,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(*inputs, **self.get_world_trs())
         correct = f(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
+    @parametrize("bucket_mode", ["custom_ops_multidtype"])
     def test_all_gather_bucket_multidtype(self, bucket_mode):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1838,7 +2928,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": bucket_mode,
+                "bucket_all_gathers_fx": "all",
+                "bucket_all_gathers_bucket_mode": bucket_mode,
                 "reorder_for_compute_comm_overlap": False,
             }
         ):
@@ -1855,14 +2946,21 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
         out = compiled(*inputs, **self.get_world_trs())
         _, y_ag0, y_ag1 = out
-        assert y_ag0.dtype == ag_0.dtype
-        assert y_ag1.dtype == ag_1.dtype
+        if y_ag0.dtype != ag_0.dtype:
+            raise AssertionError(
+                f"Expected y_ag0.dtype == {ag_0.dtype}, got {y_ag0.dtype}"
+            )
+        if y_ag1.dtype != ag_1.dtype:
+            raise AssertionError(
+                f"Expected y_ag1.dtype == {ag_1.dtype}, got {y_ag1.dtype}"
+            )
 
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
         Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
@@ -1951,7 +3049,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -1959,14 +3057,20 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             if torch._inductor.config.runtime_estimations_mms_benchmark:
                 cache = get_estimate_runtime_cache()
                 for snode in snodes:
-                    if _get_mm_like_fn(snode) is None:
+                    if _get_benchmarkable_extern_fn(snode) is None:
                         continue
                     cache_key = get_estimate_runtime_cache_key_from_snode(snode)
-                    assert cache.lookup(cache_key) is not None
+                    if cache.lookup(cache_key) is None:
+                        raise AssertionError(
+                            f"Expected cache.lookup({cache_key}) to not be None"
+                        )
 
             if torch._inductor.config_comms.runtime_estimations_align_across_all_distributed_ranks:
                 for snode in snodes:
-                    assert snode.override_estimated_runtime is not None
+                    if snode.override_estimated_runtime is None:
+                        raise AssertionError(
+                            "Expected snode.override_estimated_runtime to not be None"
+                        )
             nonlocal node_stats
             (
                 reordered_snodes,
@@ -1977,9 +3081,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with (
             torch._inductor.config.patch(
                 {
-                    "bucket_all_gathers_fx": bucket_mode,
+                    "bucket_all_gathers_fx": "all",
+                    "bucket_all_gathers_bucket_mode": bucket_mode,
                     "bucket_all_gathers_fx_bucket_size_determinator": lambda _: 2,
-                    "bucket_reduce_scatters_fx": bucket_mode,
+                    "bucket_reduce_scatters_fx": "all",
+                    "bucket_reduce_scatters_bucket_mode": bucket_mode,
                     "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                     "reorder_for_compute_comm_overlap": True,
                     "reorder_for_compute_comm_overlap_passes": [
@@ -2041,8 +3147,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
-        assert node_stats is not None
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
+        if node_stats is None:
+            raise AssertionError("Expected node_stats to not be None")
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 4)
 
@@ -2072,7 +3180,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -2108,10 +3216,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
         # TODO make the test case more interesting and validate the actual desired behavior
-        assert node_stats is not None
+        if node_stats is None:
+            raise AssertionError("Expected node_stats to not be None")
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 2)
         for stats in node_stats.values():
@@ -2193,7 +3303,272 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self.assertEqual(saved_values, [wt1])
 
     @skip_if_lt_x_gpu(2)
-    def test_comm_analysis(self):
+    def test_sync_decision_cross_ranks_different_inputs_skips_sync(self):
+        # When ranks have structurally different graphs, has_same_nodes returns
+        # False and the cross-rank sync is skipped, so each rank keeps its own
+        # saved_values instead of converging to a single rank's decision.
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        node1 = test_graph.placeholder("x")
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (node1,),
+        )
+        wt = test_graph.create_node(
+            "call_function", torch.ops._c10d_functional.wait_tensor.default, (ag,)
+        )
+        wt.meta["val"] = torch.randn(10, 10)
+
+        # Diverge the graph structure across ranks so the canonical hashes differ.
+        if self.rank == 0:
+            extra = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+        else:
+            extra = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (wt,)
+            )
+        extra.meta["val"] = torch.randn(10, 10)
+        test_graph.output((extra,))
+
+        self._init_process_group()
+        saved_values = _sync_decision_cross_ranks(test_graph, [extra])
+        self.assertEqual(saved_values, [extra])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_node_order(self):
+        # Reproduces the cross-rank sync bug: when ranks have topologically
+        # identical graphs but different node creation orders (from different
+        # dict iteration orders in Dynamo tracing), the old name-based hash in
+        # has_same_nodes returns False → sync skipped → divergent min-cut.
+        #
+        # Both ranks have the same topology:
+        #   p1 → all_gather → wait → relu → output[0]
+        #   p2 → neg → output[1]
+        # But the computation nodes are created in different orders across
+        # ranks, producing different graph.nodes iteration orders.
+        import hashlib
+
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+
+        if self.rank == 0:
+            # Rank 0: deep path created first during tracing
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+        else:
+            # Rank 1: shallow path created first during tracing
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((relu_node, neg_node))
+
+        # Verify the bug condition: the old name-based hash diverges because
+        # graph.nodes iteration order differs across ranks.
+        node_str = "/".join(x.name for x in test_graph.nodes)
+        local_hash = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
+
+        self._init_process_group()
+
+        all_hashes = [None, None]
+        torch.distributed.all_gather_object(all_hashes, local_hash)
+        self.assertNotEqual(all_hashes[0], all_hashes[1])
+
+        # Simulate divergent min-cut: rank 0 saves relu, rank 1 saves neg
+        if self.rank == 0:
+            saved_values = [relu_node]
+        else:
+            saved_values = [neg_node]
+
+        # With the canonical naming fix, sync succeeds despite different
+        # node orderings. Both ranks agree on the same saved node.
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+        self.assertEqual(len(result), 1)
+
+        # All ranks should agree on the result
+        result_targets = [None, None]
+        torch.distributed.all_gather_object(result_targets, str(result[0].target))
+        self.assertEqual(result_targets[0], result_targets[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_invalid_node_error(self):
+        # Reproduces the "Node X was invalid, but is output" assertion error.
+        #
+        # When two ranks have isomorphic graphs with matching node names and
+        # iteration order (so has_same_nodes returns True), but the same name
+        # maps to structurally different nodes across ranks, the old name-based
+        # sync communicates the wrong saved values. Using these wrong values
+        # for backward graph extraction triggers the assertion.
+        #
+        # Setup: both ranks create two relu nodes in the same order, but
+        # wire them to different placeholders:
+        #   Rank 0: relu="relu(p1)", relu_1="relu(p2)"
+        #   Rank 1: relu="relu(p2)", relu_1="relu(p1)"
+        # The backward computation needs relu(p1). On rank 0 that's "relu",
+        # on rank 1 that's "relu_1". Name-based sync broadcasts "relu" →
+        # rank 1 gets relu(p2) instead → backward extraction fails.
+        from torch._functorch._aot_autograd.descriptors import PlainAOTOutput
+        from torch._functorch.partitioners import (
+            _extract_graph_with_inputs_outputs,
+            _sync_decision_cross_ranks,
+        )
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+        t1 = test_graph.placeholder("tangents_1")
+        t1.meta["val"] = torch.randn(10, 8)
+
+        # Both ranks create relu nodes in the same order → same auto-names.
+        # But the wiring to placeholders differs across ranks.
+        if self.rank == 0:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+        else:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+        relu_a.meta["val"] = torch.randn(10, 8)
+        relu_b.meta["val"] = torch.randn(10, 8)
+
+        # Collective (required for has_collectives to return True)
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (relu_a,),
+        )
+        wt = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.wait_tensor.default,
+            (ag,),
+        )
+        wt.meta["val"] = torch.randn(10, 8)
+
+        # Backward: grad depends on relu(p1) specifically.
+        # On rank 0 that's relu_a, on rank 1 that's relu_b.
+        relu_p1 = relu_a if self.rank == 0 else relu_b
+        grad = test_graph.create_node(
+            "call_function", torch.ops.aten.mul.Tensor, (t1, relu_p1)
+        )
+        grad.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((wt, relu_b, grad))
+
+        self._init_process_group()
+
+        # Each rank correctly identifies relu(p1) as the node to save.
+        saved_values = [relu_p1]
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+
+        # Extract backward subgraph using the synced saved values.
+        # Without the fix: wrong node → "Node mul was invalid, but is output"
+        bwd_inputs = [t1] + result
+        bwd_outputs = [grad]
+        bwd_descs = [PlainAOTOutput(idx=0)]
+        _extract_graph_with_inputs_outputs(
+            test_graph, bwd_inputs, bwd_outputs, bwd_descs
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_align_runtime_estimations_across_all_distributed_ranks(self):
+        from torch._inductor.ir import ExternKernel
+        from torch._inductor.scheduler import (
+            BaseSchedulerNode,
+            ExternKernelSchedulerNode,
+        )
+
+        mock_node_1 = mock.create_autospec(ExternKernelSchedulerNode)
+        mock_node_1.node = mock.create_autospec(ExternKernel)
+        mock_node_1.node.python_kernel_name = "extern_kernels.mm"
+
+        mock_node_2 = mock.create_autospec(ExternKernelSchedulerNode)
+        mock_node_3 = mock.create_autospec(BaseSchedulerNode)
+
+        if self.rank == 0:
+            mock_node_1.override_estimated_runtime = 0.1
+            mock_node_2.override_estimated_runtime = 0.3
+            mock_node_3.override_estimated_runtime = 0.5
+        else:
+            mock_node_1.override_estimated_runtime = 0.2
+            mock_node_2.override_estimated_runtime = 0.4
+            mock_node_3.override_estimated_runtime = 0.6
+
+        mock_node_1.get_estimated_runtime.side_effect = (
+            lambda: mock_node_1.override_estimated_runtime
+        )
+        mock_node_2.get_estimated_runtime.side_effect = (
+            lambda: mock_node_2.override_estimated_runtime
+        )
+        mock_node_3.get_estimated_runtime.side_effect = (
+            lambda: mock_node_3.override_estimated_runtime
+        )
+
+        self._init_process_group()
+        from torch._inductor.comms import (
+            align_runtime_estimations_across_all_distributed_ranks,
+        )
+
+        align_runtime_estimations_across_all_distributed_ranks(
+            [mock_node_1, mock_node_2, mock_node_3]
+        )
+
+        # all nodes should be aligned across ranks (median)
+        self.assertEqual(mock_node_1.override_estimated_runtime, 0.1)
+        self.assertEqual(mock_node_2.override_estimated_runtime, 0.3)
+        self.assertEqual(mock_node_3.override_estimated_runtime, 0.5)
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_comm_analysis(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.cuda.set_device(self.rank)
         c10d.init_process_group(
@@ -2217,7 +3592,506 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
             return ag_1_wait
 
+        # test for static shape input estimation
         gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_gather_into_tensor(n):
+                valid_sizes = ["torch.Size([8, 4])", "torch.Size([16, 4])"]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+        # test for unbacked dynamic shape input estimation
+        class TestModule(nn.Module):
+            def __init__(self, group_size, group_name):
+                super().__init__()
+                self.group_size = group_size
+                self.group_name = group_name
+
+            def forward(self, x):
+                u = x.item()
+                # Use u as a dimension of a new tensor:
+                y = torch.empty(u, 4, device=x.device)
+                return func(y, self.group_size, self.group_name)
+
+        inp = torch.tensor(1, device=self.device)
+        model = TestModule(group_size, group_name).to(self.device)
+        exported_program = torch.export.export(
+            model,
+            (inp,),
+        )
+        gm = exported_program.module()
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_gather_into_tensor(n):
+                valid_sizes = ["torch.Size([2*u0, 4])", "torch.Size([4*u0, 4])"]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+        # test for backed dynamic shape input estimation
+        inp = torch.ones(4, 4, device=self.device)
+        torch._dynamo.mark_dynamic(inp, 0, min=1, max=100)
+        gm = make_fx(func, tracing_mode="symbolic")(inp, group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_gather_into_tensor(n):
+                valid_sizes = [
+                    "torch.Size([16, 4])",
+                    "torch.Size([2*s75, s75])",
+                    "torch.Size([4*s75, s75])",
+                ]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_comm_analysis(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                inp, "sum", group_size, group_name
+            )
+            rs_0_wait = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_0_wait, "sum", group_size, group_name
+            )
+            rs_1_wait = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+            return rs_1_wait
+
+        # test for static shape input estimation
+        gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_reduce_scatter_tensor(n):
+                valid_sizes = ["torch.Size([1, 4])", "torch.Size([2, 4])"]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+        # test for unbacked dynamic shape input estimation
+        class TestModule(nn.Module):
+            def __init__(self, group_size, group_name):
+                super().__init__()
+                self.group_size = group_size
+                self.group_name = group_name
+
+            def forward(self, x):
+                u = x.item()
+                # Use u as a dimension of a new tensor:
+                y = torch.empty(u, 4, device=x.device)
+                return func(y, self.group_size, self.group_name)
+
+        inp = torch.tensor(1, device=self.device)
+        model = TestModule(group_size, group_name).to(self.device)
+        exported_program = torch.export.export(
+            model,
+            (inp,),
+        )
+        gm = exported_program.module()
+        g = gm.graph
+        for n in g.nodes:
+            if is_reduce_scatter_tensor(n):
+                valid_sizes = ["torch.Size([(u0//2), 4])", "torch.Size([(u0//4), 4])"]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+        # test for backed dynamic shape input estimation
+        inp = torch.ones(4, 4, device=self.device)
+        torch._dynamo.mark_dynamic(inp, 0, min=1, max=100)
+        gm = make_fx(func, tracing_mode="symbolic")(inp, group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_reduce_scatter_tensor(n):
+                valid_sizes = [
+                    "torch.Size([(s75//2), s75])",
+                    "torch.Size([(s75//4), s75])",
+                ]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_reduce_comm_analysis(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            ar_0_out = torch.ops._c10d_functional.all_reduce(inp, "sum", group_name)
+            ar_0_wait = torch.ops.c10d_functional.wait_tensor(ar_0_out)
+            ar_1_out = torch.ops._c10d_functional.all_reduce(
+                ar_0_wait, "sum", group_name
+            )
+            ar_1_wait = torch.ops.c10d_functional.wait_tensor(ar_1_out)
+            return ar_1_wait
+
+        # test for static shape input estimation
+        gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_reduce_tensor(n):
+                expected_size = "torch.Size([4, 4])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+        # test for unbacked dynamic shape input estimation
+        class TestModule(nn.Module):
+            def __init__(self, group_size, group_name):
+                super().__init__()
+                self.group_size = group_size
+                self.group_name = group_name
+
+            def forward(self, x):
+                u = x.item()
+                # Use u as a dimension of a new tensor:
+                y = torch.empty(u, 4, device=x.device)
+                return func(y, self.group_size, self.group_name)
+
+        inp = torch.tensor(1, device=self.device)
+        model = TestModule(group_size, group_name).to(self.device)
+        exported_program = torch.export.export(
+            model,
+            (inp,),
+        )
+        gm = exported_program.module()
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_reduce_tensor(n):
+                expected_size = "torch.Size([u0, 4])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+        # test for backed dynamic shape input estimation
+        inp = torch.ones(4, 4, device=self.device)
+        torch._dynamo.mark_dynamic(inp, 0, min=1, max=100)
+        gm = make_fx(func, tracing_mode="symbolic")(inp, group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_reduce_tensor(n):
+                expected_size = "torch.Size([s75, s75])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_comm_analysis(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            chunk = inp.numel() // self.world_size
+            split_sizes = [chunk] * self.world_size
+            a2a_0_out = torch.ops._c10d_functional.all_to_all_single(
+                inp,
+                split_sizes,
+                split_sizes,
+                group_name,
+            )
+            a2a_0_wait = torch.ops.c10d_functional.wait_tensor(a2a_0_out)
+            a2a_1_out = torch.ops._c10d_functional.all_to_all_single(
+                a2a_0_wait,
+                split_sizes,
+                split_sizes,
+                group_name,
+            )
+            a2a_1_wait = torch.ops.c10d_functional.wait_tensor(a2a_1_out)
+            return a2a_1_wait
+
+        # test for static shape input estimation
+        gm = make_fx(func)(
+            torch.ones(group_size * 4, 1, device=self.device), group_size, group_name
+        )
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_to_all_tensor(n):
+                expected_size = "torch.Size([8, 1])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+        # test for unbacked dynamic shape input estimation
+        class TestModule(nn.Module):
+            def __init__(self, group_size, group_name):
+                super().__init__()
+                self.group_size = group_size
+                self.group_name = group_name
+
+            def forward(self, x):
+                u = x.item()
+                # Use u as a dimension of a new tensor:
+                y = torch.empty(u, 4, device=x.device)
+                return func(y, self.group_size, self.group_name)
+
+        inp = torch.tensor(1, device=self.device)
+        model = TestModule(group_size, group_name).to(self.device)
+        exported_program = torch.export.export(
+            model,
+            (inp,),
+        )
+        gm = exported_program.module()
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_to_all_tensor(n):
+                expected_size = "torch.Size([4*u0, 4])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                # TODO(ruisizhang123): Currently, NCCL estimation API does not support kwargs input
+                # (input_split_sizes & output_split_sizes in all-to-all) with dynamic shapes.
+                # est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                #     n, use_nccl_estimator=True
+                # )
+                # assert est_ms_nccl > 0
+
+        # test for backed dynamic shape input estimation
+        inp = torch.ones(4, 4, device=self.device)
+        torch._dynamo.mark_dynamic(inp, 0, min=1, max=100)
+        gm = make_fx(func, tracing_mode="symbolic")(inp, group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_to_all_tensor(n):
+                expected_size = "torch.Size([2*(((s75**2)//2)), s75])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                # TODO(ruisizhang123): Currently, NCCL estimation API does not support kwargs input
+                # (input_split_sizes & output_split_sizes in all-to-all) with dynamic shapes.
+                # est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                #     n, use_nccl_estimator=True
+                # )
+                # assert est_ms_nccl > 0
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_regression_use_nccl_estimate_with_gloo(self):
+        # Test checks that using nccl estimator option does not hard fail
+        # with backends that does not support runtime estimations, e.g. gloo
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                inp, group_size, group_name
+            )
+            ag_0_wait = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_wait, group_size, group_name
+            )
+            ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+            return ag_1_wait
+
+        gm = make_fx(func)(torch.ones(4, 4), group_size, group_name)
         g = gm.graph
         for n in g.nodes:
             if is_all_gather_into_tensor(n):
@@ -2228,11 +4102,812 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    def test_schedule_overlap_benchmark(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(x, w, ag_0, ag_1, ag_2, ag_3, group_size, group_name):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # cast the inputs
+            ag_0_cast = ag_0.to(torch.bfloat16)
+            ag_1_cast = ag_1.to(torch.bfloat16)
+
+            # allgather
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_cast, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1_cast, group_size, group_name
+            )
+
+            # wait op
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_0_cast, "sum", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_1_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+            y += torch.mm(2 * x, 2 * w)
+
+            # cast the inputs
+            ag_2_cast = ag_2.to(torch.bfloat16)
+            ag_3_cast = ag_3.to(torch.bfloat16)
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2_cast, group_size, group_name
+            )
+            ag_3_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_3_cast, group_size, group_name
+            )
+
+            # wait op
+            ag_2_out = torch.ops.c10d_functional.wait_tensor(ag_2_out)
+            ag_3_out = torch.ops.c10d_functional.wait_tensor(ag_3_out)
+
+            #
+            rs_2_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_2_cast, "sum", group_size, group_name
+            )
+            rs_3_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_3_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_2_out = torch.ops.c10d_functional.wait_tensor(rs_2_out)
+            rs_3_out = torch.ops.c10d_functional.wait_tensor(rs_3_out)
+            return (
+                y,
+                ag_0_out,
+                ag_1_out,
+                ag_2_out,
+                ag_3_out,
+                rs_0_out,
+                rs_1_out,
+                rs_2_out,
+                rs_3_out,
+            )
+
+        x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_0 = torch.ones(1024, 512, device=self.device, dtype=torch.float32)
+        ag_1 = torch.ones(512, 1024, device=self.device, dtype=torch.float32)
+        ag_2 = torch.ones(1024, 512, device=self.device, dtype=torch.float32)
+        ag_3 = torch.ones(512, 1024, device=self.device, dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def _pass(
+            gm: torch.fx.Graph,
+        ) -> torch.fx.GraphModule:
+            return schedule_overlap_bucketing(
+                gm.owning_module,
+                collective_bucketing=True,
+                insert_overlap_deps=True,
+                max_memory_increase_ratio=0.0,
+                collective_estimator="benchmark",
+                log_final_collectives_estimations=True,
+            )
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+        torch.compile(func, backend="inductor", fullgraph=True)(
+            *inputs, group_size, group_name
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_overlap_scheduling_device_put_sync(self):
+        """
+        Test that overlap scheduling handles async device_put correctly.
+
+        This test exercises the pattern from torchtitan's expert_parallel.py:
+        - Compute splits on GPU
+        - Transfer to CPU with .to(cpu, non_blocking=True/False)
+        - Use the CPU tensors in subsequent operations
+
+        The make_all_device_put_sync function in OverlapScheduler.__init__
+        protects against race conditions by converting all non_blocking=True
+        device_puts to non_blocking=False. This ensures the transfer completes
+        before the data is used.
+
+        Without this protection, the overlap scheduler could reorder operations
+        in a way that reads from an async-transferred tensor before the data
+        is ready, causing dirty reads. While this race is timing-dependent and
+        may not manifest in every run, this test verifies the pattern works
+        correctly with overlap scheduling.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(group_name, group)
+        group_size = group.size()
+
+        def overlap_pass(graph: torch.fx.Graph) -> torch.fx.GraphModule:
+            """Custom pass that runs overlap scheduling and verifies device_put sync."""
+            from torch._inductor.fx_passes.overlap_scheduling import (
+                schedule_overlap_bucketing,
+            )
+
+            result = schedule_overlap_bucketing(
+                graph.owning_module,
+                collective_bucketing=False,
+                insert_overlap_deps=True,
+                max_memory_increase_ratio=0.05,
+                collective_estimator="analytical",
+            )
+
+            # Verify all device_put nodes have non_blocking=False
+            for n in result.graph.nodes:
+                if (
+                    n.op == "call_function"
+                    and n.target == torch.ops.prims.device_put.default
+                ):
+                    # non_blocking can be in args (position 2) or kwargs
+                    # If not specified, it defaults to False
+                    non_blocking = False
+                    if len(n.args) >= 3:
+                        non_blocking = n.args[2]
+                    elif "non_blocking" in n.kwargs:
+                        non_blocking = n.kwargs["non_blocking"]
+                    if non_blocking is not False:
+                        raise AssertionError(
+                            f"device_put has non_blocking=True after overlap scheduling: {n}"
+                        )
+
+            return result
+
+        def func(num_tokens_per_expert, routed_input, group_size, group_name):
+            """
+            Pattern from expert_parallel.py:
+            1. Exchange token counts via all_to_all
+            2. Compute splits from CUDA tensors and transfer to CPU (one async, one sync)
+            3. Convert to list with .tolist() and use in all_to_all for data routing
+
+            The race condition occurs because:
+            - input_splits is computed and transferred with non_blocking=True
+            - output_splits is transferred with non_blocking=False
+            - .tolist() reads from the CPU tensors
+            - Without make_all_device_put_sync, overlap scheduler may reorder
+              the use of input_splits before the sync transfer completes
+            """
+            # Exchange token counts
+            num_tokens_per_expert_group = torch.ops._c10d_functional.all_to_all_single(
+                num_tokens_per_expert,
+                [num_tokens_per_expert.size(0) // group_size] * group_size,
+                [num_tokens_per_expert.size(0) // group_size] * group_size,
+                group_name,
+            )
+            num_tokens_per_expert_group = torch.ops._c10d_functional.wait_tensor(
+                num_tokens_per_expert_group
+            )
+
+            # Compute input/output splits - one async, one sync
+            # This is the critical pattern from expert_parallel.py
+            input_splits = num_tokens_per_expert.view(group_size, -1).sum(dim=1)
+            output_splits = num_tokens_per_expert_group.view(group_size, -1).sum(dim=1)
+
+            # Transfer to CPU - async for input_splits, sync for output_splits
+            # User relies on the sync transfer to implicitly complete the async one
+            cpu_input_splits = input_splits.to(torch.device("cpu"), non_blocking=True)
+            cpu_output_splits = output_splits.to(
+                torch.device("cpu"), non_blocking=False
+            )
+
+            # Convert to lists - this is where the race manifests
+            # If async transfer isn't complete, .tolist() reads garbage
+            input_splits_list = cpu_input_splits.tolist()
+            output_splits_list = cpu_output_splits.tolist()
+
+            routed_output = torch.ops._c10d_functional.all_to_all_single(
+                routed_input,
+                output_splits_list,
+                input_splits_list,
+                group_name,
+            )
+            routed_output = torch.ops._c10d_functional.wait_tensor(routed_output)
+
+            return routed_output
+
+        # Setup inputs matching expert parallel pattern
+        num_local_experts = 4
+        num_experts = num_local_experts * self.world_size
+        num_tokens = 512
+        hidden_dim = 128
+        top_k = 2
+
+        # Random router scores for each token per expert
+        tokens_expert_scores = torch.randn(
+            num_tokens, num_experts, device=self.device, dtype=torch.float32
+        )
+
+        # Precompute num_tokens_per_expert from topk selection (outside compiled fn)
+        with torch.no_grad():
+            _, selected_experts = torch.topk(tokens_expert_scores, k=top_k, dim=1)
+            flat_experts = selected_experts.reshape(-1)
+            num_tokens_per_expert = torch.bincount(
+                flat_experts, minlength=num_experts
+            ).to(torch.int64)
+
+        # Total routed tokens = sum of tokens per expert
+        total_routed_tokens = int(num_tokens_per_expert.sum().item())
+        routed_input = torch.randn(
+            total_routed_tokens, hidden_dim, device=self.device, dtype=torch.float32
+        )
+
+        torch._inductor.config.post_grad_custom_post_pass = overlap_pass
+
+        compiled_fn = torch.compile(func, backend="inductor", fullgraph=True)
+
+        eager_out = func(num_tokens_per_expert, routed_input, group_size, group_name)
+        compiled_out = compiled_fn(
+            num_tokens_per_expert, routed_input, group_size, group_name
+        )
+
+        self.assertTrue(
+            torch.allclose(eager_out, compiled_out, rtol=1e-3, atol=1e-3),
+            "Mismatch between eager and compiled output.",
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_benchmark_collective_with_symint_args(self):
+        """
+        Test that collective benchmarking handles SymInt non-tensor arguments.
+
+        When dynamic=True, ops like all_to_all_single receive SymInt split_sizes
+        in the FX graph. The benchmark path must convert these to concrete ints
+        before calling the collective.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(group_name, group)
+        group_size = group.size()
+
+        HIDDEN = 64
+
+        def func(x, w, group_size, group_name):
+            seq = x.shape[0]
+            pad = (-seq) % group_size
+            x_padded = torch.nn.functional.pad(x, (0, 0, 0, pad))
+            chunk = x_padded.shape[0] // group_size
+            split_sizes = [chunk] * group_size
+            gathered = torch.ops._c10d_functional.all_to_all_single(
+                x_padded, split_sizes, split_sizes, group_name
+            )
+            gathered = torch.ops.c10d_functional.wait_tensor(gathered)
+            return (gathered @ w).sum()
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def _pass(gm):
+            return schedule_overlap_bucketing(
+                gm.owning_module,
+                collective_bucketing=True,
+                insert_overlap_deps=True,
+                collective_estimator="benchmark",
+            )
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+
+        w = torch.randn(HIDDEN, HIDDEN, device=self.device)
+        compiled = torch.compile(func, backend="inductor", fullgraph=True, dynamic=True)
+
+        for n in (7, 11):
+            x = torch.randn(n, HIDDEN, device=self.device)
+            compiled(x, w, group_size, group_name)
+
+
+class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
+    """
+    The compile time sync runs on a gloo process group over CPU, so unlike the rest of
+    TestSyncDecisionCrossRanks these need no accelerator.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _init_process_group(self, timeout: datetime.timedelta | None = None) -> None:
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timeout,
+        )
+
+    def test_sync_cache_decision_cross_ranks(self):
+        # A cache hit on one rank and a miss on another leaves only the missing rank
+        # inside _sync_decision_cross_ranks, which desyncs the process group. The hit
+        # must be discarded unless every rank hit.
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        self._init_process_group()
+
+        with torch._functorch.config.patch(_sync_cache_decision_cross_ranks=True):
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+            counters.clear()
+            # Rank 0 hits, rank 1 misses.
+            self.assertFalse(sync_cache_decision_cross_ranks(self.rank == 0))
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"],
+                1 if self.rank == 0 else 0,
+            )
+
+        # Disabled by default, so a lone hit survives and no collective is issued.
+        self.assertEqual(
+            sync_cache_decision_cross_ranks(self.rank == 0), self.rank == 0
+        )
+
+    @torch._functorch.config.patch(
+        enable_autograd_cache=True, _sync_cache_decision_cross_ranks=True
+    )
+    @torch._inductor.config.patch(fx_graph_cache=True, compile_threads=1)
+    def test_cross_rank_miss_recompiles_and_saves(self):
+        # End to end through aot_module_simplified, rank 0 warm and rank 1 cold: rank 1
+        # reaches the partitioner's collective alone while rank 0 sails past on its hit.
+        # Rejecting that hit is only half of it, the rejected rank also has to populate
+        # aot_config.cache_info or its recompile is never saved and the next compile
+        # diverges all over again.
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+
+        self._init_process_group()
+        torch._C._distributed_c10d._register_process_group(
+            "default", torch.distributed.group.WORLD
+        )
+        expected = torch.full((4, 4), self.world_size + 1.0)
+
+        def fn(x):
+            return _functional_collectives.all_reduce(x, "sum", "default") + 1
+
+        def compile_and_run():
+            counters.clear()
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn)(torch.ones(4, 4)), expected)
+
+        # Each rank gets its own cache dir, so the clear below only cools rank 1.
+        with fresh_inductor_cache():
+            compile_and_run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            if self.rank == 1:
+                AOTAutogradCache.clear()
+
+            compile_and_run()
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"],
+                1 if self.rank == 0 else 0,
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            # Both ranks are warm again, so the hit survives the sync and is usable.
+            compile_and_run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"], 0
+            )
+
+    def test_compile_sync_pg_built_for_partitioner_sync_alone(self):
+        # _sync_decision_cross_ranks builds the pg lazily on the partitioner path, which
+        # a partial cache hit leaves to the ranks that missed. Building a group on a
+        # subset of ranks hangs and desyncs _world.group_count, so it has to happen here,
+        # where every rank is, even though the decision itself passes straight through.
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        self._init_process_group()
+        self.assertIsNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+        with torch._functorch.config.patch(_sync_decision_cross_ranks=True):
+            # A build without gloo has nothing to prime, and priming must not be what
+            # surfaces that: the partitioner still raises, and only for the graphs it
+            # syncs, rather than every compile that gets here.
+            with mock.patch.object(c10d, "is_gloo_available", return_value=False):
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertIsNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+        self.assertIsNotNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+    def test_compile_sync_pg_without_gloo(self):
+        from torch._dynamo.distributed import get_compile_sync_pg
+
+        self._init_process_group()
+
+        with mock.patch.object(c10d, "is_gloo_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "requires the gloo backend"):
+                get_compile_sync_pg()
+
+    def test_compile_sync_pg_inherits_default_timeout(self):
+        from torch._dynamo.distributed import get_compile_sync_pg
+
+        timeout = datetime.timedelta(seconds=120)
+        self._init_process_group(timeout=timeout)
+
+        pg = get_compile_sync_pg()
+        device = torch.device(c10d.distributed_c10d._get_object_coll_device(pg))
+        self.assertEqual(pg._get_backend(device).options._timeout, timeout)
+
+
+class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
+    """Unit tests for Node-typed group_name handling in bucketing.
+
+    In compile-on-one-rank graphs, collective ops receive
+    their group_name as an FX Node reference rather than a string literal.
+    These tests verify the resolution helpers work correctly.
+    """
+
+    def _make_graph_with_pg_node(self, group_name_str: str):
+        class MockPG:
+            def __init__(self, name: str):
+                self.group_name = name
+
+        graph = torch.fx.Graph()
+        pg_node = graph.placeholder("group_name")
+        pg_node.meta["val"] = MockPG(group_name_str)
+        input_node = graph.placeholder("input")
+        input_node.meta["val"] = torch.empty(4, dtype=torch.float32)
+        return graph, pg_node, input_node
+
+    def test_resolve_group_name_string(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+        self.assertEqual(_resolve_group_name("pg0"), "pg0")
+
+    def test_resolve_group_name_node(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+        graph, pg_node, _ = self._make_graph_with_pg_node("pg0")
+        self.assertEqual(_resolve_group_name(pg_node), "pg0")
+
+    def test_ag_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _ag_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        ag_node = graph.call_function(
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            args=(input_node, 2, pg_node),
+        )
+        ag_node.meta["val"] = torch.empty(8, dtype=torch.float32)
+        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32))
+
+    def test_rs_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _rs_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        rs_node = graph.call_function(
+            torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            args=(input_node, "sum", 2, pg_node),
+        )
+        rs_node.meta["val"] = torch.empty(2, dtype=torch.float32)
+        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32))
+
+    def test_ar_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _ar_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        ar_node = graph.call_function(
+            torch.ops._c10d_functional.all_reduce.default,
+            args=(input_node, "sum", pg_node),
+        )
+        ar_node.meta["val"] = torch.empty(4, dtype=torch.float32)
+        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32))
+
+
+def _build_graph_with_duplicate_rs(
+    n_duplicates: int,
+) -> torch.fx.GraphModule:
+    fake_mode = torch._subclasses.FakeTensorMode()
+    graph = torch.fx.Graph()
+
+    placeholders = []
+    for i in range(n_duplicates):
+        ph = graph.placeholder(f"input_{i}")
+        ph.meta["val"] = fake_mode.from_tensor(torch.randn(10, 128))
+        placeholders.append(ph)
+
+    rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+    wait_target = torch.ops._c10d_functional.wait_tensor.default
+    add_target = torch.ops.aten.add.Tensor
+
+    waits = []
+    for ph in placeholders:
+        rs = graph.call_function(rs_target, args=(ph, "avg", 2, "0"))
+        rs.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        wait = graph.call_function(wait_target, args=(rs,))
+        wait.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        waits.append(wait)
+
+    result = waits[0]
+    for wait in waits[1:]:
+        add_node = graph.call_function(add_target, args=(result, wait))
+        add_node.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        result = add_node
+
+    graph.output(result)
+
+    return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+
+class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        if not c10d.is_initialized():
+            store = c10d.HashStore()
+            c10d.init_process_group(backend="fake", store=store, rank=0, world_size=2)
+
+    def tearDown(self):
+        super().tearDown()
+        if c10d.is_initialized():
+            c10d.destroy_process_group()
+
+    def _count_ops(self, gm, target):
+        return sum(
+            1 for n in gm.graph.nodes if n.op == "call_function" and n.target is target
+        )
+
+    def test_two_duplicate_rs(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        gm = _build_graph_with_duplicate_rs(2)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+        self.assertEqual(self._count_ops(gm, wait_target), 2)
+        self.assertEqual(self._count_ops(gm, add_target), 1)
+
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 1)
+        self.assertEqual(self._count_ops(gm, wait_target), 1)
+        self.assertEqual(self._count_ops(gm, add_target), 1)
+
+        # 2 placeholders + 3 call_function (add, rs, wait) + 1 output
+        self.assertEqual(len(list(gm.graph.nodes)), 6)
+
+        fn_nodes = [n for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIs(fn_nodes[0].target, add_target)
+        self.assertIs(fn_nodes[1].target, rs_target)
+        self.assertIs(fn_nodes[2].target, wait_target)
+
+        # The add operates on pre-scatter inputs (10, 128), not
+        # post-scatter outputs (5, 128).
+        self.assertEqual(fn_nodes[0].meta["val"].shape, (10, 128))
+        self.assertEqual(fn_nodes[1].meta["val"].shape, (5, 128))
+        self.assertEqual(fn_nodes[2].meta["val"].shape, (5, 128))
+
+    def test_four_duplicate_rs(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        gm = _build_graph_with_duplicate_rs(4)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        self.assertEqual(self._count_ops(gm, rs_target), 4)
+        self.assertEqual(self._count_ops(gm, wait_target), 4)
+        self.assertEqual(self._count_ops(gm, add_target), 3)
+
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 1)
+        self.assertEqual(self._count_ops(gm, wait_target), 1)
+        self.assertEqual(self._count_ops(gm, add_target), 3)
+
+        fn_nodes = [n for n in gm.graph.nodes if n.op == "call_function"]
+        for n in fn_nodes[:3]:
+            self.assertIs(n.target, add_target)
+        self.assertIs(fn_nodes[3].target, rs_target)
+        self.assertIs(fn_nodes[4].target, wait_target)
+
+    def test_no_fusion_different_rs_args(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(wait_target, args=(rs_a,))
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        # Different group name "1" vs "0" above — can't fuse across groups
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "1"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(wait_target, args=(rs_b,))
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_nonlinear_reduce_op(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        # "max" is non-linear — RS(a) + RS(b) != RS(a + b) for max
+        rs_a = graph.call_function(rs_target, args=(ph_a, "max", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_a,)
+        )
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "max", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_b,)
+        )
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_wait_has_other_users(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+        neg_target = torch.ops.aten.neg.default
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(wait_target, args=(rs_a,))
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(wait_target, args=(rs_b,))
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        # wait_b has 2 users (neg + add) — can't fuse since the RS result is needed independently
+        other_use = graph.call_function(neg_target, args=(wait_b,))
+        other_use.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+
+        graph.output((add_node, other_use))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_different_dtypes(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128, dtype=torch.float32)
+        ph_b = graph.placeholder("input_b")
+        # Different dtype: bf16 vs f32
+        ph_b.meta["val"] = torch.randn(10, 128, dtype=torch.bfloat16)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128, dtype=torch.float32)
+        wait_a = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_a,)
+        )
+        wait_a.meta["val"] = torch.randn(5, 128, dtype=torch.float32)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128, dtype=torch.bfloat16)
+        wait_b = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_b,)
+        )
+        wait_b.meta["val"] = torch.randn(5, 128, dtype=torch.bfloat16)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
 
 
 if __name__ == "__main__":

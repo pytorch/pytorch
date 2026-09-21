@@ -5,21 +5,25 @@ import sys
 from unittest.mock import patch
 
 import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class SimpleKinetoInitializationTest(TestCase):
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
-    def test_kineto_profiler_with_environment_variable(self):
+    def test_kineto_profiler_with_environment_variable(self, device):
         """
         This test checks whether kineto works with torch in daemon mode, please refer to issue #112389 and #131020.
         Besides that, this test will also check that kineto will not be initialized when user loads the shared library
         directly.
         """
-        script = """
+        device_type = device.split(":")[0]
+        script = f"""
 import torch
-if torch.cuda.is_available() > 0:
-    torch.cuda.init()
+if torch.{device_type}.is_available():
+    device_module = torch.{device_type}
+    if hasattr(device_module, 'init'):
+        device_module.init()
 """
         try:
             subprocess.check_output(
@@ -46,6 +50,12 @@ if torch.cuda.is_available() > 0:
             "kineto should not be initialized when the shared library is imported directly",
         )
 
+
+instantiate_device_type_tests(
+    SimpleKinetoInitializationTest,
+    globals(),
+    only_for=("cuda",),
+)
 
 if __name__ == "__main__":
     run_tests()

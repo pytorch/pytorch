@@ -27,7 +27,8 @@ def gen_linker_script(
     text_line_start = [
         i for i, line in enumerate(linker_script_lines) if ".text           :" in line
     ]
-    assert len(text_line_start) == 1, "The linker script has multiple text sections!"
+    if len(text_line_start) != 1:
+        raise AssertionError("The linker script has multiple text sections!")
     text_line_start = text_line_start[0]
 
     # ensure that parent directory exists before writing
@@ -40,8 +41,7 @@ def gen_linker_script(
         for lineid, line in enumerate(linker_script_lines):
             if lineid == text_line_start + 2:
                 f.write("    *(\n")
-                for plines in prioritized_text:
-                    f.write(f"      .text.{plines}\n")
+                f.writelines(f"      .text.{plines}\n" for plines in prioritized_text)
                 f.write("    )\n")
             f.write(f"{line}\n")
 

@@ -88,7 +88,7 @@ if __name__ == "__main__":
         outfile = sys.stderr
         need_close = False
     else:
-        outfile = open(args.outfile, "a")
+        outfile = open(args.outfile, "a")  # noqa: SIM115
         need_close = True
 
     test_count = args.test_count

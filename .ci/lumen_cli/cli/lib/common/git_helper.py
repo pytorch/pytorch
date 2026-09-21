@@ -41,7 +41,7 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
         # Clone and fetch
         remove_dir(dst)
         r = Repo.clone_from(repo, dst, progress=PrintProgress())
-        r.git.fetch("--all", "--tags")
+        r.git.fetch("--all", "--tags", "--force")
 
         # Checkout pinned commit
         commit = get_post_build_pinned_commit(target)

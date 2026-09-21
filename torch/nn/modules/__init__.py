@@ -83,6 +83,7 @@ from .instancenorm import (
     LazyInstanceNorm2d,
     LazyInstanceNorm3d,
 )
+from .linear_cross_entropy_options import LinearCrossEntropyOptions
 from .loss import (
     BCELoss,
     BCEWithLogitsLoss,
@@ -94,6 +95,7 @@ from .loss import (
     HuberLoss,
     KLDivLoss,
     L1Loss,
+    LinearCrossEntropyLoss,
     MarginRankingLoss,
     MSELoss,
     MultiLabelMarginLoss,
@@ -255,6 +257,8 @@ __all__ = [
     "LazyLinear",
     "LeakyReLU",
     "Linear",
+    "LinearCrossEntropyLoss",
+    "LinearCrossEntropyOptions",
     "LocalResponseNorm",
     "LogSigmoid",
     "LogSoftmax",
@@ -331,4 +335,5 @@ __all__ = [
 ]
 
 # Please keep this list sorted
-assert __all__ == sorted(__all__)
+if __all__ != sorted(__all__):
+    raise AssertionError("__all__ must be sorted")

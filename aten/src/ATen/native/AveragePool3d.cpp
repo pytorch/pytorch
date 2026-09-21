@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
@@ -29,23 +28,23 @@ TORCH_META_FUNC(avg_pool3d) (
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
     "avg_pool3d: kernel_size must be a single int, or a tuple of three ints");
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "avg_pool3d: stride must be omitted, a single int, or a tuple of three ints");
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
     "avg_pool3d: padding must be a single int, or a tuple of three ints");
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
+  const int padT = c10::checked_convert<int>(padding[0], "int");
+  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
+  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
@@ -98,23 +97,23 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
     "avg_pool3d: kernel_size must be a single int, or a tuple of three ints");
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "avg_pool3d: stride must be omitted, a single int, or a tuple of three ints");
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
     "avg_pool3d: padding must be a single int, or a tuple of three ints");
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
+  const int padT = c10::checked_convert<int>(padding[0], "int");
+  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
+  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
@@ -131,16 +130,18 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   const int64_t oheight_for_shape_check = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
   const int64_t owidth_for_shape_check = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
 
-  avg_pool3d_backward_shape_check(
+  pool3d_backward_shape_check(
     input,
     gradOutput_,
+    /*indices=*/std::nullopt,
     nslices,
     kT, kH, kW,
     dT, dH, dW,
     padT, padH, padW,
+    1, 1, 1,
     itime, iheight, iwidth,
     otime_for_shape_check, oheight_for_shape_check, owidth_for_shape_check,
-    "avg_pool3d_backward()");
+    "avg_pool3d_backward()", /*check_input_size=*/true);
 
   /* resize output */
   set_output_raw_strided(0, input.sizes(), {}, input.options());
@@ -255,19 +256,19 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
   std::optional<int64_t> divisor_override,
   const Tensor& output
 ) {
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
 
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
+  const int padT = c10::checked_convert<int>(padding[0], "int");
+  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
+  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
 
   const int64_t nslices = input_.size(-4);
   const int64_t itime = input_.size(-3);
@@ -428,19 +429,19 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
   std::optional<int64_t> divisor_override,
   const Tensor& gradInput
 ) {
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
 
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
+  const int padT = c10::checked_convert<int>(padding[0], "int");
+  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
+  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
 
   const int64_t nslices = input.size(-4);
   const int64_t itime = input.size(-3);

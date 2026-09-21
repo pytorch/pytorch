@@ -7,13 +7,17 @@ import numpy as np
 import torch
 from torch import Tensor
 from contextlib import contextmanager
-from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS, IS_ARM64
 
-supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines = list(torch.backends.quantized.supported_engines)
 # Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
 # QNNPACK is not supported on PPC
 if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_TSAN, IS_MACOS, IS_WINDOWS]):
     supported_qengines.remove('qnnpack')
+# FBGEMM and x86 engines require x86 architecture with AVX2/AVX512 support
+# They are not supported on ARM64 architectures
+if IS_ARM64:
+    supported_qengines = [qe for qe in supported_qengines if qe not in ('fbgemm', 'x86')]
 
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
@@ -50,9 +54,15 @@ def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False, qscheme=torch.per_tensor_affine):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
-    assert qscheme in (torch.per_tensor_affine, torch.per_tensor_symmetric)
+    if qscheme not in (torch.per_tensor_affine, torch.per_tensor_symmetric):
+        raise AssertionError(
+            f"Expected qscheme to be per_tensor_affine or per_tensor_symmetric, got {qscheme}"
+        )
     if qscheme == torch.per_tensor_symmetric:
-        assert dtype == torch.qint8
+        if dtype != torch.qint8:
+            raise AssertionError(
+                f"Expected dtype to be torch.qint8 for symmetric qscheme, got {dtype}"
+            )
     if isinstance(X, torch.Tensor):
         X = X.numpy()
     if dtype == torch.qint8:
@@ -126,7 +136,8 @@ def _snr(x, x_hat):
         signal, noise, SNR(in dB): Either floats or a nested list of floats
     """
     if isinstance(x, (list, tuple)):
-        assert len(x) == len(x_hat)
+        if len(x) != len(x_hat):
+            raise AssertionError(f"Expected len(x) == len(x_hat), got {len(x)} != {len(x_hat)}")
         res = [_snr(x[idx], x_hat[idx]) for idx in range(len(x))]
         return res
     if x_hat.is_quantized:
@@ -252,8 +263,10 @@ def _f32_to_floatx_unpacked(x: Tensor, ebits: int, mbits: int) -> Tensor:
     Background 1: last answer in https://stackoverflow.com/q/8981913
     Background 2: Computer Organization and Design, RISC-V edition, Chapter 3.5
     """
-    assert x.dtype == torch.float
-    assert 1 + ebits + mbits <= 8
+    if x.dtype != torch.float:
+        raise AssertionError(f"Expected x.dtype to be torch.float, got {x.dtype}")
+    if 1 + ebits + mbits > 8:
+        raise AssertionError(f"Expected 1 + ebits + mbits <= 8, got {1 + ebits + mbits}")
 
     # calculate constants
     exp_bias = _n_ones(ebits - 1)
@@ -363,8 +376,10 @@ def _floatx_unpacked_to_f32(x: Tensor, ebits: int, mbits: int) -> Tensor:
       fp6: bits 0-1 empty and bits 2-7 in fp6_e2m3 or fp6_e3m2 encoding
     Output: torch.Tensor of dtype fp32 with the dequantized value
     """
-    assert x.dtype == torch.uint8
-    assert 1 + ebits + mbits <= 8
+    if x.dtype != torch.uint8:
+        raise AssertionError(f"Expected x.dtype to be torch.uint8, got {x.dtype}")
+    if 1 + ebits + mbits > 8:
+        raise AssertionError(f"Expected 1 + ebits + mbits <= 8, got {1 + ebits + mbits}")
 
     sign_mask = 1 << (ebits + mbits)
     exp_bias = _n_ones(ebits - 1)
@@ -453,7 +468,7 @@ def ceil_div(a, b):
 # more naturally.
 def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
     # Matrix is in a 128x4 pattern, internally blocked as 32x4x4 nonsense.
-    # Output should be [input.size(0, input.size(1) // blocksize] scales
+    # Output should be [input.size(0), input.size(1) // blocksize] scales
     output_scales = torch.zeros(
         (input.size(0), input.size(1) // blocksize),
         device=input.device,
@@ -497,7 +512,7 @@ def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
     x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
     return x_f32.to(torch.bfloat16)
 
-def to_blocked(input_matrix) -> torch.Tensor:
+def to_blocked(input_matrix, swizzle_32_8: bool = False) -> torch.Tensor:
     """
     Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
 
@@ -506,11 +521,29 @@ def to_blocked(input_matrix) -> torch.Tensor:
 
     Args:
         input_matrix: Input tensor of shape (H, W)
+        swizzle_32_8: build the gfx950 32x8-tiled layout that hipBLASLt calls
+            BLK32_UE8M0_32_8 instead of the default one. Pass
+            `rocm_mx_swizzle(mat_dtype)` to follow whichever layout the current
+            device takes for the data these scales belong to.
 
     Returns:
-        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
+        Flattened tensor of 32*ceil_div(H,128) * 16*ceil_div(W,4) elements, or
+        32*ceil_div(H,32) * 8*ceil_div(W,8) when `swizzle_32_8` is set.
     """
     rows, cols = input_matrix.shape
+
+    if swizzle_32_8:
+        padded_rows = ceil_div(rows, 32) * 32
+        padded_cols = ceil_div(cols, 8) * 8
+
+        padded = input_matrix
+        if (rows, cols) != (padded_rows, padded_cols):
+            padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
+            padded[:rows, :cols] = input_matrix
+
+        blocks = padded.view(padded_rows // 32, 2, 16, padded_cols // 8, 2, 4)
+        return blocks.permute(0, 3, 5, 2, 4, 1).flatten()
+
     n_row_blocks = ceil_div(rows, 128)
     n_col_blocks = ceil_div(cols, 4)
 
@@ -532,15 +565,17 @@ def to_blocked(input_matrix) -> torch.Tensor:
 
 
 def down_size(size):
-    assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
+    if size[-1] % 2 != 0:
+        raise AssertionError(f"{size} last dim not divisible by two")
     return (*size[:-1], size[-1] // 2)
 
 
 def pack_uint4(uint8_data) -> torch.Tensor:
     # converting to uint8 for operations
     shape = uint8_data.shape
-    assert shape[-1] % 2 == 0
-    uint8_data = uint8_data.contiguous().view(-1)
+    if shape[-1] % 2 != 0:
+        raise AssertionError(f"Expected shape[-1] to be divisible by 2, got {shape[-1]}")
+    uint8_data = uint8_data.reshape(-1)
     return (uint8_data[1::2] << 4 | uint8_data[::2]).view(down_size(shape))
 
 
@@ -549,11 +584,21 @@ FP4_EBITS, FP4_MBITS = 2, 1
 
 
 def _bfloat16_to_float4_e2m1fn_x2(x):
-    assert x.dtype == torch.bfloat16
+    if x.dtype != torch.bfloat16:
+        raise AssertionError(f"Expected x.dtype to be torch.bfloat16, got {x.dtype}")
     x = _f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS)
     x = pack_uint4(x)
     x = x.view(torch.float4_e2m1fn_x2)
     return x
+
+
+def data_to_nvfp4_scale(x, block_size=16):
+    """Compute per-block E4M3 scales for NVFP4 test inputs."""
+    orig_shape = x.shape
+    x = x.reshape(-1, block_size)
+    max_abs = torch.amax(torch.abs(x), 1) + 1e-12
+    scale = (max_abs / 6.0).clamp(max=torch.finfo(torch.float8_e4m3fn).max)
+    return scale.to(torch.float8_e4m3fn).reshape(orig_shape[0], -1)
 
 
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
@@ -562,14 +607,14 @@ def to_mxfp(
     block_size: int = 32,
     format: str = "mxfp8",
 ):
-    assert data_hp.dtype in (
-        torch.bfloat16,
-        torch.float,
-    ), f"{data_hp.dtype} is not supported yet"
-    assert (
-        data_hp.shape[-1] % block_size == 0
-    ), f"the last dimension of shape {data_hp.shape} must be divisible by block_size {block_size}"
-    assert data_hp.is_contiguous(), "unsupported"
+    if data_hp.dtype not in (torch.bfloat16, torch.float):
+        raise AssertionError(f"{data_hp.dtype} is not supported yet")
+    if data_hp.shape[-1] % block_size != 0:
+        raise AssertionError(
+            f"the last dimension of shape {data_hp.shape} must be divisible by block_size {block_size}"
+        )
+    if not data_hp.is_contiguous():
+        raise AssertionError("unsupported: data_hp must be contiguous")
 
     orig_shape = data_hp.shape
     data_hp = data_hp.reshape(

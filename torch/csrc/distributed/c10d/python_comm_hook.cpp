@@ -1,9 +1,6 @@
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 
-#include <ATen/core/functional.h>
-#include <torch/csrc/distributed/c10d/reducer.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
 

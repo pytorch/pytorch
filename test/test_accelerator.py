@@ -1,23 +1,33 @@
 # Owner(s): ["module: tests"]
 
 import gc
+import operator
 import sys
 import unittest
+from contextlib import nullcontext
 
 import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     NoTest,
     run_tests,
     TEST_ACCELERATOR,
     TEST_MPS,
     TEST_MULTIACCELERATOR,
+    TEST_XPU,
     TestCase,
 )
 
 
+# Pinned memory doesn't make sense on UMA systems (MPS) (see https://github.com/pytorch/pytorch/issues/193845 )
+# see test_pin_memory_on_non_blocking_copy
+
+xfailIfMPS = unittest.expectedFailure if TEST_MPS else (lambda f: f)
+
+
 if not TEST_ACCELERATOR:
     print("No available accelerator detected, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
     # Skip because failing when run on cuda build with no GPU, see #150059 for example
     sys.exit()
 
@@ -25,17 +35,12 @@ if not TEST_ACCELERATOR:
 class TestAccelerator(TestCase):
     def test_current_accelerator(self):
         self.assertTrue(torch.accelerator.is_available())
-        accelerators = ["cuda", "xpu", "mps"]
-        for accelerator in accelerators:
-            if torch.get_device_module(accelerator).is_available():
-                self.assertEqual(
-                    torch.accelerator.current_accelerator().type, accelerator
-                )
-                self.assertIsNone(torch.accelerator.current_accelerator().index)
-                with self.assertRaisesRegex(
-                    ValueError, "doesn't match the current accelerator"
-                ):
-                    torch.accelerator.set_device_index("cpu")
+        self.assertEqual(torch.accelerator.current_accelerator().type, self.device_type)
+        self.assertIsNone(torch.accelerator.current_accelerator().index)
+        with self.assertRaisesRegex(
+            ValueError, "doesn't match the current accelerator"
+        ):
+            torch.accelerator.set_device_index("cpu")
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_generic_multi_device_behavior(self):
@@ -87,6 +92,23 @@ class TestAccelerator(TestCase):
         ):
             torch.accelerator.current_stream(other_device)
 
+    def test_stream_compare_with_non_stream(self):
+        # Comparing with a non-Stream must not blindly cast it to THPStream*
+        # and read garbage fields (#188033)
+        s1 = torch.Stream()
+        for other in (42, "hello", 3.14, None, object()):
+            self.assertFalse(s1 == other)
+            self.assertTrue(s1 != other)
+        self.assertTrue(s1 in [1, "a", s1])
+        s2 = torch.Stream()
+        for op in (operator.lt, operator.le, operator.gt, operator.ge):
+            with self.assertRaises(TypeError):
+                op(s1, s2)
+        sid, di, dt = s1.stream_id, s1.device_index, s1.device_type
+        same = torch.Stream(stream_id=sid, device_index=di, device_type=dt)
+        self.assertTrue(s1 == same)
+        self.assertFalse(s1 != same)
+
     def test_device_context_manager(self):
         prev_device = torch.accelerator.current_device_index()
         with torch.accelerator.device_index(None):
@@ -95,6 +117,18 @@ class TestAccelerator(TestCase):
         with torch.accelerator.device_index(0):
             self.assertEqual(torch.accelerator.current_device_index(), 0)
         self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+
+    def test_device_index_fullgraph(self):
+        def fn(x):
+            with torch.accelerator.device_index(x.device.index):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device=0)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_multi_device_context_manager(self):
@@ -109,6 +143,21 @@ class TestAccelerator(TestCase):
         prev_stream = torch.accelerator.current_stream()
         with torch.Stream() as s:
             self.assertEqual(torch.accelerator.current_stream(), s)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+
+    def test_stream_context_manager_reentrance(self):
+        prev_stream = torch.accelerator.current_stream()
+        s0 = torch.Stream()
+        with s0, s0:
+            self.assertEqual(torch.accelerator.current_stream(), s0)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+        s1 = torch.Stream()
+        with s0:
+            self.assertEqual(torch.accelerator.current_stream(), s0)
+            with s1:
+                self.assertEqual(torch.accelerator.current_stream(), s1)
+                with s0:
+                    self.assertEqual(torch.accelerator.current_stream(), s0)
         self.assertEqual(torch.accelerator.current_stream(), prev_stream)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
@@ -128,7 +177,8 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
-    @unittest.skipIf(TEST_MPS, "MPS doesn't support pin memory!")
+    # Non-blocking MPS=>CPU copies currently return unpinned storage
+    @xfailIfMPS
     def test_pin_memory_on_non_blocking_copy(self):
         t_acc = torch.randn(100).to(torch.accelerator.current_accelerator())
         t_host = t_acc.to("cpu", non_blocking=True)
@@ -162,7 +212,12 @@ class TestAccelerator(TestCase):
         ):
             event1.elapsed_time(event2)
 
-    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
+    def test_empty_host_cache(self):
+        # Must not dereference the empty registry slot on a backend that
+        # registers no host allocator (MPS), called before any allocation as
+        # in https://github.com/pytorch/pytorch/issues/197561
+        torch.accelerator.empty_host_cache()
+
     def test_memory_stats(self):
         # Ensure that device allocator is initialized
         acc = torch.accelerator.current_accelerator()
@@ -191,7 +246,7 @@ class TestAccelerator(TestCase):
         self.assertEqual(
             len(missing_stats),
             0,
-            f"Missing expected memory statistics: {missing_stats}",
+            lambda msg: f"{msg}\nMissing expected memory statistics: {missing_stats}",
         )
 
         prev_allocated = torch.accelerator.memory_allocated()
@@ -239,11 +294,53 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
 
-    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
     def test_get_memory_info(self):
         free_bytes, total_bytes = torch.accelerator.get_memory_info()
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
+
+    @unittest.skipIf(
+        TEST_XPU,
+        "bare-bones/opaque bit-field dtypes cause undefined behavior on XPU, see https://github.com/pytorch/pytorch/issues/179888",
+    )
+    def test_device_capability_supported_dtypes(self):
+        try:
+            caps = torch.accelerator.get_device_capability()
+        except RuntimeError:
+            self.skipTest("Backend doesn't support get_device_capability")
+
+        supported_dtypes = caps["supported_dtypes"]
+        self.assertIsInstance(supported_dtypes, set)
+        self.assertGreater(len(supported_dtypes), 0)
+
+        acc = torch.accelerator.current_accelerator()
+        reference_dtype = next(iter(supported_dtypes))
+
+        all_dtypes = [
+            getattr(torch, name)
+            for name in dir(torch)
+            if isinstance(getattr(torch, name), torch.dtype)
+        ]
+        for dtype in all_dtypes:
+            with self.subTest(dtype=dtype):
+                ctx = (
+                    nullcontext()
+                    if dtype in supported_dtypes
+                    else self.assertRaises((RuntimeError, TypeError))
+                )
+                with ctx:
+                    t = torch.empty(16, dtype=dtype, device=acc)
+                    t = t.to(reference_dtype)
+                    t = t.to(dtype)
+
+
+instantiate_device_type_tests(
+    TestAccelerator,
+    globals(),
+    except_for=("cpu",),
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

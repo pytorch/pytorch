@@ -31,7 +31,7 @@ THPUtils_PySequence_to_CUDAStreamList(PyObject* obj) {
               reinterpret_cast<THPStream*>(stream)->device_index),
           static_cast<c10::DeviceType>(
               (reinterpret_cast<THPStream*>(stream))->device_type)));
-    } else if (stream == Py_None) {
+    } else if (Py_IsNone(stream)) {
       streams.emplace_back();
     } else {
       TORCH_CHECK(

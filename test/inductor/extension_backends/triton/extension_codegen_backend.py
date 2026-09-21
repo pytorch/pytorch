@@ -39,11 +39,11 @@ class CPUDeviceOpOverrides(DeviceOpOverrides):
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"def {name}(name): None\n"
 
-    def set_device(self, device_idx: int) -> str:  # noqa: ARG002 unused-argument
+    def set_device(self, device_idx: int) -> str:
         return ""
 
     def synchronize(self) -> None:
         pass
 
-    def device_guard(self, device_idx: int) -> str:  # noqa: ARG002 unused-argument
+    def device_guard(self, device_idx: int) -> str:
         return ""

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 from torch import Tensor
 from torch.distributions import constraints, Independent
@@ -44,9 +43,9 @@ class LogisticNormal(TransformedDistribution):
 
     def __init__(
         self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        loc: Tensor | float,
+        scale: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         base_dist = Normal(loc, scale, validate_args=validate_args)
         if not base_dist.batch_shape:

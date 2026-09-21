@@ -63,7 +63,7 @@ class FuzzedSparseTensor(FuzzedTensor):
         with the same sparsity pattern. Moreover, most of the sparse operation will use coalesce() method
         and what we want here is to get a sparse tensor with the same `nnz` even if this is coalesced or not.
 
-        In the other hand when `is_coalesced` is True the number of elements is reduced in the coalescing process
+        On the other hand when `is_coalesced` is True the number of elements is reduced in the coalescing process
         by an unclear amount however the probability to generate duplicates indices are low for most of the cases.
         This decision was taken on purpose to maintain the construction cost as low as possible.
         """
@@ -91,7 +91,6 @@ class FuzzedSparseTensor(FuzzedTensor):
         return x
 
     def _make_tensor(self, params, state):
-        # pyrefly: ignore [missing-attribute]
         size, _, _ = self._get_size_and_steps(params)
         density = params['density']
         nnz = math.ceil(sum(size) * density)
@@ -101,10 +100,8 @@ class FuzzedSparseTensor(FuzzedTensor):
         is_coalesced = params['coalesced']
         sparse_dim = params['sparse_dim'] if self._sparse_dim else len(size)
         sparse_dim = min(sparse_dim, len(size))
-        # pyrefly: ignore [missing-attribute]
         tensor = self.sparse_tensor_constructor(size, self._dtype, sparse_dim, nnz, is_coalesced)
 
-        # pyrefly: ignore [missing-attribute]
         if self._cuda:
             tensor = tensor.cuda()
         sparse_dim = tensor.sparse_dim()
@@ -112,7 +109,7 @@ class FuzzedSparseTensor(FuzzedTensor):
         is_hybrid = len(size[sparse_dim:]) > 0
 
         properties = {
-            "numel": int(tensor.numel()),
+            "numel": tensor.numel(),
             "shape": tensor.size(),
             "is_coalesced": tensor.is_coalesced(),
             "density": density,
@@ -120,7 +117,6 @@ class FuzzedSparseTensor(FuzzedTensor):
             "sparse_dim": sparse_dim,
             "dense_dim": dense_dim,
             "is_hybrid": is_hybrid,
-            # pyrefly: ignore [missing-attribute]
             "dtype": str(self._dtype),
         }
         return tensor, properties

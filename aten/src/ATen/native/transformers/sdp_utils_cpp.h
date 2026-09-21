@@ -17,7 +17,6 @@
 #include <c10/core/SymFloat.h>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <string_view>
 
 namespace sdp {
@@ -44,15 +43,33 @@ struct sdp_params {
   bool enable_gqa;
 };
 
+// Fused backends require a batch dimension. Give unbatched inputs a singleton
+// batch dimension before selecting or running a fused backend.
+inline sdp_params normalize_unbatched_input(sdp_params params) {
+  if (!params.query.is_nested() && !params.key.is_nested() &&
+      !params.value.is_nested() &&
+      params.query.layout() == at::kStrided &&
+      params.key.layout() == at::kStrided &&
+      params.value.layout() == at::kStrided && params.query.dim() == 3 &&
+      params.key.dim() == 3 && params.value.dim() == 3) {
+    params.query = params.query.unsqueeze(0);
+    params.key = params.key.unsqueeze(0);
+    params.value = params.value.unsqueeze(0);
+    while (params.attn_mask.has_value() && params.attn_mask->dim() < 4) {
+      params.attn_mask = params.attn_mask->unsqueeze(0);
+    }
+  }
+  return params;
+}
+
 SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params);
 
 inline c10::SymFloat calculate_scale(
     const at::Tensor& query,
     std::optional<double> scale) {
-  const auto softmax_scale = scale.has_value()
+  return scale.has_value()
       ? scale.value()
       : (c10::SymFloat(1.0) / (c10::SymFloat(query.sym_size(-1)).sqrt()));
-  return c10::SymFloat(softmax_scale);
 }
 
 inline bool input_requires_grad(sdp_params const& params) {
@@ -82,7 +99,7 @@ inline bool check_tensor_dtype(
     sdp_params const& params,
     dtype_vector allowed_dtypes,
     bool debug) {
-  auto query_dtype = params.query.dtype();
+  const auto query_dtype = params.query.dtype();
   if (!(query_dtype == params.key.dtype() &&
         query_dtype == params.value.dtype() &&
         (std::find(allowed_dtypes.begin(), allowed_dtypes.end(), query_dtype) !=
@@ -107,9 +124,9 @@ inline bool check_tensor_dtype(
 
 
 inline bool try_broadcast_param_size(
-    const c10::SymInt q_size,
-    const c10::SymInt k_size,
-    const c10::SymInt v_size,
+    const c10::SymInt& q_size,
+    const c10::SymInt& k_size,
+    const c10::SymInt& v_size,
     std::string_view param_name,
     bool debug) {
   auto max_size = std::max({q_size, k_size, v_size});
@@ -154,7 +171,7 @@ inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
     return false;
   }
 
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
   const int64_t n_tensors = param.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
 
@@ -267,33 +284,53 @@ inline bool check_for_attn_mask(sdp_params const& params, bool debug) {
 }
 
 inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
-  auto attn_mask = params.attn_mask;
+  const auto& attn_mask = params.attn_mask;
   if (!attn_mask.has_value()) {
     return true;
   }
-  if (attn_mask.value().requires_grad()) {
+  const auto& mask = attn_mask.value();
+  if (mask.requires_grad()) {
     return false;
   }
   auto batchSize = params.query.sym_size(0);
   auto qSize = params.query.sym_size(2);
   auto kvSize = params.key.sym_size(2);
   auto num_head = params.query.sym_size(1);
-  if (attn_mask.value().sym_size(-2) != qSize && attn_mask.value().sym_size(-2) != 1) {
+
+  // Helper to check if a mask dim is compatible with a target dim.
+  // Compatible means: symbolically equal, or the mask dim is concretely 1
+  // (broadcast). Returns false (conservatively reject) when neither can be
+  // determined without guarding on unbacked symbolic ints.
+  auto dim_compatible = [](const c10::SymInt& mask_dim,
+                           const c10::SymInt& target_dim) -> bool {
+    if (TORCH_STATICALLY_KNOWN_TRUE(mask_dim == target_dim)) {
+      return true;
+    }
+    auto mask_int = mask_dim.maybe_as_int();
+    return mask_int.has_value() && *mask_int == 1;
+  };
+
+  auto mask_qsize = mask.sym_size(-2);
+  if (!dim_compatible(mask_qsize, qSize)) {
     return false;
   }
-  if (attn_mask.value().sym_size(-1) != kvSize && attn_mask.value().sym_size(-1) != 1) {
+  auto mask_kvsize = mask.sym_size(-1);
+  if (!dim_compatible(mask_kvsize, kvSize)) {
     return false;
   }
-  if (attn_mask.value().dim() == 2) {
+  if (mask.dim() == 2) {
     return true;
-  } else if (attn_mask.value().dim() == 4) {
-    if ((attn_mask.value().sym_size(0) == 1 || attn_mask.value().sym_size(0) == batchSize)
-        && (attn_mask.value().sym_size(1) == 1 || attn_mask.value().sym_size(1) == num_head)) {
+  } else if (mask.dim() == 4) {
+    auto mask_b = mask.sym_size(0);
+    auto mask_h = mask.sym_size(1);
+    if (dim_compatible(mask_b, batchSize) &&
+        dim_compatible(mask_h, num_head)) {
       return true;
     }
   }
   if (debug) {
-    TORCH_WARN("Please use the following attn mask shapes: ",
+    TORCH_WARN(
+        "Please use the following attn mask shapes: ",
         "2d - ({Q_seq_len, 1}  x {KV_seq_len, 1}); ",
         "4d - ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})");
   }
@@ -374,7 +411,10 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   return true;
 }
 
-template <bool supports_gqa, bool requires_same_num_heads=true>
+template <
+    bool supports_gqa,
+    bool requires_same_num_heads = true,
+    bool supports_mqa = false>
 inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
@@ -414,6 +454,13 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
 
   // same num heads condition for non-gqa case
   if (!same_num_heads){
+    if constexpr (supports_mqa) {
+      const bool broadcastable_num_heads =
+          q_num_heads > 0 && k_num_heads == 1 && v_num_heads == 1;
+      if (broadcastable_num_heads) {
+        return true;
+      }
+    }
     if (debug) {
       TORCH_WARN(
           "For dense input, both fused kernels require query, key and value to have the same num_heads. ",
@@ -524,7 +571,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
             << params.attn_mask.value().sym_stride(-1)
             << " (GPU backends require attn_mask's last dimension to have stride 1 while the CPU does not).";
       }
-      TORCH_WARN(message.str());
+      TORCH_WARN(std::move(message).str());
     }
 
     return false;

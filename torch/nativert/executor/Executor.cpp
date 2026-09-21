@@ -256,7 +256,7 @@ void Executor::clearStaleExecutionFrames() {
   }
 
   // Move active frames to inactive so they are cleared next time if not used
-  // Check  newActiveFramesSize > 0 to guuard against other threads adding
+  // Check  newActiveFramesSize > 0 to guard against other threads adding
   // frames to active queue during while loop
   while (executionFrames_.readIfNotEmpty(frame) && newActiveFramesSize > 0) {
     --newActiveFramesSize;
@@ -283,6 +283,13 @@ void Executor::returnExecutorFrameToPool(
 
   try {
     frame->destroyBorrowedIValues();
+    // When tryFreeUnmanagedValuesAfterUse is false, intermediate values are
+    // not freed during execution. Clear them here to prevent stale tensor
+    // data from persisting across frame reuses (e.g. during rebatching with
+    // varying batch sizes, stale tensors can cause out-of-bounds accesses).
+    if (!executorConfig_.tryFreeUnmanagedValuesAfterUse) {
+      frame->clearNonPersistentValues();
+    }
     // Always return to active execution frame pool, indicating that frame was
     // used in the previous time interval
     TORCH_CHECK(

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -11,6 +11,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _fused_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -35,17 +36,17 @@ class Adam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
-        betas: tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
+        lr: float | Tensor = 1e-3,
+        betas: tuple[float | Tensor, float | Tensor] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
         amsgrad: bool = False,
         *,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-        fused: Optional[bool] = None,
+        fused: bool | None = None,
         decoupled_weight_decay: bool = False,
     ) -> None:
         if isinstance(lr, Tensor):
@@ -84,7 +85,7 @@ class Adam(Optimizer):
                 )
             if betas[1].numel() != 1:
                 raise ValueError("Tensor betas[1] must be 1-element")
-        betas = tuple(map(_to_scalar, betas))
+        betas = (_to_scalar(betas[0]), _to_scalar(betas[1]))
 
         defaults = {
             "lr": lr,
@@ -172,7 +173,7 @@ class Adam(Optimizer):
                             device=p.device,
                         )
                         if group["capturable"] or group["fused"]
-                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                        else torch.tensor(0.0, dtype=_get_scalar_dtype(), device="cpu")
                     )
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
@@ -219,7 +220,7 @@ class Adam(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -316,7 +317,7 @@ Adam.__doc__ = (
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.
-        betas (tuple[Union[float, Tensor], Union[float, Tensor]], optional):
+        betas (tuple[float | Tensor, float | Tensor], optional):
             coefficients used for computing running averages of gradient and
             its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
@@ -351,14 +352,14 @@ def _single_tensor_adam(
     exp_avg_sqs: list[Tensor],
     max_exp_avg_sqs: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     amsgrad: bool,
     has_complex: bool,
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -389,7 +390,7 @@ def _single_tensor_adam(
     # Note: ensure type declaration is under conditional check for isinstance
     # or else torchscript will get cranky about the DeviceDict type.
     if isinstance(beta1, Tensor):
-        beta1_dict: Optional[DeviceDtypeDict] = {(beta1.device, beta1.dtype): beta1}
+        beta1_dict: DeviceDtypeDict | None = {(beta1.device, beta1.dtype): beta1}
     else:
         beta1_dict = None
 
@@ -415,7 +416,7 @@ def _single_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 param.mul_(1 - lr * weight_decay)
             else:
                 # Nested if is necessary to bypass jitscript rules
@@ -423,7 +424,6 @@ def _single_tensor_adam(
                     if weight_decay.requires_grad:
                         grad = grad.addcmul_(param.clone(), weight_decay)
                     else:
-                        # pyrefly: ignore [bad-argument-type]
                         grad = grad.add(param, alpha=weight_decay)
                 else:
                     grad = grad.add(param, alpha=weight_decay)
@@ -448,7 +448,7 @@ def _single_tensor_adam(
                     device=device, dtype=dtype, non_blocking=True
                 )
 
-            device_beta1: Union[float, Tensor] = beta1_dict[key]
+            device_beta1: float | Tensor = beta1_dict[key]
         else:
             device_beta1 = beta1
 
@@ -558,14 +558,14 @@ def _multi_tensor_adam(
     exp_avg_sqs: list[Tensor],
     max_exp_avg_sqs: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     amsgrad: bool,
     has_complex: bool,
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -630,7 +630,7 @@ def _multi_tensor_adam(
 
     # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    beta1_dict: Optional[DeviceDict] = (  # type: ignore[attr-defined]
+    beta1_dict: DeviceDict | None = (  # type: ignore[attr-defined]
         {beta1.device: beta1}
         if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
         else None
@@ -688,7 +688,7 @@ def _multi_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (device_grads) already allocated for maximize
@@ -727,9 +727,9 @@ def _multi_tensor_adam(
         del device_grads
         del scaled_device_grads
 
-        bias_correction1: Union[tuple[Tensor, ...], list[Tensor]]
-        bias_correction2: Union[tuple[Tensor, ...], list[Tensor]]
-        bias_correction2_sqrt: Union[tuple[Tensor, ...], list[Tensor]]
+        bias_correction1: tuple[Tensor, ...] | list[Tensor]
+        bias_correction2: tuple[Tensor, ...] | list[Tensor]
+        bias_correction2_sqrt: tuple[Tensor, ...] | list[Tensor]
 
         if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
@@ -792,11 +792,11 @@ def _multi_tensor_adam(
 
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
-            torch._foreach_addcdiv_(
+            torch._foreach_addcdiv_(  # type: ignore[arg-type]
                 device_params,
                 device_exp_avgs,
                 exp_avg_sq_sqrt,
-                step_size,  # type: ignore[arg-type]
+                step_size,
             )
 
 
@@ -807,14 +807,14 @@ def _fused_adam(
     exp_avg_sqs: list[Tensor],
     max_exp_avg_sqs: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     amsgrad: bool,
     has_complex: bool,  # Needed for consistency.
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -839,7 +839,7 @@ def _fused_adam(
 
     # We only shuffle around the lr when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    lr_dict: Optional[DeviceDict] = (
+    lr_dict: DeviceDict | None = (
         {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
     )
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
@@ -876,6 +876,7 @@ def _fused_adam(
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
         func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
+        # pyrefly: ignore [no-matching-overload]
         func(
             device_params,
             device_grads,
@@ -909,27 +910,23 @@ def adam(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     capturable: bool = False,
     differentiable: bool = False,
-    fused: Optional[bool] = None,
-    grad_scale: Optional[Tensor] = None,
-    found_inf: Optional[Tensor] = None,
+    fused: bool | None = None,
+    grad_scale: Tensor | None = None,
+    found_inf: Tensor | None = None,
     has_complex: bool = False,
     decoupled_weight_decay: bool = False,
     *,
     amsgrad: bool,
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs Adam algorithm computation.
-
-    See :class:`~torch.optim.Adam` for details.
-    """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
@@ -988,3 +985,14 @@ def adam(
         found_inf=found_inf,
         decoupled_weight_decay=decoupled_weight_decay,
     )
+
+
+adam.__doc__ = (
+    _functional_api_doc.format(optimizer="Adam")
+    + r"""
+
+.. note::
+    With ``fused=True``, CUDA supports FP32 parameters and gradients with
+    BF16 moment buffers. See :ref:`functional-adamw-bf16-state` for an example.
+"""
+)

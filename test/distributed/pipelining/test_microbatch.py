@@ -12,9 +12,14 @@ from torch.distributed.pipelining.microbatch import (
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 d_hid = 512
@@ -22,6 +27,8 @@ torch.manual_seed(0)
 
 
 class MicrobatchTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_split_and_merge(self):
         x0 = torch.randn(128, d_hid)
         x1 = torch.randn(256, d_hid)
@@ -32,15 +39,38 @@ class MicrobatchTests(TestCase):
 
         # Default chunking: dim 0
         arg_chunks, kwarg_chunks = split_args_kwargs_into_chunks(args, kwargs, 2)
-        assert len(arg_chunks) == 2
-        assert len(kwarg_chunks) == 2
-        assert arg_chunks[0][0].shape == torch.Size([64, d_hid])
-        assert arg_chunks[1][0].shape == torch.Size([64, d_hid])
-        assert arg_chunks[0][1].shape == torch.Size([128, d_hid])
-        assert arg_chunks[0][2].shape == torch.Size([256, d_hid])
-        assert kwarg_chunks[0]["x0"].shape == torch.Size([64, d_hid])
-        assert kwarg_chunks[0]["x1"].shape == torch.Size([128, d_hid])
-        assert kwarg_chunks[1]["x2"].shape == torch.Size([256, d_hid])
+        if len(arg_chunks) != 2:
+            raise AssertionError(f"Expected 2 arg_chunks, got {len(arg_chunks)}")
+        if len(kwarg_chunks) != 2:
+            raise AssertionError(f"Expected 2 kwarg_chunks, got {len(kwarg_chunks)}")
+        if arg_chunks[0][0].shape != torch.Size([64, d_hid]):
+            raise AssertionError(
+                f"Expected arg_chunks[0][0].shape == [64, {d_hid}], got {arg_chunks[0][0].shape}"
+            )
+        if arg_chunks[1][0].shape != torch.Size([64, d_hid]):
+            raise AssertionError(
+                f"Expected arg_chunks[1][0].shape == [64, {d_hid}], got {arg_chunks[1][0].shape}"
+            )
+        if arg_chunks[0][1].shape != torch.Size([128, d_hid]):
+            raise AssertionError(
+                f"Expected arg_chunks[0][1].shape == [128, {d_hid}], got {arg_chunks[0][1].shape}"
+            )
+        if arg_chunks[0][2].shape != torch.Size([256, d_hid]):
+            raise AssertionError(
+                f"Expected arg_chunks[0][2].shape == [256, {d_hid}], got {arg_chunks[0][2].shape}"
+            )
+        if kwarg_chunks[0]["x0"].shape != torch.Size([64, d_hid]):
+            raise AssertionError(
+                f"Expected kwarg_chunks[0]['x0'].shape == [64, {d_hid}], got {kwarg_chunks[0]['x0'].shape}"
+            )
+        if kwarg_chunks[0]["x1"].shape != torch.Size([128, d_hid]):
+            raise AssertionError(
+                f"Expected kwarg_chunks[0]['x1'].shape == [128, {d_hid}], got {kwarg_chunks[0]['x1'].shape}"
+            )
+        if kwarg_chunks[1]["x2"].shape != torch.Size([256, d_hid]):
+            raise AssertionError(
+                f"Expected kwarg_chunks[1]['x2'].shape == [256, {d_hid}], got {kwarg_chunks[1]['x2'].shape}"
+            )
 
         # Merge chunks back together
         merged_args = merge_chunks(
@@ -60,6 +90,11 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
+
+class MicrobatchTestsDevices(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
     def test_split_block_mask(self, device):
         B = 6
         H = 1
@@ -110,11 +145,7 @@ class MicrobatchTests(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        if device == "cuda":
-            flex_fn = torch.compile(flex_attention)
-        else:
-            # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
-            flex_fn = flex_attention
+        flex_fn = torch.compile(flex_attention)
         out = flex_fn(q, k, v, block_mask=block_mask)
         out.sum().backward()
 
@@ -131,7 +162,8 @@ class MicrobatchTests(TestCase):
             args_chunk_spec=None,
             kwargs_chunk_spec=None,
         )
-        assert len(arg_split) == 4
+        if len(arg_split) != 4:
+            raise AssertionError(f"Expected 4 arg_split, got {len(arg_split)}")
 
         q_total_chunks = []
         dq_total_chunks = []
@@ -219,11 +251,11 @@ class MicrobatchTests(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        if device == "cuda":
-            flex_fn = torch.compile(flex_attention)
-        else:
+        if device == "cpu":
             # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
             flex_fn = flex_attention
+        else:
+            flex_fn = torch.compile(flex_attention)
         out = flex_fn(q, k, v, block_mask=block_mask)
 
         q_clone, k_clone, v_clone = (target.clone().detach() for target in (q, k, v))
@@ -235,7 +267,8 @@ class MicrobatchTests(TestCase):
             kwargs_chunk_spec=None,
         )
 
-        assert len(arg_split) == 4
+        if len(arg_split) != 4:
+            raise AssertionError(f"Expected 4 arg_split, got {len(arg_split)}")
 
         out_total_chunks = []
         for i in range(len(arg_split)):
@@ -263,7 +296,8 @@ class MicrobatchTests(TestCase):
             kwargs_chunk_spec=None,
         )
 
-        assert len(arg_split) == 4
+        if len(arg_split) != 4:
+            raise AssertionError(f"Expected 4 arg_split, got {len(arg_split)}")
 
         for i in range(len(arg_split)):
             self.assertIsNone(arg_split[i][3])
@@ -303,10 +337,7 @@ class MicrobatchTests(TestCase):
         print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    MicrobatchTests, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(MicrobatchTestsDevices, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

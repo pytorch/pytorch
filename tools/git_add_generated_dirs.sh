@@ -1,10 +1,10 @@
 #!/bin/sh
 
 # HOW TO USE:
-# 1) python setup.py ...
+# 1) pip install -e . --no-build-isolation
 # 2) tools/git_add_generated_dirs
 # 3) Edit codegen
-# 4) python setup.py ...
+# 4) pip install -e . --no-build-isolation
 # 5) git diff to see changes
 # 6) If satisfied: tools/git_reset_generated_dirs, commit, etc.
 #    If not satisfied: Go to 3)

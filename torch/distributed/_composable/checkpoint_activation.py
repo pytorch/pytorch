@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
 from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import (
-    _checkpoint_without_reentrant_generator,
+    _checkpoint_without_reentrant_generator_impl,
     _DEFAULT_DETERMINISM_MODE,
 )
 
@@ -14,7 +14,7 @@ from .contract import _State, contract
 
 
 @contextmanager
-def _no_hook(module: nn.Module, user_ctx: Optional[AbstractContextManager] = None):
+def _no_hook(module: nn.Module, user_ctx: AbstractContextManager | None = None):
     r"""
     Disable hooks installed by checkpoint to avoid unintentional recursion
     during backward recomputation.
@@ -31,7 +31,7 @@ def _no_hook(module: nn.Module, user_ctx: Optional[AbstractContextManager] = Non
 
 class _CheckpointState(_State):
     enable_hook: bool = False
-    _ac_generator: Optional[Generator[None, None, None]]
+    _ac_generator: Generator[None, None, None] | None
 
 
 @contract(_CheckpointState)
@@ -98,15 +98,15 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
                 else:
                     return nullcontext(), _no_hook(module)
 
-            gen = _checkpoint_without_reentrant_generator(
+            gen = _checkpoint_without_reentrant_generator_impl(
                 module,
-                preserve_rng_state,
-                context_fns,
-                determinism_check,
-                debug,
-                early_stop,
-                *args,
-                **kwargs,
+                args,
+                kwargs,
+                preserve_rng_state=preserve_rng_state,
+                context_fn=context_fns,
+                determinism_check=determinism_check,
+                debug=debug,
+                early_stop=early_stop,
             )
             checkpoint.state(module)._ac_generator = gen
             next(gen)
@@ -115,7 +115,8 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
         if checkpoint.state(module).enable_hook:
             try:
                 gen = checkpoint.state(module)._ac_generator
-                assert gen is not None
+                if gen is None:
+                    raise AssertionError
                 next(gen)
             except StopIteration:
                 pass

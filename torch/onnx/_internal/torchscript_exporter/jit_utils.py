@@ -71,7 +71,7 @@ class GraphContext:
                 as arguments to the `symbolic` definition.
             outputs: The number of outputs this operator returns.
                 By default an operator is assumed to return a single output.
-                If `outputs` is greater than one, this functions returns a tuple
+                If `outputs` is greater than one, this function returns a tuple
                 of output `Value`, representing each output of the ONNX operator
                 in order.
             kwargs: The attributes of the ONNX operator, whose keys are named
@@ -123,7 +123,7 @@ class GraphContext:
                 as arguments to the `symbolic` definition.
             outputs: The number of outputs this operator returns.
                 By default an operator is assumed to return a single output.
-                If `outputs` is greater than one, this functions returns a tuple
+                If `outputs` is greater than one, this function returns a tuple
                 of output `Value`, representing each output of the ONNX operator
                 in order.
             kwargs: The attributes of the ONNX operator, whose keys are named
@@ -165,7 +165,7 @@ def add_op_with_blocks(
         inputs: The inputs to the operator.
         outputs: The number of outputs this operator returns.
             By default an operator is assumed to return a single output.
-            If `outputs` is greater than one, this functions returns a tuple
+            If `outputs` is greater than one, this function returns a tuple
             of output `Value`, representing each output of the ONNX operator
             in order.
         n_blocks: The number of sub-blocks to create in the node.
@@ -215,7 +215,7 @@ def _add_op(
             as arguments to the `symbolic` definition.
         outputs: The number of outputs this operator returns.
             By default an operator is assumed to return a single output.
-            If `outputs` is greater than one, this functions returns a tuple
+            If `outputs` is greater than one, this function returns a tuple
             of output `Value`, representing each output of the ONNX operator
             in order.
         kwargs: The attributes of the ONNX operator, whose keys are named
@@ -275,7 +275,7 @@ def _create_node(
     n_outputs: int,
     shape_inference: bool = True,
 ) -> _C.Node:
-    """Creates an node 'domain_op', taking inputs and attributes."""
+    """Creates a node 'domain_op', taking inputs and attributes."""
     if isinstance(graph_or_block, _C.Graph):
         graph = graph_or_block
         node = graph.create(domain_op, inputs, n_outputs)
@@ -290,7 +290,10 @@ def _create_node(
                 node.addOutput()
 
     node_outputs = tuple(node.outputs())  # type: ignore[possibly-undefined]
-    assert len(node_outputs) == n_outputs
+    if len(node_outputs) != n_outputs:
+        raise AssertionError(
+            f"len(node_outputs)={len(node_outputs)} != n_outputs={n_outputs}"
+        )
 
     aten = domain_op.startswith("aten::")
 
@@ -315,7 +318,8 @@ def _is_onnx_list(value):
 
 def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
-    assert x.numel() == 1
+    if x.numel() != 1:
+        raise AssertionError(f"Expected numel() == 1, got {x.numel()}")
     return x[0]
 
 

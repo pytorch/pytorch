@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
-class TestEinsumtoPointwise(torch.nn.Module):
+class _TestEinsumtoPointwise(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -32,9 +32,10 @@ class TestKernelOptimization(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
-        for key1 in ref_dict.keys():
+        for key1 in ref_dict:
             key2 = "_orig_mod." + key1
-            assert key2 in res_dict, f"{key1} does not exist in traced module"
+            if key2 not in res_dict:
+                raise AssertionError(f"{key1} does not exist in traced module")
             if not torch.allclose(ref_dict[key1], res_dict[key2], rtol=rtol, atol=atol):
                 return False
         return True
@@ -66,7 +67,7 @@ class TestKernelOptimization(TestCase):
     @serialTest()  # Needs slightly more memory on GPUs
     def test_einsum_to_pointwise(self):
         counters.clear()
-        module = TestEinsumtoPointwise().to(GPU_TYPE)
+        module = _TestEinsumtoPointwise().to(GPU_TYPE)
         input = [
             torch.randn(4096, 9, 512, device=GPU_TYPE, requires_grad=True),
             torch.randn(9, 512, 96, device=GPU_TYPE, requires_grad=True),

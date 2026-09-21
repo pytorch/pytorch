@@ -19,13 +19,11 @@ from typing import NamedTuple
 # PyTorch directory root
 def scm_root() -> str:
     path = os.path.abspath(os.getcwd())
-    # pyrefly: ignore [bad-assignment]
     while True:
         if os.path.exists(os.path.join(path, ".git")):
             return path
         if os.path.isdir(os.path.join(path, ".hg")):
             return path
-        # pyrefly: ignore [bad-argument-type]
         n = len(path)
         path = os.path.dirname(path)
         if len(path) == n:
@@ -33,6 +31,14 @@ def scm_root() -> str:
 
 
 PYTORCH_ROOT = scm_root()
+
+
+def _default_num_workers() -> int | None:
+    # clang-tidy is memory hungry, so respect MAX_JOBS to cap parallelism.
+    max_jobs = os.environ.get("MAX_JOBS")
+    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
+        return int(max_jobs)
+    return os.cpu_count()
 
 
 # Returns '/usr/local/include/python<version number>'
@@ -138,6 +144,9 @@ include_dir = [
     "/usr/lib/llvm-11/include/openmp",
     get_python_include_dir(),
     os.path.join(PYTORCH_ROOT, "third_party/pybind11/include"),
+    # For header-only lints (no compile_commands.json entry) to resolve <ATen/...>.
+    os.path.join(PYTORCH_ROOT, "aten/src"),
+    PYTORCH_ROOT,
 ] + clang_search_dirs()
 for dir in include_dir:
     include_args += ["--extra-arg", f"-I{dir}"]
@@ -147,11 +156,28 @@ def check_file(
     filename: str,
     binary: str,
     build_dir: Path,
+    std: str | None,
 ) -> list[LintMessage]:
+    # Explicitly pass include path for linters that only check headers.
+    # build/aten/src covers generated <ATen/...> headers (Functions.h etc.).
+    build_include_args = include_args + [
+        "--extra-arg",
+        f"-I{build_dir}",
+        "--extra-arg",
+        f"-I{build_dir}/aten/src",
+    ]
+    cmd = [
+        binary,
+        f"-p={build_dir}",
+        *build_include_args,
+        filename,
+    ]
+    # Only add -- and -std flag if std is explicitly specified
+    if std is not None:
+        cmd.extend(["--", f"-std={std}"])
+
     try:
-        proc = run_command(
-            [binary, f"-p={build_dir}", *include_args, filename],
-        )
+        proc = run_command(cmd)
     except OSError as err:
         return [
             LintMessage(
@@ -218,9 +244,28 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--std",
+        default=None,
+        help=(
+            "C++ standard to use for compilation (e.g., c++17, c++20). "
+            "If not specified, uses the standard from compile_commands.json."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="verbose logging",
+    )
+    parser.add_argument(
+        "-j",
+        "--num-workers",
+        type=int,
+        default=None,
+        help=(
+            "number of clang-tidy processes to run in parallel. Defaults to the "
+            "MAX_JOBS environment variable if set, otherwise the CPU count. "
+            "Lower this to reduce peak memory usage (clang-tidy is memory hungry)."
+        ),
     )
     parser.add_argument(
         "filenames",
@@ -228,6 +273,8 @@ def main() -> None:
         help="paths to lint",
     )
     args = parser.parse_args()
+
+    num_workers = args.num_workers or _default_num_workers()
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
@@ -268,7 +315,7 @@ def main() -> None:
     binary_path = os.path.abspath(args.binary)
 
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=num_workers,
         thread_name_prefix="Thread",
     ) as executor:
         futures = {
@@ -277,6 +324,7 @@ def main() -> None:
                 filename,
                 binary_path,
                 abs_build_dir,
+                args.std,
             ): filename
             for filename in args.filenames
         }

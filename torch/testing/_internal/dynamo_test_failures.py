@@ -24,10 +24,9 @@ git will merge changes easier.
 import logging
 import os
 import sys
-from typing import Optional
 
 
-def find_test_dir() -> Optional[str]:
+def find_test_dir() -> str | None:
     # Find the path to the dynamo expected failure and skip files.
     from os.path import abspath, basename, dirname, exists, join, normpath
 

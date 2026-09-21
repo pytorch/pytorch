@@ -63,6 +63,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 hu.assert_deadline_disabled()
@@ -72,6 +73,8 @@ import numpy as np
 
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @override_qengines
     def _test_reference_module_impl(
         self,
@@ -334,6 +337,8 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
 
 class TestQuantizeEagerPTQStatic(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
@@ -996,7 +1001,10 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
             @classmethod
             def from_float(cls, float_module):
-                assert hasattr(float_module, "qconfig")
+                if not hasattr(float_module, "qconfig"):
+                    raise AssertionError(
+                        f"float_module {type(float_module).__name__} must have qconfig"
+                    )
                 observed = cls(float_module.conv)
                 observed.qconfig = float_module.qconfig
                 return observed
@@ -1011,8 +1019,14 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
             @classmethod
             def from_observed(cls, observed_module):
-                assert hasattr(observed_module, "qconfig")
-                assert hasattr(observed_module, "activation_post_process")
+                if not hasattr(observed_module, "qconfig"):
+                    raise AssertionError(
+                        f"observed_module {type(observed_module).__name__} must have qconfig"
+                    )
+                if not hasattr(observed_module, "activation_post_process"):
+                    raise AssertionError(
+                        f"observed_module {type(observed_module).__name__} must have activation_post_process"
+                    )
                 observed_module.conv.activation_post_process = (
                     observed_module.activation_post_process
                 )
@@ -1224,6 +1238,8 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
         make sure it is swapped to nnqd.Linear which is the quantized version of

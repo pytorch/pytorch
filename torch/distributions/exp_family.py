@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Union
 
 import torch
 from torch import Tensor
@@ -12,7 +11,7 @@ __all__ = ["ExponentialFamily"]
 class ExponentialFamily(Distribution):
     r"""
     ExponentialFamily is the abstract base class for probability distributions belonging to an
-    exponential family, whose probability mass/density function has the form is defined below
+    exponential family, whose probability mass/density function is defined below
 
     .. math::
 
@@ -57,7 +56,7 @@ class ExponentialFamily(Distribution):
         """
         Method to compute the entropy using Bregman divergence of the log normalizer.
         """
-        result: Union[Tensor, float] = -self._mean_carrier_measure
+        result: Tensor | float = -self._mean_carrier_measure
         nparams = [p.detach().requires_grad_() for p in self._natural_params]
         lg_normal = self._log_normalizer(*nparams)
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)

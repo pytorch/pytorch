@@ -17,7 +17,10 @@ if TYPE_CHECKING:
 POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "_collections",
     "builtins",
+    "copy",
     "functools",
+    "heapq",
+    "io",
     "itertools",
     "operator",
     "os",
@@ -25,6 +28,8 @@ POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "sys",
     "fx",
     "tensor",
+    "torch_c_nn",
+    "traceback",
 )
 if python_pytree._cxx_pytree_dynamo_traceable:
     POLYFILLED_MODULE_NAMES += ("pytree",)

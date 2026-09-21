@@ -4,7 +4,7 @@ import re
 import string
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from types import ModuleType
 
 import torch
@@ -64,9 +64,8 @@ def _validate_tag(tag: str):
     parts = tag.split(".")
     t = _TAGS
     for part in parts:
-        assert set(part) <= set(
-            string.ascii_lowercase + "-"
-        ), f"Tag contains invalid characters: {part}"
+        if not set(part) <= set(string.ascii_lowercase + "-"):
+            raise AssertionError(f"Tag contains invalid characters: {part}")
         if part in t:
             t = t[part]
         else:
@@ -80,11 +79,11 @@ class ExportCase:
     model: torch.nn.Module
     name: str
     example_kwargs: dict[str, Any] = field(default_factory=dict)
-    extra_args: Optional[ArgsType] = None  # For testing graph generalization.
+    extra_args: ArgsType | None = None  # For testing graph generalization.
     # Tags associated with the use case. (e.g dynamic-shape, escape-hatch)
     tags: set[str] = field(default_factory=set)
     support_level: SupportLevel = SupportLevel.SUPPORTED
-    dynamic_shapes: Optional[dict[str, Any]] = None
+    dynamic_shapes: dict[str, Any] | None = None
 
     def __post_init__(self):
         check_inputs_type(self.example_args, self.example_kwargs)
@@ -128,9 +127,10 @@ def _make_export_case(m, name, configs):
 
     if "description" not in configs:
         # Fallback to docstring if description is missing.
-        assert (
-            m.__doc__ is not None
-        ), f"Could not find description or docstring for export case: {m}"
+        if m.__doc__ is None:
+            raise AssertionError(
+                f"Could not find description or docstring for export case: {m}"
+            )
         configs = {**configs, "description": m.__doc__}
     # pyrefly: ignore [bad-argument-type]
     return ExportCase(**{**configs, "model": m, "name": name})
@@ -147,7 +147,8 @@ def export_case(**kwargs):
         if module in _MODULES:
             raise RuntimeError("export_case should only be used once per example file.")
 
-        assert module is not None
+        if module is None:
+            raise AssertionError("module must not be None")
         _MODULES.add(module)
         module_name = module.__name__.split(".")[-1]
         case = _make_export_case(m, module_name, configs)
@@ -162,7 +163,8 @@ def export_rewrite_case(**kwargs):
         configs = kwargs
 
         parent = configs.pop("parent")
-        assert isinstance(parent, ExportCase)
+        if not isinstance(parent, ExportCase):
+            raise AssertionError(f"expected ExportCase, got {type(parent)}")
         key = parent.name
         if key not in _EXAMPLE_REWRITE_CASES:
             _EXAMPLE_REWRITE_CASES[key] = []

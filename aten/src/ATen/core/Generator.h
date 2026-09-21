@@ -62,13 +62,7 @@ struct TORCH_API Generator {
     TORCH_CHECK(impl_.get(), "GeneratorImpl with nullptr is not supported");
   }
 
-  bool operator==(const Generator& rhs) const {
-    return this->impl_ == rhs.impl_;
-  }
-
-  bool operator!=(const Generator& rhs) const {
-    return !((*this) == rhs);
-  }
+  bool operator==(const Generator& rhs) const = default;
 
   bool defined() const {
     return static_cast<bool>(impl_);
@@ -108,6 +102,10 @@ struct TORCH_API Generator {
   void graphsafe_set_state(const Generator& new_state);
 
   Generator graphsafe_get_state() const;
+
+  // See c10::GeneratorImpl::philox_state.
+  std::tuple<at::Tensor, at::Tensor, at::Tensor> philox_state(
+      uint64_t increment);
 
   std::mutex& mutex() {
     return impl_->mutex_;

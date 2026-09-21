@@ -4,7 +4,6 @@ import logging
 import warnings
 from collections import OrderedDict
 from collections.abc import Iterable
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -120,7 +119,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         overall_group_size = dist.get_world_size(group=self.process_group)
         if list(period_group_size_dict.values())[-1] != overall_group_size:
             raise ValueError(
-                f"The last value in arg ``period_process_group_dict`` {list(period_group_size_dict.values())[-1]} "
+                f"The last value in arg ``period_group_size_dict`` {list(period_group_size_dict.values())[-1]} "
                 f"must be equal to the size of arg ``process_group`` {overall_group_size}."
             )
 
@@ -146,7 +145,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def _find_process_group(self):
         """
-        Return a process group as the value of an ``period_process_group_dict`` entry.
+        Return a process group as the value of a ``period_process_group_dict`` entry.
 
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
         then the returned process group is the one corresponding to the largest period,
@@ -160,9 +159,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def average_parameters(
         self,
-        params: Union[
-            Iterable[torch.nn.Parameter], Iterable[dict[str, torch.nn.Parameter]]
-        ],
+        params: Iterable[torch.nn.Parameter] | Iterable[dict[str, torch.nn.Parameter]],
     ):
         """
         Averages parameters or parameter groups of an optimizer.

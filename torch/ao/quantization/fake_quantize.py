@@ -134,7 +134,7 @@ class FakeQuantize(FakeQuantizeBase):
             clamp(round(x / scale + zero_point), quant_min, quant_max) - zero_point
         ) * scale
 
-    * :attr:`is_dynamic` indicates whether the fake quantie is a placeholder for dynamic quantization
+    * :attr:`is_dynamic` indicates whether the fake quantize is a placeholder for dynamic quantization
       operators (choose_qparams -> q -> dq) or static quantization operators (q -> dq)
 
     * :attr:`scale` defines the scale factor used for quantization.
@@ -186,10 +186,10 @@ class FakeQuantize(FakeQuantizeBase):
                 dtype = getattr(getattr(observer, "p", {}), "keywords", {}).get(
                     "dtype", dtype
                 )
-            # pyrefly: ignore [bad-argument-type]
+
             if torch.iinfo(dtype).min > quant_min:
                 raise AssertionError("quant_min out of bound")
-            # pyrefly: ignore [bad-argument-type]
+
             if quant_max > torch.iinfo(dtype).max:
                 raise AssertionError("quant_max out of bound")
             observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})

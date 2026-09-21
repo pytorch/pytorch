@@ -3,7 +3,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import matplotlib.pyplot as plt
 from scipy.stats import gmean
@@ -242,8 +242,8 @@ def get_backend_colors() -> dict[str, str]:
 
 def visualize_comparison(
     profiling_results: dict[str, list[Performance]],
-    title: Optional[str] = None,
-    output_path: Optional[str] = None,
+    title: str | None = None,
+    output_path: str | None = None,
 ) -> None:
     """
     Create a single memory_bandwidth comparison plot from profiling results.

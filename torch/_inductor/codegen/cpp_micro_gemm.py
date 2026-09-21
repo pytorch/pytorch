@@ -4,7 +4,6 @@ import operator
 import sys
 from collections.abc import Callable
 from enum import Enum
-from typing import Optional
 
 import torch
 
@@ -14,9 +13,10 @@ from ..cpu_vec_isa import (
     VecAMX,
     VecAVX2,
     VecAVX512,
+    VecAVX512VNNI,
     VecISA,
     VecNEON,
-    VecSVE256,
+    VecSVE,
 )
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
@@ -84,7 +84,8 @@ inline void {{kernel_name}}(
     ) -> None:
         self.name = name
         self.input_dtype = input_dtype
-        assert input2_dtype is not None
+        if input2_dtype is None:
+            raise AssertionError("expected input2_dtype to be set, got None")
         self.input2_dtype = input2_dtype
         self.output_dtype = output_dtype
         self.compute_dtype = compute_dtype
@@ -94,9 +95,18 @@ inline void {{kernel_name}}(
 
     def get_common_options(self):
         if self.input_dtype in [torch.uint8, torch.int8]:
-            assert self.compute_dtype == torch.int32
-            assert self.output_dtype == torch.int32
-            assert self.input2_dtype == torch.int8
+            if self.compute_dtype != torch.int32:
+                raise AssertionError(
+                    f"expected compute_dtype == torch.int32, got {self.compute_dtype}"
+                )
+            if self.output_dtype != torch.int32:
+                raise AssertionError(
+                    f"expected output_dtype == torch.int32, got {self.output_dtype}"
+                )
+            if self.input2_dtype != torch.int8:
+                raise AssertionError(
+                    f"expected input2_dtype == torch.int8, got {self.input2_dtype}"
+                )
         return {
             "torch": torch,
             "kernel_name": self.name,
@@ -232,7 +242,7 @@ class CppMicroGemmConfig:
     compute_dtype: torch.dtype
     vec_isa_cls: type[VecISA]
     register_blocking: GemmBlocking
-    extra_check: Optional[Callable[..., bool]] = None
+    extra_check: Callable[..., bool] | None = None
 
 
 micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
@@ -240,10 +250,10 @@ micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 def register_micro_gemm(*configs):
     def inner(cls):
-        assert cls not in micro_gemm_configs, (
-            f"Duplicate micro_gemm registration for {cls}"
-        )
-        assert len(configs) > 0, f"No micro_gemm configs provided for {cls}"
+        if cls in micro_gemm_configs:
+            raise AssertionError(f"Duplicate micro_gemm registration for {cls}")
+        if len(configs) <= 0:
+            raise AssertionError(f"No micro_gemm configs provided for {cls}")
         micro_gemm_configs[cls] = list(configs)
         return cls
 
@@ -426,7 +436,7 @@ def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **
         compute_dtype=torch.float,
     ),
     *generate_gemm_config(
-        VecSVE256,
+        VecSVE,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
         input2_dtype=torch.float,
@@ -688,7 +698,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     //   which introduces an additional transpose overhead of [K, N] compared to the non-transpose version.
     // Second implementation:
     //   Directly perform inner product calculation in sub-blocks,
-    //   which introduces an additional vector reduction of [M, N] compared to the non-tranpose version.
+    //   which introduces an additional vector reduction of [M, N] compared to the non-transpose version.
     // Therefore, when M * N / (K * N) is large, the first implementation has better performance.
     {%- if tail_n %}
     if (K % Vectorized::size() == 0 && N % Vectorized::size() == 0 && 24 * BLOCK_M > K) {
@@ -909,9 +919,13 @@ inline void {{kernel_name}}_transpose_b_kernel(
         # only implemented on these platforms
         if trans_b:
             vec_isa = pick_vec_isa()
-            assert issubclass(vec_isa.__class__, VecAVX512) or issubclass(
-                vec_isa.__class__, VecAVX2
-            )
+            if not (
+                issubclass(vec_isa.__class__, VecAVX512)
+                or issubclass(vec_isa.__class__, VecAVX2)
+            ):
+                raise AssertionError(
+                    f"trans_b requires AVX512 or AVX2 vec ISA, got {vec_isa.__class__}"
+                )
         self.trans_b = trans_b
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
@@ -958,6 +972,186 @@ inline void {{kernel_name}}_transpose_b_kernel(
         return result
 
 
+def check_vnni_extra(config, m, n, k, alpha, num_threads, **kwargs):
+    if not (config.input_dtype == torch.uint8 and config.input2_dtype == torch.int8):
+        raise AssertionError(
+            "expected input_dtype == torch.uint8 and input2_dtype == torch.int8, "
+            f"got {config.input_dtype}, {config.input2_dtype}"
+        )
+    vnni_size = 4
+    return k % vnni_size == 0
+
+
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAVX512VNNI,
+        # (block_m, block_n, block_k)
+        [(6, 64, 4)],
+        input_dtype=torch.uint8,
+        input2_dtype=torch.int8,
+        output_dtype=torch.int32,
+        compute_dtype=torch.int32,
+        extra_check=check_vnni_extra,
+    ),
+)
+class CppMicroGemmAVX512VNNI(CppMicroGemm):
+    """
+    This class generates the code for micro gemm using AVX512 VNNI instructions for compute.
+    It supports u8s8s32 GEMM only.
+    AVX512_VNNI ISA has been available since the 3rd gen of Intel Xeon.
+    """
+
+    TEMPLATE_ENTRY = r"""
+{{declare_kernel}} {
+    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    {{kernel.assert_function}}(K % {{vnni_size}} == 0, "K dimension must be multiple of {{vnni_size}}");
+    constexpr int64_t M_BLOCK = {{block_m}};
+    const int64_t M_TAIL = M % M_BLOCK;
+    const int64_t M_MAIN = M - M_TAIL;
+    for (int64_t m = 0; m < M_MAIN; m += M_BLOCK) {
+        for (int64_t n = 0; n < N; n += {{block_n}}) {
+            {{kernel_name}}_kernel<M_BLOCK, {{block_n}}, accum>(
+                A + m * lda,
+                B + n,
+                C + m * ldc + n,
+                K,
+                lda,
+                ldb,
+                ldc
+            );
+        }
+    }
+    if (M_TAIL > 0) {
+        switch (M_TAIL) {
+{%- for m_tail in range(block_m - 1, 0, -1) %}
+            case ({{m_tail}}):
+                for (int64_t n = 0; n < N; n += {{block_n}}) {
+                    {{kernel_name}}_kernel<{{m_tail}}, {{block_n}}, accum>(
+                        A + M_MAIN * lda,
+                        B + n,
+                        C + M_MAIN * ldc + n,
+                        K,
+                        lda,
+                        ldb,
+                        ldc
+                    );
+                }
+                break;
+{%- endfor %}
+            default:
+                {{kernel.assert_function}}(false, "Unsupported M_TAIL");
+        } // switch M_TAIL
+    } // if M_TAIL
+}
+"""
+
+    TEMPLATE_KERNEL = r"""
+template <int64_t M, int64_t N, bool accum>
+inline void {{kernel_name}}_kernel(
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    {{output_t}}* {{restrict_keyword}} C,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc
+) {
+    constexpr const int COLS = N / {{vec_len}};
+    __m512i va;
+    __m512i vb[COLS];
+    __m512i vc[M * COLS];
+
+    c10::ForcedUnroll<M * COLS>{}([&](auto i) { vc[i] = _mm512_setzero_epi32(); });
+
+    auto compute = [&](auto i, int k) {
+        constexpr const int row = i / COLS;
+        constexpr const int col = i % COLS;
+
+        if constexpr (col == 0) {
+            va = _mm512_set1_epi32(*(int32_t*)(A + row * lda + k));
+        }
+
+        if constexpr (row == 0) {
+            // B block in VNNI layout: [K / {{vnni_size}}, N, {{vnni_size}}]
+            int64_t offset = k * ldb + col * {{vec_len}} * {{vnni_size}};
+            vb[col] = _mm512_loadu_si512((__m512i const*)(B + offset));
+        }
+        vc[i] = _mm512_dpbusd_epi32(vc[i], va, vb[col]);
+    };
+
+    // Accumulate along k
+    constexpr const int k_unroll = 2;
+    int k = 0;
+    int k_limit = K / {{vnni_size}} / k_unroll;
+    for (; k < k_limit; k++) {
+        c10::ForcedUnroll<k_unroll>{}(
+            [&](auto i) {
+                c10::ForcedUnroll<M * COLS>{}(compute, {{vnni_size}} * (k * k_unroll + i));
+            }
+        );
+    }
+    k *= {{vnni_size}} * k_unroll;
+    for (; k < K; k += {{vnni_size}}) {
+        c10::ForcedUnroll<M * COLS>{}(compute, k);
+    }
+
+    // Store to C
+    auto store_c = [&](auto i) {
+        constexpr const int row = i / COLS;
+        constexpr const int col = i % COLS;
+        if constexpr (accum) {
+            __m512i vc_old = _mm512_loadu_si512((__m512i const*)(C + row * ldc + col * {{vec_len}}));
+            vc[i] = _mm512_add_epi32(vc[i], vc_old);
+        }
+        _mm512_storeu_si512((__m512i*)(C + row * ldc + col * {{vec_len}}), vc[i]);
+    };
+    c10::ForcedUnroll<M * COLS>{}(store_c);
+}
+"""
+
+    def __init__(
+        self,
+        name,
+        input_dtype,
+        input2_dtype,
+        output_dtype,
+        compute_dtype,
+        register_blocking,
+        alpha=1,
+    ) -> None:
+        super().__init__(
+            name,
+            input_dtype,
+            input2_dtype,
+            output_dtype,
+            compute_dtype,
+            register_blocking,
+            alpha,
+        )
+        if not (input_dtype == torch.uint8 and input2_dtype == torch.int8):
+            raise AssertionError(
+                f"Only u8s8s32 GEMM is supported by AVX512VNNI microkernel, got A:{input_dtype}, B:{input2_dtype}, C:{output_dtype}."
+            )
+
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
+        options = {
+            "declare_kernel": self.get_kernel_declaration(),
+            "kernel": kernel,
+            "block_m": self.register_blocking.block_m,
+            "block_n": self.register_blocking.block_n,
+            "block_k": self.register_blocking.block_k,
+            "restrict_keyword": get_restrict_keyword(),
+            "vec_len": 16,  # = 512 / 32 for C
+            **self.get_common_options(),
+        }
+        return KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
+            options
+        ) + KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
+
+    def get_b_layout(self):
+        return LayoutType.VNNI4
+
+
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     vnni_size = 4 if config.input_dtype in [torch.uint8, torch.int8] else 2
@@ -967,7 +1161,8 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     # We need avx512_bf16 to dequant int8 to bf16
     vec_isa = kwargs.get("vec_isa")
-    assert vec_isa is not None
+    if vec_isa is None:
+        raise AssertionError("expected vec_isa to be set, got None")
     return vec_isa.is_avx512_bf16_supported() and check_amx_extra(
         config, m, n, k, alpha, num_threads, **kwargs
     )
@@ -975,9 +1170,14 @@ def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 
 # amx_fp16 need to be checked separately since it is not always supported when amx is supported
 def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
-    assert config.input_dtype == torch.float16 and config.output_dtype == torch.float
+    if not (config.input_dtype == torch.float16 and config.output_dtype == torch.float):
+        raise AssertionError(
+            "expected input_dtype == torch.float16 and output_dtype == torch.float, "
+            f"got {config.input_dtype}, {config.output_dtype}"
+        )
     vec_isa = kwargs.get("vec_isa")
-    assert vec_isa is not None
+    if vec_isa is None:
+        raise AssertionError("expected vec_isa to be set, got None")
     vnni_size = 2
     return vec_isa.is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
 
@@ -1276,12 +1476,18 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
         block_m, block_n, block_k = self.register_blocking
-        assert block_m % 16 == 0, "Only support block_m % 16 == 0 for AMX"
-        assert block_n % 16 == 0, "Only support block_n % 16 == 0 for AMX"
+        if block_m % 16 != 0:
+            raise AssertionError("Only support block_m % 16 == 0 for AMX")
+        if block_n % 16 != 0:
+            raise AssertionError("Only support block_n % 16 == 0 for AMX")
         if self.input_dtype in [torch.uint8, torch.int8]:
-            assert block_k == 64, "Only support block_k = 64 for AMX INT8"
+            if block_k != 64:
+                raise AssertionError("Only support block_k = 64 for AMX INT8")
         else:
-            assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
+            if block_k != 32:
+                raise AssertionError(
+                    "Only support block_k = 32 for AMX Bfloat16/Float16"
+                )
         num_columns = block_n // 16
         options = {
             "declare_kernel": self.get_kernel_declaration(),
@@ -1335,7 +1541,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 # extra check for CppMicroBrgemm
 def check_brgemm_extra(config, m, n, k, alpha, num_threads, **kwargs):
-    assert config.input_dtype == torch.half and config.output_dtype == torch.float
+    if not (config.input_dtype == torch.half and config.output_dtype == torch.float):
+        raise AssertionError(
+            "expected input_dtype == torch.half and output_dtype == torch.float, "
+            f"got {config.input_dtype}, {config.output_dtype}"
+        )
     vnni_size = 2
     # use brgemm for Half when amx_fp16 is supported
     return torch.cpu._is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
@@ -1404,7 +1614,11 @@ class CppMicroBrgemm(CppMicroGemm):
         return "at::native::cpublas::brgemm_release();"
 
     def get_b_layout(self):
-        assert self.input_dtype == torch.half and torch.cpu._is_amx_fp16_supported()
+        if not (self.input_dtype == torch.half and torch.cpu._is_amx_fp16_supported()):
+            raise AssertionError(
+                "expected input_dtype == torch.half and AMX fp16 support, "
+                f"got {self.input_dtype}"
+            )
         return LayoutType.VNNI2
 
 
@@ -1412,7 +1626,8 @@ def check_woq_int4_extra(config, m, n, k, alpha, num_threads, **kwargs):
     if alpha != 1:
         return False
     q_group_size = kwargs.get("q_group_size")
-    assert q_group_size is not None
+    if q_group_size is None:
+        raise AssertionError("expected q_group_size to be set, got None")
     if (
         q_group_size not in [32, 64, 128]
         or k % q_group_size != 0
@@ -1484,7 +1699,7 @@ class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
                     break;
                 {%- endfor %}
                 default:
-                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                    {{kernel.assert_function}}(false, "Unsupported block_m");
                 }
             }
         }
@@ -1656,8 +1871,10 @@ inline void {{kernel_name}}_kernel(
         )
 
     def get_kernel_extra_args(self, **kwargs) -> list[str]:
-        assert "kernel" in kwargs
-        assert "qscale_and_zeros" in kwargs
+        if "kernel" not in kwargs:
+            raise AssertionError("expected 'kernel' in kwargs")
+        if "qscale_and_zeros" not in kwargs:
+            raise AssertionError("expected 'qscale_and_zeros' in kwargs")
         kernel = kwargs["kernel"]
         qscale_and_zeros = kwargs["qscale_and_zeros"]
         return [
@@ -1901,8 +2118,10 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
         )
 
     def get_kernel_extra_args(self, **kwargs) -> list[str]:
-        assert "kernel" in kwargs
-        assert "qscale_and_zeros" in kwargs
+        if "kernel" not in kwargs:
+            raise AssertionError("expected 'kernel' in kwargs")
+        if "qscale_and_zeros" not in kwargs:
+            raise AssertionError("expected 'qscale_and_zeros' in kwargs")
         kernel = kwargs["kernel"]
         qscale_and_zeros = kwargs["qscale_and_zeros"]
         return [
@@ -1930,7 +2149,7 @@ def create_micro_gemm(
     num_threads=-1,
     use_ref=True,
     q_group_size=None,
-) -> Optional[CppMicroGemm]:
+) -> CppMicroGemm | None:
     """
     Based on the provided info, try to find the config of the micro-kernel that would
     deliver the best performance in terms of lower latency for this case.
@@ -1959,13 +2178,16 @@ def create_micro_gemm(
         m_threshold = 5
         return m < m_threshold
 
-    assert isinstance(n, int) or n.is_number, n
-    assert isinstance(k, int) or k.is_number, k
+    if not (isinstance(n, int) or n.is_number):
+        raise AssertionError(n)
+    if not (isinstance(k, int) or k.is_number):
+        raise AssertionError(k)
     from ..utils import has_free_symbols
 
     dynamic_M = has_free_symbols((m,))
-    m = V.graph.sizevars.size_hint(m, fallback=1) if dynamic_M else m
-    assert isinstance(m, int) or m.is_number, m
+    m = V.graph.sizevars.optimization_hint(m, fallback=1)
+    if not (isinstance(m, int) or m.is_number):
+        raise AssertionError(m)
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
@@ -2005,12 +2227,14 @@ def create_micro_gemm(
                 if config.vec_isa_cls == VecAMX and skip_amx_kernel_for_woq(dynamic_M):
                     continue
                 # Criteria on the ranking of configurations
-                # 1. ISA: AMX > VEC
+                # 1. ISA: AMX > VNNI > VEC
                 # 2. Dividable by block sizes (block_m, block_n, block_k)
                 # 3. Number of mxn blocks is large enough to occupy all the threads
                 # 4. Register blocks are larger
                 isa_score = 0
                 if config.vec_isa_cls == VecAMX:
+                    isa_score += 2
+                elif config.vec_isa_cls == VecAVX512VNNI:
                     isa_score += 1
                 dividable_score = 0
                 if m % block_m == 0:

@@ -9,13 +9,22 @@
 .. automodule:: torch.profiler
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.profiler.profiler
+
+.. autofunction:: schedule
+
+.. autofunction:: supported_activities
+
+.. autofunction:: tensorboard_trace_handler
+```
+
 ## API Reference
 ```{eval-rst}
-.. autoclass:: torch.profiler._KinetoProfile
-  :members:
 
 .. autoclass:: torch.profiler.profile
   :members:
+  :inherited-members:
 
 .. autoclass:: torch.profiler.ProfilerAction
   :members:
@@ -23,9 +32,11 @@
 .. autoclass:: torch.profiler.ProfilerActivity
   :members:
 
-.. autofunction:: torch.profiler.schedule
+.. autoclass:: torch.profiler.CuspyConfig
 
-.. autofunction:: torch.profiler.tensorboard_trace_handler
+.. autoclass:: torch.profiler.ProfilerActivityConfig
+
+.. autoclass:: torch.profiler.PerformanceMetricsConfig
 ```
 
 ## Intel Instrumentation and Tracing Technology APIs
@@ -38,6 +49,8 @@
 .. autofunction:: torch.profiler.itt.range_push
 
 .. autofunction:: torch.profiler.itt.range_pop
+
+.. autofunction:: torch.profiler.itt.range
 ```
 
 <!-- This module needs to be documented. Adding here in the meantime

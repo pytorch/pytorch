@@ -223,14 +223,14 @@ std::pair<IValue, IValue> getFunctionTuple(
           .append(",")
           .append(value_type_str)
           .append("]");
-      types.emplace_back(dict_str);
+      types.emplace_back(std::move(dict_str));
       continue;
     } else if (t->kind() == TypeKind::TupleType) {
       std::string named_tuple_str =
           get_named_tuple_str_or_default(compilation_unit, t, type_str);
-      types.emplace_back(named_tuple_str);
+      types.emplace_back(std::move(named_tuple_str));
       continue;
-    } else if (type_str.find(torch_prefix) == 0) {
+    } else if (type_str.starts_with(torch_prefix)) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
@@ -239,7 +239,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
           type_str);
     }
-    types.emplace_back(type_str);
+    types.emplace_back(std::move(type_str));
   }
 
   // since the register location is embedded into the bytecode, pass the
@@ -276,7 +276,7 @@ std::pair<IValue, IValue> getFunctionTuple(
         This part adds the argument's name, type and default_value in
         `bytecode.pkl` This has to be consistent with the `code/` directory
         which has annotated py code of the entire module. `type_printer` uses
-        `TypeNameUniquer` to get the managled name of the argument. This helps
+        `TypeNameUniquer` to get the mangled name of the argument. This helps
         in having the right object reference when a class method is called using
         the `self` argument.
 
@@ -553,7 +553,7 @@ void ScriptModuleSerializer::writeArchive(
       continue;
     }
     WriteableTensorData writable_td = getWriteableTensorData(td);
-    if (use_storage_context && serialized_tensors.count(tensor_name)) {
+    if (use_storage_context && serialized_tensors.contains(tensor_name)) {
       // storage has been serialized already, skip
       continue;
     }
@@ -586,7 +586,7 @@ void ScriptModuleSerializer::writeExtraFiles(
     for (const auto& kv : hook_files) {
       // Checks if the hooked file is already written in extra files,
       //   if so, skips it and warns
-      if (extra_files.find(kv.first) != extra_files.end()) {
+      if (extra_files.contains(kv.first)) {
         TORCH_WARN_ONCE(
             "An extra files hook attempted to write ",
             kv.first,
@@ -604,7 +604,7 @@ void ScriptModuleSerializer::writeExtraFiles(
 void ScriptModuleSerializer::updateSourceRangeTags(
     const SourceRangeRecords& ranges) {
   for (const auto& range : ranges) {
-    if (source_range_tags_.find(range.range) == source_range_tags_.end()) {
+    if (!source_range_tags_.contains(range.range)) {
       source_range_tags_[range.range] = current_source_range_tag_;
       current_source_range_tag_++;
     }
@@ -697,7 +697,7 @@ void ScriptModuleSerializer::writeByteCode(
     // Note that stripping off debug map will not strip off
     // debug handles.
     // The reason we save debug handles conditionally is so that
-    // we dont end up with a model that has debug handles but has not
+    // we don't end up with a model that has debug handles but has not
     // debug map to correlate debug handles with.
     // Once we have a model with both handles and debug map, we can
     // strip off debug map and have a lean model served to production.
@@ -712,7 +712,7 @@ void ScriptModuleSerializer::writeByteCode(
     // For delegated backends get source ranges that are in the debug info
     // map. Since delegated backend replace original module with lowered
     // module we will not serialize original module's code which is what would
-    // have contained source range. Since we dont have that anymore, extract
+    // have contained source range. Since we don't have that anymore, extract
     // source ranges out of delegated module and store in a separate archive.
     // Note that we must do this first because in order to serialize inlined
     // CS appropriate source_range_tags must have been generated.
@@ -771,7 +771,7 @@ std::optional<std::string> type_printer(
 
 void ScriptModuleSerializer::convertNamedType(
     const c10::NamedTypePtr& class_type) {
-  if (converted_types_.count(class_type)) {
+  if (converted_types_.contains(class_type)) {
     return;
   }
   converted_types_.insert(class_type);
@@ -872,7 +872,7 @@ void ExportModule(
     } else {
       message << "Error while opening file: " << errno << '\n';
     }
-    TORCH_CHECK(false, message.str());
+    TORCH_CHECK(false, std::move(message).str());
   }
   ExportModule(
       module,
@@ -909,9 +909,8 @@ DetachedBuffer::UniqueDetachedBuffer save_jit_module_to_bytes(
 void save_jit_module_to_write_func(
     const Module& module,
     const ExtraFilesMap& extra_files,
-    bool save_mobile_debug_info,
+    [[maybe_unused]] bool save_mobile_debug_info,
     const std::function<size_t(const void*, size_t)>& writer_func) {
-  (void)save_mobile_debug_info;
   auto buffer = save_jit_module_to_bytes(module, extra_files);
   writer_func(buffer->data(), buffer->size());
 }

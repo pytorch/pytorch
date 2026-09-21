@@ -101,9 +101,6 @@ def flags(enabled=None, strategy=None):
 
 
 class OptEinsumModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     global enabled
     enabled = ContextProp(_get_enabled, _set_enabled)
     global strategy

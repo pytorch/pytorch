@@ -22,7 +22,10 @@ collapse_in_out_dim(at::Tensor input, int64_t dim, at::Tensor weight) {
   // [BM, N]
   std::vector<int64_t> output_reshaped_size{
       input_reshaped_size[0], weight.size(0)};
-  return {input_reshaped_size, output_size, output_reshaped_size};
+  return {
+      std::move(input_reshaped_size),
+      std::move(output_size),
+      std::move(output_reshaped_size)};
 }
 
 Tensor linear_pointwise(

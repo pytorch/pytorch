@@ -1,12 +1,9 @@
 #include <torch/optim/sgd.h>
 
-#include <torch/csrc/autograd/variable.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
-#include <torch/types.h>
 #include <torch/utils.h>
 
-#include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 #include <functional>

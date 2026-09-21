@@ -5,7 +5,7 @@ set -eux
 torch_version=$(unzip -p torch-* '**/METADATA' | grep '^Version: ' | cut -d' ' -f2)
 nightly=$(echo ${torch_version} | cut -d'.' -f4)
 
-# Copied from .ci/manywheel/build_common.sh
+# Copied from .ci/wheel/linux/build_common.sh
 make_wheel_record() {
   fpath=$1
   if echo $fpath | grep RECORD >/dev/null 2>&1; then
@@ -37,7 +37,7 @@ change_wheel_version() {
   # Update the version in METADATA and its SHA256 hash
   sed -i "s/Version: ${f_version}/Version: ${t_version}/g" METADATA
   # then add PyTorch nightly dependency of vLLM
-  if [[ "${package}" == vllm ]] || [[ "${package}" == xformers ]]; then
+  if [[ "${package}" == vllm ]]; then
     sed -i "/License-File/a\Requires-Dist: torch==${torch_version}" METADATA
   fi
   sed -i '/METADATA,sha256/d' RECORD
@@ -88,7 +88,7 @@ repackage_wheel() {
 ${PYTHON_EXECUTABLE} -mpip install wheel==0.45.1
 
 pushd externals/vllm/wheels
-for package in xformers flashinfer-python vllm; do
+for package in vllm; do
   repackage_wheel $package
 done
 popd

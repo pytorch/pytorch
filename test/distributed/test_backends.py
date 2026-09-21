@@ -18,11 +18,25 @@ class TestMiscCollectiveUtils(TestCase):
         Test device to backend mapping
         """
         if "cuda" in device:
-            assert dist.get_default_backend_for_device(device) == "nccl"
+            if dist.get_default_backend_for_device(device) != "nccl":
+                raise AssertionError(
+                    f"Expected nccl, got {dist.get_default_backend_for_device(device)}"
+                )
         elif "cpu" in device:
-            assert dist.get_default_backend_for_device(device) == "gloo"
-        elif "hpu" in device:
-            assert dist.get_default_backend_for_device(device) == "hccl"
+            if dist.get_default_backend_for_device(device) != "gloo":
+                raise AssertionError(
+                    f"Expected gloo, got {dist.get_default_backend_for_device(device)}"
+                )
+        elif "mps" in device:
+            if dist.get_default_backend_for_device(device) != "gloo":
+                raise AssertionError(
+                    f"Expected gloo, got {dist.get_default_backend_for_device(device)}"
+                )
+        elif "xpu" in device:
+            if dist.get_default_backend_for_device(device) != "xccl":
+                raise AssertionError(
+                    f"Expected xccl, got {dist.get_default_backend_for_device(device)}"
+                )
         else:
             with self.assertRaises(ValueError):
                 dist.get_default_backend_for_device(device)
@@ -40,12 +54,15 @@ class TestMiscCollectiveUtils(TestCase):
         )
         pg = dist.distributed_c10d._get_default_group()
         backend_pg = pg._get_backend_name()
-        assert backend_pg == backend
+        if backend_pg != backend:
+            raise AssertionError(f"Expected {backend}, got {backend_pg}")
         dist.destroy_process_group()
 
 
-devices = ["cpu", "cuda", "hpu"]
-instantiate_device_type_tests(TestMiscCollectiveUtils, globals(), only_for=devices)
+devices = ["cpu", "cuda", "mps", "xpu"]
+instantiate_device_type_tests(
+    TestMiscCollectiveUtils, globals(), only_for=devices, allow_mps=True, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

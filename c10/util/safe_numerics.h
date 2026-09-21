@@ -3,43 +3,58 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 // GCC has __builtin_mul_overflow from before it supported __has_builtin
 #ifdef _MSC_VER
 #define C10_HAS_BUILTIN_OVERFLOW() (0)
-#include <c10/util/llvmMathExtras.h>
 #include <intrin.h>
+#include <bit>
 #else
 #define C10_HAS_BUILTIN_OVERFLOW() (1)
 #endif
 
 namespace c10 {
 
-C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
+template <typename T, typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
+C10_ALWAYS_INLINE bool add_overflows(T a, T b, T* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_add_overflow(a, b, out);
 #else
-  unsigned long long tmp;
-#if defined(_M_IX86) || defined(_M_X64)
-  auto carry = _addcarry_u64(0, a, b, &tmp);
-#else
-  tmp = a + b;
-  unsigned long long vector = (a & b) ^ ((a ^ b) & ~tmp);
-  auto carry = vector >> 63;
-#endif
-  *out = tmp;
-  return carry;
+  if constexpr (std::is_signed_v<T>) {
+    // For signed types, detect overflow by checking sign changes
+    volatile T tmp = a + b;
+    *out = tmp;
+
+    // If both operands have the same sign, check if result changed sign
+    // unexpectedly.
+    if ((a > 0) == (b > 0)) {
+      if ((a > 0) && (tmp <= 0)) {
+        return true; // Positive overflow
+      }
+      if ((a < 0) && (tmp >= 0)) {
+        return true; // Negative overflow
+      }
+    }
+    return false;
+  } else {
+    // For unsigned types, overflow causes wrap-around
+    volatile T tmp = a + b;
+    *out = tmp;
+    return (tmp < a || tmp < b);
+  }
 #endif
 }
 
-template <typename T>
+C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
+  return add_overflows<uint64_t>(a, b, out);
+}
+
+template <typename T, typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
 C10_ALWAYS_INLINE bool mul_overflows(T a, T b, T* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_mul_overflow(a, b, out);
 #else
-  static_assert(
-      std::is_integral_v<T>, "mul_overflows only supports integral types");
-
   if constexpr (std::is_signed_v<T>) {
     // For signed types, use the division-based check
     volatile T tmp = a * b;
@@ -53,9 +68,7 @@ C10_ALWAYS_INLINE bool mul_overflows(T a, T b, T* out) {
     // This test isn't exact, but avoids doing integer division
     *out = a * b;
     constexpr int bits = sizeof(T) * 8;
-    return (
-        (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) <
-        bits);
+    return (std::countl_zero(a) + std::countl_zero(b)) < bits;
   }
 #endif
 }
@@ -83,7 +96,7 @@ bool safe_multiplies_u64(It first, It last, uint64_t* out) {
     prod *= x;
     // log2(0) isn't valid, so need to track it specially
     is_zero |= (x == 0);
-    prod_log2 += c10::llvm::Log2_64_Ceil(x);
+    prod_log2 += std::bit_width(x - 1);
   }
   *out = prod;
   // This test isn't exact, but avoids doing integer division

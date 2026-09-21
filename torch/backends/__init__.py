@@ -113,9 +113,6 @@ def _set_fp32_precision_setter(backend, op):
 
 
 class GenericModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     fp32_precision = ContextProp(
         _get_fp32_precision_getter("generic", "all"),
         _set_fp32_precision_setter("generic", "all"),
@@ -138,5 +135,6 @@ from torch.backends import (
     nnpack as nnpack,
     openmp as openmp,
     opt_einsum as opt_einsum,
+    python_native as python_native,
     quantized as quantized,
 )

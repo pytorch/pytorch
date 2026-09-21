@@ -57,9 +57,8 @@ class _JittedFunction:
     ):
         self.code_string = code_string
 
-        assert return_by_ref or num_outputs == 1, (
-            "Return by value only works for single output. "
-        )
+        if not (return_by_ref or num_outputs == 1):
+            raise AssertionError("Return by value only works for single output.")
         self.return_by_ref = return_by_ref
         self.num_outputs = num_outputs
 
@@ -72,11 +71,15 @@ class _JittedFunction:
     def __call__(self, *tensors: Tensor, **kwargs):
         # Jiterator follow torch.cuda's lazy initialization behavior
         # Defer checking cuda's availability at the function invocation time
-        assert self.is_cuda_available, (
-            "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
-        )
+        if not self.is_cuda_available:
+            raise AssertionError(
+                "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
+            )
 
-        assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
+        if len(tensors) > 8:
+            raise AssertionError(
+                f"jiterator only supports up to 8 tensor inputs, got {len(tensors)}"
+            )
 
         expanded_kwargs = self.kwargs_dict.copy()
         for key, value in kwargs.items():
@@ -104,7 +107,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     into elementwise kernel template, and compiled on the fly. Compiled kernel will be cached in memory, as well as
     local temp dir.
 
-    Jiterator-generated kernels accepts noncontiguous tensors, and supports broadcasting and type promotion.
+    Jiterator-generated kernels accept noncontiguous tensors, and support broadcasting and type promotion.
 
     Args:
         code_string (str): CUDA code string to be compiled by jiterator. The entry functor must return by value.

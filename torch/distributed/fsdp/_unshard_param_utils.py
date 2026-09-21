@@ -37,7 +37,7 @@ def _writeback_to_local_shard(
     writeback_grad: bool,
 ):
     """
-    For the handle, writes back the this rank's shard of the unsharded
+    For the handle, writes back this rank's shard of the unsharded
     flattened parameter to the sharded flattened parameter. If
     ``writeback_grad=True``, then writes back to the sharded gradient as
     well.

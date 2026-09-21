@@ -2,9 +2,9 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <cuda_runtime.h>
@@ -23,6 +23,7 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDAUtils.h>
@@ -33,12 +34,8 @@
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
-#include <thrust/iterator/counting_iterator.h>
 #include <thrust/functional.h>
-#include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
-#include <thrust/iterator/discard_iterator.h>
-
 
 #include <library_types.h>
 
@@ -462,8 +459,8 @@ void sparse_sparse_matmul_cuda_kernel(
   // Filling the COO row indices
   thrust::for_each(
       policy,
-      thrust::make_counting_iterator(int64_t(0)),
-      thrust::make_counting_iterator(int64_t(major_dim)),
+      cccl_counting_iterator<int64_t>{0ll},
+      cccl_counting_iterator<int64_t>{major_dim},
       [output_indices_accessor,
        csr_output_pointers_accessor,
        major_dim,
@@ -479,8 +476,8 @@ void sparse_sparse_matmul_cuda_kernel(
   // Filling the COO column indices
   thrust::for_each(
     policy,
-    thrust::make_counting_iterator(int64_t(0)),
-    thrust::make_counting_iterator(int64_t(csr_output.nnz_)),
+    cccl_counting_iterator<int64_t>{0ll},
+    cccl_counting_iterator<int64_t>{csr_output.nnz_},
     [output_indices_accessor,
       csr_output_pointers_accessor,
       csr_output_ind_accessor,
@@ -496,14 +493,9 @@ void sparse_sparse_matmul_cuda_kernel(
 Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
   TORCH_INTERNAL_ASSERT(mat2_.is_sparse());
-  TORCH_CHECK(mat1_.dim() == 2);
-  TORCH_CHECK(mat2_.dim() == 2);
+  check_mm_shapes(mat1_, mat2_, "_sparse_sparse_matmul");
   TORCH_CHECK(mat1_.dense_dim() == 0, "sparse_mm: scalar values expected, mat1 got ", mat1_.dense_dim(), "D values");
   TORCH_CHECK(mat2_.dense_dim() == 0, "sparse_mm: scalar values expected, mat2 got ", mat2_.dense_dim(), "D values");
-
-  TORCH_CHECK(
-      mat1_.size(1) == mat2_.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1_.size(0), "x", mat1_.size(1), " and ", mat2_.size(0), "x", mat2_.size(1), ")");
 
   TORCH_CHECK(mat1_.scalar_type() == mat2_.scalar_type(),
            "mat1 dtype ", mat1_.scalar_type(), " does not match mat2 dtype ", mat2_.scalar_type());

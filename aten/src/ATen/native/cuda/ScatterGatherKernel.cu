@@ -29,14 +29,20 @@ public:
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
-public:
+ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
-#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
-    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
-#else
+#if defined(USE_ROCM)
+    // TODO: this check is too coarse, revisit, we should only be checking for
+    //       the availability of the builtins required by the implementation, at
+    //       most.
+    if (__builtin_amdgcn_processor_is("gfx942") ||
+        __builtin_amdgcn_processor_is("gfx950"))
+      return opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
-#endif
+  #else
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
+  #endif
   }
 };
 static ReduceAdd reduce_add;
@@ -155,6 +161,94 @@ struct _cuda_scatter_gather_internal_kernel {
         return;
       }
     }
+
+#if !defined(USE_ROCM)
+    if constexpr (is_scatter_like && std::is_same_v<func_t, ReduceAdd> &&
+        (std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double> ||
+         std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>)) {
+      constexpr size_t element_size = sizeof(scalar_t);
+      constexpr size_t alignment = 16;
+      if (at::native::fast_scatter_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
+        auto slice_size = iter.shape()[0] * element_size;
+        auto num_ind = iter.shape()[1];
+        auto self_stride_bytes = index_stride * element_size;
+        auto src_stride_bytes = iter.strides(1)[1];
+        if (iter.numel() == 0) return;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+        if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
+          at::native::tma_scatter_kernel_launch<at::native::ScatterAddOp, scalar_t, index_t>(
+              reinterpret_cast<scalar_t*>(self_ptr),
+              reinterpret_cast<const scalar_t*>(src_ptr),
+              reinterpret_cast<index_t*>(index_ptr),
+              num_ind, static_cast<int>(iter.shape()[0]), index_size,
+              self_stride_bytes, src_stride_bytes);
+          return;
+        }
+#endif
+        at::native::vectorized_scatter_kernel_launch<
+            at::native::ScatterAddOp, alignment, scalar_t, index_t>(
+            reinterpret_cast<scalar_t*>(self_ptr),
+            reinterpret_cast<const scalar_t*>(src_ptr),
+            reinterpret_cast<index_t*>(index_ptr),
+            num_ind, slice_size, index_size,
+            self_stride_bytes, src_stride_bytes);
+        return;
+      }
+    }
+#endif
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+    if constexpr (is_scatter_like &&
+        (std::is_same_v<func_t, ReduceMinimum> ||
+         std::is_same_v<func_t, ReduceMaximum>) &&
+        (std::is_same_v<scalar_t, c10::Half> ||
+         std::is_same_v<scalar_t, c10::BFloat16>)) {
+      constexpr size_t element_size = sizeof(scalar_t);
+      constexpr size_t alignment = 16;
+      if (at::native::fast_scatter_kernel_eligible<alignment>(
+              iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
+        auto slice_size = iter.shape()[0] * element_size;
+        auto num_ind = iter.shape()[1];
+        auto self_stride_bytes = index_stride * element_size;
+        auto src_stride_bytes = iter.strides(1)[1];
+        auto ind_dim_size = index_size;
+        if (iter.numel() == 0) return;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+        if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
+          if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
+            at::native::tma_scatter_kernel_launch<at::native::ScatterMaxOp, scalar_t, index_t>(
+                reinterpret_cast<scalar_t*>(self_ptr),
+                reinterpret_cast<const scalar_t*>(src_ptr),
+                reinterpret_cast<index_t*>(index_ptr), num_ind,
+                static_cast<int>(iter.shape()[0]), ind_dim_size,
+                self_stride_bytes, src_stride_bytes);
+          } else {
+            at::native::tma_scatter_kernel_launch<at::native::ScatterMinOp, scalar_t, index_t>(
+                reinterpret_cast<scalar_t*>(self_ptr),
+                reinterpret_cast<const scalar_t*>(src_ptr),
+                reinterpret_cast<index_t*>(index_ptr), num_ind,
+                static_cast<int>(iter.shape()[0]), ind_dim_size,
+                self_stride_bytes, src_stride_bytes);
+          }
+          return;
+        }
+#endif
+        if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
+          at::native::vectorized_scatter_kernel_launch<at::native::ScatterMaxOp, alignment, scalar_t, index_t>(
+              reinterpret_cast<scalar_t*>(self_ptr),
+              reinterpret_cast<const scalar_t*>(src_ptr),
+              reinterpret_cast<index_t*>(index_ptr), num_ind, slice_size,
+              ind_dim_size, self_stride_bytes, src_stride_bytes);
+        } else {
+          at::native::vectorized_scatter_kernel_launch<at::native::ScatterMinOp, alignment, scalar_t, index_t>(
+              reinterpret_cast<scalar_t*>(self_ptr),
+              reinterpret_cast<const scalar_t*>(src_ptr),
+              reinterpret_cast<index_t*>(index_ptr), num_ind, slice_size,
+              ind_dim_size, self_stride_bytes, src_stride_bytes);
+        }
+        return;
+      }
+    }
+#endif
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
@@ -226,8 +320,8 @@ struct cuda_scatter_gather_base_kernel {
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_gather_base_kernel_func", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
@@ -286,8 +380,8 @@ struct cuda_scatter_gather_base_kernel {
           self.qscheme() == kPerTensorAffine,
           "Only per_tensor quantized quantized tensors are supported by gather.")
       AT_DISPATCH_QINT_TYPES(iter.dtype(), "gather_quant_cuda", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-            OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+            OpaqueType<sizeof(scalar_t)>, scalar_t>;
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
             iter, index_size, index_stride, self.numel(), f
@@ -299,8 +393,8 @@ struct cuda_scatter_gather_base_kernel {
           iter.dtype(),
           "gather_cuda",
           AT_WRAP([&] {
-            using dtype = typename std::conditional<cast_to_opaque,
-                OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+            using dtype = std::conditional_t<cast_to_opaque,
+                OpaqueType<sizeof(scalar_t)>, scalar_t>;
             AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
               _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
                 iter, index_size, index_stride, self.numel(), f
@@ -311,6 +405,7 @@ struct cuda_scatter_gather_base_kernel {
           AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
           AT_EXPAND(AT_FLOAT8_TYPES),
           kComplexHalf,
+          kBComplex32,
           kHalf,
           kBool,
           kBFloat16);
@@ -365,8 +460,8 @@ struct cuda_scatter_gather_base_kernel {
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_gather_base_kernel_func", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
@@ -454,8 +549,8 @@ struct cuda_scatter_fill_base_kernel {
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_fill_base_kernel_func", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
 
         auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
@@ -467,6 +562,49 @@ struct cuda_scatter_fill_base_kernel {
         });
       }
     );
+  }
+
+  void operator()(
+    const Tensor& self, int64_t dim,
+    const Tensor& index, Scalar src,
+    const std::string& method_name,
+    const TensorAssign& f
+  ) {
+    at::assert_no_internal_overlap(self);
+
+    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+    auto self_restrided = restride_dim(self, dim, index_sizes);
+
+    auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self_restrided)
+      .add_const_input(index)
+      .build();
+
+    auto index_size = ensure_nonempty_size(self, dim);
+    auto index_stride = ensure_nonempty_stride(self, dim);
+
+    AT_DISPATCH_V2(
+      iter.dtype(),
+      "cuda_scatter_fill_base_kernel_func",
+      AT_WRAP([&] {
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
+
+        const auto src_scalar_val = src.to<scalar_t>();
+        const auto src_val = *reinterpret_cast<const dtype*>(&src_scalar_val);
+
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_func", [&] () {
+          _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
+            iter, src_val, index_size, index_stride, self.numel(), f
+          );
+        });
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_FLOAT8_TYPES),
+      kHalf, kBool, kBFloat16);
   }
 
   void operator()(
@@ -499,8 +637,8 @@ struct cuda_scatter_fill_base_kernel {
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_fill_base_kernel_reduce_multiply", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
 
         auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
@@ -536,9 +674,6 @@ void scatter_fill_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& ind
 }
 
 void scatter_add_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("scatter_add_cuda_kernel");
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", reduce_add);
@@ -567,7 +702,6 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
                                     const Tensor& src, const ReductionType& reduce) {
   switch (reduce) {
   case ReductionType::SUM :
-    globalContext().alertNotDeterministic("scatter_reduce_cuda_sum_");
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_sum_", reduce_add);
     break;
@@ -585,7 +719,6 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
             "scatter_reduce_cuda_amin_", reduce_minimum);
     break;
   case ReductionType::MEAN :
-    globalContext().alertNotDeterministic("scatter_reduce_cuda_mean_");
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_mean_", reduce_mean);
     break;

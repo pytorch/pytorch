@@ -2,8 +2,6 @@
 
 # mypy: ignore-errors
 
-from typing import Optional, Union
-
 from core.api import AutoLabels, GroupedBenchmark, TimerArgs
 
 
@@ -67,19 +65,16 @@ TL;DR
 # Allow strings in definition for convenience, and None to signify a base
 # case. (No subsequent entry needed. See the "add" example above.)
 Label = tuple[str, ...]
-_Label = Union[Label, Optional[str]]
+_Label = Label | str | None
 
-_Value = Union[
-    Union[TimerArgs, GroupedBenchmark],
-    dict[_Label, "_Value"],
-]
+_Value = TimerArgs | GroupedBenchmark | dict[_Label, "_Value"]
 
 Definition = dict[_Label, _Value]
 
 # We initially have to parse (flatten) to an intermediate state in order to
 # build TorchScript models since multiple entries will share the same model
 # artifact.
-FlatIntermediateDefinition = dict[Label, Union[TimerArgs, GroupedBenchmark]]
+FlatIntermediateDefinition = dict[Label, TimerArgs | GroupedBenchmark]
 
 # Final parsed schema.
 FlatDefinition = tuple[tuple[Label, AutoLabels, TimerArgs], ...]

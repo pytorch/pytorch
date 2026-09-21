@@ -192,7 +192,7 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
 def _cast_to_type(g: jit_utils.GraphContext, input, to_type):
     if to_type is None:
         return input
-    return getattr(opset9, f"_cast_{to_type}")(g, input, False)
+    return g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx[to_type])
 
 
 def _comparison_operator(g: jit_utils.GraphContext, input, other, op_name):

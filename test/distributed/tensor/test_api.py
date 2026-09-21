@@ -19,7 +19,8 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
     map_local_tensor_for_rank,
     with_comms,
 )
@@ -43,12 +44,9 @@ class MyModel(nn.Module):
 c10d_ops = torch.ops.c10d
 
 
-class DTensorAPITest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        # hard code world size to 4 as we need to test
-        # at least with 2d mesh
-        return 4
+class DTensorAPITest(DTensorContinuousTestBase):
+    # Four ranks are required for the 2D mesh cases.
+    world_size = 4
 
     @with_comms
     def test_distribute_tensor_rank(self):
@@ -79,7 +77,13 @@ class DTensorAPITest(DTensorTestBase):
         dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_minus_spec)
         self.assertEqual(dist_tensor.placements[0].dim, 1)
 
-        placement_combs = [[Shard(0)], [Shard(1)], [Replicate()]]
+        placement_combs = [
+            [Shard(0)],
+            [Shard(1)],
+            [Replicate()],
+            [Partial(reduce_op="sum")],
+            [Partial(reduce_op="avg")],
+        ]
 
         if not self.is_local_tensor_enabled:
             # test src_data_rank == 1
@@ -124,6 +128,10 @@ class DTensorAPITest(DTensorTestBase):
         with self.assertRaisesRegex(ValueError, "must have the same length"):
             shard_spec = [Shard(0)]
             distribute_tensor(tensor_to_distribute, device_mesh, shard_spec)
+
+        with self.assertRaisesRegex(ValueError, "conversion is not supported"):
+            new_spec = [Replicate(), Partial(reduce_op="prod")]
+            distribute_tensor(tensor_to_distribute, device_mesh, new_spec)
 
         with self.assertRaisesRegex(RuntimeError, "distribute leaf tensor"):
             shard_spec = [Shard(0)]
@@ -244,7 +252,8 @@ class DTensorAPITest(DTensorTestBase):
             return DTensor.from_local(inputs[0], device_mesh, [Shard(0)])
 
         def output_fn(mod, outputs, device_mesh):
-            assert isinstance(outputs, DTensor)
+            if not isinstance(outputs, DTensor):
+                raise AssertionError(f"Expected DTensor, got {type(outputs)}")
             return outputs.to_local()
 
         replica_module = distribute_module(
@@ -278,6 +287,37 @@ class DTensorAPITest(DTensorTestBase):
         self.assertTrue(isinstance(param_grad.placements[0], Replicate))
 
     @with_comms
+    def test_distribute_module_preserves_requires_grad(self):
+        device_mesh = self.build_device_mesh()
+
+        class ModelWithFrozenParam(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.frozen = nn.Parameter(torch.randn(10, 10), requires_grad=False)
+                self.trainable = nn.Parameter(torch.randn(10, 10), requires_grad=True)
+
+            def forward(self, x):
+                return x + self.frozen + self.trainable
+
+        model = ModelWithFrozenParam().to(self.device_type)
+
+        distributed_model = distribute_module(model, device_mesh)
+
+        self.assertFalse(distributed_model.frozen.requires_grad)
+        self.assertTrue(distributed_model.trainable.requires_grad)
+
+        x = DTensor.from_local(
+            torch.randn(10, 10, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+        output = distributed_model(x)
+        output.sum().backward()
+
+        self.assertIsNone(distributed_model.frozen.grad)
+        self.assertIsNotNone(distributed_model.trainable.grad)
+
+    @with_comms
     def test_distribute_module_input_fn_output_fn_warning(self):
         device_mesh = self.build_device_mesh()
 
@@ -289,7 +329,8 @@ class DTensorAPITest(DTensorTestBase):
             return DTensor.from_local(inputs[0], device_mesh, [Shard(0)])
 
         def output_fn(outputs, device_mesh):
-            assert isinstance(outputs, DTensor)
+            if not isinstance(outputs, DTensor):
+                raise AssertionError(f"Expected DTensor, got {type(outputs)}")
             return outputs.to_local()
 
         with self.assertWarnsRegex(FutureWarning, "Deprecating"):
@@ -400,7 +441,9 @@ class DTensorAPITest(DTensorTestBase):
 
 
 DTensorAPITestWithLocalTensor = create_local_tensor_test_class(
-    DTensorAPITest, skipped_tests=["test_checkpoint_apis_check_partial_placement"]
+    DTensorAPITest,
+    skipped_tests=["test_checkpoint_apis_check_partial_placement"],
+    base_class=LocalDTensorContinuousTestBase,
 )
 
 if __name__ == "__main__":

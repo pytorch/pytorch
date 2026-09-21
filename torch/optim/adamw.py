@@ -1,6 +1,3 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
-
 from torch import Tensor
 
 from .adam import Adam, adam
@@ -8,10 +5,12 @@ from .optimizer import (
     _capturable_doc,
     _differentiable_doc,
     _foreach_doc,
+    _functional_api_doc,
     _fused_doc,
     _maximize_doc,
     _params_doc,
     ParamsT,
+    StateDict,
 )
 
 
@@ -22,17 +21,17 @@ class AdamW(Adam):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
-        betas: tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
+        lr: float | Tensor = 1e-3,
+        betas: tuple[float | Tensor, float | Tensor] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 1e-2,
         amsgrad: bool = False,
         *,
         maximize: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         capturable: bool = False,
         differentiable: bool = False,
-        fused: Optional[bool] = None,
+        fused: bool | None = None,
     ) -> None:
         super().__init__(
             params,
@@ -52,7 +51,7 @@ class AdamW(Adam):
     # Preserve decoupled_weight_decay from AdamW for backwards compatibility. The following
     # guarantees that decoupled_weight_decay will always be True for loading any state into
     # AdamW
-    def __setstate__(self, state):
+    def __setstate__(self, state: StateDict) -> None:
         super().__setstate__(state)
         for group in self.param_groups:
             group["decoupled_weight_decay"] = True
@@ -102,7 +101,7 @@ AdamW.__doc__ = (
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.
-        betas (tuple[Union[float, Tensor], Union[float, Tensor]], optional):
+        betas (tuple[float | Tensor, float | Tensor], optional):
             coefficients used for computing running averages of gradient and
             its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
@@ -137,26 +136,22 @@ def adamw(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     capturable: bool = False,
     differentiable: bool = False,
-    fused: Optional[bool] = None,
-    grad_scale: Optional[Tensor] = None,
-    found_inf: Optional[Tensor] = None,
+    fused: bool | None = None,
+    grad_scale: Tensor | None = None,
+    found_inf: Tensor | None = None,
     has_complex: bool = False,
     *,
     amsgrad: bool,
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs AdamW algorithm computation.
-
-    See :class:`~torch.optim.AdamW` for details.
-    """
     adam(
         params,
         grads,
@@ -180,3 +175,14 @@ def adamw(
         maximize=maximize,
         decoupled_weight_decay=True,
     )
+
+
+adamw.__doc__ = (
+    _functional_api_doc.format(optimizer="AdamW")
+    + r"""
+
+.. note::
+    With ``fused=True``, CUDA supports FP32 parameters and gradients with
+    BF16 moment buffers. See :ref:`functional-adamw-bf16-state` for an example.
+"""
+)

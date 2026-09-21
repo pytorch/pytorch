@@ -5,13 +5,10 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
-#include <ATen/functorch/DynamicLayer.h>
-#include <ATen/functorch/PlumbingHelper.h>
 
 namespace at::functorch {
 
@@ -159,7 +156,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(l1_loss);
   m.impl("layer_norm", native::layer_norm_symint);
   m.impl("_fused_rms_norm", native::rms_norm_composite);
-  OP_DECOMPOSE2(ldexp, Tensor);
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
   OP_DECOMPOSE(linear);
@@ -225,7 +221,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(pinverse);
   OP_DECOMPOSE(poisson_nll_loss);
   OP_DECOMPOSE(positive);
-  OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
   m.impl("repeat_interleave.self_int", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_int))>(native::repeat_interleave_symint));
   m.impl("repeat_interleave.self_Tensor", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_Tensor))>(native::repeat_interleave_symint));

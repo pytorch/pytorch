@@ -8,7 +8,6 @@ import operator
 import unittest
 
 import numpy as np
-import pytest
 import sympy
 
 import torch
@@ -16,35 +15,54 @@ import torch.fx
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
-from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounter,
+    CompileCounterWithBackend,
+)
 from torch._inductor.utils import fresh_cache
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    _iterate_exprs,
+    canonicalize_bool_expr,
     DimConstraints,
     DimDynamic,
     expect_true,
+    free_symbols,
     guard_bool,
     guard_float,
     guard_int,
+    guarding_hint_or_throw,
     GuardOnDataDependentSymNode,
     has_free_symbols,
-    hint_int,
     is_symbolic,
+    rebind_unbacked,
     ShapeEnv,
     StatelessSymbolicContext,
     statically_known_false,
     statically_known_true,
+    SYMPY_INTERP,
+)
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
-    TEST_XPU,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TestCase,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -54,8 +72,14 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
+    Max,
+    Min,
     Mod,
 )
+from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.singleton_int import SingletonInt
+from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 
 aten = torch.ops.aten
@@ -88,7 +112,10 @@ def cat_meta(tensors, dim=0):
             if idx == dim:
                 concat_length = concat_length + length
             else:
-                assert length == common_length
+                if length != common_length:
+                    raise AssertionError(
+                        f"length mismatch: {length} != {common_length}"
+                    )
     new_shape = list(shape)
     new_shape[dim] = concat_length
     return tensors[0].new_empty(new_shape)
@@ -218,7 +245,7 @@ def create_symtype(cls, pytype, shape_env, val, duck=True, **kwargs):
 
     symbol = shape_env.create_symbol(
         val,
-        source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
+        source=ConstantSource(f"__testing_only{len(shape_env.backed_var_to_val)}"),
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
         **kwargs,
@@ -243,6 +270,8 @@ def create_symfloat(shape_env, f: float) -> SymFloat:
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
 )
 class TestPySymInt(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []
@@ -511,6 +540,13 @@ class TestPySymInt(TestCase):
         r = torch.empty(a0, device="meta")
         self.assertIsInstance(r.shape[0], SymInt)
 
+    def test_hash_size(self):
+        # See issue #168254
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        r = torch.empty(a0, device="meta")
+        self.assertRaises(TypeError, lambda: hash(r.shape))
+
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -620,6 +656,11 @@ class TestPySymInt(TestCase):
             """Eq(TruncToInt(OpaqueUnaryFn_sqrt(ToFloat(s97))), 2)""",
         )
 
+        a1 = create_symint(shape_env, 7)
+        r = math.trunc(a1 / 1)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertEqual(r.node.expr, a1.node.expr)
+
     def test_sym_ceil(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -707,7 +748,7 @@ def forward(self, x_1):
     def test_data_dependent_guard_propagate_real_tensors(self):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
-        shape_env.set_unbacked_var_to_val(s0.node.expr, 0)
+        shape_env.set_real_tensor_prop_unbacked_vals(s0.node.expr, 0)
         self.assertEqual(bool(s0 == 0), True)
 
     def test_expect_true_basic(self):
@@ -734,6 +775,44 @@ def forward(self, x_1):
         self.assertTrue(i0 != s0)
         self.assertFalse(i0 > s0)
         self.assertFalse(i0 >= s0)
+
+    def test_unbacked_symbool_eq_expect_true(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symbool()
+        b = shape_env.create_unbacked_symbool()
+
+        expr = a == b
+
+        self.assertIsInstance(expr, torch.SymBool)
+        self.assertExpectedInline(str(expr.node.expr), """Eq(Eq(u0, 1), Eq(u1, 1))""")
+        self.assertTrue(expect_true(expr))
+        self.assertExpectedInline(
+            str(
+                {
+                    symbol: [ra.expr for ra in runtime_asserts]
+                    for symbol, runtime_asserts in shape_env.deferred_runtime_asserts.items()
+                }
+            ),
+            """{u1: [Eq(Eq(u0, 1), Eq(u1, 1))]}""",
+        )
+
+        implications = [
+            implication for implication, _ in shape_env.get_implications(expr.node.expr)
+        ]
+        self.assertExpectedInline(
+            "\n".join(sorted(str(i) for i in implications)),
+            """\
+Eq(Eq(u0, 1), Eq(u1, 1))
+Eq(Eq(u1, 1), Eq(u0, 1))
+Eq(u0, 1) < Eq(u1, 1)
+Eq(u0, 1) <= Eq(u1, 1)
+Eq(u1, 1) < Eq(u0, 1)
+Eq(u1, 1) <= Eq(u0, 1)
+Ne(Eq(u0, 1), Eq(u1, 1))
+Ne(Eq(u1, 1), Eq(u0, 1))""",
+        )
+        self.assertFalse(any(i.has(sympy.Gt, sympy.Ge) for i in implications))
+        self.assertTrue(all(i == canonicalize_bool_expr(i) for i in implications))
 
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
@@ -768,6 +847,136 @@ def forward(self, x_1):
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
         self.assertExpectedInline(str(i3), """u3""")
+
+    def test_rename_unbacked_to_unifies_unbacked_dest(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        dest = shape_env.create_unbacked_symint().node.expr
+        shape_env._set_replacement(orig, dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env.replacements[orig], new)
+        self.assertEqual(shape_env.replacements[new], dest)
+
+    def test_rename_unbacked_to_raises_on_disjoint_ranges(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint()
+        new = shape_env.create_unbacked_symint()
+        dest = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(dest, min=0, max=5)
+        _constrain_range_for_size(new, min=10, max=20)
+        shape_env._set_replacement(orig.node.expr, dest.node.expr, "test-setup")
+        with self.assertRaises(ValueRangeError):
+            shape_env._rename_unbacked_to(orig.node.expr, new.node.expr)
+
+    def test_rename_unbacked_to_preserves_existing_backed_replacement(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        dest = shape_env.create_unbacked_symint().node.expr
+        backed = create_symint(shape_env, 4).node.expr
+        shape_env._set_replacement(new, backed, "test-setup")
+        shape_env._set_replacement(orig, dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env.replacements[orig], new)
+        self.assertEqual(shape_env.replacements[new], backed)
+        self.assertEqual(shape_env.replacements[dest], backed)
+
+    def test_rename_unbacked_to_unifies_existing_unbacked(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        dest = shape_env.create_unbacked_symint().node.expr
+        other = shape_env.create_unbacked_symint().node.expr
+        shape_env._set_replacement(new, other, "test-setup")
+        shape_env._set_replacement(orig, dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env.replacements[orig], new)
+        self.assertEqual(shape_env.replacements[new], dest)
+        self.assertEqual(shape_env.replacements[other], dest)
+
+    def test_rename_unbacked_to_preserves_transitive_backed_replacement(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        other = shape_env.create_unbacked_symint().node.expr
+        dest = shape_env.create_unbacked_symint().node.expr
+        backed = create_symint(shape_env, 4).node.expr
+        shape_env._set_replacement(other, backed, "test-setup")
+        shape_env._set_replacement(new, other, "test-setup")
+        shape_env._set_replacement(orig, dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env._find(new), backed)
+        self.assertEqual(shape_env.replacements[other], backed)
+        self.assertEqual(shape_env.replacements[dest], backed)
+
+    def test_rename_unbacked_to_unifies_unbacked_alias_onto_backed_dest(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        alias = shape_env.create_unbacked_symint().node.expr
+        backed_dest = create_symint(shape_env, 4).node.expr
+        shape_env._set_replacement(new, alias, "test-setup")
+        shape_env._set_replacement(orig, backed_dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env._find(orig), backed_dest)
+        self.assertEqual(shape_env._find(new), backed_dest)
+        self.assertEqual(shape_env._find(alias), backed_dest)
+
+    def test_rename_unbacked_to_skips_range_widening_alias(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint()
+        new = shape_env.create_unbacked_symint()
+        alias = shape_env.create_unbacked_symint()
+        dest = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(new, min=0, max=100)
+        _constrain_range_for_size(alias, min=0, max=5)
+        _constrain_range_for_size(dest, min=0, max=20)
+        shape_env._set_replacement(new.node.expr, alias.node.expr, "test-setup")
+        shape_env._set_replacement(orig.node.expr, dest.node.expr, "test-setup")
+        shape_env._rename_unbacked_to(orig.node.expr, new.node.expr)
+        self.assertEqual(shape_env._find(new.node.expr), dest.node.expr)
+        self.assertEqual(shape_env._find(orig.node.expr), dest.node.expr)
+        self.assertNotIn(alias.node.expr, shape_env.replacements)
+
+    def test_rename_unbacked_to_unifies_two_backed_terminals(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        backed_dest = create_symint(shape_env, 4, duck=False).node.expr
+        backed_new = create_symint(shape_env, 4, duck=False).node.expr
+        shape_env._set_replacement(new, backed_new, "test-setup")
+        shape_env._set_replacement(orig, backed_dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env.replacements[new], backed_dest)
+        self.assertEqual(shape_env._find(orig), shape_env._find(new))
+
+    def test_rename_unbacked_to_unifies_on_double_propagation(self):
+        from torch._guards import detect_fake_mode
+        from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                u = torch.unique(x)  # aten._unique2 -> unbacked count
+                return u.sum() + x.new_zeros(u.shape[0]).sum()
+
+        m = M()
+        inp = (torch.tensor([1, 1, 2, 3, 3]),)
+        ep = torch.export.export(m, inp)
+        gm = ep.module()
+        ph_vals = [
+            n.meta["val"]
+            for n in gm.graph.nodes
+            if n.op == "placeholder" and "val" in n.meta
+        ]
+        fm = detect_fake_mode(ph_vals)
+        self.assertIsNotNone(fm)
+        with fm:
+            PropagateUnbackedSymInts(gm).run(*ph_vals)
+            PropagateUnbackedSymInts(gm).run(*ph_vals)
+        # After the (previously-asserting) re-propagation, the exported program
+        # still runs and matches eager.
+        self.assertEqual(gm(*inp), m(*inp))
 
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
@@ -908,9 +1117,49 @@ def forward(self, x_1):
             )
         )
 
-    def test_prims_non_overlapping_and_dense(self):
+    def test_sympy_interp_is_non_overlapping_and_dense_flat_args(self):
+        # SYMPY_INTERP is used as the eval() namespace for guard code strings.
+        # Guard code prints IsNonOverlappingAndDenseIndicator(s0, s1, ..., st0, st1, ...)
+        # with flat args, so the SYMPY_INTERP function must accept flat args.
+        interp_fn = SYMPY_INTERP["IsNonOverlappingAndDenseIndicator"]
+
+        # 1D contiguous: sizes=(5,), strides=(1,)
+        self.assertEqual(interp_fn(5, 1), 1)
+        # 1D non-contiguous: sizes=(5,), strides=(2,)
+        self.assertEqual(interp_fn(5, 2), 0)
+        # 1D single element: sizes=(1,), strides=(42,)
+        self.assertEqual(interp_fn(1, 42), 1)
+
+        # 2D contiguous: sizes=(3, 4), strides=(4, 1)
+        self.assertEqual(interp_fn(3, 4, 4, 1), 1)
+        # 2D non-contiguous: sizes=(3, 4), strides=(5, 1) -- gap in memory
+        self.assertEqual(interp_fn(3, 4, 5, 1), 0)
+        # 2D transposed but still dense: sizes=(4, 3), strides=(1, 4)
+        self.assertEqual(interp_fn(4, 3, 1, 4), 1)
+
+        # 4D contiguous (the exact scenario from the MAST job failure):
+        # sizes=(2, 3, 4, 5), strides=(60, 20, 5, 1)
+        self.assertEqual(interp_fn(2, 3, 4, 5, 60, 20, 5, 1), 1)
+        # 4D non-contiguous:
+        self.assertEqual(interp_fn(2, 3, 4, 5, 100, 20, 5, 1), 0)
+
+    def test_sympy_interp_guard_eval_simulation(self):
+        # Simulate the actual guard eval() path: guard code strings use
+        # IsNonOverlappingAndDenseIndicator as a function name, and SYMPY_INTERP
+        # provides the binding in the eval namespace.
+        guard_code = "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 60, 20, 5, 1) == 1"
+        result = eval(guard_code, SYMPY_INTERP)  # noqa: P204
+        self.assertTrue(result)
+
+        guard_code_false = (
+            "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 100, 20, 5, 1) == 1"
+        )
+        result_false = eval(guard_code_false, SYMPY_INTERP)  # noqa: P204
+        self.assertFalse(result_false)
+
+    def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
-        cf = torch._prims_common.is_non_overlapping_and_dense
+        cf = torch._prims_common.is_non_overlapping_and_dense_or_false
 
         # backed case
         a0 = create_symint(shape_env, 5)
@@ -1112,6 +1361,213 @@ def forward(self, x_1):
         assert_not_optimized(torch.sym_max(mx3, s3 + s7))
         assert_not_optimized(torch.sym_max(mx3, s7 * 2))
 
+    def test_build_proxy_for_optimized_add(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles flattened
+        sympy.Add expressions with more than 2 arguments.
+
+        When sympy.Add operations are optimized by _optimized_add
+        (in torch/fx/experimental/sym_node.py), they can be flattened into a
+        single Add node with 3 or more arguments (e.g., Add(s0, s1, s2)
+        instead of Add(Add(s0, s1), s2)).
+
+        _build_proxy_for_sym_expr must handle this by using torch.sym_sum
+        (which natively supports n-ary addition) instead of operator.add
+        (which is binary and would either raise TypeError or silently drop
+        arguments via FX codegen's 2-placeholder format string).
+        """
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+
+        # This triggers _optimized_add and produces a flattened sympy.Add
+        # with 3 arguments: Add(s0_symbol, s1_symbol, s2_symbol)
+        optimized_sum = s0 + s1 + s2
+        self.assertTrue(optimized_sum.node._optimized_summation)
+        # Confirm the underlying sympy expression has 3 args (flattened).
+        self.assertEqual(len(optimized_sum.node.expr.args), 3)
+
+        # ------------------------------------------------------------------
+        # Case 1: out=None
+        #
+        # Previously this would call operator.add(a, b, c) and raise
+        # TypeError. Now uses torch.sym_sum which handles n-ary addition.
+        # ------------------------------------------------------------------
+        tracer_none = PythonKeyTracer()
+        for sym in [s0, s1, s2]:
+            tracer_none.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                proxy=sym, value=sym
+            )
+
+        result = _build_proxy_for_sym_expr(tracer_none, optimized_sum.node.expr)
+        self.assertEqual(int(result), 9)
+
+        # ------------------------------------------------------------------
+        # Case 2: out=optimized_sum  (the typical path from get_proxy_slot)
+        #
+        # Previously _sym_register would record operator.add with 3 args,
+        # and FX codegen's "{} + {}" format string would silently drop the
+        # third argument. Now uses torch.sym_sum which correctly handles
+        # all arguments.
+        # ------------------------------------------------------------------
+        tracer = PythonKeyTracer()
+        tracer.root = torch.nn.Module()
+        tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+
+        for sym, name in [(s0, "s0"), (s1, "s1"), (s2, "s2")]:
+            node = tracer.graph.placeholder(name)
+            proxy = fx.Proxy(node, tracer)
+            set_meta(proxy, sym)
+            tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                proxy=proxy, value=sym
+            )
+            tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+        _build_proxy_for_sym_expr(tracer, optimized_sum.node.expr, out=optimized_sum)
+
+        out_proxy = tracer.symnode_tracker[optimized_sum].force()
+        tracer.graph.output(out_proxy.node)
+
+        gm = fx.GraphModule(tracer.root, tracer.graph)
+
+        result = gm(2, 3, 4)  # should be 2 + 3 + 4 = 9
+        self.assertEqual(result, 9)
+
+    def test_build_proxy_for_nary_min_max(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles flattened
+        sympy.Max/sympy.Min expressions with more than 2 arguments.
+
+        sympy flattens Max(a, Max(b, c)) -> Max(a, b, c) (and likewise for
+        Min). _build_proxy_for_sym_expr must rebuild these even though
+        torch.sym_max/sym_min are binary; a binary handler would raise
+        TypeError on a 3-arg Max/Min.
+        """
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        # min/max of (2, 3, 4) -> 2 for min, 4 for max
+        for sym_op, expected in [(torch.sym_max, 4), (torch.sym_min, 2)]:
+            with self.subTest(op=sym_op.__name__):
+                shape_env = ShapeEnv()
+                # Unbacked symints keep the expression symbolic (backed symints
+                # would specialize away the Max/Min).
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+                u2 = shape_env.create_unbacked_symint()
+
+                flattened = sym_op(sym_op(u0, u1), u2)
+                self.assertEqual(len(flattened.node.expr.args), 3)
+
+                # Case 1: out=None must not raise TypeError on the 3-arg expr.
+                tracer_none = PythonKeyTracer()
+                for sym in [u0, u1, u2]:
+                    tracer_none.sympy_expr_tracker[sym.node.expr] = (
+                        _SympyExprTrackerValue(proxy=sym, value=sym)
+                    )
+                result = _build_proxy_for_sym_expr(tracer_none, flattened.node.expr)
+                self.assertEqual(result.node.expr, flattened.node.expr)
+
+                # Case 2: out=flattened (the typical get_proxy_slot path). The
+                # rebuilt node must execute correctly (a binary handler would
+                # have dropped the third argument or crashed).
+                tracer = PythonKeyTracer()
+                tracer.root = torch.nn.Module()
+                tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+                for sym, name in [(u0, "u0"), (u1, "u1"), (u2, "u2")]:
+                    node = tracer.graph.placeholder(name)
+                    proxy = fx.Proxy(node, tracer)
+                    set_meta(proxy, sym)
+                    tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                        proxy=proxy, value=sym
+                    )
+                    tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+                _build_proxy_for_sym_expr(tracer, flattened.node.expr, out=flattened)
+                out_proxy = tracer.symnode_tracker[flattened].force()
+                tracer.graph.output(out_proxy.node)
+                gm = fx.GraphModule(tracer.root, tracer.graph)
+                self.assertEqual(gm(2, 3, 4), expected)
+
+    def test_build_proxy_for_pow(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles sympy.Pow.
+
+        sympy canonicalizes x * x into Pow(x, 2), so a reduction numel over a
+        tensor whose two dims duck-share a symbol becomes a nonlinear product
+        like s0 * s1**2. _build_proxy_for_sym_expr must rebuild it; without a
+        Pow handler the Pow factor has no proxy and get_proxy_slot raises
+        "is not tracked with proxy".
+        """
+        import sympy
+
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        # Cover more than just the square: the exponent is passed straight to
+        # the handler, so any natural power must rebuild (s1**2, s1**3, ...).
+        for exp in (2, 3):
+            with self.subTest(exp=exp):
+                shape_env = ShapeEnv()
+                # Unbacked symints keep the expression symbolic (backed symints
+                # would specialize the power away).
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+
+                prod = u0 * u1**exp
+                self.assertTrue(prod.node.expr.has(sympy.Pow))
+
+                # Case 1: out=None must rebuild the Pow expr, not return None.
+                tracer_none = PythonKeyTracer()
+                for sym in [u0, u1]:
+                    tracer_none.sympy_expr_tracker[sym.node.expr] = (
+                        _SympyExprTrackerValue(proxy=sym, value=sym)
+                    )
+                result = _build_proxy_for_sym_expr(tracer_none, prod.node.expr)
+                self.assertEqual(result.node.expr, prod.node.expr)
+
+                # Case 2: out=prod (the typical get_proxy_slot path). The rebuilt
+                # node must execute correctly: u0 * u1**exp with u0=2, u1=3.
+                tracer = PythonKeyTracer()
+                tracer.root = torch.nn.Module()
+                tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+                for sym, name in [(u0, "u0"), (u1, "u1")]:
+                    node = tracer.graph.placeholder(name)
+                    proxy = fx.Proxy(node, tracer)
+                    set_meta(proxy, sym)
+                    tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                        proxy=proxy, value=sym
+                    )
+                    tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+                _build_proxy_for_sym_expr(tracer, prod.node.expr, out=prod)
+                out_proxy = tracer.symnode_tracker[prod].force()
+                tracer.graph.output(out_proxy.node)
+                gm = fx.GraphModule(tracer.root, tracer.graph)
+                self.assertEqual(gm(2, 3), 2 * 3**exp)
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -1120,6 +1576,25 @@ def forward(self, x_1):
                 torch.sym_max(1, torch.sym_max(257, u0)) == torch.sym_max(257, u0)
             )
         )
+
+    def test_min_max_simplify_with_value_ranges(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 <= 5)
+        torch._check(u1 >= 10)
+
+        u0_expr = u0.node.expr
+        u1_expr = u1.node.expr
+        self.assertEqual(shape_env.simplify(Min(u0_expr, 5)), u0_expr)
+        self.assertEqual(shape_env.simplify(Max(u1_expr, 10)), u1_expr)
+        self.assertEqual(shape_env.simplify(Min(u0_expr, u1_expr, 20)), u0_expr)
+        self.assertEqual(shape_env.simplify(Max(u1_expr, u0_expr, -1)), u1_expr)
+
+        u2 = shape_env.create_unbacked_symint()
+        u2_expr = u2.node.expr
+        self.assertEqual(shape_env.simplify(Min(u2_expr, 5)), Min(5, u2_expr))
+        self.assertEqual(shape_env.simplify(Max(u2_expr, 5)), Max(5, u2_expr))
 
     def test_numpy_sym_max(self):
         self.assertEqual(torch.sym_max(np.int64(10), 12), 12)
@@ -1164,32 +1639,37 @@ def forward(self, x_1):
     def test_specialize_zero_one(self):
         shape_env = ShapeEnv(specialize_zero_one=True)
         a0 = create_symint(shape_env, 5)
-        assert a0 != 1
+        if a0 == 1:
+            raise AssertionError("expected a0 != 1")
         self.assertEqual(len(shape_env.guards), 0)
 
         shape_env = ShapeEnv(specialize_zero_one=False)
         a0 = create_symint(shape_env, 5)
-        assert a0 != 1
+        if a0 == 1:
+            raise AssertionError("expected a0 != 1")
         self.assertEqual(len(shape_env.guards), 1)
 
     def test_duck_shape(self):
         shape_env = ShapeEnv(duck_shape=True)
         a0 = create_symint(shape_env, 5)
         a1 = create_symint(shape_env, 5)
-        assert a0 == a1
+        if a0 != a1:
+            raise AssertionError("expected a0 == a1")
         self.assertEqual(len(shape_env.guards), 0)
 
         shape_env = ShapeEnv(duck_shape=False)
         a0 = create_symint(shape_env, 5)
         a1 = create_symint(shape_env, 5)
-        assert a0 == a1
+        if a0 != a1:
+            raise AssertionError("expected a0 == a1")
         self.assertEqual(len(shape_env.guards), 1)
 
     def test_int_bool(self):
         # See https://github.com/pytorch/pytorch/issues/95981
         shape_env = ShapeEnv(duck_shape=True)
         a0 = create_symint(shape_env, 5)
-        assert a0
+        if not a0:
+            raise AssertionError("expected a0 to be truthy")
         self.assertEqual(len(shape_env.guards), 0)
 
     def test_symint_as_scalar(self):
@@ -1200,7 +1680,10 @@ def forward(self, x_1):
 
         class TestSymInt(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                assert func == torch.ops.aten.add.Tensor
+                if func != torch.ops.aten.add.Tensor:
+                    raise AssertionError(
+                        f"expected torch.ops.aten.add.Tensor, got {func}"
+                    )
 
                 nonlocal sym_int_encountered
                 # WARNING: do not do identity tests on the outer
@@ -1218,7 +1701,8 @@ def forward(self, x_1):
     def test_deepcopy(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
-        assert a0 < 4
+        if not (a0 < 4):
+            raise AssertionError(f"expected a0 < 4, got a0={a0}")
         new_shape_env = copy.deepcopy(shape_env)
         self.assertEqual(len(new_shape_env.guards), 1)
 
@@ -1249,7 +1733,7 @@ class f(torch.nn.Module):
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: "f32[s57 + s75, 2*s96]" = native_dropout[0]
         getitem_1: "b8[s57 + s75, 2*s96]" = native_dropout[1];  native_dropout = None
-        return (getitem, getitem_1)""",  # noqa: B950
+        return (getitem, getitem_1)""",
         )
 
     def test_statically_known_true(self):
@@ -1463,11 +1947,174 @@ class f(torch.nn.Module):
 
             _ = torch.baddbmm(bias3, A, Bmat)
 
+    def test_lu_unpack_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        m, n = [shape_env.create_unbacked_symint() for _ in range(2)]
+
+        with fake_mode:
+            LU = torch.empty((m, n), device="meta")
+            pivots = torch.empty((1,), device="meta", dtype=torch.int32)
+            P, L, U = torch.lu_unpack(LU, pivots)
+
+    def test_linalg_qr_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        m, n = [shape_env.create_unbacked_symint() for _ in range(2)]
+
+        with fake_mode:
+            A = torch.empty((m, n), device="meta")
+            Q, R = torch.linalg.qr(A)
+
+    def _make_unbacked_size(self, shape_env):
+        return shape_env.create_unbacked_symint()
+
+    def test_avg_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.avg_pool2d(x, [2, 2], [2, 2], [0, 0])
+
+    def test_max_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.max_pool2d_with_indices(x, [2, 2], [2, 2])
+
+    def test_avg_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.avg_pool3d(x, [2, 2, 2], [2, 2, 2])
+
+    def test_max_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.max_pool3d_with_indices(x, [2, 2, 2], [2, 2, 2])
+
+    def test_avg_pool1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.avg_pool1d(x, [2], [2])
+
+    def test_pixel_shuffle_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, u(shape_env), 3, 3), device="meta")
+            torch.ops.aten.pixel_shuffle(x, 1)
+
+    def test_pdist_forward_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((self._make_unbacked_size(shape_env), 5), device="meta")
+            torch.ops.aten._pdist_forward(x, 2.0)
+
+    def test_reflection_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad2d(x, [1, 1, 1, 1])
+
+    def test_replication_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.replication_pad2d(x, [1, 1, 1, 1])
+
+    def test_reflection_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad1d(x, [1, 1])
+
+    def test_replication_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.replication_pad1d(x, [1, 1])
+
+    def test_reflection_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.reflection_pad3d(x, [1, 1, 1, 1, 1, 1])
+
+    def test_replication_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
 )
 class TestSymNumberMagicMethods(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         with self.subTest(fn=fn, inp1=inp1, inp2=inp2, is_unary_fn=is_unary_fn):
             return self._do_test2(fn, inp1, inp2, shape_env, is_unary_fn)
@@ -1605,7 +2252,7 @@ class TestSymNumberMagicMethods(TestCase):
         ) and fn in sym_node.only_float_magic_methods:
             self.skipTest(f"{fn} is not an int method")
 
-        if second_type == "float" and fn in ["mod"]:
+        if second_type == "float" and fn == "mod":
             self.skipTest(f"{fn} only handles int")
 
         if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
@@ -1904,6 +2551,13 @@ class TestSymNumberMagicMethods(TestCase):
         with self.assertRaises(ZeroDivisionError):
             y % x
 
+        # test pow operations preserve DynamicInt type
+        check(w**2, 1)  # DynamicInt ** int
+        check(2**z, 4)  # int ** DynamicInt
+        check(y**x, 1)  # DynamicInt ** DynamicInt
+        check(pow(z, 2), 4)  # pow(DynamicInt, int)
+        self.assertTrue(isinstance(pow(y, 3, 5), DynamicInt))  # pow with modulo
+
         # math, numpy
         self.assertEqual(math.cos(x), y)
         self.assertEqual(math.prod([z, z], start=z), 8)
@@ -1931,6 +2585,8 @@ instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
 
 class TestFloorDiv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def python_floordiv(x, y):
         return x // y
@@ -2036,6 +2692,8 @@ class TestFloorDiv(TestCase):
 
 
 class TestDimConstraints(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("mark_dynamic not supported")
     def test_simplify_max_1_0(self):
         x = torch.rand(10)
@@ -3049,6 +3707,8 @@ class TestGuardsExpressions(TestCase):
     Tests the guards-related methods used by the inductor FX graph cache.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_guards_gt_lt(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 6)
@@ -3060,16 +3720,151 @@ class TestGuardsExpressions(TestCase):
 
         guards = shape_env.produce_guards_expression([s0])
 
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s2)])
+        )
 
     def test_guards_float_print(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 3)
         guard_bool(2 / s0 == 2 / 3)
         guards = shape_env.produce_guards_expression([s0])
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+
+    def test_deserialize_symexpr_keeps_symbolic(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 24)
+        expr = shape_env.deserialize_symexpr(f"128*{s0.node.expr}")
+        # Must stay symbolic; collapsing to the hint (3072) is the bug this guards.
+        self.assertIsInstance(expr, torch.SymInt)
+        self.assertEqual(str(expr.node.expr), f"128*{s0.node.expr}")
+
+    def test_deserialize_symexpr_unbacked_int_symbol(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        out = shape_env.deserialize_symexpr(str(u0.node.expr))
+        self.assertIsInstance(out, torch.SymInt)
+        self.assertIs(out.node.pytype, int)
+        # No backed_var_to_val entry, so it binds hintless.
+        self.assertIsNone(out.node.hint)
+
+    def test_deserialize_symexpr_float_symbol(self):
+        shape_env = ShapeEnv()
+        f0 = shape_env.create_unbacked_symfloat()
+        out = shape_env.deserialize_symexpr(str(f0.node.expr))
+        # A float symbol must not be rebuilt as an int.
+        self.assertIsInstance(out, torch.SymFloat)
+        self.assertIs(out.node.pytype, float)
+
+    def test_deserialize_symexpr_float_hint_not_truncated(self):
+        shape_env = ShapeEnv()
+        f0 = make_symbol(SymT.FLOAT, 0)
+        shape_env.var_to_range[f0] = ValueRanges(-sympy.oo, sympy.oo)
+        shape_env.backed_var_to_val[f0] = sympy.Float(1.5)
+        shape_env.name_to_symbol[f0.name] = f0  # create_symbol does this
+        out = shape_env.deserialize_symexpr(str(f0))
+        self.assertIsInstance(out, torch.SymFloat)
+        self.assertEqual(out.node.hint, 1.5)
+
+    def test_deserialize_symexpr_singleton_int_symbol(self):
+        # Nested-tensor symbols land in backed_var_to_val but deliberately get no
+        # var_to_range entry, so a namespace built from var_to_range alone raises
+        # NameError. Their SingletonInt is not a scalar, so they bind hintless.
+        shape_env = ShapeEnv()
+        s0 = make_symbol(SymT.SIZE, 0, positive=True, integer=True)
+        shape_env.backed_var_to_val[s0] = SingletonInt(1, coeff=1)
+        shape_env.name_to_symbol[s0.name] = s0  # create_symbol does this
+        self.assertNotIn(s0, shape_env.var_to_range)
+        out = shape_env.deserialize_symexpr(str(s0))
+        self.assertIsInstance(out, torch.SymInt)
+        self.assertIsNone(out.node.hint)
+
+    def test_deserialize_symexpr_add_backed_var_to_val_symbol(self):
+        # add_backed_var_to_val does not populate var_to_range either.
+        shape_env = ShapeEnv()
+        s0 = make_symbol(SymT.SIZE, 0, positive=True, integer=True)
+        shape_env.add_backed_var_to_val(s0, 7)
+        self.assertNotIn(s0, shape_env.var_to_range)
+        out = shape_env.deserialize_symexpr(str(s0))
+        self.assertIsInstance(out, torch.SymInt)
+        self.assertEqual(out.node.hint, 7)
+
+    def test_deserialize_symexpr_resolves_sympy_interp_names(self):
+        # Lazy locals must fall through to SYMPY_INTERP for non-symbol names.
+        shape_env = ShapeEnv()
+        self.assertEqual(shape_env.deserialize_symexpr("math.trunc(3.7)"), 3)
+
+    def test_deserialize_symexpr_replay_under_translation_validation(self):
+        # deserialize_symexpr creates an FX placeholder / z3 var per symbol, so it
+        # has to be a recorded event: translation validation replays self.events
+        # onto a fresh ShapeEnv, and an unrecorded placeholder makes that replay
+        # fail with "Node sN not found in name_to_node". Dropping
+        # @record_shapeenv_event() from deserialize_symexpr fails this test.
+        from torch.fx.experimental import _config as fx_config
+        from torch.fx.experimental.recording import replay_shape_env_events
+        from torch.fx.experimental.validator import _HAS_Z3
+
+        if not _HAS_Z3:
+            self.skipTest("translation validation requires z3")
+
+        with fx_config.patch(translation_validation=True):
+            shape_env = ShapeEnv()
+            # Recording is only on when translation validation is, which is the
+            # configuration the decorator exists for.
+            self.assertTrue(shape_env.should_record_events)
+
+            a = create_symint(shape_env, 24).node.expr
+            out = shape_env.deserialize_symexpr(f"{a} * 2")
+            self.assertEqual(out.node.expr, a * 2)
+
+            shape_env.check_equal(replay_shape_env_events(shape_env.events))
+
+    def test_deserialize_symexpr_unregistered_symbol_is_descriptive(self):
+        # name_to_symbol is a hand-maintained index across every mint site, so a
+        # site that forgets to register is reachable by omission. Such a symbol
+        # must not surface as a context-free NameError out of eval.
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 24).node.expr
+        del shape_env.name_to_symbol[s.name]
+
+        with self.assertRaisesRegex(AssertionError, f"{s.name} is shaped like"):
+            shape_env.deserialize_symexpr(f"{s.name} * 2")
+
+        # The message has to name the expression, since eval alone would not say
+        # which stride it came from.
+        with self.assertRaisesRegex(AssertionError, r"Deserializing: .* \* 2"):
+            shape_env.deserialize_symexpr(f"{s.name} * 2")
+
+    def test_deserialize_symexpr_max_min_installs_no_guard(self):
+        # SymExprPrinter must not render Max/Min as builtin max()/min(): those
+        # pick a branch by evaluating `a > b`, which guards and collapses the
+        # expression to whichever operand won. The 3-arg case covers sympy's
+        # n-ary Max, which binary torch.sym_max cannot be handed directly.
+        from torch.fx.experimental.symbolic_shapes import SymExprPrinter
+        from torch.utils._sympy.functions import Max, Min
+
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 24).node.expr
+        b = create_symint(shape_env, 36).node.expr
+        printer = SymExprPrinter()
+        num_guards = len(shape_env.guards)
+
+        # Arg order is sympy's canonical one, so only assert the callee.
+        self.assertIn("torch.sym_max", printer.doprint(Max(a, b)))
+        self.assertIn("torch.sym_min", printer.doprint(Min(a, b)))
+
+        for expr in (Max(a, b), Min(a, b), Max(a, b, 128)):
+            out = shape_env.deserialize_symexpr(printer.doprint(expr))
+            self.assertEqual(out.node.expr, expr)
+            self.assertEqual(len(shape_env.guards), num_guards)
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3213,12 +4008,13 @@ class TestGuardsExpressions(TestCase):
 
         self.assertIn("math.trunc(", guards)
         self.assertIn("float(", guards)
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
+        )
 
-    @unittest.skipIf(
-        TEST_XPU, "Skipped on XPU"
-    )  # https://github.com/intel/torch-xpu-ops/issues/2169"
     @skipIfTorchDynamo("Attempt to trace generator")
     @torch.fx.experimental._config.patch("use_duck_shape", False)
     def test_size_comparison_no_recompile(self):
@@ -3246,9 +4042,60 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"Size comparison should not cause recompilation.",
         )
+
+    @skipIfTorchDynamo("Test uses torch.compile")
+    def test_python_mod_padding_no_recompile(self):
+        """
+        Test that padding with PythonMod and slicing back to original size
+        doesn't cause guards or recompilation.
+        """
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def func(x):
+            # Padding to align to multiple of 4
+            padding = (-x.size()[0]) % 4
+            aligned_size = x.size()[0] + padding
+            tensor = torch.empty(aligned_size, x.size()[1])
+            # Do some work on padded tensor
+            tensor = tensor * 100
+            # Remove padding with slicing
+            remove_padding = tensor[0 : x.size()[0], ...]
+            # View should work without guards since shapes match
+            return remove_padding.view(x.size())
+
+        # First call we pass something does not need padding
+        result1 = func(torch.rand(4, 10))
+        self.assertEqual(result1.shape, (4, 10))
+
+        # Second call with different size needs padding
+        result1 = func(torch.rand(10, 12))
+        self.assertEqual(result1.shape, (10, 12))
+
+        # Should only compile once despite different input shapes
+        self.assertEqual(
+            cnt.frame_count,
+            1,
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
+            f"PythonMod padding should not cause recompilation.",
+        )
+
+        # test with unbacked.
+        torch._dynamo.reset()
+
+        a = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        result1 = func(a)
+        self.assertEqual(result1.shape, (10, 10))
+
+        result1 = func(torch.rand(4, 10))
+        self.assertEqual(result1.shape, (4, 10))
+
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
@@ -3280,11 +4127,37 @@ class TestGuardsExpressions(TestCase):
 def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
     for node in graph.nodes:
         if node.name == "arg3_1":
-            assert node.meta["val"].size()[0] == 2
+            if node.meta["val"].size()[0] != 2:
+                raise AssertionError(
+                    f"expected size()[0] == 2, got {node.meta['val'].size()[0]}"
+                )
     return graph
 
 
 class TestUnbacked(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_rebind_unbacked_to_symbolic_expression(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True, shape_env=shape_env
+        )
+        graph = torch.fx.Graph()
+        node = graph.call_function(operator.add, args=(1, 1))
+
+        with fake_mode:
+            old = shape_env.create_unbacked_symint()
+            base = shape_env.create_unbacked_symint()
+            result = (base + 1) // 2
+
+        old_expr = old.node.expr
+        result_expr = result.node.expr
+        node.meta["unbacked_bindings"] = {old_expr: ()}
+
+        rebind_unbacked(shape_env, node, result)
+
+        self.assertEqual(shape_env.replacements[old_expr], result_expr)
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
@@ -3299,6 +4172,36 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_symfloat_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(a, b):
+            torch._check(b.item() * 2 == 11)
+            return b * 10
+
+        with fresh_cache():
+            self.assertEqual(
+                func(torch.tensor([100]), torch.tensor([5.5])), torch.tensor([55.0])
+            )
+            with self.assertRaisesRegex(RuntimeError, r"Eq\(2\.0\*zuf\d+, 11\.0\)"):
+                func(torch.tensor([5]), torch.tensor([1.8]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_symfloat_eq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(a, b):
+            torch._check(b.item() == 5.5)
+            return a * 10
+
+        with fresh_cache():
+            self.assertEqual(
+                func(torch.tensor([5]), torch.tensor([5.5])), torch.tensor([50])
+            )
+            with self.assertRaisesRegex(RuntimeError, r"zuf\d+ >= 5\.5"):
+                func(torch.tensor([100]), torch.tensor([1.5]))
+
     # Test a situation where we generate a runtime assert i.e: u1==s1, then we specialize s1
     # later on to a constant.
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3310,7 +4213,8 @@ class TestUnbacked(TestCase):
             s0 = x.size()[0]
             s1 = x.size()[1]
             torch._check(u0 + s0 + s1 == 102)
-            assert s0 == 2
+            if s0 != 2:
+                raise AssertionError(f"expected s0 == 2, got {s0}")
             return x * 10
 
         func(torch.rand(2, 50), torch.tensor([50]))
@@ -3355,6 +4259,28 @@ class TestUnbacked(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
+    def test_iterate_exprs_dict(self):
+        """Test that _iterate_exprs handles dict values (e.g. from triton_kernel_wrapper_functional)."""
+        a, b = sympy.symbols("a b")
+
+        # dict with tensor values and string keys — should not crash
+        t = torch.randn(3, 4)
+        result = list(_iterate_exprs({"Out": t}))
+        # concrete tensor has no symbolic exprs
+        self.assertEqual(len(result), 0)
+
+        # dict with sympy keys — should iterate over both keys and values
+        result = list(_iterate_exprs({a: 1, b: 2}))
+        self.assertEqual(len(result), 2)
+        self.assertIn(a, result)
+        self.assertIn(b, result)
+
+        # free_symbols works on dicts with sympy keys
+        self.assertEqual(free_symbols({a + b: 1}), {a, b})
+
+        # empty dict
+        self.assertEqual(list(_iterate_exprs({})), [])
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
@@ -3388,7 +4314,15 @@ class TestUnbacked(TestCase):
         with self.assertRaises((AssertionError, RuntimeError)):
             func(a, torch.rand(2, 1))
 
-    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
+    @unittest.skipIf(
+        TEST_WITH_ASAN
+        or IS_LINUX
+        or IS_MACOS
+        or TEST_WITH_ROCM
+        or TEST_WITH_SLOW
+        or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/163953",
+    )
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
@@ -3486,8 +4420,145 @@ class TestUnbacked(TestCase):
         b = torch.tensor([1])
         func(a, b)
 
+    def test_ignorable_fresh_unbacked_symbols(self):
+        # Test that symbols created during fake tensor tracing but not returned
+        # can be marked as ignorable to avoid unbound symbol errors
+
+        # Positive case: marking symbol as ignorable should work
+        with torch.library._scoped_library("test_ignorable", "FRAGMENT") as lib:
+            torch.library.define(
+                "test_ignorable::custom_op",
+                "(Tensor x, bool y) -> Tensor",
+                lib=lib,
+            )
+
+            @torch.library.register_fake("test_ignorable::custom_op", lib=lib)
+            def custom_op_fake(x, y):
+                ctx = torch._custom_op.impl.get_ctx()
+                # Create a symint during fake tensor tracing
+                if y:
+                    with ctx._shape_env.ignore_fresh_unbacked_symbols():
+                        sz = ctx.new_dynamic_size()
+                else:
+                    sz = ctx.new_dynamic_size()
+                # Return something else (not the symint we created)
+                return x.clone()
+
+            @torch.library.impl(
+                "test_ignorable::custom_op",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def custom_op_impl(x, y):
+                return x.clone()
+
+            @torch.compile(fullgraph=True)
+            def func_positive(x):
+                return torch.ops.test_ignorable.custom_op(x, True)
+
+            @torch.compile(fullgraph=True)
+            def func_negative(x):
+                return torch.ops.test_ignorable.custom_op(x, False)
+
+            x = torch.randn(3, 4)
+
+            # This should not raise an error about unbound symbols
+            result = func_positive(x)
+            self.assertEqual(result, x)
+
+            # This should raise an error about unbound symbols
+            with self.assertRaisesRegex(
+                Exception, "Pending unbacked symbols.*not in returned outputs"
+            ):
+                func_negative(x)
+
+    def test_meta_copy(self):
+        """
+        Test that meta_copy_ does not raise when self and src have different
+        unbacked symint sizes.
+        """
+        from torch._meta_registrations import meta_copy_
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+
+            self_tensor = torch.empty((u0, 256))
+            src_tensor = torch.empty((u1, 256))
+
+            meta_copy_(self_tensor, src_tensor)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_symbool_propagate_real_tensors(self):
+        """
+        Test that propagate_real_tensors properly handles SymBool from boolean .item() calls.
+
+        When tracing with propagate_real_tensors=True, if a boolean .item() returns False
+        during tracing, a runtime assertion should be generated that throws when the
+        boolean becomes True at runtime.
+
+        This is a regression test for a bug where int(real_t) was used instead of real_t,
+        causing boolean values to be incorrectly converted to integers and losing the
+        proper runtime assertion.
+        """
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if x.eq(0.1).any().item():
+                return x
+            return x + 1
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # First call with 0.2 - item() returns False, traces the x + 1 branch
+            result1 = f(torch.ones(2) * 0.2)
+            torch.testing.assert_close(result1, torch.ones(2) * 1.2)
+
+            # Second call with 0.1 - item() returns True, should throw runtime assertion
+            # because the traced graph assumed False
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Runtime assertion failed for expression Ne\(u0, 1\)",
+            ):
+                f(torch.ones(2) * 0.1)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    @torch._dynamo.config.patch("suppress_errors", True)
+    def test_sparse_csr_tensor_no_data_dependent_guard(self):
+        """
+        Test that sparse CSR tensor construction doesn't trigger
+        GuardOnDataDependentSymNode errors due to str() being called
+        on FakeTensors during graph break handling.
+        """
+
+        class MinimalSparseModel(torch.nn.Module):
+            def forward(self, values):
+                crow_indices = torch.tensor([0, 2, 4], dtype=torch.int64)
+                col_indices = torch.tensor([0, 1, 0, 1], dtype=torch.int64)
+                size = (2, 2)
+                sparse = torch.ops.aten.sparse_csr_tensor(
+                    crow_indices, col_indices, values, size
+                )
+                return sparse
+
+        values = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        model = MinimalSparseModel()
+        eager_out = model(values)
+
+        compiled_model = torch.compile(model, fullgraph=False)
+        compiled_out = compiled_model(values)
+
+        self.assertEqual(eager_out.layout, compiled_out.layout)
+        self.assertEqual(eager_out.shape, compiled_out.shape)
+        torch.testing.assert_close(eager_out.values(), compiled_out.values())
+
 
 class TestUbackedOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @fresh_cache()
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3532,11 +4603,11 @@ class TestUbackedOps(TestCase):
             aot_graphs,
             """\
 def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
-        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        ge: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
+        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
@@ -3544,9 +4615,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         view_1: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
         view_2: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
-        mul_11: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        mul_14: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_11, mul_14, clone)""",  # noqa: B950
+        mul_3: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        mul_4: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
+        return (mul_3, mul_4, clone)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3573,11 +4644,11 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
             aot_graphs,
             """\
 def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
-        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        ge: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
+        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
@@ -3585,9 +4656,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
         view_2: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
-        mul_6: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        mul_9: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_6, mul_9, clone)""",  # noqa: B950
+        mul: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        mul_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
+        return (mul, mul_1, clone)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3632,21 +4703,21 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             aot_graphs,
             """\
 def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", arg3_1: "f32[u2, u3][1, u2]cpu"):
-        ge_1: "Sym(u2 >= 0)" = arg1_1 >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
-        ge_3: "Sym(u3 >= 0)" = arg2_1 >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge: "Sym(u2 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        ge_1: "Sym(u3 >= 0)" = arg2_1 >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
-        ge_4: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_4 = _assert_scalar_2 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
         sym_sum: "Sym(u0 + 1)" = torch.sym_sum((1, _local_scalar_dense))
         gt: "Sym(u0 + 1 > 0)" = sym_sum > 0;  sym_sum = None
         _assert_scalar_3 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 0 < u0 + 1 on node 'gt'");  gt = _assert_scalar_3 = None
         select_1: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1);  arg0_1 = None
         _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
-        ge_5: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
-        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_5 = _assert_scalar_4 = None
+        ge_3: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
+        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_3 = _assert_scalar_4 = None
         sym_sum_1: "Sym(u1 + 1)" = torch.sym_sum((1, _local_scalar_dense_1))
         gt_1: "Sym(u1 + 1 > 0)" = sym_sum_1 > 0;  sym_sum_1 = None
         _assert_scalar_5 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 + 1 on node 'gt_1'");  gt_1 = _assert_scalar_5 = None
@@ -3656,8 +4727,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_6 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_6 = None
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
-        mul_21: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        return (mul_21,)""",  # noqa: B950
+        mul_17: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        return (mul_17,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3688,7 +4759,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
-            """""",  # noqa: B950
+            """""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3707,6 +4778,44 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(cnt.frame_count, 2)
 
     @fresh_cache()
+    @skipIfTorchDynamo("test inspects inner torch.compile/AOT backend graph")
+    def test_user_check_input_shape_bound_preserved_in_aot_graph(self):
+        def f(x):
+            torch._check(x.shape[0] <= 5, lambda: "custom shape check failed")
+            return x + 1
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_f = torch.compile(f, fullgraph=True, dynamic=True, backend=backend)
+        x = torch.ones(4)
+        self.assertEqual(compiled_f(x), f(x))
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        fw_graph = backend.fw_graphs[0]
+        assert_nodes = [
+            node
+            for node in fw_graph.graph.nodes
+            if node.target is torch.ops.aten._assert_scalar.default
+        ]
+        self.assertEqual(len(assert_nodes), 1)
+        self.assertEqual(assert_nodes[0].args[1], "custom shape check failed")
+        self.assertEqual(fw_graph(4, x)[0], f(x))
+
+        with self.assertRaisesRegex(RuntimeError, "custom shape check failed"):
+            fw_graph(6, torch.ones(6))
+
+        def g(x):
+            def lazy_message():
+                raise RuntimeError("message should be lazy")
+
+            torch._check(x.shape[0] <= 5, lazy_message)
+            return x + 1
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_g = torch.compile(g, fullgraph=True, dynamic=True, backend=backend)
+        x = torch.ones(4)
+        self.assertEqual(compiled_g(x), g(x))
+
+    @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_slice(self):
         from torch.fx.experimental.symbolic_shapes import statically_known_true
@@ -3722,7 +4831,10 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             torch._check(u1 <= x.size(0))
             torch._check(u0 <= u1)
             out = x[u0:u1]
-            assert statically_known_true(out.size(0) == (u1 - u0))
+            if not statically_known_true(out.size(0) == (u1 - u0)):
+                raise AssertionError(
+                    "expected statically_known_true(out.size(0) == (u1 - u0))"
+                )
             return out
 
         x, xs = torch.randn(10), torch.tensor([3, 6])
@@ -3738,7 +4850,10 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             torch._check(u0 > 1)
             torch._check(u0 <= x.size(0))
             out = x[-u0:]
-            assert statically_known_true(out.size(0) == u0)
+            if not statically_known_true(out.size(0) == u0):
+                raise AssertionError(
+                    "expected statically_known_true(out.size(0) == u0)"
+                )
             return out
 
         x, n = torch.randn(10), torch.tensor([5])
@@ -3785,7 +4900,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         sym_storage_offset_default: "Sym(u3)" = torch.ops.aten.sym_storage_offset.default(slice_1)
         ge_2: "Sym(u3 >= 0)" = sym_storage_offset_default >= 0;  sym_storage_offset_default = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_2 = None
-        return (slice_1,)""",  # noqa: B950
+        return (slice_1,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3813,6 +4928,31 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     @torch._inductor.config.patch("cpp_wrapper", True)
     def test_unbacked_slice_with_step_cpp_wrapper(self):
         self.test_unbacked_slice_with_step()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_slice_noop_with_unbacked_bindings(self):
+        # Regression test: the no-op early return in slice_ lowering
+        # (start==0, size<=end, step==1) must register DynamicSliceSize
+        # for unbacked bindings created at trace time.
+        # torch._check after the slice adds facts to ShapeEnv that make
+        # statically_known_leq(size, end) True at lowering time.
+        def f(x, n):
+            u0 = n.item()
+            result = x[:u0]
+            torch._check(u0 >= 0)
+            torch._check(u0 >= x.size(0))
+            return result
+
+        x = torch.randn(10, 16)
+        n = torch.tensor([10])
+
+        eager_result = f(x, n)
+
+        compiled_fn = torch.compile(f, fullgraph=True, backend="inductor")
+        compiled_result = compiled_fn(x, n)
+
+        self.assertEqual(eager_result, compiled_result)
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -4004,7 +5144,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         cnt = CompileCounterWithBackend("inductor")
 
         # This view (u2, u3) -> (u0, u1) can't happen in general unless we know that input is contiguous or we have
-        # hints to to compute strides.
+        # hints to compute strides.
         def func(x, y):
             u0, u1 = y.tolist()
             result2 = x.view(u0, u1) * 10
@@ -4068,14 +5208,14 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertExpectedInline(
             output,
             """\
-        ge_1: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
-        ge_3: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         clone: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.clone.default(arg2_1, memory_format = torch.contiguous_format);  arg2_1 = None
-        add_3: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-        mul_6: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add_3, 100);  add_3 = None
-        return (mul_6,)""",  # noqa: B950
+        add: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+        mul_2: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
+        return (mul_2,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4097,13 +5237,13 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertExpectedInline(
             output,
             """\
-        ge_1: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
-        ge_3: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         add: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
-        mul_5: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
-        return (mul_5,)""",  # noqa: B950
+        mul_3: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
+        return (mul_3,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4141,7 +5281,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         select: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense)
         select_1: "f32[s77, s77][s77**2, 1]cpu" = torch.ops.aten.select.int(arg2_1, 1, _local_scalar_dense)
         select_2: "f32[s77, s77][s77**2, s77]cpu" = torch.ops.aten.select.int(arg2_1, 2, _local_scalar_dense);  arg2_1 = _local_scalar_dense = None
-        return (select, select_1, select_2)""",  # noqa: B950
+        return (select, select_1, select_2)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4283,16 +5423,16 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             aot_graphs,
             """\
 def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
-        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        ge: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
+        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
-        return (_reshape_copy,)""",  # noqa: B950
+        return (_reshape_copy,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4319,16 +5459,16 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
             aot_graphs,
             """\
 def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
-        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        ge: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
+        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
-        return (_reshape_copy,)""",  # noqa: B950
+        return (_reshape_copy,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4476,8 +5616,1882 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res = f(x, start, 0)
         self.assertEqual(res.shape, torch.Size([0]))
 
+    @skipIfTorchDynamo("mark_unbacked not supported")
+    def test_unbacked_norm_no_dde(self):
+        def vector_norm(x):
+            return torch.linalg.vector_norm(x)
+
+        def dist_fn(x, y):
+            return torch.dist(x, y)
+
+        def norm_fro(x):
+            return torch.norm(x, p="fro")
+
+        x = torch.randn(4, 5)
+        y = torch.randn(4, 5)
+        for dim in range(x.ndim):
+            torch._dynamo.decorators.mark_unbacked(x, dim)
+            torch._dynamo.decorators.mark_unbacked(y, dim)
+
+        for fn, args in [
+            (vector_norm, (x,)),
+            (dist_fn, (x, y)),
+            (norm_fro, (x,)),
+        ]:
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, fullgraph=True, backend="eager")
+            compiled(*args)
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_expand(self):
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+
+        def func(a, shape):
+            return a.expand(*shape)
+
+        compiled = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+
+        def run(a, shape):
+            self.assertEqual(compiled(a, shape), func(a, shape))
+
+        # No specialization - matching dimensions
+        run(torch.rand(2, 10), (2, 10))
+        run(torch.rand(5, 5), (5, 5))
+        self.assertEqual(cnt.frame_count, 1)  # Single compilation
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Specialize input dim to 1 (broadcasting)
+        # Input dim is 1, needs to expand to larger size
+        run(torch.rand(1, 10), (9, 10))  # Compile with input[0] == 1
+        run(torch.rand(1, 5), (7, 5))  # Reuse same compiled graph
+        self.assertEqual(cnt.frame_count, 1)
+        # Changing input from 1 triggers recompilation
+        run(torch.rand(5, 10), (5, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Multi-dimensional broadcasting
+        # Multiple dimensions with different broadcast semantics
+        run(torch.rand(1, 1, 10), (5, 7, 10))  # Broadcast first two dims
+        run(torch.rand(1, 1, 5), (3, 4, 5))  # Reuse pattern
+        self.assertEqual(cnt.frame_count, 1)
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_broadcast(self):
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+
+        def func(a, b):
+            torch.broadcast_shapes(a.size(), b.size())
+            return a + b
+
+        compiled = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+
+        def run(a, b):
+            self.assertEqual(compiled(a, b), func(a, b))
+
+        # No 0/1 specializations, no broadcasts.
+        # but a[0] == b[0] and a[1] == b[1] are asserted.
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        run(torch.rand(1, 1), torch.rand(1, 1))
+        run(torch.rand(10, 10), torch.rand(10, 10))
+
+        self.assertEqual(cnt.frame_count, 1)
+        run(torch.rand(10, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # specialize a[0] == 1. b[0] not specialized.
+        run(torch.rand(1, 10), torch.rand(9, 10))
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 1)
+        # if we change a[0] we get recompilation.
+        run(torch.rand(10, 10), torch.rand(10, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # TODO duck sizing shall be disabled when backed_size_oblivious
+        # is on probably.
+        # specialize b[0] == 1. a[0] not specialized.
+        run(torch.rand(10, 11), torch.rand(1, 11))
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 1)
+        run(torch.rand(2, 10), torch.rand(2, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_unbacked_view_extra(self):
+        def fn(x):
+            i0 = x.nonzero().size(0)
+            y = torch.zeros((i0, 192))
+            return y.view([12, -1, 192])
+
+        res1 = torch.compile(fn, fullgraph=True)(torch.ones((12,)))
+        res2 = fn(torch.ones((12,)))
+        self.assertEqual(res1, res2)
+
+    @skipIfTorchDynamo("mark_dynamic not supported")
+    def test_hint_override_consistent_stride1(self):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def func(x):
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.size()[2]
+            )
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[1]
+            )
+            torch._check(a == b)
+            torch._check(a == 6)
+
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.size()[1] * x.size()[2]
+            )
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[0]
+            )
+            torch._check(a == b)
+            torch._check(a == 120)
+
+            return a, b, x * 100
+
+        x = torch.rand(10, 20, 30)
+
+        torch._dynamo.mark_dynamic(x, 0, hint_override=2)
+        torch._dynamo.mark_dynamic(x, 2, hint_override=6)
+
+        func(x)
+
+    @skipIfTorchDynamo("mark_dynamic not supported")
+    def test_hint_override_consistent_stride2(self):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def func(x):
+            # only one of the sizes has hint overridden.
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.size()[1] * x.size()[2]
+            )
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[0]
+            )
+            torch._check(a == b)
+            torch._check(a == 24)
+
+            return a, b, x * 100
+
+        x = torch.rand(10, 20, 30)
+
+        torch._dynamo.mark_dynamic(x, 0, hint_override=2)
+        torch._dynamo.mark_dynamic(x, 1, hint_override=4)
+        torch._dynamo.mark_dynamic(x, 2, hint_override=6)
+        func(x)
+
+    def test_optimization_hint(self):
+        @torch.compile(fullgraph=True)
+        def func(x):
+            u0 = x.item()
+            a = torch.ones([u0])
+            torch._check(
+                torch.fx.experimental.symbolic_shapes.optimization_hint(
+                    a.size()[0], fallback=300
+                )
+                == 300
+            )
+            b = torch.ones([x.item() * 2])
+            torch._check(
+                torch.fx.experimental.symbolic_shapes.optimization_hint(
+                    b.size()[0], fallback=300
+                )
+                == 600
+            )
+
+            return a * 10
+
+        func(torch.tensor([33]))
+
+    def test_guarding_hint_or_throw(self):
+        @torch.compile(fullgraph=True)
+        def func(x):
+            u0 = x.item()
+            a = torch.ones([u0])
+            torch._check(
+                torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                    a.size()[0]
+                )
+                == 300
+            )
+
+            return a * 10
+
+        self.assertRaises(GuardOnDataDependentSymNode, lambda: func(torch.tensor([33])))
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_shape_id_unifies_unbacked_symbols(self):
+        """
+        Test that shape_id parameter in mark_unbacked causes tensors to share
+        the same unbacked symbol, allowing equality comparisons without DDE.
+        """
+
+        def func(x, y):
+            if x.size()[0] == y.size()[0]:
+                return x + y
+            else:
+                return x - y
+
+        # Test 1: Without shape_id, comparing unbacked symbols raises DDE
+        x1 = torch.rand(4, 3)
+        y1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        torch._dynamo.decorators.mark_unbacked(y1, 0)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+            compiled_func(x1, y1)
+
+        # Test 2: With shape_id, same symbol is used - no DDE, fullgraph succeeds
+        x2 = torch.rand(4, 3)
+        y2 = torch.rand(4, 3)
+
+        torch._dynamo.reset()
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x2, y2)
+        # Since both use same symbol, x.size()[0] == y.size()[0] is always True
+        self.assertTrue(torch.allclose(result, x2 + y2))
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_shape_id_runtime_assertion_on_mismatch(self):
+        """
+        Test that shape_id with different actual sizes at runtime
+        raises an assertion error during tracing. This ensures that duck shaping
+        violations are caught rather than silently producing incorrect results.
+        """
+
+        def func(x, y):
+            return x + y
+
+        torch._dynamo.reset()
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+
+        # First, compile with valid inputs (same batch size)
+        x1 = torch.rand(4, 3)
+        y1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(y1, 0, shape_id="batch")
+        result = compiled_func(x1, y1)
+        self.assertTrue(torch.allclose(result, x1 + y1))
+
+        # Now pass tensors with different batch sizes but same shape_id
+        # This triggers recompilation, and during tracing the torch._check
+        # equality assertion will fail because the sizes don't match
+        x2 = torch.rand(4, 3)
+        y2 = torch.rand(5, 3)  # Different batch size!
+        torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(y2, 0, shape_id="batch")
+
+        # Should raise an AssertionError during guard building because batch sizes don't match
+        with self.assertRaises(AssertionError):
+            compiled_func(x2, y2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_shape_id_recompilation(self):
+        """
+        Test that changing _dynamo_shape_ids triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with shape_id
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same shape_id - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="batch")
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call without shape_id - should recompile
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_shape_id_no_recompile_without_unbacked_indices(self):
+        """
+        Test that passing a tensor without _dynamo_unbacked_indices after
+        compiling with shape_ids does NOT trigger recompilation.
+        The guard on shape_ids only applies when the runtime tensor
+        also has _dynamo_unbacked_indices.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with shape_id (has _dynamo_unbacked_indices)
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with regular tensor (no _dynamo_unbacked_indices)
+        # Should NOT recompile - guard passes when no _dynamo_unbacked_indices
+        x2 = torch.rand(4, 3)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_shape_id_recompile_with_different_id(self):
+        """
+        Test that passing a tensor with same _dynamo_dynamic_indices but
+        different shape_id DOES trigger recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with shape_id="batch"
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different shape_id - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="other")
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_bounds_partially_specified(self):
+        """
+        Unbacked sizes are size oblivious, an unspecified min stays 0.
+        """
+        ranges = []
+
+        def backend(gm, example_inputs):
+            for arg in example_inputs:
+                if isinstance(arg, torch.SymInt):
+                    vr = arg.node.shape_env.var_to_range[arg.node.expr]
+                    ranges.append((vr.lower, vr.upper))
+            return gm.forward
+
+        for kwargs, expected in (
+            ({"max": 10}, (0, 10)),
+            ({"min": 3}, (3, int_oo)),
+            ({"min": 3, "max": 10}, (3, 10)),
+            ({}, (0, int_oo)),
+        ):
+            with self.subTest(kwargs=kwargs):
+                torch._dynamo.reset()
+                ranges.clear()
+                x = torch.randn(4)
+                torch._dynamo.decorators.mark_unbacked(x, 0, **kwargs)
+                torch.compile(lambda t: t.cos() * t.shape[0], backend=backend)(x)
+                self.assertEqual(ranges, [expected])
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_bounds_recompilation(self):
+        """
+        Test that changing _dynamo_unbacked_bounds triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with min/max bounds
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, min=1, max=100)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same bounds - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0, min=1, max=100)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call without bounds - should recompile
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Fourth call with different bounds - should recompile
+        x4 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x4, 0, min=1, max=200)
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 3)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_bounds_no_recompile_without_unbacked_indices(self):
+        """
+        Test that passing a tensor without _dynamo_unbacked_indices after
+        compiling with bounds does NOT trigger recompilation.
+        The guard on bounds only applies when the runtime tensor
+        also has _dynamo_unbacked_indices.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with bounds (has _dynamo_unbacked_indices)
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, min=1, max=100)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with regular tensor (no _dynamo_unbacked_indices)
+        # Should NOT recompile - guard passes when no _dynamo_unbacked_indices
+        x2 = torch.rand(4, 3)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_no_bounds_then_bounds(self):
+        """
+        Test that compiling without bounds then calling with bounds
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked but no bounds
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same (no bounds) - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with min=1, max=100 - should recompile
+        # (compiled without bounds, now calling with bounds)
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0, min=1, max=100)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_indices_recompilation(self):
+        """
+        Test that changing _dynamo_unbacked_indices triggers recompilation.
+        Uses subset match semantics: runtime indices must be a subset of compiled indices,
+        unless the runtime tensor has no attribute (unspecified = don't care).
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with unbacked indices [0, 1]
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, [0, 1])
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same unbacked indices - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, [0, 1])
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with subset [0] - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with no unbacked indices (plain tensor) - should NOT recompile
+        # (no attribute = unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with superset [0, 1, 2] - should recompile (not a subset of {0, 1})
+        x5 = torch.rand(4, 3, 5)
+        torch._dynamo.decorators.mark_unbacked(x5, [0, 1, 2])
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Sixth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x6 = torch.rand(4, 3, 5)
+        torch._dynamo.decorators.mark_unbacked(x6, [])
+        self.assertFalse(hasattr(x6, "_dynamo_unbacked_indices"))
+        compiled_func(x6)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_indices_no_recompile_to_unbacked(self):
+        """
+        Test that compiling without _dynamo_unbacked_indices and then passing
+        a tensor with _dynamo_unbacked_indices DOES trigger recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call without unbacked indices
+        x1 = torch.rand(4, 3)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with unbacked indices - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_no_shape_id_then_shape_id(self):
+        """
+        Test that compiling without shape_id then calling with shape_id
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked but no shape_id
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same (no shape_id) - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with shape_id="batch" - should recompile
+        # (compiled without shape_id, now calling with shape_id)
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0, shape_id="batch")
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_empty_list_is_noop(self):
+        """
+        Test that mark_unbacked(x, []) is a no-op:
+        - On a fresh tensor, no attribute is set.
+        - After mark_unbacked(x, 0), calling mark_unbacked(x, []) does NOT clear dim 0.
+        """
+        # Empty list on fresh tensor is a no-op
+        x0 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x0, [])
+        self.assertFalse(hasattr(x0, "_dynamo_unbacked_indices"))
+
+        # Empty list after marking a dim does not clear it
+        x = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(x._dynamo_unbacked_indices, {0})
+        torch._dynamo.decorators.mark_unbacked(x, [])
+        self.assertEqual(x._dynamo_unbacked_indices, {0})
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_mark_dynamic_empty_list_is_noop(self):
+        """
+        Test that mark_dynamic(x, []) is a no-op:
+        - On a fresh tensor, no attribute is set.
+        - After mark_dynamic(x, 0), calling mark_dynamic(x, []) does NOT clear dim 0.
+        """
+        # Empty list on fresh tensor is a no-op
+        x0 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_dynamic(x0, [])
+        self.assertFalse(hasattr(x0, "_dynamo_dynamic_indices"))
+
+        # Empty list after marking a dim does not clear it
+        x = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_dynamic(x, 0)
+        self.assertIn(0, x._dynamo_dynamic_indices)
+        torch._dynamo.decorators.mark_dynamic(x, [])
+        self.assertIn(0, x._dynamo_dynamic_indices)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_to_mark_static_recompilation(self):
+        """
+        Test that compiling with mark_unbacked and then calling with mark_static
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_static - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_static is not traceable")
+    def test_mark_static_to_mark_unbacked_recompilation(self):
+        """
+        Test that compiling with mark_static and then calling with mark_unbacked
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_static
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_unbacked - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_mark_dynamic_to_mark_static_recompilation(self):
+        """
+        Test that compiling with mark_dynamic and then calling with mark_static
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_dynamic
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_static - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_dynamic_indices_exact_match_recompilation(self):
+        """
+        Test that dynamic indices use subset match semantics.
+        - Compile with mark_dynamic(x, [0, 1]) then call with mark_dynamic(x, [0]) → no recompile (subset)
+        - Compile with mark_dynamic(x, [0, 1]) then call with mark_dynamic(x, [2]) → recompile (not subset)
+        - Plain tensor (no attribute) = unspecified = don't care → no recompile
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_dynamic on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x1, 0)
+        torch._dynamo.mark_dynamic(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same dynamic indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x2, 0)
+        torch._dynamo.mark_dynamic(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 dynamic - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_dynamic_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_dynamic_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("maybe_mark_dynamic is not traceable")
+    def test_weak_dynamic_indices_exact_match_recompilation(self):
+        """
+        Test that weak dynamic indices (from maybe_mark_dynamic) use subset match semantics.
+        - Compile with maybe_mark_dynamic(x, [0, 1]) then call with maybe_mark_dynamic(x, [0]) → no recompile (subset)
+        - Plain tensor (no attribute) = unspecified = don't care → no recompile
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with maybe_mark_dynamic on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x1, 0)
+        torch._dynamo.maybe_mark_dynamic(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same weak dynamic indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x2, 0)
+        torch._dynamo.maybe_mark_dynamic(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 weak dynamic - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_weak_dynamic_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_weak_dynamic_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("mark_static is not traceable")
+    def test_static_indices_exact_match_recompilation(self):
+        """
+        Test that static indices use subset match semantics.
+        - Compile with mark_static(x, [0, 1]) then call with mark_static(x, [0]) → no recompile (subset)
+        - If you want dim 1 NOT static, explicitly mark it dynamic.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_static on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x1, 0)
+        torch._dynamo.mark_static(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same static indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        torch._dynamo.mark_static(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 static - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_static_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_static_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_exec_fft_reshape_no_dde(self):
+        """
+        Test that view/reshape operations from with in meta python function
+        on tensors with unbacked dimensions do not raise GuardOnDataDependentSymNode
+        errors. This tests the unbacked handling in the view decomposition via
+        _exec_fft.
+        """
+
+        def func(x):
+            # FFT triggers _exec_fft which calls reshape with unbacked batch dims
+            return torch.fft.fft(x)
+
+        x = torch.rand(4, 8, dtype=torch.complex64)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        expected = torch.fft.fft(x)
+        self.assertTrue(torch.allclose(result, expected))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_inductor_issue_164428(self):
+        torch.manual_seed(6804)
+
+        def fuzzed_program(arg_0, arg_1, arg_2, sentinel):
+            var_node_4 = arg_0
+            var_node_5 = torch.full((7, 1, 32), -1.195053522845565, dtype=torch.float64)
+            var_node_3 = torch.div(var_node_4, var_node_5)
+            var_node_2 = torch.flatten(var_node_3)
+            var_node_8 = torch.full((2,), -0.8316502130341195, dtype=torch.float64)
+            var_node_9 = arg_1
+            var_node_7 = torch.matmul(
+                var_node_8.to(torch.float64), var_node_9.to(torch.float64)
+            )
+            var_node_10 = arg_2
+            var_node_6 = torch.sub(var_node_7, var_node_10)
+            var_node_1 = torch.sub(var_node_2, var_node_6)
+            var_node_0 = var_node_1.contiguous().view([16, 14])
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True)
+
+        arg_0 = torch.as_strided(
+            torch.randn(7).to(torch.float64), (7, 1, 32), (1, 1, 0)
+        )
+        arg_1 = torch.as_strided(torch.randn(448).to(torch.float64), (2, 224), (224, 1))
+        arg_2 = torch.as_strided(torch.randn(224).to(torch.float64), (224,), (1,))
+
+        args = (arg_0, arg_1, arg_2) + (sentinel,)
+        result_original = fuzzed_program(*args)
+        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+        result_compiled = compiled_program(*args)
+        self.assertTrue(torch.allclose(result_compiled, result_original))
+
+    def test_inductor_view_issue_172693(self):
+        class MinimalBugModule(torch.nn.Module):
+            def __init__(self, num_heads: int = 8):
+                super().__init__()
+                self.num_heads = num_heads
+
+            def forward(self, key):
+                reshaped_key = key.reshape(key.shape[0], self.num_heads, -1)
+                torch._dynamo.graph_break()
+                return reshaped_key + 1
+
+        num_heads = 8
+
+        bug_module = MinimalBugModule(num_heads=num_heads)
+
+        key = torch.empty_strided((2, 16, 9), (288, 9, 1)).normal_()
+
+        with torch.inference_mode():
+            eager_result = bug_module(key)
+            bug_module.compile(dynamic=True)
+            compiled_result = bug_module(key)
+
+        self.assertEqual(compiled_result, eager_result)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_view_as_complex_unbacked_no_dde(self):
+        """
+        Test that view_as_complex does not raise GuardOnDataDependentSymNode
+        when operating on tensors with unbacked dimensions.
+        """
+
+        def func(x):
+            return torch.view_as_complex(x)
+
+        # Create a tensor with shape [..., 2] where batch dim is unbacked
+        x = torch.rand(4, 8, 2)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        expected = torch.view_as_complex(x)
+        self.assertTrue(
+            torch.allclose(torch.view_as_real(result), torch.view_as_real(expected))
+        )
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_view_as_real_backward_unbacked_no_dde(self):
+        """
+        Test that view_as_real backward (which calls view_as_complex) does not
+        raise GuardOnDataDependentSymNode when operating on tensors with
+        unbacked dimensions.
+        """
+
+        def func(x):
+            y = torch.view_as_real(x)
+            return y.sum()
+
+        x = torch.rand(4, 8, dtype=torch.complex64, requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode during backward
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        result.backward()
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_view_input(self):
+        @torch.compile()
+        def fn(x):
+            return x * 100 + 1
+
+        x = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        y = x[0:1, 0:1]  # y is a view, y._base is x
+        result = fn(y)
+        self.assertEqual(result.shape, (1, 1))
+
 
 instantiate_parametrized_tests(TestUnbacked)
+
+
+class TestMaybeFastEvalComparison(TestCase):
+    """Tests for _maybe_fast_eval_comparison fast path optimization."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_sum_of_nonneg_ge_zero(self):
+        """Test that sum of non-negative symbols >= 0 returns True."""
+        shape_env = ShapeEnv()
+        # Create unbacked symbols and constrain them to be positive
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+        torch._check(u1 >= 0)
+
+        # u0 + u1 >= 0 should be True (both have range [0, inf])
+        expr = sympy.GreaterThan(u0.node.expr + u1.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_single_nonneg_symbol_ge_zero(self):
+        """Test that a single non-negative symbol >= 0 returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 >= 0 should be True (u0 has range [0, inf])
+        expr = sympy.GreaterThan(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_zero_le_sum_of_nonneg(self):
+        """Test that 0 <= sum of non-negative symbols returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+        torch._check(u1 >= 0)
+
+        # 0 <= u0 + u1 should be True
+        expr = sympy.Le(0, u0.node.expr + u1.node.expr)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_nonneg_constant_in_sum(self):
+        """Test that sum with non-negative constant >= 0 returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 + 5 >= 0 should be True
+        expr = sympy.GreaterThan(u0.node.expr + 5, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_negative_constant_returns_none(self):
+        """Test that sum with negative constant returns None (undecidable)."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 - 5 >= 0 is undecidable (u0 could be 0, making it -5)
+        expr = sympy.GreaterThan(u0.node.expr - 5, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_sympy_interp_min_max_are_symbol_safe(self):
+        from torch._dynamo.source import LocalSource
+        from torch.fx.experimental.symbolic_shapes import ShapeGuardPythonPrinter
+        from torch.utils._sympy.functions import Max, Min
+
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        sym = u0.node.expr
+        source = LocalSource("u0")
+        printer = ShapeGuardPythonPrinter(
+            {sym: [source]}, lambda source: source.name, {sym: [source]}
+        )
+
+        # Printer emits torch.sym_max / torch.sym_min so the printed string is
+        # symbol-safe to eval on unbacked SymInts.
+        max_expr = printer.doprint(sympy.Max(1, sym))
+        min_expr = printer.doprint(sympy.Min(1, sym))
+        self.assertEqual(max_expr, "torch.sym_max(1, L['u0'])")
+        self.assertEqual(min_expr, "torch.sym_min(1, L['u0'])")
+
+        locals_ = {"L": {"u0": u0}}
+        max_result = eval(max_expr, SYMPY_INTERP, locals_).node.expr  # noqa: P204
+        min_result = eval(min_expr, SYMPY_INTERP, locals_).node.expr  # noqa: P204
+        self.assertEqual(max_result, Max(1, sym))
+        self.assertEqual(min_result, Min(1, sym))
+
+        # Three-arg form right-folds into nested binary calls.
+        u1 = shape_env.create_unbacked_symint()
+        sym1 = u1.node.expr
+        printer3 = ShapeGuardPythonPrinter(
+            {sym: [source], sym1: [LocalSource("u1")]},
+            lambda s: s.name,
+            {sym: [source], sym1: [LocalSource("u1")]},
+        )
+        max3 = printer3.doprint(sympy.Max(1, sym, sym1))
+        self.assertIn("torch.sym_max", max3)
+        locals3 = {"L": {"u0": u0, "u1": u1}}
+        max3_result = eval(max3, SYMPY_INTERP, locals3).node.expr  # noqa: P204
+        self.assertEqual(max3_result, Max(1, sym, sym1))
+
+    def test_non_zero_rhs_returns_none(self):
+        """Test that comparison with non-zero RHS returns None."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 >= 5 is not handled by this fast path
+        expr = sympy.GreaterThan(u0.node.expr, 5)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_unhandled_expr_type_returns_none(self):
+        """Test that unhandled expression types return None."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # Eq is not handled by the current fast path
+        expr = sympy.Eq(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_unbacked_symbol_with_default_range_returns_none(self):
+        """Test that unbacked symbols with default range [-inf, inf] return None."""
+        shape_env = ShapeEnv()
+        # Default unbacked symint has range [-int_oo, int_oo]
+        u0 = shape_env.create_unbacked_symint()
+
+        # u0 >= 0 is undecidable since u0 could be negative
+        expr = sympy.GreaterThan(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_slice_assignment_same_bounds(self):
+        # Repro from sequential_experts_gemm (MoE pattern in HuggingFace Aria).
+        # output[start:end] = out should not fail with a data-dependent guard
+        # because `out` was produced from token_states[start:end], so both
+        # slices share the same (start, end) and thus the same size.
+        def sequential_experts_gemm(token_states, expert_weights, tokens_per_expert):
+            num_tokens = token_states.shape[0]
+            out_features = expert_weights.shape[-1]
+            output = torch.zeros(
+                num_tokens,
+                out_features,
+                dtype=token_states.dtype,
+                device=token_states.device,
+            )
+
+            cumsum_num_tokens = torch.cumsum(tokens_per_expert, dim=0)
+            zero_tensor = torch.zeros(
+                1, dtype=torch.long, device=cumsum_num_tokens.device
+            )
+            cumsum_num_tokens = torch.cat((zero_tensor, cumsum_num_tokens))
+
+            for expert_num in range(expert_weights.shape[0]):
+                start = cumsum_num_tokens[expert_num]
+                end = cumsum_num_tokens[expert_num + 1]
+                tokens = token_states[start:end]
+                out = torch.matmul(tokens, expert_weights[expert_num])
+                output[start:end] = out
+            return output
+
+        num_tokens = 10
+        in_features = 16
+        out_features = 32
+        num_experts = 3
+
+        token_states = torch.randn(num_tokens, in_features)
+        expert_weights = torch.randn(num_experts, in_features, out_features)
+        tokens_per_expert = torch.tensor([3, 2, 5])
+
+        eager_result = sequential_experts_gemm(
+            token_states, expert_weights, tokens_per_expert
+        )
+
+        compiled_fn = torch.compile(
+            sequential_experts_gemm, fullgraph=True, backend="eager"
+        )
+        compiled_result = compiled_fn(token_states, expert_weights, tokens_per_expert)
+
+        self.assertEqual(eager_result, compiled_result)
+
+
+class TestTransferSymbolsFromForeignShapeEnv(TestCase):
+    """Tests for ShapeEnv.transfer_symbols_from_foreign_shape_env."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _make_source(self, name="t"):
+        from torch._dynamo.source import ConstantSource
+
+        return ConstantSource(name)
+
+    @staticmethod
+    def _transfer_symint(env, value, source):
+        """Test helper that mirrors what builder.py does when wrapping a raw
+        foreign unbacked SymInt input: transfer the expression and wrap as a
+        SymInt in the local env."""
+        new_expr = env._transfer_foreign_expr_as_unbacked(value, source=source)
+        return env.create_symintnode(new_expr, hint=None, source=source)
+
+    def _create_backed_symbols(self, shape_env, tensor, source_name="foreign"):
+        """Create backed symbolic sizes/strides/offset using _create_symbolic_sizes_strides_storage_offset."""
+        src = self._make_source(source_name)
+        return shape_env._create_symbolic_sizes_strides_storage_offset(
+            tensor.size(),
+            tensor.stride(),
+            tensor.storage_offset(),
+            [True] * tensor.dim(),
+            src,
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DUCK] * tensor.dim(),
+                dynamic_strides=[DimDynamic.INFER_STRIDE] * tensor.dim(),
+            ),
+        )
+
+    def test_backed_symbols_transferred_as_duck(self):
+        """Backed (guarding-hinted) symbols should become DUCK dims in the new env."""
+        foreign_env = ShapeEnv()
+        x = torch.randn(4, 8)
+        sizes, strides, offset = self._create_backed_symbols(foreign_env, x)
+        # Sanity: foreign sizes are symbolic
+        self.assertTrue(is_symbolic(sizes[0]))
+        self.assertTrue(is_symbolic(sizes[1]))
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                offset,
+                source=self._make_source("local"),
+            )
+        )
+        # New symbols should exist in local_env, not foreign_env
+        for s in new_sizes:
+            self.assertTrue(is_symbolic(s))
+            self.assertIs(s.node.shape_env, local_env)
+        # Hints should match the original concrete values
+        self.assertEqual(guarding_hint_or_throw(new_sizes[0].node), 4)
+        self.assertEqual(guarding_hint_or_throw(new_sizes[1].node), 8)
+
+    def test_static_dims_stay_static(self):
+        """Non-symbolic (plain int) sizes should remain static ints."""
+        local_env = ShapeEnv()
+
+        sizes = (3, 5)
+        strides = (5, 1)
+        storage_offset = 0
+
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # Static dims should stay as plain ints
+        for s in new_sizes:
+            self.assertFalse(is_symbolic(s))
+        self.assertEqual(new_sizes, (3, 5))
+
+    def test_unbacked_symbols_transferred(self):
+        """Unbacked symbols should become UNBACKED dims in the new env."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        u1 = foreign_env.create_unbacked_symint()
+
+        # Use plain int strides; unbacked symbols as strides would need
+        # valid positive hints, and INFER_STRIDE handles stride creation.
+        sizes = (u0, u1)
+        strides = (1, 1)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # New symbols should be unbacked in local_env
+        for s in new_sizes:
+            self.assertTrue(is_symbolic(s))
+            self.assertIs(s.node.shape_env, local_env)
+            self.assertFalse(local_env.has_guarding_hint(s.node.expr))
+
+    def test_shared_unbacked_symbol_preserved(self):
+        """When two dims share the same unbacked symbol (e.g. size=[u0, u0]),
+        the transfer preserves that sharing."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+
+        sizes = (u0, u0)
+        strides = (u0, 1)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # Both dims should map to the same new symbol since they were
+        # the same unbacked symbol in the foreign env.
+        self.assertTrue(is_symbolic(new_sizes[0]))
+        self.assertTrue(is_symbolic(new_sizes[1]))
+        self.assertEqual(
+            new_sizes[0].node.expr,
+            new_sizes[1].node.expr,
+            "Shared unbacked symbol should be preserved across dims",
+        )
+        # Stride[0] should equal the shared size symbol (contiguous relationship)
+        self.assertTrue(is_symbolic(new_strides[0]))
+        self.assertEqual(
+            new_strides[0].node.expr,
+            new_sizes[0].node.expr,
+            "Stride should preserve relationship with size via substitution",
+        )
+
+    def test_foreign_stride_symbol_not_in_sizes(self):
+        """If a stride references a foreign unbacked symbol not in any size dim
+        (e.g. from as_strided), a fresh unbacked symbol should be created."""
+        foreign_env = ShapeEnv()
+        u_size = foreign_env.create_unbacked_symint()
+        u_stride = foreign_env.create_unbacked_symint()  # independent from sizes
+
+        sizes = (u_size,)
+        strides = (u_stride,)  # stride symbol not in sizes
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # Size should be unbacked in local_env
+        self.assertTrue(is_symbolic(new_sizes[0]))
+        self.assertIs(new_sizes[0].node.shape_env, local_env)
+        # Stride should also be unbacked in local_env (fresh symbol, not foreign)
+        self.assertTrue(is_symbolic(new_strides[0]))
+        self.assertIs(new_strides[0].node.shape_env, local_env)
+        # Stride should be a different symbol than size
+        self.assertNotEqual(new_sizes[0].node.expr, new_strides[0].node.expr)
+
+    def test_derived_unbacked_expression_preserved(self):
+        """If a size is a derived expression (e.g., u0 // 2) from a base symbol
+        that appears in another dim, it should be expressed in terms of the
+        new symbol rather than creating an independent fresh symbol."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        # Create a derived expression: u0 // 2
+        u0_half = u0 // 2
+
+        sizes = (u0, u0_half)
+        strides = (1, 1)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # dim 0 should be a fresh unbacked symbol
+        self.assertTrue(is_symbolic(new_sizes[0]))
+        new_u0 = new_sizes[0].node.expr
+        # dim 1 should be derived from new_u0 (e.g., floor(new_u0/2))
+        self.assertTrue(is_symbolic(new_sizes[1]))
+        # The derived expression should reference the new base symbol
+        self.assertIn(new_u0, new_sizes[1].node.expr.free_symbols)
+
+    def test_unbacked_hint_overrides_transferred(self):
+        """Hint overrides on unbacked symbols in the foreign env should be
+        transferred to the new env."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        # Set a hint override on u0 in the foreign env
+        foreign_env.var_to_hint_override[u0.node.expr] = 42
+
+        sizes = (u0,)
+        strides = (1,)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # The hint override should be transferred to local_env
+        new_sym = new_sizes[0]
+        self.assertTrue(is_symbolic(new_sym))
+        self.assertIn(new_sym.node.expr, local_env.var_to_hint_override)
+        self.assertEqual(local_env.var_to_hint_override[new_sym.node.expr], 42)
+
+    def test_mixed_static_backed_unbacked(self):
+        """A mix of static, backed, and unbacked dims should all be handled correctly."""
+        foreign_env = ShapeEnv()
+        # Create a backed symbol
+        x = torch.randn(4)
+        backed_sizes, _, _ = self._create_backed_symbols(foreign_env, x)
+        backed_sym = backed_sizes[0]  # backed, hint=4
+
+        # Create an unbacked symbol
+        unbacked_sym = foreign_env.create_unbacked_symint()
+        foreign_env.var_to_hint_override[unbacked_sym.node.expr] = 99
+
+        sizes = (7, backed_sym, unbacked_sym)  # static, backed, unbacked
+        strides = (1, 1, 1)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # dim 0: static
+        self.assertFalse(is_symbolic(new_sizes[0]))
+        self.assertEqual(new_sizes[0], 7)
+
+        # dim 1: backed/duck
+        self.assertTrue(is_symbolic(new_sizes[1]))
+        self.assertIs(new_sizes[1].node.shape_env, local_env)
+        self.assertEqual(guarding_hint_or_throw(new_sizes[1].node), 4)
+
+        # dim 2: unbacked with hint override
+        self.assertTrue(is_symbolic(new_sizes[2]))
+        self.assertIs(new_sizes[2].node.shape_env, local_env)
+        self.assertFalse(local_env.has_guarding_hint(new_sizes[2].node.expr))
+        self.assertEqual(local_env.var_to_hint_override[new_sizes[2].node.expr], 99)
+
+    def test_raw_unbacked_symint_transfer_shares_tensor_symbol(self):
+        """Tensor dims and raw SymInts from one foreign ShapeEnv share transfer."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        foreign_env.var_to_hint_override[u0.node.expr] = 32
+
+        local_env = ShapeEnv()
+        new_sizes, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (u0,),
+            (1,),
+            0,
+            source=self._make_source("tensor"),
+        )
+        raw_u0 = self._transfer_symint(local_env, u0, source=self._make_source("raw"))
+        raw_u0_plus_1 = self._transfer_symint(
+            local_env, u0 + 1, source=self._make_source("raw_plus_1")
+        )
+
+        tensor_symbol = new_sizes[0].node.expr
+        self.assertEqual(raw_u0.node.expr, tensor_symbol)
+        self.assertEqual(raw_u0_plus_1.node.expr, tensor_symbol + 1)
+        self.assertEqual(local_env.var_to_hint_override[tensor_symbol], 32)
+
+    def test_raw_unbacked_symint_transfer_preserves_multi_symbol_expr(self):
+        """Derived raw SymInts are rebuilt from transferred base symbols."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        u1 = foreign_env.create_unbacked_symint()
+        foreign_env.var_to_hint_override[u0.node.expr] = 32
+        foreign_env.var_to_hint_override[u1.node.expr] = 16
+
+        local_env = ShapeEnv()
+        new_sizes, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (u0, u1, u0 + u1),
+            (1, 1, 1),
+            0,
+            source=self._make_source("tensor"),
+        )
+        raw_sum = self._transfer_symint(
+            local_env, u0 + u1, source=self._make_source("raw_sum")
+        )
+
+        new_u0 = new_sizes[0].node.expr
+        new_u1 = new_sizes[1].node.expr
+        self.assertEqual(new_sizes[2].node.expr, new_u0 + new_u1)
+        self.assertEqual(raw_sum.node.expr, new_u0 + new_u1)
+        self.assertEqual(local_env.var_to_hint_override[new_u0], 32)
+        self.assertEqual(local_env.var_to_hint_override[new_u1], 16)
+
+    def test_raw_unbacked_symint_transfer_falls_back_for_backed_leftover(self):
+        """Mixed backed+unbacked foreign expr falls back to fresh local unbacked."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        # Create a backed foreign symbol that this env cannot translate.
+        s0 = foreign_env.create_symbol(
+            8,
+            self._make_source("s0"),
+            DimDynamic.DYNAMIC,
+        )
+        s0_symint = foreign_env.create_symintnode(s0, hint=8)
+        mixed = u0 + s0_symint
+
+        local_env = ShapeEnv()
+        raw = self._transfer_symint(
+            local_env, mixed, source=self._make_source("raw_mixed")
+        )
+
+        # Result is a fresh local unbacked symbol; no foreign symbols leaked.
+        result_expr = raw.node.expr
+        self.assertTrue(local_env.is_unbacked_symint(result_expr))
+        # All free symbols are owned by local_env.
+        for sym in result_expr.free_symbols:
+            self.assertTrue(local_env.is_unbacked_symint(sym))
+
+    def test_transfer_is_self_short_circuit(self):
+        """When the SymInt already belongs to this ShapeEnv,
+        _transfer_foreign_expr_as_unbacked is a no-op (returns the input expr
+        unchanged, no new symbol minted)."""
+        local_env = ShapeEnv()
+        local_u0 = local_env.create_unbacked_symint()
+
+        cache_size_before = len(local_env.foreign_unbacked_symbol_cache)
+        result = local_env._transfer_foreign_expr_as_unbacked(
+            local_u0, source=self._make_source("local")
+        )
+        self.assertEqual(result, local_u0.node.expr)
+        # Nothing should have been added to the cache.
+        self.assertEqual(
+            len(local_env.foreign_unbacked_symbol_cache), cache_size_before
+        )
+
+    def test_transfer_constrains_size_on_cache_hit(self):
+        """When is_size=True and the expression resolves to a single Symbol
+        from the cache (cached via a non-size path earlier),
+        _constrain_range_for_size is still applied; the symbol ends up in
+        size_like."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+
+        local_env = ShapeEnv()
+        # First: transfer u0 via the raw SymInt path (is_size=False).
+        raw_symint = self._transfer_symint(
+            local_env, u0, source=self._make_source("raw")
+        )
+        raw = raw_symint.node.expr
+        self.assertNotIn(raw, local_env.size_like)
+
+        # Now: transfer the same u0 as a tensor size dim (is_size=True via
+        # transfer_symbols_from_foreign_shape_env's UNBACKED path).
+        new_sizes, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (u0,), (1,), 0, source=self._make_source("tensor")
+        )
+        # Same cached local symbol reused.
+        self.assertEqual(new_sizes[0].node.expr, raw)
+        # And now it carries the size lower-bound constraint.
+        self.assertIn(raw, local_env.size_like)
+
+    def test_foreign_unbacked_transfer_preserves_derived_tensor_expr(self):
+        """Derived tensor dims are minted as opaque symbols; raw SymInt with
+        the same expression reuses that symbol via the (env, expr) cache."""
+        foreign_env = ShapeEnv()
+        global_tokens = foreign_env.create_unbacked_symint()
+        hidden = foreign_env.create_unbacked_symint()
+        foreign_env.var_to_hint_override[global_tokens.node.expr] = 64
+        foreign_env.var_to_hint_override[hidden.node.expr] = 128
+
+        derived_tokens = global_tokens // 2
+        local_env = ShapeEnv()
+        new_sizes, new_strides, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (derived_tokens, hidden),
+            (hidden, 1),
+            0,
+            source=self._make_source("derived_tensor"),
+        )
+        raw_derived_tokens = self._transfer_symint(
+            local_env, derived_tokens, source=self._make_source("raw_derived_tokens")
+        )
+
+        self.assertEqual(raw_derived_tokens.node.expr, new_sizes[0].node.expr)
+        self.assertEqual(new_strides[0].node.expr, new_sizes[1].node.expr)
+        self.assertEqual(len(raw_derived_tokens.node.expr.free_symbols), 1)
+        derived_token_sym = next(iter(raw_derived_tokens.node.expr.free_symbols))
+        # `derived_tokens` (= global_tokens // 2) is minted as one fresh
+        # opaque symbol; its hint is the foreign expression's hint (64 // 2).
+        self.assertEqual(local_env.var_to_hint_override[derived_token_sym], 32)
+        self.assertEqual(local_env.var_to_hint_override[new_sizes[1].node.expr], 128)
+
+    def test_foreign_unbacked_transfer_preserves_shared_token_grid(self):
+        """Separate tensor transfers preserve shared token-grid symbols."""
+        foreign_env = ShapeEnv()
+        batch = foreign_env.create_unbacked_symint()
+        seq = foreign_env.create_unbacked_symint()
+        hidden = foreign_env.create_unbacked_symint()
+        foreign_env.var_to_hint_override[batch.node.expr] = 4
+        foreign_env.var_to_hint_override[seq.node.expr] = 128
+        foreign_env.var_to_hint_override[hidden.node.expr] = 64
+
+        derived_seq = seq // 2
+        local_env = ShapeEnv()
+        token_grid_sizes, token_grid_strides, _ = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                (batch, seq),
+                (seq, 1),
+                0,
+                source=self._make_source("token_grid"),
+            )
+        )
+        label_sizes, label_strides, _ = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                (batch, seq),
+                (seq, 1),
+                0,
+                source=self._make_source("labels"),
+            )
+        )
+        derived_sizes, derived_strides, _ = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                (batch, derived_seq, hidden),
+                (derived_seq * hidden, hidden, 1),
+                0,
+                source=self._make_source("derived_activation"),
+            )
+        )
+        raw_derived_seq = self._transfer_symint(
+            local_env, derived_seq, source=self._make_source("raw_derived_seq")
+        )
+        raw_seq_plus_hidden = self._transfer_symint(
+            local_env, seq + hidden, source=self._make_source("raw_seq_plus_hidden")
+        )
+
+        self.assertEqual(token_grid_sizes[0].node.expr, label_sizes[0].node.expr)
+        self.assertEqual(token_grid_sizes[0].node.expr, derived_sizes[0].node.expr)
+        self.assertEqual(token_grid_sizes[1].node.expr, label_sizes[1].node.expr)
+        self.assertEqual(token_grid_strides[0].node.expr, token_grid_sizes[1].node.expr)
+        self.assertEqual(label_strides[0].node.expr, label_sizes[1].node.expr)
+        self.assertEqual(raw_derived_seq.node.expr, derived_sizes[1].node.expr)
+        self.assertEqual(
+            derived_strides[0].node.expr,
+            derived_sizes[1].node.expr * derived_sizes[2].node.expr,
+        )
+        self.assertEqual(
+            raw_seq_plus_hidden.node.expr,
+            token_grid_sizes[1].node.expr + derived_sizes[2].node.expr,
+        )
+
+
+class TestTransferSymbolsFromForeignShapeEnvDevice(TestCase):
+    """Device tests for ShapeEnv.transfer_symbols_from_foreign_shape_env."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_flex_attention_foreign_fake_e2e(self, device):
+        """E2E test: trace flex_attention with BlockMask containing unbacked dims
+        through a fresh FakeTensorMode, exercising the foreign ShapeEnv transfer path."""
+        from contextlib import contextmanager
+
+        import torch.utils._pytree as pytree
+        from torch._dynamo.decorators import mark_unbacked
+        from torch._guards import tracing, TracingContext
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import (
+            RelaxedUnspecConstraint,
+            TrackedFake,
+        )
+        from torch.fx.traceback import preserve_node_meta
+        from torch.nn.attention.flex_attention import (
+            _MaskModWrapper,
+            AuxRequest,
+            BlockMask,
+            flex_attention,
+        )
+
+        if BlockMask not in pytree.SUPPORTED_NODES:
+            pytree.register_pytree_node(
+                BlockMask,
+                BlockMask._flatten,
+                BlockMask._unflatten,
+                flatten_with_keys_fn=BlockMask._flatten_with_keys,
+                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+            )
+        if _MaskModWrapper not in pytree.SUPPORTED_NODES:
+            pytree.register_constant(_MaskModWrapper)
+
+        @contextmanager
+        def skip_nested_compile():
+            prev = torch._dynamo.config.error_on_nested_fx_trace
+            torch._dynamo.config.error_on_nested_fx_trace = False
+            try:
+                yield
+            finally:
+                torch._dynamo.config.error_on_nested_fx_trace = prev
+
+        def copy_marks(src, dst):
+            for key in (
+                "_dynamo_unbacked_indices",
+                "_dynamo_strict_unbacked_indices",
+                "_dynamo_unbacked_bounds",
+                "_dynamo_shape_ids",
+                "_dynamo_hint_overrides",
+                "_specialize_on",
+            ):
+                if hasattr(src, key):
+                    setattr(dst, key, getattr(src, key))
+            return dst
+
+        def _symbolic_context(t):
+            marked = getattr(t, "_dynamo_unbacked_indices", set())
+            strict = getattr(t, "_dynamo_strict_unbacked_indices", set())
+            if not marked and not strict:
+                return None
+            dynamic_sizes = [DimDynamic.STATIC] * t.dim()
+            constraint_sizes = [None] * t.dim()
+            for i in range(t.dim()):
+                if i in marked:
+                    dynamic_sizes[i] = DimDynamic.UNBACKED
+                elif i in strict:
+                    dynamic_sizes[i] = DimDynamic.UNBACKED
+                    constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)
+            return StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                constraint_sizes=constraint_sizes,
+                specialize_on=[[] for _ in range(t.dim())],
+                shape_ids=getattr(t, "_dynamo_shape_ids", None),
+                unbacked_bounds=getattr(t, "_dynamo_unbacked_bounds", None),
+            )
+
+        def fakeify(fake_mode, x, name):
+            if not isinstance(x, torch.Tensor):
+                return x
+            from torch._dynamo.source import LocalSource
+
+            source = LocalSource(name, is_input=True)
+            ctx = _symbolic_context(x)
+            if ctx is not None:
+                fake = fake_mode.from_tensor(x, source=source, symbolic_context=ctx)
+                fake_mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, ctx))
+                return fake
+            return fake_mode.from_tensor(x, static_shapes=True)
+
+        ntoks, block_size = 8192, 128
+        nblocks = (ntoks + block_size - 1) // block_size
+        width = 2
+
+        kv_indices = (
+            torch.arange(width, dtype=torch.int32).expand(nblocks, width).clone()
+        )
+        full_kv_indices = kv_indices.clone()
+        q_indices = kv_indices.clone()
+        full_q_indices = kv_indices.clone()
+        kv_num_blocks = torch.full((nblocks,), width, dtype=torch.int32)
+        full_kv_num_blocks = kv_num_blocks.clone()
+        q_num_blocks = kv_num_blocks.clone()
+        full_q_num_blocks = kv_num_blocks.clone()
+
+        mark_unbacked(kv_indices, 1)
+        mark_unbacked(full_kv_indices, 1)
+        mark_unbacked(q_indices, 1)
+        mark_unbacked(full_q_indices, 1)
+
+        attn_regions = torch.arange(ntoks, dtype=torch.int32, device=device)
+        document_ids = torch.zeros(ntoks, dtype=torch.int32, device=device)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return (
+                (q_idx >= kv_idx)
+                & (attn_regions[q_idx] == attn_regions[kv_idx])
+                & (document_ids[q_idx] == document_ids[kv_idx])
+            )
+
+        block_mask = BlockMask(
+            kv_num_blocks=kv_num_blocks.to(device),
+            kv_indices=copy_marks(kv_indices, kv_indices.to(device)),
+            full_kv_num_blocks=full_kv_num_blocks.to(device),
+            full_kv_indices=copy_marks(full_kv_indices, full_kv_indices.to(device)),
+            q_num_blocks=q_num_blocks.to(device),
+            q_indices=copy_marks(q_indices, q_indices.to(device)),
+            full_q_num_blocks=full_q_num_blocks.to(device),
+            full_q_indices=copy_marks(full_q_indices, full_q_indices.to(device)),
+            BLOCK_SIZE=(block_size, block_size),
+            mask_mod=mask_mod,
+            seq_lengths=(ntoks, ntoks),
+        )
+
+        q = torch.randn(1, 4, ntoks, 128, device=device)
+        k = torch.randn(1, 4, ntoks, 128, device=device)
+        v = torch.randn(1, 4, ntoks, 128, device=device)
+        cflex = torch.compile(flex_attention, dynamic=False, fullgraph=True)
+
+        flat_args, spec = pytree.tree_flatten([q, k, v, block_mask])
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(tracked_fakes=[]),
+        )
+        fake_args = tuple(
+            fakeify(fake_mode, x, f"inp_{i}") for i, x in enumerate(flat_args)
+        )
+        torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+            fake_mode.shape_env,
+            fake_args,
+        )
+
+        def wrapped(*flat):
+            q1, k1, v1, mask1 = pytree.tree_unflatten(list(flat), spec)
+            out, aux = cflex(
+                q1,
+                k1,
+                v1,
+                block_mask=mask1,
+                return_aux=AuxRequest(max_scores=True),
+            )
+            return out.sum().detach(), aux.max_scores.max().detach()
+
+        # This should not raise — the fix ensures unbacked symbols from
+        # the outer FakeTensorMode are correctly transferred into the
+        # inner ShapeEnv created by torch.compile.
+        with (
+            fake_mode,
+            tracing(TracingContext(fake_mode)),
+            preserve_node_meta(),
+            skip_nested_compile(),
+            torch.compiler._non_strict_tracing_context(),
+        ):
+            gm = make_fx(
+                wrapped,
+                record_stack_traces=True,
+                record_module_stack=False,
+            )(*fake_args)
+
+        # Verify unbacked dims are preserved in the captured graph.
+        # Check placeholder shapes for unbacked symbols (u0, u1, etc.)
+        unbacked_count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                val = node.meta.get("val", None)
+                if val is not None and hasattr(val, "size"):
+                    for s in val.size():
+                        if is_symbolic(s) and not s.node.has_hint():
+                            unbacked_count += 1
+        self.assertGreaterEqual(
+            unbacked_count,
+            4,
+            lambda msg: f"{msg}\nExpected at least 4 unbacked dims but found {unbacked_count}",
+        )
+
+
+instantiate_device_type_tests(
+    TestTransferSymbolsFromForeignShapeEnvDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,7 @@ class CaptureControl:
 
 class DataFrameTracedOps(DFIterDataPipe):
     def __init__(self, source_datapipe, output_var) -> None:
+        super().__init__()
         self.source_datapipe = source_datapipe
         self.output_var = output_var
 
@@ -80,7 +81,6 @@ class Capture:
 
     def _ops_str(self):
         res = ""
-        # pyrefly: ignore [not-iterable]
         for op in self.ctx["operations"]:
             if len(res) > 0:
                 res += "\n"
@@ -90,7 +90,6 @@ class Capture:
     def __getstate__(self):
         # TODO(VitalyFedyunin): Currently can't pickle (why?)
         self.ctx["schema_df"] = None
-        # pyrefly: ignore [not-iterable]
         for var in self.ctx["variables"]:
             var.calculated_value = None
         state = {}
@@ -114,13 +113,11 @@ class Capture:
         return CaptureGetItem(self, key, ctx=self.ctx)
 
     def __setitem__(self, key, value) -> None:
-        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(CaptureSetItem(self, key, value, ctx=self.ctx))
 
     def __add__(self, add_val):
         res = CaptureAdd(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
-        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(
             CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
         )
@@ -129,7 +126,6 @@ class Capture:
     def __sub__(self, add_val):
         res = CaptureSub(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
-        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(
             CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
         )
@@ -139,19 +135,15 @@ class Capture:
         res = CaptureMul(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
         t = CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
-        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(t)
         return var
 
     def _is_context_empty(self):
-        # pyrefly: ignore [bad-argument-type]
         return len(self.ctx["operations"]) == 0 and len(self.ctx["variables"]) == 0
 
     def apply_ops_2(self, dataframe) -> None:
         # TODO(VitalyFedyunin): Make this calculation thread safe (as currently it updates pointer)
-        # pyrefly: ignore [unsupported-operation]
         self.ctx["variables"][0].calculated_value = dataframe
-        # pyrefly: ignore [not-iterable]
         for op in self.ctx["operations"]:
             op.execute()
 
@@ -184,13 +176,13 @@ class Capture:
         res = CaptureCall(self, ctx=self.ctx, args=args, kwargs=kwargs)
         var = CaptureVariable(None, ctx=self.ctx)
         t = CaptureVariableAssign(ctx=self.ctx, variable=var, value=res)
-        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(t)
         return var
 
 
 class CaptureF(Capture):
     def __init__(self, ctx=None, **kwargs) -> None:
+        super().__init__()
         if ctx is None:
             self.ctx = {"operations": [], "variables": []}
         else:
@@ -228,6 +220,7 @@ class CaptureLikeMock:
 
 class CaptureCall(Capture):
     def __init__(self, callable, ctx=None, **kwargs) -> None:
+        super().__init__()
         if ctx is None:
             self.ctx = {"operations": [], "variables": []}
         else:
@@ -267,6 +260,7 @@ class CaptureVariable(Capture):
     names_idx = 0
 
     def __init__(self, value, ctx) -> None:
+        super().__init__()
         if CaptureControl.disabled:
             raise RuntimeError("Attempting to create capture variable with capture off")
         self.ctx = ctx
@@ -283,9 +277,7 @@ class CaptureVariable(Capture):
 
     def apply_ops(self, dataframe):
         # TODO(VitalyFedyunin): Make this calculation thread safe (as currently it updates pointer)
-        # pyrefly: ignore [unsupported-operation]
         self.ctx["variables"][0].calculated_value = dataframe
-        # pyrefly: ignore [not-iterable]
         for op in self.ctx["operations"]:
             op.execute()
         return self.calculated_value
@@ -293,6 +285,7 @@ class CaptureVariable(Capture):
 
 class CaptureGetItem(Capture):
     def __init__(self, left, key, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.key = key
@@ -307,6 +300,7 @@ class CaptureGetItem(Capture):
 
 class CaptureSetItem(Capture):
     def __init__(self, left, key, value, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.key = key
@@ -323,6 +317,7 @@ class CaptureSetItem(Capture):
 
 class CaptureAdd(Capture):
     def __init__(self, left, right, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.right = right
@@ -336,6 +331,7 @@ class CaptureAdd(Capture):
 
 class CaptureMul(Capture):
     def __init__(self, left, right, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.right = right
@@ -349,6 +345,7 @@ class CaptureMul(Capture):
 
 class CaptureSub(Capture):
     def __init__(self, left, right, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.right = right
@@ -362,6 +359,7 @@ class CaptureSub(Capture):
 
 class CaptureGetAttr(Capture):
     def __init__(self, src, name, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.src = src
         self.name = name
@@ -401,7 +399,6 @@ class CaptureDataFrame(CaptureInitial):
 
 class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
     def as_datapipe(self):
-        # pyrefly: ignore [unsupported-operation]
         return DataFrameTracedOps(self.ctx["variables"][0].source_datapipe, self)
 
     def raw_iterator(self):

@@ -12,18 +12,23 @@ import torch
 import torch._guards
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.utils import get_gpu_type
+from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
     statically_known_true,
+    sym_eq,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -44,6 +49,7 @@ PatternMatcherPass = functools.partial(
 )
 
 log = logging.getLogger(__name__)
+early_patterns = PatternMatcherPass()
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -54,15 +60,36 @@ pass_patterns = [
 ]
 
 
+def _is_lossless_fp_widening_cast(
+    src_dtype: torch.dtype, dst_dtype: torch.dtype
+) -> bool:
+    if src_dtype == dst_dtype:
+        return True
+
+    if not (src_dtype.is_floating_point and dst_dtype.is_floating_point):
+        return False
+
+    src_info = torch.finfo(src_dtype)
+    dst_info = torch.finfo(dst_dtype)
+
+    # A floating-point cast is only pointless if the first conversion cannot
+    # discard precision or range from the source values.
+    return (
+        dst_info.eps <= src_info.eps
+        and dst_info.max >= src_info.max
+        and dst_info.tiny <= src_info.tiny
+    )
+
+
 @init_once_fakemode
-def lazy_init():
+def lazy_init(input_device: torch.device | None = None):
     from .fuse_attention import _sfdp_init
     from .misc_patterns import _misc_patterns_init
     from .pad_mm import _pad_mm_init
 
-    _pad_mm_init()
-    _sfdp_init()
-    _misc_patterns_init()
+    _pad_mm_init(input_device)
+    _sfdp_init(input_device)
+    _misc_patterns_init(input_device)
 
 
 def remove_no_ops(
@@ -70,17 +97,41 @@ def remove_no_ops(
     zeros: OrderedSet[torch.fx.Node],
     ones: OrderedSet[torch.fx.Node],
 ):
+    """
+    Removes operations that are essentially no-ops e.g. (+ 0, - 0, * 1, / 1)
+    """
     with torch.utils._python_dispatch._disable_current_modes():
-        "Removes no-ops: (+ 0, - 0, * 1, / 1)"
         graph = gm.graph
 
         def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
             if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
                 return False
             for field in fields:
-                if getattr(t1, field) != getattr(t2, field):
+                v1 = getattr(t1, field)
+                v2 = getattr(t2, field)
+                if field == "shape":
+                    # Shapes may contain unbacked SymInts; tuple `!=` would
+                    # force a guard. Conservatively treat unknown as "not equal".
+                    if not guard_or_false(sym_eq(v1, v2)):
+                        return False
+                elif v1 != v2:
                     return False
             return True
+
+        def is_mutated(n):
+            """Check if a node is mutated by any in-place operation."""
+            for user in n.users:
+                if user.op != "call_function" or not hasattr(user.target, "_schema"):
+                    continue
+                for i, arg in enumerate(user.args):
+                    if arg is n:
+                        schema_arg = user.target._schema.arguments[i]
+                        if schema_arg.alias_info and schema_arg.alias_info.is_write:
+                            return True
+            return False
+
+        def isScalarValue(arg):
+            return isinstance(arg, (int, float))
 
         def replace_no_op(node, replace_input_index):
             replacement = node.args[replace_input_index]
@@ -89,6 +140,16 @@ def remove_no_ops(
             # non-Tensor inputs even for ops with only Tensor inputs.
             # TODO - decompose/type promote to avoid this
             if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
+                if all(isScalarValue(arg) for arg in node.args) or not isinstance(
+                    replacement, torch.fx.Node
+                ):
+                    return
+
+            # https://github.com/pytorch/pytorch/issues/174187
+            # Don't replace if the replacement value is mutated in-place.
+            # The original node acts as an implicit copy; removing it would
+            # cause users to observe the post-mutation value instead.
+            if is_mutated(replacement):
                 return
 
             if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
@@ -110,34 +171,61 @@ def remove_no_ops(
             graph.erase_node(node)
 
         for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
-            # TODO handle Tensor-Scalar adds, it's a different schema
             if len(node.args) == 2:
                 if (
-                    not any(e in zeros for e in node.args)
+                    not any(
+                        e in zeros or (isScalarValue(e) and e == 0) for e in node.args
+                    )
                     or node.kwargs.get("alpha", 1) != 1
                 ):
                     continue
 
-                replace_index = 1 if node.args[0] in zeros else 0
+                replace_index = (
+                    1
+                    if node.args[0] in zeros
+                    or (isScalarValue(node.args[0]) and node.args[0] == 0)
+                    else 0
+                )
+                replacement = node.args[replace_index]
+                if isinstance(replacement, torch.fx.Node):
+                    val = replacement.meta.get("val")
+                    if isinstance(val, torch.Tensor) and val.is_conj():
+                        continue
                 replace_no_op(node, replace_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):
             if len(node.args) == 2:
-                if node.args[1] not in zeros or node.kwargs.get("alpha", 1) != 1:
+                if (
+                    not (
+                        node.args[1] in zeros
+                        or (isScalarValue(node.args[1]) and node.args[1] == 0)
+                    )
+                    or node.kwargs.get("alpha", 1) != 1
+                ):
                     continue
 
                 replace_no_op(node, 0)
 
         for node in graph.find_nodes(op="call_function", target=aten.mul.Tensor):
             if len(node.args) == 2:
-                if not any(e in ones for e in node.args):
+                if not any(
+                    e in ones or (isScalarValue(e) and e == 1) for e in node.args
+                ):
                     continue
 
-                replace_input_index = 1 if node.args[0] in ones else 0
+                replace_input_index = (
+                    1
+                    if node.args[0] in ones
+                    or (isScalarValue(node.args[0]) and node.args[0] == 1)
+                    else 0
+                )
                 replace_no_op(node, replace_input_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
-            if len(node.args) == 2 and node.args[1] in ones:
+            if len(node.args) == 2 and (
+                node.args[1] in ones
+                or (isScalarValue(node.args[1]) and node.args[1] == 1)
+            ):
                 replace_no_op(node, 0)
 
         # meta tensors returned from the graph have no data and can be replaced with empty_strided
@@ -149,10 +237,18 @@ def remove_no_ops(
                 val = n.meta.get("val")
                 if isinstance(val, torch.Tensor) and val.device.type == "meta":
                     with graph.inserting_before(output_node):
+                        # size/stride may be symbolic under dynamic shapes;
+                        # materialize them so we never pass raw SymInts as args.
+                        # Use materialize_symints (roots backed sizes on input
+                        # placeholders) rather than create_size_node(n, d), which
+                        # would query `n` and pin it alive, blocking the
+                        # eliminate_dead_code() that removes this meta tensor.
+                        size = graph.materialize_symints(val.size())
+                        stride = graph.materialize_symints(val.stride())
                         n.replace_all_uses_with(
                             graph.call_function(
                                 torch.ops.aten.empty_strided.default,
-                                args=(val.size(), val.stride()),
+                                args=(size, stride),
                                 kwargs={"dtype": val.dtype, "device": val.device},
                             )
                         )
@@ -181,7 +277,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
             is_needed = True
 
             if existing_views:
-                # Replace the view with the an existing view if available.
+                # Replace the view with an existing view if available.
                 alias = existing_views.get(to_type)
                 if alias:
                     is_needed = False
@@ -205,6 +301,11 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
                 break
             for unused in unused_views:
                 views.pop(unused)
+                if unused.op == "placeholder":
+                    # Placeholders are graph inputs; erasing one would silently
+                    # shrink the compiled function's arity while callers keep
+                    # passing the original argument count.
+                    continue
                 graph.erase_node(unused)
 
 
@@ -218,6 +319,7 @@ class UniformValueConstantFolder(ConstantFolder):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
+        self.mutated_storages = self._collect_mutated_storages()
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
@@ -269,10 +371,17 @@ class UniformValueConstantFolder(ConstantFolder):
             if not isinstance(tensor_val, torch.Tensor):
                 continue
 
-            def is_zero_int(arg: Any) -> bool:
+            def is_zero_int(arg: object) -> bool:
                 return isinstance(arg, int) and arg == 0
 
             if not any(is_zero_int(a) for a in op.args):
+                continue
+
+            # x * 0 is only uniformly 0 for integer/bool dtypes. For floating
+            # point (and complex) dtypes nan * 0 == nan and (+/-inf) * 0 == nan,
+            # so folding x * 0 -> 0 would incorrectly drop NaN/Inf when x is not
+            # known to be finite.
+            if tensor_val.dtype.is_floating_point or tensor_val.dtype.is_complex:
                 continue
 
             t = torch.full(
@@ -283,6 +392,41 @@ class UniformValueConstantFolder(ConstantFolder):
                 pin_memory=False,
             )
             self.add_node_replacement(op, t)
+
+    def _collect_mutated_storages(self) -> OrderedSet[int]:
+        mutated_storages: OrderedSet[int] = OrderedSet()
+
+        def add_mutated_storage(arg: torch.fx.Node) -> None:
+            storage = get_node_storage(arg)
+            if storage is not None:
+                mutated_storages.add(storage)
+
+        graph = typing.cast(torch.fx.Graph, self.module.graph)
+        for op, target in graph._find_nodes_lookup_table.table:
+            if (
+                op != "call_function"
+                or not isinstance(target, torch._ops.OpOverload)
+                or not target._schema.is_mutable
+            ):
+                continue
+
+            for node in graph.find_nodes(op=op, target=target, sort=False):
+                for schema_arg, arg in zip_schema(
+                    target._schema, node.args, node.kwargs
+                ):
+                    if (
+                        schema_arg.alias_info is None
+                        or not schema_arg.alias_info.is_write
+                    ):
+                        continue
+
+                    pytree.tree_map_only(torch.fx.Node, add_mutated_storage, arg)
+
+        return mutated_storages
+
+    def _aliases_mutated_storage(self, node: torch.fx.Node) -> bool:
+        storage = get_node_storage(node)
+        return storage is not None and storage in self.mutated_storages
 
     def _support_dynamic_shape(self):
         return True
@@ -309,6 +453,11 @@ class UniformValueConstantFolder(ConstantFolder):
         # 3. for pointwise ops, run node to get the substitute value
         # 4. deal with some special ops
         # otherwise, stop deduce value and return unknown value
+
+        # Values read from a mutated storage must remain runtime reads. Folding
+        # them would make later calls reuse the compile-time value.
+        if self._aliases_mutated_storage(node):
+            return self.unknown_value
 
         # TODO: cat, more indexing
         # TODO - do on cpu to avoid syncs
@@ -341,6 +490,12 @@ class UniformValueConstantFolder(ConstantFolder):
 
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
+            (input_tensor, output_dtype), kwargs = self.fetch_args_kwargs_from_env(node)
+            # view.dtype with different element sizes changes element count
+            # (e.g., complex64 [1+0j] viewed as float32 becomes [1.0, 0.0]),
+            # making uniform values non-uniform. Also crashes on 0-d tensors.
+            if input_tensor.element_size() != output_dtype.itemsize:
+                return self.unknown_value
             return super(ConstantFolder, self).run_node(node)
 
         # view ops, return input tensor, the first argument
@@ -348,7 +503,8 @@ class UniformValueConstantFolder(ConstantFolder):
             node.target.overloadpacket in self.view_op_packets
             or node.target.overloadpacket in self.indexing_op_packets
         ):
-            assert isinstance(node.args[0], torch.fx.Node)
+            if not isinstance(node.args[0], torch.fx.Node):
+                raise AssertionError(f"expected fx.Node, got {type(node.args[0])}")
             return self.env[node.args[0]]
 
         # we don't want to return unknown value for symints so that we can
@@ -378,9 +534,72 @@ class UniformValueConstantFolder(ConstantFolder):
         return self.unknown_value
 
 
+def _has_self_referential_shape(
+    shapes: list[int | torch.fx.Node], node: torch.fx.Node
+) -> bool:
+    """
+    Check if any shape in `shapes` depends on `node`.
+
+    This is used to detect cycles when constant_fold_uniform_value creates a
+    replacement full() node whose shape includes a sym_size computed from the
+    original tensor being replaced.
+
+    Checks direct args only - shape nodes typically come from sym_size(tensor, dim)
+    where tensor is a direct arg.
+    """
+    for shape_node in shapes:
+        if isinstance(shape_node, torch.fx.Node):
+            if node in shape_node.args:
+                return True
+    return False
+
+
+# TODO: Investigate generalizing this to cuDNN, CPU Flash, and overrideable fused attention.
+def _remove_zero_bias_from_efficient_attention(
+    gm: torch.fx.GraphModule,
+    uniform_values: dict[torch.fx.Node, Any],
+) -> None:
+    if config.numerics == "strict":
+        return
+
+    targets = (
+        (aten._scaled_dot_product_efficient_attention.default, 3),
+        (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+    )
+    for target, bias_index in targets:
+        for node in gm.graph.find_nodes(op="call_function", target=target):
+            bias = node.args[bias_index]
+            if not isinstance(bias, torch.fx.Node):
+                continue
+            if target is aten._scaled_dot_product_efficient_attention_backward.default:
+                # Backward positional argument 10 is a four-element bool sequence:
+                # [..., compute_grad_bias]. Thus grad_input_mask[3] says whether backward
+                # must produce grad_bias, which requires retaining the bias. This is
+                # rare for a proven-zero bias, but can occur for a differentiable
+                # expression such as parameter * 0.
+                grad_input_mask = node.args[10]
+                compute_bias_gradient = grad_input_mask[3]
+                if compute_bias_gradient:
+                    continue
+            value = uniform_values.get(bias)
+            fake_bias = bias.meta.get("val")
+            if (
+                not isinstance(fake_bias, torch.Tensor)
+                or not fake_bias.dtype.is_floating_point
+                or value != 0.0
+            ):
+                continue
+            args = list(node.args)
+            args[bias_index] = None
+            node.args = tuple(args)
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
+    """Fold uniform constants and algebraic no-ops.
+
+    This includes replacing an all-zero additive efficient-attention bias with no bias.
+    """
     with torch.utils._python_dispatch._disable_current_modes():
-        "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
         aten = torch.ops.aten
 
         # Constant folding can leak memory, especially with repeated compilation, so we are only going to
@@ -389,6 +608,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         cf.run()
 
         node_replacements = cf.node_replacements
+        _remove_zero_bias_from_efficient_attention(gm, node_replacements)
 
         # note: [constant folding refining of symints]
         # constant folding will partially evaluate a graph such that values which have dependencies which
@@ -412,7 +632,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
 
         for node, value in node_replacements.items():
-            # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
+            # we don't have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
             # hasn't shown up to be important yet
             if "val" not in node.meta:
                 # This can only happen in AOTI
@@ -463,6 +683,11 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     for s in node_replacements_shapes[node]
                 ]
 
+                # Check if any shape depends on a symint that was computed from
+                # the node being replaced - this would create a cycle
+                if _has_self_referential_shape(shapes, node):
+                    continue
+
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(
                     aten.full.default,
@@ -471,7 +696,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
                         "device": fake_tensor.device,
-                        "pin_memory": False,
+                        "pin_memory": node.kwargs.get("pin_memory", False),
                     },
                 )
 
@@ -505,7 +730,10 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
 
         quant_options_node = kwargs.pop("quant_options", None)
         if quant_options_node is not None:
-            assert isinstance(quant_options_node, torch.fx.Node)
+            if not isinstance(quant_options_node, torch.fx.Node):
+                raise AssertionError(
+                    f"expected fx.Node, got {type(quant_options_node)}"
+                )
             quant_options = torch._higher_order_ops.InvokeQuant(
                 *invoke_quant.kwargs["quant_options"].args,
                 **invoke_quant.kwargs["quant_options"].kwargs,
@@ -540,12 +768,16 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             ):
                 subgraph_graph = getattr(gm, subgraph.target)
                 output_node = torch._inductor.utils.output_node(subgraph_graph)
-                assert (
+                if not (
                     isinstance(output_node.args[0], (list, tuple))
                     and len(output_node.args[0]) == 1
-                )
+                ):
+                    raise AssertionError(
+                        "expected subgraph output to be a single-element list or tuple"
+                    )
 
                 unpacked_output = output_node.args[0][0]
+                # pyrefly: ignore [bad-argument-type]
                 output_node.args = (unpacked_output,)
                 if "val" in output_node.meta:
                     output_node.meta["val"] = output_node.meta["val"][0]
@@ -564,7 +796,10 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
     canonicalize_quant_mapping(gm)
 
 
-def joint_graph_passes(graph: torch.fx.GraphModule):
+def joint_graph_passes(
+    graph: torch.fx.GraphModule,
+    input_device: torch.device | None = None,
+):
     """
     Run FX transformations on the joint forwards+backwards graph.
     """
@@ -573,15 +808,15 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         subsystem="joint_graph_passes",
     )
 
-    lazy_init()
+    lazy_init(input_device)
     count = 0
 
     # must occur before other passes
     canonicalize_aten_ir_passes(graph)
 
-    if config.joint_custom_pre_pass is not None:
+    for joint_custom_pre_pass in get_custom_graph_passes(config.joint_custom_pre_pass):
         GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
+            joint_custom_pre_pass
         )
         count += 1
 
@@ -595,6 +830,22 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         )
 
     if config.pattern_matcher:
+        count += early_patterns.apply(graph.graph)
+
+    # Make sure AutoChunker happens before pad_mm so we don't need
+    # to handle padding when searching for chunking patterns.
+    if config.auto_chunker.enable:
+        from .auto_chunker import CantChunk, chunk
+
+        try:
+            graph = chunk(graph)
+        except CantChunk:
+            auto_chunker_log = torch._logging.getArtifactLogger(
+                __name__, "auto_chunker"
+            )
+            auto_chunker_log.debug("AutoChunker fail.", exc_info=True)
+
+    if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
             maybe_count = GraphTransformObserver(
                 graph, f"pass_pattern_{i}"
@@ -606,9 +857,11 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         # we'll instead explicitly turn off the config
         count += replace_random_passes(graph)
 
-    if config.joint_custom_post_pass is not None:
+    for joint_custom_post_pass in get_custom_graph_passes(
+        config.joint_custom_post_pass
+    ):
         GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
-            config.joint_custom_post_pass
+            joint_custom_post_pass
         )
         count += 1
 
@@ -691,7 +944,18 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
     graph = match.graph
     node = match.output_node()
     allowed = torch.float16, torch.bfloat16, torch.float32, torch.float64
-    if dtype1 in allowed and dtype2 in allowed:
+    arg_val = arg.meta.get("val", None)
+    if not isinstance(arg_val, torch.Tensor):
+        return
+
+    if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
+        # A narrower intermediate can be worth materializing before upcasting.
+        if dtype1.itemsize < dtype2.itemsize:
+            return
+        if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
+            arg_val.dtype, dtype1
+        ):
+            return
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)
         )
@@ -725,8 +989,10 @@ def definitely_equal(
         if isinstance(rhs_item, torch.fx.Node):
             rhs_item = rhs_item.meta["val"]
 
-        assert isinstance(lhs_item, (int, torch.SymInt)), type(lhs_item)
-        assert isinstance(rhs_item, (int, torch.SymInt)), type(rhs_item)
+        if not isinstance(lhs_item, (int, torch.SymInt)):
+            raise AssertionError(type(lhs_item))
+        if not isinstance(rhs_item, (int, torch.SymInt)):
+            raise AssertionError(type(rhs_item))
 
         # It still makes sense to call guard_or_true/false since lhs_item
         # rhs_item are torch.SymInt rather than sympy expressions when
@@ -747,7 +1013,7 @@ def definitely_equal(
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
@@ -765,7 +1031,7 @@ def pointless_view(match: Match, arg, size):
         KeywordArg("size2"),
     ),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_view_pair(match: Match, arg, size1, size2):
     """
@@ -786,11 +1052,12 @@ def pointless_view_pair(match: Match, arg, size1, size2):
         KeywordArg("perm2"),
     ),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
     rank = len(perm1)
-    assert len(perm2) == rank
+    if len(perm2) != rank:
+        raise AssertionError(f"expected len(perm2) == {rank}, got {len(perm2)}")
 
     for i in range(rank):
         if perm1[perm2[i]] != i:
@@ -811,6 +1078,9 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     """Convert bmm to mm when batch size is 1"""
+    # See Note [Preserving FlexGEMM body GEMMs].
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return
 
     def repl(a, b):
         return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)
@@ -862,6 +1132,14 @@ def _partial_softmax_pattern(linear_func, reverse=False, to_dtype=False):
     return CallFunction(aten.sub.Tensor, scaled, amax)
 
 
+def _preserve_scaled_softmax_nonfinite_semantics(scaled, stable, dim, keepdim):
+    # This pattern also matches the raw scaled - amax(scaled) expression.  Only
+    # use the stable form when it preserves that expression's nonfinite behavior.
+    original = scaled - torch.amax(scaled, dim=dim, keepdim=keepdim)
+    finite_scaled = torch.all(torch.isfinite(scaled), dim=dim, keepdim=True)
+    return torch.where(finite_scaled, stable, original)
+
+
 def _other_is_broadcasted_in_dim(match):
     # Check that the scaling factor is constant across the reduction dim,
     # so scaling doesn't change which index corresponds to the maximum value
@@ -901,7 +1179,9 @@ def _other_is_broadcasted_in_dim(match):
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp * other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -913,8 +1193,11 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore [unsupported-operation]
-        return (inp - max_) * (sign * other)
+
+        stable = (inp - max_) * (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
@@ -931,7 +1214,9 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
 
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp / other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -943,8 +1228,11 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore [unsupported-operation]
-        return (inp - max_) / (sign * other)
+
+        stable = (inp - max_) / (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
@@ -957,3 +1245,100 @@ for to_dtype in (False, True):
         pass_dict=pass_patterns[1],
         extra_check=_other_is_broadcasted_in_dim,
     )(div_softmax_pattern)
+
+
+def scatter_upon_const_tensor_extra_check(m):
+    if not config.optimize_scatter_upon_const_tensor:
+        return False
+    full_shape = m.kwargs["shape"]
+    selector = m.kwargs["selector"]
+    dim = m.kwargs["dim"]
+    if dim < 0:
+        dim += len(full_shape)
+
+    selector_ft = selector.meta["val"]
+    if selector_ft.dim() != len(full_shape):
+        raise AssertionError(
+            f"expected selector_ft.dim() == {len(full_shape)}, got {selector_ft.dim()}"
+        )
+
+    for idx, select_sz, full_sz in zip(
+        itertools.count(), selector_ft.shape, full_shape
+    ):
+        if idx == dim:
+            continue
+
+        # TODO: the pattern can be updated to support the case that index tensor
+        # is shorter. But that will need a more complex condition expression
+        # especially for multi-dimensional tensors.
+        # Skip it for now.
+        if isinstance(full_sz, torch.fx.Node):
+            full_sz = full_sz.meta["val"]
+        if select_sz < full_sz:
+            return False
+
+    # Actually we can support small size larger than 1. It would be a bit
+    # tedious. E.g., we load all the index values (not many) and compare
+    # them with the position in tensor to decide what value to return.
+    return selector_ft.size(dim) == 1
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.scatter.value,
+        CallFunction(
+            aten.full,
+            KeywordArg("shape"),
+            KeywordArg("background_val"),
+            dtype=KeywordArg("dtype"),
+        ),
+        KeywordArg("dim"),
+        KeywordArg("selector"),
+        KeywordArg("val"),  # scalar value
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=patterns,
+    extra_check=scatter_upon_const_tensor_extra_check,
+)
+def scatter_upon_const_tensor(
+    match: Match, shape, background_val, dtype, dim, selector, val
+):
+    """
+    Match the pattern of full+scatter into a pointwise operation in joint graph.
+
+    TODO: Right now the scatter value must be a scalar. But we could support it
+    when it is a tensor as well.
+    """
+    from torch._inductor import metrics
+
+    # pyrefly: ignore  # bad-assignment
+    metrics.num_matches_for_scatter_upon_const_tensor += 1
+
+    # Create a replacement that uses torch.where for the pointwise operation
+    def repl_fn(shape, background_val, dim, selector, val):
+        # Create a tensor of indices for the scatter dimension
+        length = shape[dim]
+        indices = torch.arange(length, device=selector.device, dtype=torch.int64)
+
+        # Reshape indices to have size 'length' at dim, then broadcast
+        view_shape = [1] * len(shape)
+        view_shape[dim] = length
+        indices_view = indices.view(*view_shape)
+
+        # Broadcast selector to match full tensor shape
+        selector_expanded = selector.expand(shape)
+
+        # Create a mask for where to scatter
+        mask = selector_expanded == indices_view
+
+        # Use torch.where to implement the scatter pointwise operation.
+        # When val and background_val are Python scalars, torch.where promotes
+        # the result to the default floating dtype (float32), which loses the
+        # const tensor's dtype. Cast back to dtype so the rewrite preserves
+        # aten.scatter.value semantics (the result has self's dtype, with the
+        # scalar value cast to it).
+        return torch.where(mask, val, background_val).to(dtype)
+
+    # replace the scatter operation with pointwise equivalent
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl_fn, [shape, background_val, dim, selector, val])

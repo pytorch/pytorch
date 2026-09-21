@@ -38,6 +38,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -130,29 +131,6 @@ else:
 
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
-    def test_pytorch_np(self):
-        tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
-        for tensor in tensors:
-            # regular tensor
-            self.assertIsInstance(make_np(tensor), np.ndarray)
-
-            # CUDA tensor
-            if torch.cuda.is_available():
-                self.assertIsInstance(make_np(tensor.cuda()), np.ndarray)
-
-            # regular variable
-            self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
-
-            # CUDA variable
-            if torch.cuda.is_available():
-                self.assertIsInstance(
-                    make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray
-                )
-
-        # python primitive type
-        self.assertIsInstance(make_np(0), np.ndarray)
-        self.assertIsInstance(make_np(0.1), np.ndarray)
-
     def test_pytorch_autograd_np(self):
         x = torch.autograd.Variable(torch.empty(1))
         self.assertIsInstance(make_np(x), np.ndarray)
@@ -217,6 +195,22 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
             )
 
 
+class TestTensorBoardPyTorchNumpyDevice(BaseTestCase):
+    def test_pytorch_np(self, device):
+        tensors = [
+            torch.rand(3, 10, 10, device=device),
+            torch.rand(1, device=device),
+            torch.rand(1, 2, 3, 4, 5, device=device),
+        ]
+        for tensor in tensors:
+            self.assertIsInstance(make_np(tensor), np.ndarray)
+            self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
+
+        # python primitive type (device-agnostic)
+        self.assertIsInstance(make_np(0), np.ndarray)
+        self.assertIsInstance(make_np(0.1), np.ndarray)
+
+
 class TestTensorBoardUtils(BaseTestCase):
     def test_to_HWC(self):
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
@@ -257,8 +251,8 @@ class TestTensorBoardUtils(BaseTestCase):
             total_frame = s[1]
             V_input = np.swapaxes(V_input, 0, 1)
             for f in range(total_frame):
-                x = np.reshape(V_input[f], newshape=(-1))
-                y = np.reshape(V_after[f], newshape=(-1))
+                x = np.reshape(V_input[f], -1)
+                y = np.reshape(V_after[f], -1)
                 np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
     def test_numpy_vid_uint8(self):
@@ -267,8 +261,8 @@ class TestTensorBoardUtils(BaseTestCase):
         total_frame = V_input.shape[1]
         V_input = np.swapaxes(V_input, 0, 1)
         for f in range(total_frame):
-            x = np.reshape(V_input[f], newshape=(-1))
-            y = np.reshape(V_after[f], newshape=(-1))
+            x = np.reshape(V_input[f], -1)
+            y = np.reshape(V_after[f], -1)
             np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
 
@@ -283,10 +277,6 @@ recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 
 class TestTensorBoardWriter(BaseTestCase):
-    @unittest.skipIf(
-        sys.version_info >= (3, 13),
-        "numpy failure, likely caused by old tensorboard version",
-    )
     def test_writer(self):
         with self.createSummaryWriter() as writer:
             sample_rate = 44100
@@ -559,7 +549,8 @@ def get_expected_file(function_ptr):
 
 def read_expected_content(function_ptr):
     expected_file = get_expected_file(function_ptr)
-    assert os.path.exists(expected_file), expected_file
+    if not os.path.exists(expected_file):
+        raise AssertionError(f"expected file does not exist: {expected_file}")
     with open(expected_file) as f:
         return f.read()
 
@@ -739,6 +730,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
 class TestTensorBoardFigure(BaseTestCase):
     @skipIfNoMatplotlib
+    @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure(self):
         writer = self.createSummaryWriter()
 
@@ -764,6 +756,7 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.close()
 
     @skipIfNoMatplotlib
+    @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure_list(self):
         writer = self.createSummaryWriter()
 
@@ -780,13 +773,13 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
         self.assertTrue(
             all(plt.fignum_exists(figure.number) is True for figure in figures)
-        )  # noqa: F812
+        )
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != "3.3.0":
             self.assertTrue(
                 all(plt.fignum_exists(figure.number) is False for figure in figures)
-            )  # noqa: F812
+            )
         else:
             print(
                 "Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163"
@@ -872,6 +865,12 @@ class TestTensorProtoSummary(BaseTestCase):
 
 
 instantiate_parametrized_tests(TestTensorProtoSummary)
+instantiate_device_type_tests(
+    TestTensorBoardPyTorchNumpyDevice,
+    globals(),
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()

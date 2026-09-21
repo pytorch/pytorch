@@ -1,5 +1,4 @@
 #include <c10/util/env.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
@@ -105,8 +104,7 @@ void applySymbolicShapesOnLT(
         converted_args.emplace_back(get_symbolic_shape(tensor));
       }
     } else if (arg.isTensor()) {
-      auto ss = get_symbolic_shape(arg.toTensor());
-      converted_args.emplace_back(ss);
+      converted_args.emplace_back(get_symbolic_shape(arg.toTensor()));
     } else {
       // If we need to support symbolic ints, here is the place
       // to add it.

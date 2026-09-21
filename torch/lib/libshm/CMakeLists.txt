@@ -21,7 +21,7 @@ target_include_directories(shm PUBLIC
 set_target_properties(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib"
-  CXX_STANDARD 17)
+  CXX_STANDARD 20)
 target_link_libraries(shm PRIVATE ${TORCH_CPU_LIB})
 
 if(UNIX AND NOT APPLE)

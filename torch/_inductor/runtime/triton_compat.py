@@ -76,11 +76,8 @@ if triton is not None:
             return False
         return param_name in inspect.signature(triton.Config.__init__).parameters
 
-    HAS_WARP_SPEC = (
-        hasattr(tl, "async_task")
-        and _triton_config_has("num_consumer_groups")
-        and _triton_config_has("num_buffers_warp_spec")
-    )
+    # Drop the legacy support of autoWS
+    HAS_WARP_SPEC = False
 
     try:
         from triton import knobs
@@ -93,6 +90,13 @@ if triton is not None:
         from triton.compiler.compiler import (
             triton_key,  # type: ignore[attr-defined,no-redef]
         )
+
+    try:
+        from triton.runtime.errors import IntelGPUError
+    except ImportError:
+
+        class IntelGPUError(Exception):  # type: ignore[no-redef]
+            pass
 
     builtins_use_semantic_kwarg = (
         "_semantic" in inspect.signature(triton.language.core.view).parameters
@@ -107,6 +111,9 @@ else:
         pass
 
     class PTXASError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class IntelGPUError(Exception):  # type: ignore[no-redef]
         pass
 
     Config = object
@@ -141,17 +148,6 @@ else:
     HAS_TRITON = False
 
 
-def cc_warp_size(cc: str | int) -> int:
-    if torch.version.hip:
-        cc_str = str(cc)
-        if "gfx10" in cc_str or "gfx11" in cc_str:
-            return 32
-        else:
-            return 64
-    else:
-        return 32
-
-
 try:
     autograd_profiler = torch.autograd.profiler
 except AttributeError:  # Compile workers only have a mock version of torch
@@ -166,6 +162,7 @@ __all__ = [
     "OutOfResources",
     "KernelInterface",
     "PTXASError",
+    "IntelGPUError",
     "ASTSource",
     "GPUTarget",
     "tl",
@@ -173,7 +170,6 @@ __all__ = [
     "libdevice",
     "math",
     "triton",
-    "cc_warp_size",
     "knobs",
     "triton_key",
 ]

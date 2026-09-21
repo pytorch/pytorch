@@ -6,7 +6,6 @@ constructor arguments.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Optional
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -218,9 +217,9 @@ class MixedPrecision:
 
     """
 
-    param_dtype: Optional[torch.dtype] = None
-    reduce_dtype: Optional[torch.dtype] = None
-    buffer_dtype: Optional[torch.dtype] = None
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
+    buffer_dtype: torch.dtype | None = None
     keep_low_precision_grads: bool = False
     cast_forward_inputs: bool = False
     cast_root_forward_inputs: bool = True
@@ -250,7 +249,7 @@ class StateDictType(Enum):
 
     .. note::
         FSDP currently supports three types of ``state_dict``:
-            1. ``state_dict/load_state_dict`: this pair of APIs return and load
+            1. ``state_dict/load_state_dict``: this pair of APIs return and load
                the non-sharded, unflattened parameters. The semantics is the
                same as using DDP.
             2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return

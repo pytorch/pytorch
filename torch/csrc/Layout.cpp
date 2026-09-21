@@ -3,22 +3,20 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/refcount_contention.h>
 
-#include <ATen/Layout.h>
-
-#include <structmember.h>
 #include <cstring>
 #include <string>
 
 PyObject* THPLayout_New(at::Layout layout, const std::string& name) {
   auto type = &THPLayoutType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPLayout*>(self.get());
   self_->layout = layout;
   std::strncpy(self_->name, name.c_str(), LAYOUT_NAME_LEN);
   self_->name[LAYOUT_NAME_LEN] = '\0';
+  torch::utils::set_immortal_if_possible(self.get());
   return self.release();
 }
 
@@ -68,12 +66,5 @@ PyTypeObject THPLayoutType = {
 };
 
 void THPLayout_init(PyObject* module) {
-  if (PyType_Ready(&THPLayoutType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPLayoutType);
-  if (PyModule_AddObject(
-          module, "layout", reinterpret_cast<PyObject*>(&THPLayoutType)) != 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPLayoutType) >= 0);
 }

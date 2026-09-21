@@ -2,7 +2,6 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
@@ -45,7 +44,9 @@ struct ConcretePyInterpreterVTable final
   std::string name() const override;
 
   void incref(PyObject* pyobj) const override;
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
+  void decref(PyObject* pyobj) const override;
+  bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const override;
+  size_t refcnt(PyObject* pyobj) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
   // operate upon a PyObjectSlot rather than a TensorImpl
@@ -193,9 +194,7 @@ py::object torchDispatchFromTensorImpl(
     const char* module_name,
     // WARNING: MUST NOT BE TENSOR ARGS
     c10::SmallVector<py::object, 1> extra_args = {}) {
-  if (torch_api_function == nullptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_api_function != nullptr);
   TORCH_CHECK(
       PyGILState_Check(),
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
@@ -216,8 +215,7 @@ py::object torchDispatchFromTensorImpl(
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
   int64_t i = 1;
   for (auto& a : extra_args) {
-    if (a.ptr() == nullptr)
-      throw python_error();
+    TORCH_CHECK_PYTHON(a.ptr() != nullptr);
     PyTuple_SET_ITEM(args.ptr(), i, std::move(a).release().ptr());
     i++;
   }
@@ -235,53 +233,13 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
-// NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
-// Before calling PyInterpreter::decref, we must statically know if the
-// pyobj has a PyObjectSlot or not.
-// - If it has a PyObjectSlot, we need to be careful about PyObject resurrection
-// - If it does not have a PyObjectSlot, we can freely decref
-// One alternative to this is using PyObject_IsInstance
-// to get at this information. However, we don't want to risk an incorrect
-// `__instancecheck__` changing the semantics here.
-void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
-    const {
+void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
   // Leak the pyobj if not initialized.  This can happen if we are running
   // exit handlers that are destructing tensors with residual (owned)
   // PyObjects stored in them.
   if (!Py_IsInitialized())
     return;
-
   pybind11::gil_scoped_acquire gil;
-  // Two possibilities:
-  // 1. We are decref-ing an object that has a PyObjectSlot, like a Tensor or
-  // Storage. Then we must be careful about PyObject resurrection (see
-  // THPVariable_clear).
-  // 2. We are decref-ing some other Python object. We don't do
-  // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (has_pyobj_slot && Py_REFCNT(pyobj) > 1) {
-    if (THPVariable_Check(pyobj)) {
-      // It's still alive!  This can happen if a weak ref resurrected
-      // the PyObject without flipping ownership.  At this point it is
-      // too late to rescue the object, so just stub out the PyObject
-      // so that it fails on subsequent uses.  Don't raise an error here;
-      // you're probably in a destructor.
-      TORCH_WARN(
-          "Deallocating Tensor that still has live PyObject references.  "
-          "This probably happened because you took out a weak reference to "
-          "Tensor and didn't call _fix_weakref() after dereferencing it.  "
-          "Subsequent accesses to this tensor via the PyObject will now fail.");
-      (reinterpret_cast<THPVariable*>(pyobj))->cdata =
-          c10::MaybeOwned<torch::autograd::Variable>();
-    } else if (THPStorage_Check(pyobj)) {
-      TORCH_WARN(
-          "Deallocating UntypedStorage that still has live PyObject references.  "
-          "This probably happened because you took out a weak reference to "
-          "UntypedStorage and didn't call _fix_weakref() after dereferencing it.  "
-          "Subsequent accesses to this storage via the PyObject will now fail.");
-      (reinterpret_cast<THPStorage*>(pyobj))->cdata =
-          c10::MaybeOwned<c10::Storage>();
-    }
-  }
   Py_DECREF(pyobj);
 }
 
@@ -290,6 +248,25 @@ void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
     return;
   pybind11::gil_scoped_acquire gil;
   Py_INCREF(pyobj);
+}
+
+bool ConcretePyInterpreterVTable::try_incref(
+    const c10::impl::PyObjectSlot& pyobj_slot) const {
+  if (!Py_IsInitialized())
+    return false;
+  pybind11::gil_scoped_acquire gil;
+  PyObject* pyobj = pyobj_slot.load_pyobj();
+  if (!pyobj) {
+    return false;
+  }
+  return PyUnstable_TryIncRef(pyobj);
+}
+
+size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
+  if (!Py_IsInitialized() || pyobj == nullptr)
+    return 0;
+  pybind11::gil_scoped_acquire gil;
+  return Py_REFCNT(pyobj);
 }
 
 bool isPythonTensor(const at::Tensor& tensor) {
@@ -325,17 +302,14 @@ void ConcretePyInterpreterVTable::dispatch(
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
-  for (const auto idx : c10::irange(arguments.size())) {
-    const auto& ivalue = arguments[idx];
+  for (const auto& ivalue : arguments) {
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
         append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
       }
     } else if (ivalue.isList()) {
-      const auto& list = ivalue.toListRef();
-      for (const auto jdx : c10::irange(list.size())) {
-        const auto& nv = list[jdx];
+      for (const auto& nv : ivalue.toListRef()) {
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {
@@ -357,6 +331,8 @@ void ConcretePyInterpreterVTable::dispatch(
       nullptr,
       torch_api_function_overload.ptr(),
       nullptr,
+      &op,
+      &arguments,
       TorchFunctionName::TorchDispatch);
   pushPyOutToStack(
       op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
@@ -371,16 +347,13 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   // TODO: if necessary, can optimize to cache the cache lookup
   // TODO: if necessary, can optimize OpOverload to have slots
   auto cache = py::dict(torch_api_function_overload.attr("_dispatch_cache"));
-  if (cache.ptr() == nullptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(cache.ptr() != nullptr);
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
   PyObject* raw_handler = nullptr;
-  if (PyDict_GetItemRef(cache.ptr(), py::cast(k).ptr(), &raw_handler) < 0) {
-    // There was an error that is not missing key (which would return 0)
-    throw python_error();
-  }
+  // There was an error that is not missing key (which would return 0)
+  TORCH_CHECK_PYTHON(
+      PyDict_GetItemRef(cache.ptr(), py::cast(k).ptr(), &raw_handler) >= 0);
   auto handler = py::reinterpret_steal<py::object>(raw_handler);
   if (handler.ptr() == nullptr) {
     // Slow path
@@ -404,9 +377,7 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   py::object obj = py::reinterpret_steal<py::object>(
       PyObject_Call(handler.ptr(), args.ptr(), kwargs.ptr()));
 
-  if (obj.ptr() == nullptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(obj.ptr() != nullptr);
 
   pushPyOutToStack(op, stack, std::move(obj), "Python dispatcher");
 }
@@ -618,11 +589,7 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  auto obj = mb_obj.value();
+  PyObject* obj = tensor->pyobj_slot()->load_pyobj();
   py::handle(obj).attr(attr_name) = capsule;
 }
 
@@ -646,11 +613,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
     const py::object& obj) {
-  std::optional<PyObject*> mb_obj =
-      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  auto tensor_obj = mb_obj.value();
+  PyObject* tensor_obj = tensor->pyobj_slot()->load_pyobj();
   auto buffer_len_attr_name = std::string(base_attr_name) + std::string("_len");
 
   bool is_buffer_allocated = false;
@@ -984,7 +947,7 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
 std::string ConcretePyInterpreterVTable::name() const {
   std::stringstream ss;
   ss << getPyInterpreter();
-  return ss.str();
+  return std::move(ss).str();
 }
 
 PyInterpreterHolder self_interpreter;
@@ -992,7 +955,7 @@ PyInterpreterHolder self_interpreter;
 } // anonymous namespace
 
 py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
-  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
+  return op.getPythonOp([&]() -> PyObject* {
     // Parse the name into namespace and name (no overload_name)
     // TODO: put this into the library
     const auto& schema = op.schema();

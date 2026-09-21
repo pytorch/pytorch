@@ -1,6 +1,7 @@
 # torch.mtia
 
-The MTIA backend is implemented out of the tree, only interfaces are defined here.
+The MTIA backend is implemented out of the tree, only interfaces are defined
+here.
 
 ```{eval-rst}
 .. automodule:: torch.mtia
@@ -26,6 +27,7 @@ The MTIA backend is implemented out of the tree, only interfaces are defined her
     is_initialized
     memory_stats
     get_device_capability
+    get_device_properties
     empty_cache
     record_memory_history
     snapshot
@@ -37,6 +39,13 @@ The MTIA backend is implemented out of the tree, only interfaces are defined her
     device
     set_rng_state
     get_rng_state
+    set_rng_state_all
+    get_rng_state_all
+    manual_seed
+    manual_seed_all
+    seed
+    seed_all
+    initial_seed
     DeferredMtiaCallError
 ```
 

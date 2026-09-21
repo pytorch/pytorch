@@ -2,14 +2,19 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Optional
+from functools import cache
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
+from torch.types import Device
 
-from ._utils import _device_t, _get_device_index
+from . import random
+from ._utils import _get_device_index
+from .graphs import Graph
 from .memory import (
     empty_cache,
+    empty_host_cache,
     get_memory_info,
     max_memory_allocated,
     max_memory_reserved,
@@ -22,13 +27,16 @@ from .memory import (
 
 
 __all__ = [
+    "Graph",
     "current_accelerator",
     "current_device_idx",  # deprecated
     "current_device_index",
+    "get_device_capability",
     "current_stream",
     "device_count",
     "device_index",
     "empty_cache",
+    "empty_host_cache",
     "get_memory_info",
     "is_available",
     "max_memory_allocated",
@@ -50,7 +58,7 @@ def device_count() -> int:
 
     Returns:
         int: the number of the current :ref:`accelerator<accelerators>` available.
-            If there is no available accelerators, return 0.
+            If there are no available accelerators, return 0.
 
     .. note:: This API delegates to the device-specific version of `device_count`.
         On CUDA, this API will NOT poison fork if NVML discovery succeeds.
@@ -65,7 +73,7 @@ def device_count() -> int:
 
 
 def is_available() -> bool:
-    r"""Check if the current accelerator is available at runtime: it was build, all the
+    r"""Check if the current accelerator is available at runtime: it was built, all the
     required drivers are available and at least one device is visible.
     See :ref:`accelerator<accelerators>` for details.
 
@@ -114,7 +122,7 @@ def current_accelerator(check_available: bool = False) -> torch.device | None:
     Example::
 
         >>> # xdoctest:
-        >>> # If an accelerator is available, sent the model to it
+        >>> # If an accelerator is available, send the model to it
         >>> model = torch.nn.Linear(2, 2)
         >>> if (current_device := current_accelerator(check_available=True)) is not None:
         >>>     model.to(current_device)
@@ -152,7 +160,34 @@ current_device_idx.__doc__ = r"""
     """
 
 
-def set_device_index(device: _device_t, /) -> None:
+@cache
+def get_device_capability(device: Device = None, /) -> dict[str, Any]:
+    r"""Return the capability of the currently selected device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): The device to query capabilities for
+            :ref:`accelerator<accelerators>` device type. If not given,
+            use :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        dict[str, Any]: A dictionary containing device capability information. The dictionary includes:
+            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types for which
+              tensors can be allocated on the accelerator and type conversion across
+              supported dtypes are supported. Any operator support outside of that
+              is not guaranteed
+
+    Examples:
+        >>> # xdoctest: +SKIP("requires cuda")
+        >>> # Query capabilities for current device
+        >>> capabilities = torch.accelerator.get_device_capability("cuda:0")
+        >>> print("Supported dtypes:", capabilities["supported_dtypes"])
+    """
+    device_index = _get_device_index(device, optional=True)
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._accelerator_getDeviceCapability(device_index)
+
+
+def set_device_index(device: Device, /) -> None:
     r"""Set the current device index to a given device.
 
     Args:
@@ -184,7 +219,7 @@ set_device_idx.__doc__ = r"""
     """
 
 
-def current_stream(device: _device_t = None, /) -> torch.Stream:
+def current_stream(device: Device = None, /) -> torch.Stream:
     r"""Return the currently selected stream for a given device.
 
     Args:
@@ -210,7 +245,7 @@ def set_stream(stream: torch.Stream) -> None:
     torch._C._accelerator_setStream(stream)
 
 
-def synchronize(device: _device_t = None, /) -> None:
+def synchronize(device: Device = None, /) -> None:
     r"""Wait for all kernels in all streams on the given device to complete.
 
     Args:

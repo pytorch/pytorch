@@ -13,6 +13,7 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 #include <ATen/native/quantized/PackedParams.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <cudnn_frontend.h>
@@ -43,14 +44,10 @@ struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
       int64_t output_zero_point) override;
 
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false) override {
-    throw std::runtime_error(
-    "apply_dynamic is not implemented for this packed "
-    "parameter type");
+    TORCH_CHECK(false, "apply_dynamic is not implemented for this packed parameter type");
   }
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false) override {
-    throw std::runtime_error(
-    "apply_dynamic_relu is not implemented for this packed "
-    "parameter type");
+    TORCH_CHECK(false, "apply_dynamic_relu is not implemented for this packed parameter type");
   }
 
   std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;

@@ -65,7 +65,6 @@ Tensor adaptive_avg_pool2d_quantized_cuda(
     return at::quantize_per_tensor(result_fp32, input.q_scale(), input.q_zero_point(), input.scalar_type());
 #else // USE_CUDA
   TORCH_CHECK(false, "at::native::adaptive_avg_pool2d_quantized_cuda: ATen not compiled with USE_CUDA support");
-  return Tensor{}; // never reached, placates the compiler
 #endif
 }
 
@@ -214,7 +213,6 @@ Tensor quantized_max_pool2d_cudnn(
 #endif // AT_CUDNN_ENABLED()
 #else // USE_CUDA
   TORCH_CHECK(false, "at::native::quantized_max_pool2d_cudnn: ATen not compiled with USE_CUDA support");
-  return Tensor{}; // never reached, placates the compiler
 #endif
 }
 

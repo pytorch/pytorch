@@ -1,10 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Config.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/RNN.h>
 #include <c10/util/Exception.h>
@@ -108,6 +106,8 @@ Tensor _cudnn_init_dropout_state(
       false, "_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
+void _cudnn_clear_dropout_state() {}
+
 } // namespace native
 } // namespace at
 
@@ -115,8 +115,7 @@ Tensor _cudnn_init_dropout_state(
 
 #include <ATen/native/cudnn/RNNUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 // DropoutDescriptor
@@ -181,7 +180,7 @@ struct RNNDescriptorParams {
       default: {
         std::ostringstream oss;
         oss << "unrecognized cuDNN RNN mode " << fn_mode;
-        TORCH_CHECK(false, oss.str());
+        TORCH_CHECK(false, std::move(oss).str());
       }
     }
   }
@@ -657,7 +656,7 @@ void add_projection_weights(
       nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
   auto elem_size = dataSize(getCudnnDataType(weight_buf));
   auto offset_bytes = static_cast<const char*>(matrix_pointer) -
-      static_cast<const char*>(weight_buf.data_ptr());
+      static_cast<const char*>(weight_buf.const_data_ptr());
   TORCH_INTERNAL_ASSERT(
       offset_bytes % elem_size == 0,
       "offset_bytes = ",
@@ -796,7 +795,7 @@ get_parameters(
             min_dim);
         auto elem_size = dataSize(getCudnnDataType(weight_buf));
         auto offset_bytes = static_cast<const char*>(matrix_pointer) -
-            static_cast<const char*>(weight_buf.data_ptr());
+            static_cast<const char*>(weight_buf.const_data_ptr());
         TORCH_INTERNAL_ASSERT(
             offset_bytes % elem_size == 0,
             "offset_bytes = ",
@@ -1284,7 +1283,7 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
 #endif
 }
 
-} // namespace native
+} // namespace at::native
 
 // Utilities exposed in RNNUtils.h
 namespace cudnn_rnn {
@@ -1368,7 +1367,7 @@ copy_weights_to_flat_buf_views(
     }
   }
 
-  return std::make_tuple(weight_buf, params_arr);
+  return std::make_tuple(std::move(weight_buf), std::move(params_arr));
 }
 
 } // namespace cudnn_rnn
@@ -1679,7 +1678,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
         CUDNN_FWD_MODE_INFERENCE,
         x_descs_arr.desc(),
         &workspace_size,
-        NULL));
+        nullptr));
 #endif
     workspace = at::empty(workspace_size, input.options().dtype(kByte));
     reserve = at::empty({0}, input.options().dtype(kByte));
@@ -1733,7 +1732,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     output.transpose_(0, 1);
   }
 
-  return std::make_tuple(output, hy, cy, reserve, weight_buf);
+  return std::make_tuple(
+      std::move(output),
+      std::move(hy),
+      std::move(cy),
+      std::move(reserve),
+      std::move(weight_buf));
 }
 
 std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
@@ -1899,7 +1903,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
       CUDNN_FWD_MODE_TRAINING,
       x_descs_arr.desc(),
       &workspace_size,
-      NULL));
+      nullptr));
 #endif
   // TODO: put this in the correct device???
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
@@ -1961,7 +1965,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     dx = dx.transpose_(0, 1);
   }
 
-  return std::make_tuple(dx, dhx, dcx);
+  return std::make_tuple(std::move(dx), std::move(dhx), std::move(dcx));
 }
 
 // NB: This MUST BE CALLED AFTER _cudnn_rnn_backward_input.
@@ -2087,7 +2091,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
       CUDNN_FWD_MODE_TRAINING,
       x_descs_arr.desc(),
       &workspace_size,
-      NULL));
+      nullptr));
 #endif
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
 #ifndef USE_CUDNN_RNN_V8_API
@@ -2250,7 +2254,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
         reserve);
   }
   return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{
-      dx, dhx, dcx, dw};
+      std::move(dx), std::move(dhx), std::move(dcx), std::move(dw)};
 }
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
@@ -2377,12 +2381,7 @@ struct DropoutState {
     if (event) {
 #if !defined(USE_ROCM)
       // See Note [DropoutState and CUDA graph capture]
-      cudaStreamCaptureStatus status;
-      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
-          cuda::getCurrentCUDAStream(), &status, &capture_id_last_lock));
-      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
-        capture_id_last_lock = 0;
-      }
+      capture_id_last_lock = at::cuda::currentStreamCaptureId().value_or(0);
       if (capture_id_last_lock == capture_id_last_unlock) {
         event->block(cuda::getCurrentCUDAStream());
       }
@@ -2397,12 +2396,7 @@ struct DropoutState {
       event->record();
 #if !defined(USE_ROCM)
       // See Note [DropoutState and CUDA graph capture]
-      cudaStreamCaptureStatus status;
-      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
-          cuda::getCurrentCUDAStream(), &status, &capture_id_last_unlock));
-      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
-        capture_id_last_unlock = 0;
-      }
+      capture_id_last_unlock = at::cuda::currentStreamCaptureId().value_or(0);
       TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
 #endif
     }
@@ -2410,21 +2404,29 @@ struct DropoutState {
   }
 };
 
+// Each state is slightly over 2MB and initialized lazily, so it's fine to
+// cache them. The cache is process-lifetime state; it can be released via
+// clear_dropout_state() (exposed as torch._C._cudnn_clear_dropout_state()).
+std::vector<DropoutState>& dropout_state_cache() {
+  static std::vector<DropoutState> cache{
+      static_cast<size_t>(cuda::getNumGPUs())};
+  return cache;
+}
+
+std::mutex& dropout_state_cache_mutex() {
+  static std::mutex mut;
+  return mut;
+}
+
 DropoutState& get_dropout_state(
     double dropout_p,
     bool train,
     TensorOptions options) {
-  // Each state is slightly over 2MB and initialized lazily, so it's fine to
-  // cache them.
-  static std::vector<DropoutState> dropout_state_cache{
-      static_cast<size_t>(cuda::getNumGPUs())};
-  static std::mutex state_cache_mut;
-
   AT_ASSERT(options.device().is_cuda());
   auto device = options.device().index();
 
-  std::unique_lock<std::mutex> lock{state_cache_mut};
-  auto& state = dropout_state_cache.at(device);
+  std::unique_lock<std::mutex> lock{dropout_state_cache_mutex()};
+  auto& state = dropout_state_cache().at(device);
   if (train && dropout_p > 0) {
     const auto& gen = at::detail::getCUDAHooks().getDefaultGenerator(device);
     auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
@@ -2595,6 +2597,10 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       bidirectional);
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+  TORCH_CHECK(
+      _batch_sizes.device().is_cpu(),
+      "batch_sizes tensor should be on CPU, but got ",
+      _batch_sizes.device());
   IntArrayRef batch_sizes{
       _batch_sizes.data_ptr<int64_t>(),
       static_cast<size_t>(_batch_sizes.size(0))};
@@ -2819,7 +2825,15 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
 
 } // namespace
 
-} // namespace at
-} // namespace at
+void _cudnn_clear_dropout_state() {
+  std::lock_guard<std::mutex> lock{dropout_state_cache_mutex()};
+  for (auto& state : dropout_state_cache()) {
+    std::lock_guard<std::mutex> state_lock{state.mutex};
+    state.buffer = Tensor();
+    state.event.reset();
+  }
+}
+
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED()

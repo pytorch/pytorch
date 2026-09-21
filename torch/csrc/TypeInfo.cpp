@@ -2,26 +2,21 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
 
 #include <ATen/Dispatch_v2.h>
 
 #include <c10/util/Exception.h>
 
-#include <structmember.h>
-#include <cstring>
 #include <limits>
 #include <sstream>
 
 static PyObject* THPFInfo_New(const at::ScalarType& type) {
   auto finfo = &THPFInfoType;
   auto self = THPObjectPtr{finfo->tp_alloc(finfo, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = c10::toRealValueType(type);
   return self.release();
@@ -30,8 +25,7 @@ static PyObject* THPFInfo_New(const at::ScalarType& type) {
 static PyObject* THPIInfo_New(const at::ScalarType& type) {
   auto iinfo = &THPIInfoType;
   auto self = THPObjectPtr{iinfo->tp_alloc(iinfo, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = type;
   return self.release();
@@ -113,8 +107,13 @@ static PyObject* THPDTypeInfo_compare(
       } else {
         Py_RETURN_FALSE;
       }
+    default:
+      Py_RETURN_NOTIMPLEMENTED;
   }
-  return Py_INCREF(Py_NotImplemented), Py_NotImplemented;
+}
+
+static Py_hash_t THPDTypeInfo_hash(THPDTypeInfo* self) {
+  return static_cast<Py_hash_t>(self->type) ^ 0x345678;
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {
@@ -204,7 +203,8 @@ static PyObject* THPIInfo_dtype(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return AT_DISPATCH_IINFO_TYPES(self->type, "dtype", [&primary_name] {
-    return PyUnicode_FromString(primary_name.data());
+    return PyUnicode_FromStringAndSize(
+        primary_name.data(), static_cast<Py_ssize_t>(primary_name.size()));
   });
   END_HANDLE_TH_ERRORS
 }
@@ -237,7 +237,8 @@ static PyObject* THPFInfo_dtype(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return _AT_DISPATCH_FINFO_TYPES(self->type, "dtype", [&primary_name] {
-    return PyUnicode_FromString(primary_name.data());
+    return PyUnicode_FromStringAndSize(
+        primary_name.data(), static_cast<Py_ssize_t>(primary_name.size()));
   });
   END_HANDLE_TH_ERRORS
 }
@@ -254,9 +255,10 @@ static PyObject* THPFInfo_str(THPFInfo* self) {
       << PyFloat_AsDouble(THPFInfo_smallest_normal(self, nullptr));
   oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr));
   if (dtypeStr != nullptr) {
-    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ")";
+    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
-  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
+  return !PyErr_Occurred() ? THPUtils_packString(std::move(oss).str().c_str())
+                           : nullptr;
 }
 
 static PyObject* THPIInfo_str(THPIInfo* self) {
@@ -266,10 +268,11 @@ static PyObject* THPIInfo_str(THPIInfo* self) {
   oss << "iinfo(min=" << PyLong_AsDouble(THPIInfo_min(self, nullptr));
   oss << ", max=" << PyLong_AsDouble(THPIInfo_max(self, nullptr));
   if (dtypeStr) {
-    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ")";
+    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
 
-  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
+  return !PyErr_Occurred() ? THPUtils_packString(std::move(oss).str().c_str())
+                           : nullptr;
 }
 
 static const std::initializer_list<PyGetSetDef> THPFInfo_properties = {
@@ -317,7 +320,7 @@ PyTypeObject THPFInfoType = {
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
+    reinterpret_cast<hashfunc>(THPDTypeInfo_hash), /* tp_hash */
     nullptr, /* tp_call */
     reinterpret_cast<reprfunc>(THPFInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
@@ -374,7 +377,7 @@ PyTypeObject THPIInfoType = {
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
+    reinterpret_cast<hashfunc>(THPDTypeInfo_hash), /* tp_hash */
     nullptr, /* tp_call */
     reinterpret_cast<reprfunc>(THPIInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
@@ -403,20 +406,6 @@ PyTypeObject THPIInfoType = {
 };
 
 void THPDTypeInfo_init(PyObject* module) {
-  if (PyType_Ready(&THPFInfoType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPFInfoType);
-  if (PyModule_AddObject(
-          module, "finfo", reinterpret_cast<PyObject*>(&THPFInfoType)) != 0) {
-    throw python_error();
-  }
-  if (PyType_Ready(&THPIInfoType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPIInfoType);
-  if (PyModule_AddObject(
-          module, "iinfo", reinterpret_cast<PyObject*>(&THPIInfoType)) != 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPFInfoType) >= 0);
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPIInfoType) >= 0);
 }

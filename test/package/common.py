@@ -12,7 +12,7 @@ class PackageTestCase(TestCase):
         self._temporary_files = []
 
     def temp(self):
-        t = NamedTemporaryFile()
+        t = NamedTemporaryFile()  # noqa: SIM115
         name = t.name
         if IS_WINDOWS:
             t.close()  # can't read an open file in windows

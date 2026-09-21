@@ -74,7 +74,7 @@ void remove_padding_transform0213_kernelLauncher(
 
 template <typename T>
 void add_padding_kernelLauncher(
-    T* input,
+    const T* input,
     T* output,
     T padding_value,
     const int* offsets,

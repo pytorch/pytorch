@@ -2,11 +2,11 @@
 
 namespace caffe2 {
 
-const std::map<string, string>& GetBuildOptions() {
+const std::map<std::string, std::string>& GetBuildOptions() {
 #ifndef CAFFE2_BUILD_STRINGS
 #define CAFFE2_BUILD_STRINGS {}
 #endif
-  static const std::map<string, string> kMap = CAFFE2_BUILD_STRINGS;
+  static const std::map<std::string, std::string> kMap = CAFFE2_BUILD_STRINGS;
   return kMap;
 }
 

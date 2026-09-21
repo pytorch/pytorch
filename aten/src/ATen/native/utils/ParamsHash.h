@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/irange.h>
-#include <memory>
-#include <mutex>
+#include <cstring>
+#include <type_traits>
 
 namespace at::native {
 
@@ -16,14 +16,14 @@ struct ParamsHash {
   // contents as char* when hashing
   static_assert(std::is_standard_layout_v<Params>, "Params is not POD");
 
-  size_t operator()(const Params& params) const {
+  size_t operator()(const Params& params) const noexcept {
     auto ptr = reinterpret_cast<const uint8_t*>(&params);
     uint32_t value = 0x811C9DC5;
     for (const auto i : c10::irange(sizeof(Params))) {
       value ^= ptr[i];
       value *= 0x01000193;
     }
-    return (size_t)value;
+    return static_cast<size_t>(value);
   }
 };
 
@@ -33,14 +33,12 @@ struct ParamsEqual {
   // contents as char* when comparing
   static_assert(std::is_standard_layout_v<Params>, "Params is not POD");
 
-  bool operator()(const Params& a, const Params& b) const {
-    auto ptr1 = reinterpret_cast<const uint8_t*>(&a);
-    auto ptr2 = reinterpret_cast<const uint8_t*>(&b);
-    return memcmp(ptr1, ptr2, sizeof(Params)) == 0;
+  bool operator()(const Params& a, const Params& b) const noexcept {
+    return std::memcmp(&a, &b, sizeof(Params)) == 0;
   }
 };
 
-// Provide explicit byte-for-byte constructors to avoid uwittingly leaving
+// Provide explicit byte-for-byte constructors to avoid unwittingly leaving
 // padding bytes uninitialized (e.g., when passing Params by value)
 template <typename T>
 struct ParamsWrapper {
@@ -48,56 +46,40 @@ struct ParamsWrapper {
   static_assert(
       std::is_standard_layout_v<T>,
       "ParamsWrapper cannot wrap non-POD data");
+  static_assert(std::is_trivially_copyable_v<T>,
+      "ParamsWrapper requires trivially copyable T");
 
-  ParamsWrapper() {
-    memset(&(this->pod), 0, sizeof(this->pod));
+  ParamsWrapper() noexcept {
+    std::memset(&(this->pod), 0, sizeof(this->pod));
   }
 
-  ParamsWrapper(const ParamsWrapper& other) {
-    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
+  ParamsWrapper(const ParamsWrapper& other) noexcept {
+    std::memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
   }
 
-  ParamsWrapper(ParamsWrapper&& other) noexcept {
-    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
-  }
-
-  ParamsWrapper& operator=(const ParamsWrapper& other) {
-    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
+  ParamsWrapper& operator=(const ParamsWrapper& other) noexcept {
+    std::memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
     return *this;
   }
 
-  ParamsWrapper& operator=(ParamsWrapper&& other) noexcept {
-    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
-    return *this;
-  }
+  ParamsWrapper(ParamsWrapper&& other) = delete;
+  ParamsWrapper& operator=(ParamsWrapper&& other) = delete;
+  ~ParamsWrapper() = default;
 
   inline friend bool operator==(
       const ParamsWrapper& lhs,
       const ParamsWrapper& rhs) noexcept {
-    auto ptr1 = reinterpret_cast<const uint8_t*>(&(lhs.pod));
-    auto ptr2 = reinterpret_cast<const uint8_t*>(&(rhs.pod));
-    return memcmp(ptr1, ptr2, sizeof(lhs.pod)) == 0;
+    return std::memcmp(&lhs.pod, &rhs.pod, sizeof(T)) == 0;
   }
 };
 
 // Wrapped version: this allows the outer struct to have custom copy and move
 // constructors for additional safety
-template <typename ParamsWrapper>
+template <typename WrapperT>
 struct ParamsWrapperHash {
-  // Params must be a POD because we read out its memory
-  // contents as char* when hashing
-  static_assert(
-      std::is_standard_layout_v<decltype(ParamsWrapper::pod)>,
-      "ParamsWrapper cannot wrap non-POD data");
-
-  size_t operator()(const ParamsWrapper& params_wrapper) const {
-    auto ptr = reinterpret_cast<const uint8_t*>(&(params_wrapper.pod));
-    uint32_t value = 0x811C9DC5;
-    for (const auto i : c10::irange(sizeof(params_wrapper.pod))) {
-      value ^= ptr[i];
-      value *= 0x01000193;
-    }
-    return (size_t)value;
+  size_t operator()(const WrapperT& params_wrapper) const noexcept {
+    ParamsHash<decltype(WrapperT::pod)> hasher;
+    return hasher(params_wrapper.pod);
   }
 };
 

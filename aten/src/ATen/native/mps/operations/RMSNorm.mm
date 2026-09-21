@@ -55,7 +55,7 @@ std::tuple<Tensor, Tensor> _fused_rms_norm_mps(const Tensor& input,
       if (N <= LOOPED_LIMIT) {
         size_t threadgroup_needed = (N + N_READS - 1) / N_READS;
         size_t simds_needed = (threadgroup_needed + SIMD_SIZE - 1) / SIMD_SIZE;
-        size_t threadgroup_size = SIMD_SIZE * simds_needed;
+        threadgroup_size = SIMD_SIZE * simds_needed;
         assert(threadgroup_size <= maxThreadsPerGroup);
       }
       size_t n_threads = M * threadgroup_size;

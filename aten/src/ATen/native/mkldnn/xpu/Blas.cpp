@@ -1,5 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/xpu/Blas.h>
@@ -15,7 +15,13 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/gelu.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/relu.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/tensordot.h>
 #endif
 
 namespace at::native {
@@ -30,21 +36,7 @@ Tensor& addmm_out(
     const Scalar& alpha,
     Tensor& result) {
   checkBackend("addmm_out", {result, self, mat1, mat2}, Backend::XPU);
-  TORCH_CHECK(
-      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0],
-      "x",
-      mat1.sizes()[1],
-      " and ",
-      mat2.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ")");
+  check_mm_shapes(mat1, mat2, "addmm");
   TORCH_CHECK(
       mat1.dtype() == mat2.dtype(),
       "expected mat1 and mat2 to have the same dtype, but got: ",
@@ -52,15 +44,15 @@ Tensor& addmm_out(
       " != ",
       mat2.dtype())
 
+  std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
+  result.resize_(result_shape);
+
   // complex case
   if (self.is_complex()) {
     at::native::addmm_complex_out_xpu(self, mat1, mat2, beta, alpha, result);
 
     return result;
   }
-
-  std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
-  result.resize_(result_shape);
 
   IntArrayRef result_sizes = result.sizes();
   if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
@@ -85,11 +77,48 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
+  TORCH_CHECK(
+      result_shape.size() >= (size_t)self.dim(),
+      "The number of sizes provided (",
+      result_shape.size(),
+      ") ",
+      "must be greater or equal to the number of dimensions in the tensor (",
+      self.dim(),
+      ")");
+
+  // Bypass OneDNN optimization path for float64 due to lack of full double
+  // precision support.
+  if (mat1.scalar_type() == at::kDouble) {
+    bool is_inplace = self.is_same(result);
+    bool is_beta_ne_zero = beta.to<double>() != 0.0;
+
+    Tensor self_copy;
+    if (is_inplace && is_beta_ne_zero) {
+      self_copy = self.clone();
+    }
+
+    onednn::matmul(result, mat1, mat2, Tensor(), true, onednn::Attr());
+
+    if (alpha.to<double>() != 1.0) {
+      result.mul_(alpha);
+    }
+
+    if (is_beta_ne_zero) {
+      result.add_(is_inplace ? self_copy : self, beta);
+    }
+
+    return result;
+  }
+
   // general case
+  float beta_ = beta.to<float>();
+  float alpha_ = alpha.to<float>();
+
+  bool is_reduced_float =
+      mat1.scalar_type() == kBFloat16 || mat1.scalar_type() == kHalf;
+
   Tensor bias = Tensor();
   onednn::Attr attr;
-  float beta_ = beta.to<float>();
-  float alpha_ = beta_ == 0.f ? alpha.to<float>() : alpha.to<float>() / beta_;
   if (beta_ == 0.f) {
     attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else if (alpha_ == 1.f && beta_ == 1.f && !result.is_same(self)) {
@@ -99,9 +128,16 @@ Tensor& addmm_out(
     Tensor binary = self.dim() < 1 ? self.unsqueeze(0) : self;
     binary = binary.dim() == 1 ? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
+    if (!inplace && is_reduced_float) {
+      // For reduced-precision types, the 3-step post-op chain
+      // (eltwise -> binary_add -> eltwise) rounds intermediates to
+      // bf16/f16, losing precision. Use post_sum which fuses the
+      // addition in oneDNN's f32 accumulator, matching CPU behavior.
+      result.copy_(self.expand(result.sizes()));
+      inplace = true;
+    }
     if (inplace) {
-      attr.append_post_eltwise(
-          1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
+      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
       attr.append_post_sum(beta_);
     } else {
       if (at::native::onednn::is_broadcast(binary)) {
@@ -112,12 +148,12 @@ Tensor& addmm_out(
       binary = at::native::onednn::is_onednn_matmul_strides(binary)
           ? binary
           : binary.contiguous();
-      // Tensor binary = self.expand_as(result);
       // For post-binary-add, onednn needs binary scale=1.f
       // Thus we need the following transformation
       // alpha * matmul(mat1, mat2) + beta * binary
       // beta * (alpha/beta * matmul(src, wei) + binary)
-      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+      float alpha_ratio = alpha_ / beta_;
+      attr.append_post_eltwise(1.f, alpha_ratio, 0.f, attr.kind_with_linear);
       attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
       attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
     }
@@ -145,19 +181,7 @@ Tensor& _addmm_activation_out(
 
 Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
   checkBackend("mm_out", {result, self, mat2}, Backend::XPU);
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  TORCH_CHECK(
-      self.sizes()[1] == mat2.sizes()[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      self.sizes()[0],
-      "x",
-      self.sizes()[1],
-      " and ",
-      mat2.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ")");
+  check_mm_shapes(self, mat2, "mm");
   TORCH_CHECK(
       self.dtype() == mat2.dtype(),
       "expected mat1 and mat2 to have the same dtype, but got: ",
@@ -223,11 +247,39 @@ Tensor& baddbmm_out(
     return result;
   }
 
+  // Bypass OneDNN optimization path for float64 due to lack of full double
+  // precision support.
+  if (batch1.scalar_type() == at::kDouble ||
+      batch2.scalar_type() == at::kDouble) {
+    bool is_inplace = input.is_same(result);
+    bool is_beta_ne_zero = beta.to<double>() != 0.0;
+
+    Tensor input_copy;
+    if (is_inplace && is_beta_ne_zero) {
+      input_copy = input.clone();
+    }
+
+    onednn::matmul(result, batch1, batch2, Tensor(), true, onednn::Attr());
+
+    if (alpha.to<double>() != 1.0) {
+      result.mul_(alpha);
+    }
+
+    if (is_beta_ne_zero) {
+      result.add_(is_inplace ? input_copy : input, beta);
+    }
+
+    return result;
+  }
+
   // general case
   onednn::Attr attr;
   float beta_ = beta.to<float>();
-  float alpha_ = beta_ == 0.f ? alpha.to<float>() : alpha.to<float>() / beta_;
-  Tensor binary;
+  float alpha_ = alpha.to<float>();
+
+  bool is_reduced_float =
+      batch1.scalar_type() == kBFloat16 || batch1.scalar_type() == kHalf;
+
   if (beta_ == 0.f) {
     attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
@@ -236,9 +288,17 @@ Tensor& baddbmm_out(
     // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     bool inplace = binary.is_same(result);
+    if (!inplace && is_reduced_float) {
+      // Reduced-precision dtypes lose accuracy in the non-inplace path below,
+      // whose 3-step post-op chain (eltwise -> binary_add -> eltwise) rounds
+      // intermediates to bf16/f16. Copy self into result and take the inplace
+      // path instead, which uses post_sum and accumulates in oneDNN's f32
+      // accumulator, matching CPU/CUDA behavior.
+      result.copy_(input.expand(result.sizes()));
+      inplace = true;
+    }
     if (inplace) {
-      attr.append_post_eltwise(
-          1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
+      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
       attr.append_post_sum(beta_);
     } else {
       if (at::native::onednn::is_broadcast(binary)) {
@@ -247,12 +307,13 @@ Tensor& baddbmm_out(
       binary = at::native::onednn::is_onednn_matmul_strides(binary)
           ? binary
           : binary.contiguous();
-      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+      float alpha_ratio = alpha_ / beta_;
+      attr.append_post_eltwise(1.f, alpha_ratio, 0.f, attr.kind_with_linear);
       attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
       attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
     }
   }
-  onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
+  onednn::matmul(result, batch1, batch2, Tensor(), true, attr);
   return result;
 }
 
@@ -275,13 +336,7 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
     return result;
   }
 
-  onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
-  return result;
-}
-
-Tensor bmm(const Tensor& self, const Tensor& batch2) {
-  auto result = at::empty({0}, self.options());
-  at::native::xpu::bmm_out(self, batch2, result);
+  onednn::matmul(result, self, batch2, Tensor(), true, onednn::Attr());
   return result;
 }
 
@@ -326,8 +381,27 @@ Tensor& addmv_out(
   }
 
   Tensor vec_v = vec.view({vec.size(0), 1});
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-  out.resize_({mat.size(0)});
+
+  bool is_float64 =
+      mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
+  bool need_preserve_strides =
+      out.dim() == 1 && out.stride(0) != 1 && out.numel() > 0;
+
+  if (is_float64 && self.is_same(out) && !need_preserve_strides) {
+    self_v = self_v.clone();
+  }
+
+  // addmm_out resizes its output to 2D, destroying stride information.
+  // When out has noncontiguous strides, compute into a temporary and copy back.
+  if (need_preserve_strides) {
+    Tensor tmp = at::empty({mat.size(0)}, out.options());
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, tmp);
+    tmp.resize_({mat.size(0)});
+    out.copy_(tmp);
+  } else {
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
+    out.resize_({mat.size(0)});
+  }
   return out;
 }
 
@@ -343,6 +417,13 @@ Tensor& tensordot_out(
   auto output_device = result.device();
   auto input1_device = input1.device();
   auto input2_device = input2.device();
+  if (result.defined()) {
+    TORCH_CHECK(
+        !(result.requires_grad() && at::GradMode::is_enabled() &&
+          result.sizes() != result_tmp.sizes()),
+        "tensordot(): the 'out' tensor was specified and requires gradients, and its shape does not match the expected result. "
+        "Either remove the 'out' argument, ensure it does not require gradients, or make sure its shape matches the expected output.");
+  }
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
       (output_device == input1_device) && (input1_device == input2_device),
@@ -506,13 +587,17 @@ Tensor& _int_mm_out_xpu(
       mat2.size(0));
 
   TORCH_CHECK(
-      self.dtype() == at::kChar,
-      "Expected self dtype to be of type int8 but got ",
-      self.dtype());
+      self.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      self.scalar_type());
   TORCH_CHECK(
-      mat2.dtype() == at::kChar,
-      "Expected mat2 dtype to be of type int8 but got ",
-      mat2.dtype());
+      mat2.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      mat2.scalar_type());
   TORCH_CHECK(
       result.dtype() == at::kInt,
       "Expected result dtype to be of type kInt but got ",
@@ -550,7 +635,7 @@ Tensor& _int_mm_out_xpu(
       self.contiguous(),
       1.0,
       0,
-      mat2.contiguous(),
+      mat2,
       mat2_scales,
       mat2_zero_points,
       bias,
@@ -631,4 +716,125 @@ Tensor _weight_int8pack_mm_xpu(
 
   return C;
 }
+
+Tensor _bmm_dtype_xpu(
+    const Tensor& batch1,
+    const Tensor& batch2,
+    const at::ScalarType out_dtype) {
+  Tensor out = at::empty(
+      {batch1.size(0), batch1.size(1), batch2.size(2)},
+      batch1.options().dtype(out_dtype));
+  return _bmm_out_dtype_xpu(batch1, batch2, out_dtype, out);
+}
+
+static void out_dtype_checks(
+    const Tensor& mat1,
+    const at::ScalarType out_dtype,
+    const Tensor& out) {
+  TORCH_CHECK(
+      out_dtype == out.scalar_type(),
+      "out_dtype must be the same as the dtype of the provided out tensor");
+  TORCH_CHECK(
+      out_dtype == mat1.scalar_type() ||
+          (out_dtype == at::ScalarType::Float &&
+           (mat1.scalar_type() == at::ScalarType::Half ||
+            mat1.scalar_type() == at::ScalarType::BFloat16)),
+      "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+}
+
+Tensor& _bmm_out_dtype_xpu(
+    const Tensor& batch1,
+    const Tensor& batch2,
+    const at::ScalarType out_dtype,
+    Tensor& out) {
+  out_dtype_checks(batch1, out_dtype, out);
+  xpu::bmm_out(batch1, batch2, const_cast<Tensor&>(out));
+  return out;
+}
+
+Tensor _baddbmm_dtype_xpu(
+    const Tensor& self,
+    const Tensor& batch1,
+    const Tensor& batch2,
+    const at::ScalarType out_dtype,
+    const Scalar& beta,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      self.scalar_type() == out_dtype || self.scalar_type() == batch1.dtype(),
+      "self dtype must match either out_dtype or batch1 dtype");
+  Tensor out = at::empty(
+      {batch1.size(0), batch1.size(1), batch2.size(2)},
+      batch1.options().dtype(out_dtype));
+  return _baddbmm_out_dtype_xpu(
+      self, batch1, batch2, out_dtype, beta, alpha, out);
+}
+
+Tensor& _baddbmm_out_dtype_xpu(
+    const Tensor& self,
+    const Tensor& batch1,
+    const Tensor& batch2,
+    const at::ScalarType out_dtype,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Tensor& out) {
+  out_dtype_checks(batch1, out_dtype, out);
+  xpu::baddbmm_out(
+      self,
+      batch1,
+      batch2,
+      beta,
+      alpha,
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      const_cast<Tensor&>(out));
+  return out;
+}
+
+Tensor _mm_dtype_xpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    const at::ScalarType out_dtype) {
+  Tensor result =
+      at::empty({self.size(0), mat2.size(1)}, self.options().dtype(out_dtype));
+  return _mm_dtype_out_xpu(self, mat2, out_dtype, result);
+}
+
+Tensor& _mm_dtype_out_xpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    const at::ScalarType out_dtype,
+    Tensor& out) {
+  out_dtype_checks(self, out_dtype, out);
+  xpu::mm_out(self, mat2, const_cast<Tensor&>(out));
+  return out;
+}
+
+Tensor _addmm_dtype_xpu(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const at::ScalarType out_dtype,
+    const Scalar& beta,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  Tensor result =
+      at::empty({mat1.size(0), mat2.size(1)}, self.options().dtype(out_dtype));
+  return _addmm_dtype_out_xpu(self, mat1, mat2, out_dtype, beta, alpha, result);
+}
+
+Tensor& _addmm_dtype_out_xpu(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const at::ScalarType out_dtype,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Tensor& out) {
+  out_dtype_checks(mat1, out_dtype, out);
+  xpu::addmm_out(self, mat1, mat2, beta, alpha, out);
+  return out;
+}
+
 } // namespace at::native

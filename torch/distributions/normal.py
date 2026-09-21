@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -55,9 +54,9 @@ class Normal(ExponentialFamily):
 
     def __init__(
         self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        loc: Tensor | float,
+        scale: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, _Number) and isinstance(scale, _Number):
@@ -89,7 +88,6 @@ class Normal(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         # compute the variance
-        # pyrefly: ignore [unsupported-operation]
         var = self.scale**2
         log_scale = (
             math.log(self.scale)

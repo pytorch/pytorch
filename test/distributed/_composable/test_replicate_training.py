@@ -7,7 +7,6 @@ import itertools
 import unittest
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -37,6 +36,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
@@ -78,13 +78,12 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
                 # Check that Replicate moved the inputs to GPU, including recursing
                 # into the tuple data structure
-                assert x.device == device, f"Expects {device} but got {x.device}"
-                assert ys[0].device == device, (
-                    f"Expects {device} but got {ys[0].device}"
-                )
-                assert ys[1].device == device, (
-                    f"Expects {device} but got {ys[1].device}"
-                )
+                if not (x.device == device):
+                    raise AssertionError(f"Expects {device} but got {x.device}")
+                if not (ys[0].device == device):
+                    raise AssertionError(f"Expects {device} but got {ys[0].device}")
+                if not (ys[1].device == device):
+                    raise AssertionError(f"Expects {device} but got {ys[1].device}")
                 y = ys[0] + ys[1]
                 return x + y + 1
 
@@ -369,7 +368,8 @@ class TestReplicate1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        assert test_device_type in ("cuda", "hpu", "xpu", "cpu"), f"{test_device_type}"
+        if test_device_type not in ("cuda", "hpu", "xpu", "cpu"):
+            raise AssertionError(f"Unexpected device type: {test_device_type}")
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(
@@ -402,8 +402,8 @@ class TestReplicate1DTrainingCore(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
-        orig_all_gather = dist.all_gather_into_tensor
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_all_gather = dist.all_gather_single
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
@@ -677,8 +677,11 @@ class TestReplicateTrainingCompose(FSDPTest):
         module_grouping: str,
         test_device_type: str,
     ):
-        assert checkpoint_impl in ("composable", "utils", "wrapper")
-        testing_compile = replicate != torch.distributed._composable.replicate_with_fsdp
+        if checkpoint_impl not in ("composable", "utils", "wrapper"):
+            raise AssertionError(f"Unexpected checkpoint_impl: {checkpoint_impl}")
+        testing_compile = (
+            replicate is not torch.distributed._composable.replicate_with_fsdp
+        )
         if testing_compile and checkpoint_impl == "composable":
             return
         torch.manual_seed(42)
@@ -722,7 +725,10 @@ class TestReplicateTrainingCompose(FSDPTest):
             "mesh": device_mesh,
         }
         if module_grouping == "mem_eff":
-            assert model_args.n_layers == 3
+            if not (model_args.n_layers == 3):
+                raise AssertionError(
+                    f"Expected n_layers == 3, got {model_args.n_layers}"
+                )
             replicate(model.layers[0], **fsdp_kwargs)
             replicate([model.layers[1], model.layers[2]], **fsdp_kwargs)
             replicate([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
@@ -828,7 +834,7 @@ class TestReplicateSharedParams(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
-class TestReplicateGradientAccumulation(FSDPTest):
+class TestReplicateGradientAccumulation(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -869,7 +875,7 @@ class TestReplicateGradientAccumulation(FSDPTest):
     def _test_gradient_accumulation(
         self,
         mesh: DeviceMesh,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,

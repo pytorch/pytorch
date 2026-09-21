@@ -7,13 +7,14 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from typing import Optional, Union
 from unittest.mock import MagicMock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch._C._autograd import DeviceType
+from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
@@ -45,27 +46,42 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
-    requires_multicast_support,
+    MultiProcContinuousTest,
+    PLATFORM_SUPPORTS_SYMM_MEM,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     patch_post_backward,
     patch_reshard,
     patch_unshard,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    requires_cuda_p2p_access,
+    run_tests,
+    skip_but_pass_in_sandcastle_if,
+    skipIfTorchInductor,
+    TEST_WITH_ROCM,
+    TEST_XPU,
+    xfailIf,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     FeedForward,
     ModelArgs,
     Transformer,
     TransformerBlock,
 )
+from torch.testing._internal.inductor_utils import skipCUDAIf
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 c10d_ops = torch.ops.c10d
@@ -115,7 +131,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self, params: list[nn.Parameter], reshard_after_forward: Union[bool, int]
+        self, params: list[nn.Parameter], reshard_after_forward: bool | int
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
@@ -166,7 +182,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def _test_all_gather(
         self,
         param_sizes: list[torch.Size],
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         async_op: bool,
         all_gather_copy_in_stream,
         all_gather_stream,
@@ -269,12 +285,17 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
         # Run the foreach reduce-scatter (including copy-in and view-out)
         torch.manual_seed(42)
-        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        # Keep sequential fp16 sums exactly representable in the threaded PG.
+        unsharded_grads = [
+            torch.ones_like(param) * (self.rank % 8) for param in orig_params
+        ]
+        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
         comm = DefaultReduceScatter()
         (
+            _,
             _,
             _,
             post_reduce_event,
@@ -308,7 +329,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             _,
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, reduce_scatter_dtype)
-        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
             _div_if_needed(grad, predivide_factor)
             dist.all_reduce(
@@ -341,7 +361,7 @@ class TestFullyShardCommunication(FSDPTest):
 
     def _test_communication_count(
         self,
-        reshard_after_forward: Union[bool, int, None],
+        reshard_after_forward: bool | int | None,
     ):
         torch.manual_seed(42)
         model_args = ModelArgs()
@@ -423,7 +443,14 @@ class TestFullyShardCommunication(FSDPTest):
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1571
     def test_set_reduce_scatter_divide_factor(self):
         self.run_subtests(
-            {"divide_factor": [self.world_size * 2, self.world_size]},
+            {
+                "divide_factor": [self.world_size * 2, self.world_size],
+                "mesh_shape": [
+                    (self.world_size,),
+                    (self.world_size // 2, 2),
+                    (self.world_size, 1),
+                ],
+            },
             self._test_set_reduce_scatter_divide_factor,
         )
         self.run_subtests(
@@ -431,18 +458,31 @@ class TestFullyShardCommunication(FSDPTest):
             self._test_set_reduce_scatter_divide_factor_mixed_prevision,
         )
 
-    def _test_set_reduce_scatter_divide_factor(self, divide_factor: float):
+    def _test_set_reduce_scatter_divide_factor(
+        self, divide_factor: float, mesh_shape: tuple[int] | tuple[int, int]
+    ):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
         model = Transformer(model_args)
         ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
+        mesh = init_device_mesh(
+            device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
         for module in model.modules():
             if isinstance(module, TransformerBlock):
-                fully_shard(module, reshard_after_forward=False)
-        model = fully_shard(model, reshard_after_forward=False)
+                fully_shard(module, reshard_after_forward=False, mesh=mesh)
+        model = fully_shard(model, reshard_after_forward=False, mesh=mesh)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
-        model.set_reduce_scatter_divide_factor(divide_factor)
+        model.set_gradient_divide_factor(divide_factor)
+
+        # Get ref_model params which should have the specific division factor applied
+        block_params = set()
+        for ref_mod in ref_model.modules():
+            if isinstance(ref_mod, TransformerBlock):
+                block_params.update(ref_mod.parameters())
+        non_block_params = set(ref_model.parameters()) - block_params
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
@@ -451,16 +491,18 @@ class TestFullyShardCommunication(FSDPTest):
             ref_loss = ref_model(inp).sum()
             ref_loss.backward()
             for param in ref_model.parameters():
-                param.grad.mul_(1.0 / divide_factor)
+                factor = divide_factor if param in non_block_params else self.world_size
+                param.grad.mul_(1.0 / factor)
                 dist.all_reduce(param.grad)
             loss = model(inp).sum()
             loss.backward()
             ref_optim.step()
             optim.step()
+            self.assertEqual(ref_loss, loss)
+            # Check parity before calling zero_grad so that grads are also checked
+            check_sharded_parity(self, ref_model, model)
             ref_optim.zero_grad()
             optim.zero_grad()
-            self.assertEqual(ref_loss, loss)
-            check_sharded_parity(self, ref_model, model)
 
     def _test_set_reduce_scatter_divide_factor_mixed_prevision(
         self, divide_factor: float
@@ -479,7 +521,7 @@ class TestFullyShardCommunication(FSDPTest):
             fully_shard(mlp, mp_policy=mp_policy)
         model = fully_shard(model, mp_policy=mp_policy)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
-        model.set_reduce_scatter_divide_factor(divide_factor)
+        model.set_gradient_divide_factor(divide_factor)
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
@@ -512,6 +554,124 @@ class TestFullyShardCommunication(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_max_input_buffers(self):
+        """
+        Tests that ``set_reduce_scatter_max_input_buffers`` is a pure
+        scheduling change: changing the in-flight reduce-scatter copy-in buffer
+        cap (``2``, or an explicit ``1`` that matches the default) produces
+        identical parameters and gradients to the default single-buffer
+        behavior, across FSDP/HSDP and reshard-after-forward (under bf16 mixed
+        precision, where the retained buffer is in the reduce dtype).
+        """
+        self.run_subtests(
+            {
+                "mesh_shape": [(self.world_size,), (self.world_size // 2, 2)],
+                "reshard_after_forward": [True, False],
+                "max_input_buffers": [1, 2],
+            },
+            self._test_set_reduce_scatter_max_input_buffers,
+        )
+
+    def _test_set_reduce_scatter_max_input_buffers(
+        self,
+        mesh_shape: tuple[int] | tuple[int, int],
+        reshard_after_forward: bool,
+        max_input_buffers: int,
+    ):
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
+        ref_model = Transformer(model_args)
+        model = copy.deepcopy(ref_model)
+        mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
+        mesh = init_device_mesh(
+            device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        fsdp_kwargs = {
+            "reshard_after_forward": reshard_after_forward,
+            "mesh": mesh,
+            "mp_policy": mp_policy,
+        }
+        # Reference model keeps the default (copy-in on the compute stream)
+        for module in ref_model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, **fsdp_kwargs)
+        ref_model = fully_shard(ref_model, **fsdp_kwargs)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        # Test model retains multiple reduce-scatter copy-in buffers in flight
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, **fsdp_kwargs)
+        model = fully_shard(model, **fsdp_kwargs)
+        model.set_reduce_scatter_max_input_buffers(max_input_buffers)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        for _ in range(3):
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            ref_optim.step()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            self.assertEqual(ref_loss, loss)
+            # Check parity before zero_grad so gradients are compared too
+            check_sharded_parity(self, ref_model, model)
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_max_input_buffers_resolves_to_max(self):
+        """
+        Per-module reduce-scatter input-buffer caps share one pipeline (a single
+        ``comm_ctx.reduce_scatter_states`` list), so mixed caps must resolve to
+        the max on the shared comm context: a lower-cap module cannot silently
+        undo a higher-cap module's retention. The per-group values stay as set.
+        """
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = Transformer(model_args)
+        blocks = [m for m in model.modules() if isinstance(m, TransformerBlock)]
+        self.assertGreaterEqual(len(blocks), 2)
+        for block in blocks:
+            fully_shard(block)
+        model = fully_shard(model)
+        # Set a non-default cap on a single block only (recurse=False); every
+        # other group (including the root) keeps the default of 1.
+        expected_max = 3
+        blocks[0].set_reduce_scatter_max_input_buffers(expected_max, recurse=False)
+
+        # Resolution runs in lazy init on the first forward.
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        model(inp).sum().backward()
+
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        self.assertEqual(comm_ctx.reduce_scatter_max_input_buffers, expected_max)
+        # Resolution leaves the per-group input values untouched.
+        block0_pg = blocks[0]._get_fsdp_state()._fsdp_param_groups[0]
+        block1_pg = blocks[1]._get_fsdp_state()._fsdp_param_groups[0]
+        self.assertEqual(block0_pg.reduce_scatter_max_input_buffers, expected_max)
+        self.assertEqual(block1_pg.reduce_scatter_max_input_buffers, 1)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_max_input_buffers_validation(self):
+        model = fully_shard(nn.Linear(16, 16))
+        # Non-positive -> ValueError
+        with self.assertRaises(ValueError):
+            model.set_reduce_scatter_max_input_buffers(0)
+        # Non-int -> TypeError, even though 2.5 >= 1 numerically
+        with self.assertRaises(TypeError):
+            model.set_reduce_scatter_max_input_buffers(2.5)
+        # bool is an int subclass but is not a valid count -> TypeError
+        with self.assertRaises(TypeError):
+            model.set_reduce_scatter_max_input_buffers(True)
+        # A valid value is accepted
+        model.set_reduce_scatter_max_input_buffers(2)
+
+    @skip_if_lt_x_gpu(2)
     def test_set_reshard_after_forward(self):
         """
         Tests that FSDP issues the expected number of all-gathers and
@@ -528,7 +688,7 @@ class TestFullyShardCommunication(FSDPTest):
 
     def _test_set_reshard_after_forward_by_communication_count(
         self,
-        set_reshard_after_forward: Union[bool, None],
+        set_reshard_after_forward: bool | None,
         recurse: bool,
     ):
         torch.manual_seed(42)
@@ -614,8 +774,8 @@ class TestFullyShardPrefetch(FSDPTest):
 
     def _test_backward_prefetch_forward_backward(
         self,
-        reshard_after_forward: Union[bool, int, None],
-        checkpoint_impl: Optional[str],
+        reshard_after_forward: bool | int | None,
+        checkpoint_impl: str | None,
     ):
         n_layers = 3
         model, optim, inp = self._init_transformer(
@@ -672,7 +832,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
     def _test_backward_prefetch_multi_forward(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
+        self, reshard_after_forward: bool | int, checkpoint_impl: str | None
     ):
         n_layers = 3
         model, _, inp = self._init_transformer(
@@ -751,7 +911,7 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
 
     def _test_backward_prefetch_unused_in_backward(
-        self, reshard_after_forward: Union[bool, int, None]
+        self, reshard_after_forward: bool | int | None
     ):
         """
         Test a model with a linear module then a split into two linear modules,
@@ -1019,7 +1179,9 @@ class TestFullyShardPrefetch(FSDPTest):
         n_layers = 3
         reshard_after_forward = True
         # use checkpoint wrapper instead of torch.utils
-        model_args = ModelArgs(n_layers=n_layers, checkpoint_activations=False)
+        model_args = ModelArgs(
+            n_layers=n_layers, checkpoint_activations=False, weight_tying=False
+        )
         model = Transformer(model_args)
         apply_activation_checkpointing(
             model, check_fn=lambda m: isinstance(m, TransformerBlock)
@@ -1047,8 +1209,10 @@ class TestFullyShardPrefetch(FSDPTest):
 
         def set_backward_prefetch(model: Transformer) -> None:
             # tell pyre model.set_modules_to_backward_prefetch is available
-            assert isinstance(model, FSDPModule)
-            assert isinstance(model.output, FSDPModule)
+            if not isinstance(model, FSDPModule):
+                raise AssertionError(f"Expected FSDPModule, got {type(model)}")
+            if not isinstance(model.output, FSDPModule):
+                raise AssertionError(f"Expected FSDPModule, got {type(model.output)}")
 
             # mimic deepseek MOE
             # prefetch layer - 1 and its feedforward before cpu sync during a2a
@@ -1060,7 +1224,10 @@ class TestFullyShardPrefetch(FSDPTest):
                 and model.output is not None
                 and len(model.layers) > 0
             ):
-                assert isinstance(reversed_transformer_blocks[0], FSDPModule)
+                if not isinstance(reversed_transformer_blocks[0], FSDPModule):
+                    raise AssertionError(
+                        f"Expected FSDPModule, got {type(reversed_transformer_blocks[0])}"
+                    )
                 model.output.set_modules_to_backward_prefetch(
                     [reversed_transformer_blocks[0]]
                 )
@@ -1068,13 +1235,25 @@ class TestFullyShardPrefetch(FSDPTest):
             for transformer_block, prev_transformer_block in zip(
                 reversed_transformer_blocks, prev_transformer_blocks
             ):
-                assert isinstance(transformer_block, FSDPModule)
-                if prev_transformer_block is not None:
-                    assert isinstance(prev_transformer_block, FSDPModule)
-                    assert hasattr(prev_transformer_block.feed_forward, "w1")
-                    assert isinstance(
-                        prev_transformer_block.feed_forward.w1, FSDPModule
+                if not isinstance(transformer_block, FSDPModule):
+                    raise AssertionError(
+                        f"Expected FSDPModule, got {type(transformer_block)}"
                     )
+                if prev_transformer_block is not None:
+                    if not isinstance(prev_transformer_block, FSDPModule):
+                        raise AssertionError(
+                            f"Expected FSDPModule, got {type(prev_transformer_block)}"
+                        )
+                    if not hasattr(prev_transformer_block.feed_forward, "w1"):
+                        raise AssertionError(
+                            "Expected prev_transformer_block.feed_forward to have 'w1' attribute"
+                        )
+                    if not isinstance(
+                        prev_transformer_block.feed_forward.w1, FSDPModule
+                    ):
+                        raise AssertionError(
+                            f"Expected FSDPModule, got {type(prev_transformer_block.feed_forward.w1)}"
+                        )
                     transformer_block.set_modules_to_backward_prefetch(
                         [
                             prev_transformer_block,
@@ -1082,7 +1261,10 @@ class TestFullyShardPrefetch(FSDPTest):
                         ]
                     )
                 elif model.tok_embeddings is not None:
-                    assert isinstance(model.tok_embeddings, FSDPModule)
+                    if not isinstance(model.tok_embeddings, FSDPModule):
+                        raise AssertionError(
+                            f"Expected FSDPModule, got {type(model.tok_embeddings)}"
+                        )
                     transformer_block.set_modules_to_backward_prefetch(
                         [model.tok_embeddings]
                     )
@@ -1152,12 +1334,6 @@ class TestFullyShardPrefetch(FSDPTest):
                     "tok_embeddings, pos_embeddings",
                     TrainingState.POST_BACKWARD,
                 ),
-                (
-                    "reshard",
-                    "tok_embeddings, pos_embeddings",
-                    TrainingState.POST_BACKWARD,
-                ),
-                ("reshard", "norm, output", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_backward_events)
             events.clear()
@@ -1220,12 +1396,6 @@ class TestFullyShardPrefetch(FSDPTest):
                     "tok_embeddings, pos_embeddings",
                     TrainingState.POST_BACKWARD,
                 ),
-                (
-                    "reshard",
-                    "tok_embeddings, pos_embeddings",
-                    TrainingState.POST_BACKWARD,
-                ),
-                ("reshard", "norm, output", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_backward_events)
             events.clear()
@@ -1233,7 +1403,9 @@ class TestFullyShardPrefetch(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_multi_module_backward_prefetch(self):
         n_layers = 5
-        model_args = ModelArgs(n_layers=n_layers, checkpoint_activations=True)
+        model_args = ModelArgs(
+            n_layers=n_layers, checkpoint_activations=True, weight_tying=False
+        )
         model = Transformer(model_args)
         for i in range(n_layers):
             if i == 0:
@@ -1352,23 +1524,30 @@ class TestFullyShardPrefetch(FSDPTest):
                 self.assertEqual(events, expected_events)
                 events.clear()
                 loss.sum().backward()
+                # `_force_complete_incomplete_states` completes post-forward
+                # for the incomplete groups (both `model[0]` and `model[1]`
+                # have `unused_lin` that never ran forward), reshards, and
+                # registers pre-backward hooks on the root output; those
+                # hooks fire at backward start (unshard events). Only
+                # group1's post_backward fires via autograd (model[1]'s
+                # input requires grad); root and group0's post_backwards
+                # fire in the final callback in all-states pre-order.
                 expected_events = [
-                    # Since both `model[0]` and `model[1]` have unused modules
-                    # that never ran forward, they do not reshard after forward
-                    # despite setting it to `True`. Check that there are no
-                    # unshards in backward.
+                    ("unshard", "1.unused_lin, 1.lin", TrainingState.PRE_BACKWARD),
+                    ("unshard", "0.unused_lin, 0.lin", TrainingState.PRE_BACKWARD),
                     (
                         "post_backward",
                         "1.unused_lin, 1.lin",
                         TrainingState.POST_BACKWARD,
                     ),
+                    ("post_backward", "", TrainingState.POST_BACKWARD),
                     (
                         "post_backward",
                         "0.unused_lin, 0.lin",
                         TrainingState.POST_BACKWARD,
                     ),
-                    ("post_backward", "", TrainingState.POST_BACKWARD),
                 ]
+                self.assertEqual(events, expected_events)
                 events.clear()
                 optim.step()
                 optim.zero_grad()
@@ -1407,8 +1586,8 @@ class TestFullyShardPrefetch(FSDPTest):
     def _init_transformer(
         self,
         n_layers: int,
-        reshard_after_forward: Union[bool, int, None],
-        checkpoint_impl: Optional[str],
+        reshard_after_forward: bool | int | None,
+        checkpoint_impl: str | None,
     ):
         model_args = ModelArgs(
             n_layers=n_layers, checkpoint_activations=(checkpoint_impl == "utils")
@@ -1477,6 +1656,7 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/149349")
     @skip_if_lt_x_gpu(2)
     def test_unshard_async(self):
         class ReduceModule(nn.Module):
@@ -1560,7 +1740,6 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     def test_unshard_no_param_group(self):
         # Check that we can call `unshard()` on a module with no parameter
         # group / no managed parameters without erroring
@@ -1571,7 +1750,6 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
         handle = model.unshard(async_op=True)
         handle.wait()
 
-    @skip_if_lt_x_gpu(1)
     def test_unshard_without_lazy_init(self):
         torch.manual_seed(42)
         model = MLP(4)
@@ -1602,8 +1780,15 @@ class TestFullyShardAllocFromPG(FSDPTest):
     @skip_if_lt_x_gpu(2)
     # The NCCL PG refuses to allocate tensors if multicast is unavailable, see
     # https://github.com/pytorch/pytorch/blob/503362d019b3782581492af7767945dbd75ca1c9/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp#L5634
-    @requires_multicast_support()
     def test_fully_shard_alloc_from_pg(self):
+        # Run this check inside test instead of using @requires_multicast_support().
+        # The decorator would trigger an initialization of SymmMem allocator
+        # when Python statically initializes classes in this file, causing
+        # SymmMem to fix the allocate backend to "CUDA". This is unfriendly for
+        # other tests in this file that requires NCCL backend
+        if not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0):
+            self.skipTest("multicast support is not available")
+
         torch.manual_seed(42)
         model_args = ModelArgs()
         model = Transformer(model_args)
@@ -1655,13 +1840,77 @@ class TestFullyShardAllocFromPG(FSDPTest):
             model.set_allocate_memory_from_process_group_for_comm(True)
 
 
+@requires_cuda_p2p_access()
+@skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Not enough GPUs to run the test")
+@unittest.skipIf(
+    not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
+)
+@skipCUDAIf(not SM90OrLater, "requires sm90+")
+class TestFullyShardSymmMem(MultiProcContinuousTest):
+    @classmethod
+    def backend_str(cls) -> str | None:
+        return "nccl"
+
+    @classmethod
+    def opts(cls):
+        if not dist.is_nccl_available():
+            return None
+        # Enable Zero-CTA policy for CE collectives
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
+        return opts
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @parametrize("sum_reduction", [True, False])
+    def test_fully_shard_symm_mem(self, sum_reduction: bool):
+        torch.manual_seed(42 + self.rank)
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        seq_len = 64
+        model_args = ModelArgs()
+        model_args.dim = 4096
+        model_args.max_seq_len = seq_len
+        model = Transformer(model_args).to(device)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+                module.set_force_sum_reduction_for_comms(sum_reduction)
+                module.set_symm_mem_for_comm()
+        fully_shard(model)
+        model.set_force_sum_reduction_for_comms(sum_reduction)
+        model.set_symm_mem_for_comm()
+
+        bs = 4
+        inp = torch.randint(0, model_args.vocab_size, (bs, seq_len), device=device)
+
+        def run():
+            loss = model(inp)
+            loss.sum().backward()
+
+        run()
+        torch.cuda.synchronize(device)
+
+
+instantiate_parametrized_tests(TestFullyShardSymmMem)
+
+
 class TestFullyShardForceSumReduction(FSDPTest):
     # The messages might change when we move to a different NCCL version.
     # Please update this test if it starts failing.
-    COLLECTIVE_RE = (
-        "NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ "
-        "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
-    )
+
+    if TEST_WITH_ROCM and torch.cuda.nccl.version()[:2] >= (2, 27):
+        COLLECTIVE_RE = (
+            r"NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ acc \(nil\) "
+            "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
+        )
+    else:
+        COLLECTIVE_RE = (
+            "NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ "
+            "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
+        )
     # See here for the numerical values for each reduction op:
     # https://github.com/NVIDIA/nccl/blob/72d2432094d6ae36abd6e511c3a16a2d052dbf94/src/nccl.h.in#L260-L275
     SUM_REDUCTION = 0
@@ -1676,9 +1925,10 @@ class TestFullyShardForceSumReduction(FSDPTest):
         super()._run(*args, **kwargs)
 
     # Test reduce-scatter only on plain FSDP on 2 GPUs
+    # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
-        TEST_XPU, "Related environment variable is not supported with XCCL"
+        not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
     )
     def test_fully_shard_force_sum_reduce_scatter(self):
         torch.manual_seed(42)
@@ -1731,9 +1981,10 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, reduce_scatter_sum_re)
 
     # Test both reduce-scatter and all-reduce on HSDP (DDP+FSDP) on 4 GPUs
+    # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(4)
     @unittest.skipIf(
-        TEST_XPU, "Related environment variable is not supported with XCCL"
+        not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
     )
     def test_fully_shard_force_sum_both_reductions(self):
         mesh = init_device_mesh(
@@ -1799,10 +2050,33 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, all_reduce_sum_re)
 
 
-class TestFullyShardReduceOpWorldSize1(FSDPTest):
+@instantiate_parametrized_tests
+class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return 1
+
+    @parametrize("divide_factor", [None, 1.0, 2.0])
+    def test_singleton_copy_division(self, divide_factor):
+        divisions = []
+
+        class RecordDivisions(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.div.Tensor:
+                    divisions.append(func)
+                return func(*args, **(kwargs or {}))
+
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        fully_shard(model, mesh=init_device_mesh(device_type.type, (1,)))
+        if divide_factor is not None:
+            model.set_gradient_divide_factor(divide_factor)
+        inp = torch.ones(3, 8, device=device_type)
+        loss = model(inp).sum()
+        with RecordDivisions():
+            loss.backward()
+        self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
+        self.assertEqual(model.weight.grad.to_local(), expected)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp

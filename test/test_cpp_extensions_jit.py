@@ -9,9 +9,11 @@ import shutil
 import string
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch.backends.cudnn
@@ -37,6 +39,50 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
+
+
+class TestCppExtensionImport(common.TestCase):
+    def test_cython_not_loaded_with_import_cpp_extension(self):
+        script = """
+import importlib.util
+import inspect
+import pathlib
+import sys
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    root = pathlib.Path(tmpdir)
+    (root / "Cython" / "Distutils").mkdir(parents=True)
+    (root / "Cython" / "Compiler").mkdir(parents=True)
+    (root / "Cython" / "__init__.py").write_text("")
+    (root / "Cython" / "Distutils" / "__init__.py").write_text("")
+    (root / "Cython" / "Compiler" / "__init__.py").write_text("")
+    (root / "Cython" / "Compiler" / "Main.py").write_text("")
+    (root / "Cython" / "Distutils" / "build_ext.py").write_text(
+        "from distutils.command.build_ext import build_ext\\n"
+    )
+
+    sys.path.insert(0, tmpdir)
+    assert importlib.util.find_spec("Cython") is not None  # noqa: S101
+    import torch.utils.cpp_extension
+
+    cython_modules = sorted(
+        name for name in sys.modules
+        if name == "Cython" or name.startswith("Cython.")
+    )
+    assert not cython_modules, cython_modules  # noqa: S101
+    build_extension_cls = torch.utils.cpp_extension.BuildExtension
+    assert isinstance(build_extension_cls, type)  # noqa: S101
+    assert build_extension_cls is torch.utils.cpp_extension.BuildExtension  # noqa: S101
+    build_extension_source = inspect.getsource(build_extension_cls)
+    assert "def build_extensions" in build_extension_source  # noqa: S101
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 # There's only one test that runs gradcheck, run slow mode manually
@@ -97,6 +143,39 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
 
+    def test_jit_stale_lock_file_does_not_deadlock(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189245:
+        # a leftover 'lock' file (e.g. from a builder killed by SIGKILL/OOM)
+        # must not deadlock later loads. Run in a subprocess so a regression
+        # (an infinite wait) surfaces as a timeout instead of hanging the job.
+        build_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, build_dir, ignore_errors=True)
+        # Simulate the stale lock left behind by a forcefully killed builder.
+        open(os.path.join(build_dir, "lock"), "w").close()
+        script = "\n".join(
+            [
+                "import torch.utils.cpp_extension as ext",
+                "m = ext.load_inline(",
+                "    name='stale_lock_ext',",
+                "    cpp_sources='int forty_two() { return 42; }',",
+                "    functions=['forty_two'],",
+                f"    build_directory={build_dir!r},",
+                "    verbose=True)",
+                "assert m.forty_two() == 42",
+                "print('STALE_LOCK_OK')",
+            ]
+        )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("cpp_extension.load() deadlocked on a stale lock file (#189245)")
+        self.assertIn("STALE_LOCK_OK", proc.stdout, msg=proc.stderr)
+
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
         # NOTE: The name of the extension must equal the name of the module.
@@ -141,7 +220,6 @@ class TestCppExtensionJIT(common.TestCase):
                 sources=[sycl_file],
                 extra_sycl_cflags=extra_sycl_cflags,
                 verbose=True,
-                keep_intermediates=True,
                 build_directory=temp_dir,
             )
 
@@ -155,7 +233,12 @@ class TestCppExtensionJIT(common.TestCase):
             # 2 * sigmoid(0) = 2 * 0.5 = 1
             self.assertEqual(z, torch.ones_like(z))
         finally:
-            shutil.rmtree(temp_dir)
+            if IS_WINDOWS:
+                # rmtree returns permission error: [WinError 5] Access is denied
+                # on Windows, this is a workaround
+                subprocess.run(["rd", "/s", "/q", temp_dir], stdout=subprocess.PIPE)
+            else:
+                shutil.rmtree(temp_dir)
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_extension(self):
@@ -331,14 +414,11 @@ class TestCppExtensionJIT(common.TestCase):
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
         major, minor = map(int, torch.version.cuda.split(".")[:2])
-        if major < 12 or (major == 12 and minor <= 9):
+        if major == 12 and minor <= 9:
             # Compute capability <= 7.0 is only supported up to CUDA 12.9
             archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
             archflags["Volta"] = (["70"], ["70"])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        if major < 12:
-            # CUDA 12 drops compute capability < 5.0
-            archflags["Pascal 3.5"] = (["35", "60", "61"], None)
 
         for flags, expected in archflags.items():
             try:
@@ -447,6 +527,84 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         self.assertEqual(module.tanh_add.__doc__.split("\n")[2], "Tanh and then sum :D")
+
+    def test_inline_jit_generated_bindings_gil_not_used(self):
+        variants = (
+            ("default", {}, False),
+            ("enabled", {"gil_not_used": True}, True),
+            ("disabled", {"gil_not_used": False}, False),
+        )
+
+        for name, options, expects_gil_not_used in variants:
+            with (
+                self.subTest(name=name),
+                tempfile.TemporaryDirectory() as build_directory,
+            ):
+                with (
+                    mock.patch.object(
+                        torch.utils.cpp_extension,
+                        "remove_extension_h_precompiler_headers",
+                    ),
+                    mock.patch.object(
+                        torch.utils.cpp_extension,
+                        "_jit_compile",
+                    ),
+                ):
+                    torch.utils.cpp_extension.load_inline(
+                        name=f"inline_jit_extension_gil_not_used_{name}",
+                        cpp_sources="int add_one(int value) { return value + 1; }",
+                        functions="add_one",
+                        build_directory=build_directory,
+                        **options,
+                    )
+
+                with open(os.path.join(build_directory, "main.cpp")) as source_file:
+                    generated_source = source_file.read()
+
+                gil_not_used_declaration = (
+                    "PYBIND11_MODULE(TORCH_EXTENSION_NAME, m, "
+                    "pybind11::mod_gil_not_used()) {"
+                )
+                gil_used_declaration = "PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {"
+                expected_declaration, unexpected_declaration = (
+                    (gil_not_used_declaration, gil_used_declaration)
+                    if expects_gil_not_used
+                    else (gil_used_declaration, gil_not_used_declaration)
+                )
+                self.assertIn(expected_declaration, generated_source)
+                self.assertNotIn(unexpected_declaration, generated_source)
+
+    @unittest.skipUnless(
+        sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+        "requires free-threaded Python",
+    )
+    def test_inline_jit_generated_bindings_keep_gil_disabled(self):
+        script = """
+import sys
+import tempfile
+
+import torch.utils.cpp_extension
+
+assert not sys._is_gil_enabled()
+with tempfile.TemporaryDirectory() as build_directory:
+    module = torch.utils.cpp_extension.load_inline(
+        name="inline_jit_extension_gil_not_used_runtime",
+        cpp_sources="int add_one(int value) { return value + 1; }",
+        functions="add_one",
+        build_directory=build_directory,
+        gil_not_used=True,
+        verbose=True,
+    )
+    assert module.add_one(1) == 2
+    assert not sys._is_gil_enabled()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_inline_jit_compile_extension_multiple_sources_and_no_functions(self):
         cpp_source1 = """
@@ -861,7 +1019,8 @@ class TestCppExtensionJIT(common.TestCase):
         # Try calling zero_grad()
         net.zero_grad()
         for p in net.parameters():
-            assert p.grad is None, "zero_grad defaults to setting grads to None"
+            if p.grad is not None:
+                raise AssertionError("zero_grad defaults to setting grads to None")
 
         # Test train(), eval(), training (a property)
         self.assertTrue(net.training)
@@ -1267,6 +1426,144 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(abs_t, torch.abs(t))
         self.assertEqual(floor_t, torch.floor(t))
 
+    def test_from_blob_stable_api(self):
+        source = """
+        #include <torch/csrc/stable/ops.h>
+        #include <torch/extension.h>
+        #include <vector>
+
+        // Test using the stable API torch::stable::from_blob
+        at::Tensor test_stable_from_blob() {
+            // Allocate data buffer with known values
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            // Create tensor using stable API
+            torch::stable::Tensor stable_tensor = torch::stable::from_blob(
+                data.data(),
+                {2, 3},
+                {3, 1},
+                torch::stable::Device(torch::headeronly::DeviceType::CPU, 0),
+                torch::headeronly::ScalarType::Float
+            );
+
+            // Convert stable::Tensor to at::Tensor for return
+            // The stable::Tensor wraps an AtenTensorHandle, we need to extract the underlying tensor
+            AtenTensorHandle handle = stable_tensor.get();
+            return *reinterpret_cast<at::Tensor*>(handle);
+        }
+
+        // Test using the standard torch::from_blob as reference
+        at::Tensor test_reference_from_blob() {
+            // Use the same data buffer
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            // Create tensor using standard API
+            auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+            at::Tensor ref_tensor = torch::from_blob(
+                data.data(),
+                {2, 3},
+                {3, 1},
+                options
+            );
+
+            return ref_tensor;
+        }
+
+        // Test with non-contiguous strides
+        at::Tensor test_stable_from_blob_strided() {
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            // Create a non-contiguous view: shape [2, 2] with stride [3, 1]
+            // This will select elements at indices [0,1] and [3,4]
+            torch::stable::Tensor stable_tensor = torch::stable::from_blob(
+                data.data(),
+                {2, 2},
+                {3, 1},
+                torch::stable::Device(torch::headeronly::DeviceType::CPU, 0),
+                torch::headeronly::ScalarType::Float
+            );
+
+            AtenTensorHandle handle = stable_tensor.get();
+            return *reinterpret_cast<at::Tensor*>(handle);
+        }
+
+        at::Tensor test_reference_from_blob_strided() {
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+            at::Tensor ref_tensor = torch::from_blob(
+                data.data(),
+                {2, 2},
+                {3, 1},
+                options
+            );
+
+            return ref_tensor;
+        }
+
+        // Test with storage offset
+        at::Tensor test_stable_from_blob_offset() {
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            // Create tensor starting from offset 2 (third element)
+            torch::stable::Tensor stable_tensor = torch::stable::from_blob(
+                data.data(),
+                {2, 2},
+                {2, 1},
+                torch::stable::Device(torch::headeronly::DeviceType::CPU, 0),
+                torch::headeronly::ScalarType::Float,
+                2  // storage_offset - start from data[2]
+            );
+
+            AtenTensorHandle handle = stable_tensor.get();
+            return *reinterpret_cast<at::Tensor*>(handle);
+        }
+
+        at::Tensor test_reference_from_blob_offset() {
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+            // Note: torch::from_blob doesn't support storage_offset directly,
+            // so we create from blob and then apply offset
+            at::Tensor ref_tensor = torch::from_blob(
+                data.data() + 2,  // pointer offset instead
+                {2, 2},
+                {2, 1},
+                options
+            );
+
+            return ref_tensor;
+        }
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_from_blob_stable",
+            cpp_sources=[source],
+            functions=[
+                "test_stable_from_blob",
+                "test_reference_from_blob",
+                "test_stable_from_blob_strided",
+                "test_reference_from_blob_strided",
+                "test_stable_from_blob_offset",
+                "test_reference_from_blob_offset",
+            ],
+        )
+
+        # Test basic from_blob
+        stable_result = module.test_stable_from_blob()
+        reference_result = module.test_reference_from_blob()
+        self.assertEqual(stable_result, reference_result)
+
+        # Test with non-contiguous strides
+        stable_strided = module.test_stable_from_blob_strided()
+        reference_strided = module.test_reference_from_blob_strided()
+        self.assertEqual(stable_strided, reference_strided)
+
+        # Test with storage offset
+        stable_offset = module.test_stable_from_blob_offset()
+        reference_offset = module.test_reference_from_blob_offset()
+        self.assertEqual(stable_offset, reference_offset)
+
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_cuda_pluggable_allocator_include(self):
         """
@@ -1342,6 +1639,85 @@ class TestCppExtensionJIT(common.TestCase):
                 os.path.exists(exploit_file),
                 "Command injection vulnerability detected!",
             )
+
+    def test_torch_check_eq_stacktrace(self):
+        """Test that TORCH_CHECK_EQ includes C++ stack trace when TORCH_SHOW_CPP_STACKTRACES=1.
+
+        When TORCH_SHOW_CPP_STACKTRACES=1, errors from TORCH_CHECK_EQ should include
+        a C++ stack trace via DealWithFatal's call to GetFetchStackTrace.
+        Since this env var is cached on first use, we use subprocess to test both cases.
+        """
+        test_script = """
+import torch
+import torch.utils.cpp_extension
+
+cpp_source = '''
+#include <c10/util/Exception.h>
+
+void trigger_torch_check_eq_failure() {
+    int a = 1;
+    int b = 2;
+    TORCH_CHECK_EQ(a, b) << "This check should fail";
+}
+'''
+
+module = torch.utils.cpp_extension.load_inline(
+    name="test_torch_check_eq_stacktrace",
+    cpp_sources=cpp_source,
+    functions=["trigger_torch_check_eq_failure"],
+    verbose=False,
+)
+
+try:
+    module.trigger_torch_check_eq_failure()
+except RuntimeError as e:
+    print(str(e))
+"""
+
+        for show_cpp_stacktraces in [False, True]:
+            with self.subTest(show_cpp_stacktraces=show_cpp_stacktraces):
+                env = os.environ.copy()
+                env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+                env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+                result = subprocess.run(
+                    [sys.executable, "-c", test_script],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+
+                error_message = result.stdout + result.stderr
+
+                self.assertIn(
+                    "Check failed: a == b",
+                    error_message,
+                    f"Expected 'Check failed: a == b' in error message, got: {error_message}",
+                )
+
+                if show_cpp_stacktraces:
+                    # C++ CapturedTraceback is not available on aarch64 due to:
+                    # #if !defined(FBCODE_CAFFE2) && !defined(__aarch64__)
+                    # in torch/csrc/Module.cpp
+                    import platform
+
+                    is_aarch64 = platform.machine() in ("aarch64", "arm64")
+                    if not is_aarch64:
+                        self.assertIn(
+                            "C++ CapturedTraceback:",
+                            error_message,
+                            f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",
+                        )
+                    self.assertRegex(
+                        error_message,
+                        r"Exception raised from trigger_torch_check_eq_failure at .*[/\\]main.cpp:8",
+                    )
+                else:
+                    self.assertNotIn(
+                        "C++ CapturedTraceback:",
+                        error_message,
+                        f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
+                    )
 
 
 if __name__ == "__main__":

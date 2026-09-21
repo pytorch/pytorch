@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -17,7 +16,7 @@ __all__ = ["ExpRelaxedCategorical", "RelaxedOneHotCategorical"]
 
 class ExpRelaxedCategorical(Distribution):
     r"""
-    Creates a ExpRelaxedCategorical parameterized by
+    Creates an ExpRelaxedCategorical parameterized by
     :attr:`temperature`, and either :attr:`probs` or :attr:`logits` (but not both).
     Returns the log of a point in the simplex. Based on the interface to
     :class:`OneHotCategorical`.
@@ -48,14 +47,15 @@ class ExpRelaxedCategorical(Distribution):
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         self._categorical = Categorical(probs, logits)
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -108,7 +108,7 @@ class ExpRelaxedCategorical(Distribution):
 
 class RelaxedOneHotCategorical(TransformedDistribution):
     r"""
-    Creates a RelaxedOneHotCategorical distribution parametrized by
+    Creates a RelaxedOneHotCategorical distribution parameterized by
     :attr:`temperature`, and either :attr:`probs` or :attr:`logits`.
     This is a relaxed version of the :class:`OneHotCategorical` distribution, so
     its samples are on simplex, and are reparametrizable.
@@ -137,9 +137,9 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         base_dist = ExpRelaxedCategorical(
             temperature, probs, logits, validate_args=validate_args

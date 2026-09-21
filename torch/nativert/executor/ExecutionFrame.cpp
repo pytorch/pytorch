@@ -121,14 +121,13 @@ void ExecutionFrame::updateMovableOutputs() {
       auto id = (*valuePtr)->id();
 
       /*
-          values are not moveable if:
+          values are not movable if:
           1. they are persistent
           2. they are inputs (since inputs are borrowed)
           3. the value will be moved in a later (right-more) output
       */
 
-      if (!seen.insert(id).second || persistent_[id] ||
-          inputs.find(id) != inputs.end()) {
+      if (!seen.insert(id).second || persistent_[id] || inputs.contains(id)) {
         moveable_output_mask_[idx] = false;
       }
     }

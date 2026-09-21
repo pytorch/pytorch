@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/DeviceCapability.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
@@ -143,6 +144,17 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const = 0;
 
   /**
+   * Returns a backend-specific, opaque native handle associated with the given
+   * stream.
+   *
+   * The returned pointer is owned and managed by PyTorch. Callers must not
+   * modify or free it.
+   */
+  virtual void* getStreamNativeHandle(const Stream) const {
+    TORCH_CHECK(false, "Backend doesn't support getting stream native handle.")
+  }
+
+  /**
    * Destroys the given event.
    */
   virtual void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
@@ -192,6 +204,15 @@ struct C10_API DeviceGuardImplInterface {
   virtual DeviceIndex deviceCount() const noexcept = 0;
 
   /**
+   * Get the following capabilities of the current device:
+   * (1) Data type support
+   * Returns DeviceCapability object.
+   */
+  virtual DeviceCapability getDeviceCapability(Device /*unused*/) const {
+    TORCH_CHECK(false, "Backend doesn't support getting device capabilities.");
+  }
+
+  /**
    * Return true if all the work previously enqueued on the stream for
    * asynchronous execution has completed running on the device.
    */
@@ -205,6 +226,13 @@ struct C10_API DeviceGuardImplInterface {
    */
   virtual void synchronizeStream(const Stream& /*stream*/) const {
     TORCH_CHECK(false, "Backend doesn't support synchronizing streams.");
+  }
+
+  /**
+   * Return true if this stream is currently recording work for graph capture.
+   */
+  virtual bool isStreamCapturing(const Stream& /*stream*/) const {
+    return false;
   }
 
   /**
@@ -289,6 +317,23 @@ struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
   }
   DeviceIndex deviceCount() const noexcept override {
     return 1;
+  }
+
+  DeviceCapability getDeviceCapability(Device /*unused*/) const override {
+    DeviceCapability cap;
+    if constexpr (D == DeviceType::Meta) {
+      cap.capability_data.capability_bits = 0;
+      // Meta only supports basic types for shape inference
+      // Byte, Char, Short, Int, Long, Float, Double,
+      // Bool, ComplexFloat, ComplexDouble
+      cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+          (1ULL << kIndex_Char) | (1ULL << kIndex_Short) |
+          (1ULL << kIndex_Int) | (1ULL << kIndex_Long) |
+          (1ULL << kIndex_Float) | (1ULL << kIndex_Double) |
+          (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_ComplexDouble) |
+          (1ULL << kIndex_Bool);
+    }
+    return cap;
   }
 
   // Event-related functions

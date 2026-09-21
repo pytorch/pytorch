@@ -176,7 +176,7 @@ void ImagingResampleHorizontal(
   //
 
   // TODO: we may want to merge that into the fallback code (currently called
-  // basic_loop_aa_horizontal<uint8_t>)
+  // basic_loop_separable_1d_horizontal<uint8_t>)
   // Although this may not be needed if / when we port all this code to use
   // Vec.h since this would potentially give us another fall-back implem
 
@@ -252,7 +252,7 @@ void ImagingResampleVertical(
   //   oB[xoffset + i] = b[xoffset + ymin[i]] * w[i, 0] + ... + b[xoffset + ymin[i] + (K-1) * xsize] * w[i, K-1]
 
   // TODO: we may want to merge that into the fallback code (currently called
-  // basic_loop_aa_vertical<uint8_t>)
+  // basic_loop_separable_1d_vertical<uint8_t>)
   // Although this may not be needed if / when we port all this code to use
   // Vec.h since this would potentially give us another fall-back implem
   const int16_t* kk = (int16_t*)(vert_indices_weights[3].const_data_ptr<double>());
@@ -289,7 +289,7 @@ void ImagingResampleVertical(
 // mode for uint8 dtype when C <= 4, with or without antialias. The
 // implem is based on PIL-SIMD.
 // Its equivalent implementation (fallback) for when AVX isn't supported or when
-// C > 4 is separable_upsample_generic_Nd_kernel_impl()  There are a bunch of
+// C > 4 is upsample_separable_Nd_kernel_impl()  There are a bunch of
 // future improvement that can be done: look for the TODOs in this file.
 // For details on how the weights are computed and how the multiplications are
 // run on int (instead of float weights), see
@@ -655,7 +655,7 @@ void ImagingResampleHorizontalConvolution8u4x(
       // last element
       auto mmk = _mm256_set1_epi32(k[i]);
       // For num_channels == 3 (3 bytes = one pixel) we tolerate to read 4 bytes
-      // lines 0, 1 and 2 wont go out of allocated memory bounds
+      // lines 0, 1 and 2 won't go out of allocated memory bounds
       auto pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
           mm_cvtepu8_epi32(lineIn0_min + stride * i, i32_aligned)),
           mm_cvtepu8_epi32(lineIn1_min + stride * i, i32_aligned), 1);
@@ -1312,7 +1312,7 @@ void ImagingResampleVerticalConvolution8u(
 
     // Here we write 4 bytes to the output even if num_channels < 4, e.g o = {r,g,b,X} for num_channels=3
     // It is OK to write 4th byte (e.g. X) as on the next step we will overwrite it with new data.
-    // We also wont go out of bounds of lineOut memory allocation
+    // We also won't go out of bounds of lineOut memory allocation
     std::memcpy(lineOut + j, (uint8_t *) &o, 4);
   }
 

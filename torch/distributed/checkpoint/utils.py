@@ -9,7 +9,7 @@ from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, cast, Optional, TypeVar, Union
+from typing import Any, cast, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -23,6 +23,7 @@ from .api import (
     WRAPPED_EXCEPTION,
 )
 from .metadata import MetadataIndex, STATE_DICT_TYPE
+from .protocol import _get_checkpointable_tensor_shard, _is_checkpointable_tensor
 
 
 __all__ = ["find_tensor_shard", "find_state_dict_object"]
@@ -32,7 +33,7 @@ R = TypeVar("R")
 
 
 def _get_failure_dict(
-    results: list[Union[T, WRAPPED_EXCEPTION]],
+    results: list[T | WRAPPED_EXCEPTION],
 ) -> dict[int, WRAPPED_EXCEPTION]:
     return cast(
         dict[int, WRAPPED_EXCEPTION],
@@ -41,7 +42,7 @@ def _get_failure_dict(
 
 
 def _all_gather_keys(
-    local_dict: dict[str, Any], group: Optional[dist.ProcessGroup] = None
+    local_dict: dict[str, Any], group: dist.ProcessGroup | None = None
 ) -> set[str]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
@@ -52,7 +53,7 @@ def _all_gather_keys(
 
 
 def _assert_same_keys(
-    state_dict: dict[str, Any], process_group: Optional[dist.ProcessGroup] = None
+    state_dict: dict[str, Any], process_group: dist.ProcessGroup | None = None
 ) -> None:
     """
     Asserts that all ranks have the same keys in their state dict.
@@ -76,7 +77,7 @@ class _DistWrapper:
     """
     This is a wrapper around PG that provides a series of features around object collectives.
 
-    It works without distributed initialized, where most collectives turns into nops.
+    It works without distributed initialized, where most collectives turn into nops.
 
     All variants that take functions are exception robust, meaning that if one or more
     ranks raise errors, all ranks will observe those.
@@ -84,7 +85,7 @@ class _DistWrapper:
 
     def __init__(
         self,
-        group: Optional[dist.ProcessGroup],
+        group: dist.ProcessGroup | None,
         use_dist: bool,
         coordinator_rank: int,
     ):
@@ -112,7 +113,7 @@ class _DistWrapper:
             return dist.get_world_size(self.group)
         return 1
 
-    def broadcast_object(self, object: Optional[T]) -> T:
+    def broadcast_object(self, object: T | None) -> T:
         """Implement functionality similar to c10d::broadcast_object_list but without distributed enabled."""
         object_list = [object]
         if self.use_dist:
@@ -123,7 +124,7 @@ class _DistWrapper:
             )
         return cast(T, object_list[0])
 
-    def gather_object(self, object: T) -> Optional[list[T]]:
+    def gather_object(self, object: T) -> list[T] | None:
         """Implement functionality similar to c10d::gather_object but without distributed enabled."""
         if self.use_dist:
             gather_objs = (
@@ -155,7 +156,7 @@ class _DistWrapper:
             gather_objs = [object]
         return gather_objs
 
-    def scatter_object(self, object_list: Optional[list[T]]) -> T:
+    def scatter_object(self, object_list: list[T] | None) -> T:
         """Implement functionality similar to c10d::scatter_object but without distributed enabled."""
         if self.use_dist:
             gather_result = cast(list[T], [None])
@@ -188,14 +189,14 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Scatter to each rank part of the result.
         """
-        local_data: Union[WRAPPED_EXCEPTION, T]
+        local_data: WRAPPED_EXCEPTION | T
         try:
             local_data = map_fun()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
-        all_results: Optional[list[Union[R, CheckpointException]]] = None
+        all_results: list[R | CheckpointException] | None = None
         if self.is_coordinator:
             if all_data is None:
                 raise AssertionError("all_data is None")
@@ -205,10 +206,10 @@ class _DistWrapper:
                 try:
                     # N.B. why can't mypy cast List[R] to List[Union[R, WRAPPED_EXCEPTION]]?
                     all_results = cast(
-                        list[Union[R, CheckpointException]],
+                        list[R | CheckpointException],
                         reduce_fun(cast(list[T], all_data)),
                     )
-                except BaseException as e:  # noqa: B036
+                except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -236,14 +237,14 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Broadcast the reduced value to all ranks.
         """
-        local_data: Union[T, WRAPPED_EXCEPTION]
+        local_data: T | WRAPPED_EXCEPTION
         try:
             local_data = map_fun()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
-        result: Optional[Union[R, CheckpointException]] = None
+        result: R | CheckpointException | None = None
         if self.is_coordinator:
             if all_data is None:
                 raise AssertionError("all_data is None")
@@ -251,7 +252,7 @@ class _DistWrapper:
             if len(node_failures) == 0:
                 try:
                     result = reduce_fun(cast(list[T], all_data))
-                except BaseException as e:  # noqa: B036
+                except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -261,6 +262,7 @@ class _DistWrapper:
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
+        # pyrefly: ignore [redundant-cast]
         return cast(R, final_result)
 
     def all_gather(
@@ -275,10 +277,10 @@ class _DistWrapper:
             Run ``map_cp`` on all ranks
             all_gather the values to all ranks
         """
-        result: Union[T, WRAPPED_EXCEPTION]
+        result: T | WRAPPED_EXCEPTION
         try:
             result = map_fun()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             result = _wrap_exception(e)
 
         all_results = self.all_gather_object(result)
@@ -300,16 +302,17 @@ class _DistWrapper:
             Run ``map_cp`` on rank 0
             broadcast the value
         """
-        result: Optional[Union[T, CheckpointException]] = None
+        result: T | CheckpointException | None = None
         if self.is_coordinator:
             try:
                 result = map_fun()
-            except BaseException as e:  # noqa: B036
+            except BaseException as e:
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
         # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
+        # pyrefly: ignore [redundant-cast]
         return cast(T, final_result)
 
     def barrier(self) -> None:
@@ -348,6 +351,8 @@ def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tenso
     if hasattr(tensor, "__get_tensor_shard__"):
         # DTensor implements _Checkpointable
         return tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
+    if _is_checkpointable_tensor(tensor):
+        return _get_checkpointable_tensor_shard(tensor, index)
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:

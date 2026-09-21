@@ -311,10 +311,22 @@ class TestExpandDims(TestCase):
 
     def test_axis_tuple(self):
         a = np.empty((3, 3, 3))
-        assert np.expand_dims(a, axis=(0, 1, 2)).shape == (1, 1, 1, 3, 3, 3)
-        assert np.expand_dims(a, axis=(0, -1, -2)).shape == (1, 3, 3, 3, 1, 1)
-        assert np.expand_dims(a, axis=(0, 3, 5)).shape == (1, 3, 3, 1, 3, 1)
-        assert np.expand_dims(a, axis=(0, -3, -5)).shape == (1, 1, 3, 1, 3, 3)
+        if np.expand_dims(a, axis=(0, 1, 2)).shape != (1, 1, 1, 3, 3, 3):
+            raise AssertionError(
+                f"Expected shape (1, 1, 1, 3, 3, 3), got {np.expand_dims(a, axis=(0, 1, 2)).shape}"
+            )
+        if np.expand_dims(a, axis=(0, -1, -2)).shape != (1, 3, 3, 3, 1, 1):
+            raise AssertionError(
+                f"Expected shape (1, 3, 3, 3, 1, 1), got {np.expand_dims(a, axis=(0, -1, -2)).shape}"
+            )
+        if np.expand_dims(a, axis=(0, 3, 5)).shape != (1, 3, 3, 1, 3, 1):
+            raise AssertionError(
+                f"Expected shape (1, 3, 3, 1, 3, 1), got {np.expand_dims(a, axis=(0, 3, 5)).shape}"
+            )
+        if np.expand_dims(a, axis=(0, -3, -5)).shape != (1, 1, 3, 1, 3, 3):
+            raise AssertionError(
+                f"Expected shape (1, 1, 3, 1, 3, 3), got {np.expand_dims(a, axis=(0, -3, -5)).shape}"
+            )
 
     def test_axis_out_of_range(self):
         s = (2, 3, 4, 5)
@@ -704,12 +716,14 @@ class TestSqueeze(TestCase):
         res = np.squeeze(a)
         assert_equal(res, 1.5)
         assert_equal(res.ndim, 0)
-        assert type(res) is np.ndarray
+        if type(res) is not np.ndarray:
+            raise AssertionError(f"Expected type(res) is np.ndarray, got {type(res)}")
 
     @xfailIfTorchDynamo
     def test_basic_2(self):
         aa = np.ones((3, 1, 4, 1, 1))
-        assert aa.squeeze().tensor._base is aa.tensor
+        if aa.squeeze().tensor._base is not aa.tensor:
+            raise AssertionError("Expected aa.squeeze().tensor._base is aa.tensor")
 
     def test_squeeze_axis(self):
         A = [[[1, 1, 1], [2, 2, 2], [3, 3, 3]]]
@@ -729,8 +743,14 @@ class TestSqueeze(TestCase):
         # Ticket #133
         a = np.array([3])
         b = np.array(3)
-        assert type(a.squeeze()) is np.ndarray
-        assert type(b.squeeze()) is np.ndarray
+        if type(a.squeeze()) is not np.ndarray:
+            raise AssertionError(
+                f"Expected type(a.squeeze()) is np.ndarray, got {type(a.squeeze())}"
+            )
+        if type(b.squeeze()) is not np.ndarray:
+            raise AssertionError(
+                f"Expected type(b.squeeze()) is np.ndarray, got {type(b.squeeze())}"
+            )
 
     @skip(reason="XXX: order='F' not implemented")
     def test_squeeze_contiguous(self):
@@ -798,7 +818,10 @@ class TestKron(TestCase):
         expected_shape = np.multiply(normalised_shape_a, normalised_shape_b)
 
         k = np.kron(a, b)
-        assert np.array_equal(k.shape, expected_shape), "Unexpected shape from kron"
+        if not np.array_equal(k.shape, expected_shape):
+            raise AssertionError(
+                f"Unexpected shape from kron: expected {expected_shape}, got {k.shape}"
+            )
 
 
 class TestTile(TestCase):

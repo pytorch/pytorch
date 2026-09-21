@@ -35,8 +35,7 @@ void raiseExceptionWithMessage(Stack& stack) {
 }
 
 void is(Stack& stack) {
-  IValue self, obj;
-  pop(stack, self, obj);
+  auto [self, obj] = pop<IValue, IValue>(stack);
   push(stack, self.is(obj));
 }
 
@@ -45,8 +44,7 @@ void unInitialized(Stack& stack) {
 }
 
 void isNot(Stack& stack) {
-  IValue self, obj;
-  pop(stack, self, obj);
+  auto [self, obj] = pop<IValue, IValue>(stack);
   push(stack, !self.is(obj));
 }
 
@@ -113,9 +111,7 @@ void layout(Stack& stack) {
 }
 
 void toPrimDType(Stack& stack) {
-  bool non_blocking = false;
-  bool copy = false;
-  pop(stack, non_blocking, copy);
+  auto [non_blocking, copy] = pop<bool, bool>(stack);
   std::optional<at::ScalarType> scalarType =
       pop(stack).toOptional<at::ScalarType>();
   std::optional<c10::Device> device = std::nullopt;

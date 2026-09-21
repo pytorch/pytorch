@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/runtime/static/impl.h>
 
+#include <functional>
+
 namespace torch::jit {
 
 // A StorageGroup represents a collection of tensors that share backing storage.
@@ -81,13 +83,13 @@ class ManagedStorages {
 
  private:
   // We will use placement-new to add new storages to this buffer
-  at::StorageImpl* storages_;
+  at::StorageImpl* storages_{nullptr};
 
   // Current number of storages that have been placed into the storage buffer
-  size_t size_;
+  size_t size_{0};
 
   // Total allocated capacity of the storage buffer
-  size_t capacity_;
+  size_t capacity_{0};
 };
 
 TORCH_API std::vector<StorageGroup> assignStorageToManagedTensors(
@@ -216,14 +218,10 @@ class MemoryPlanner {
     if (storages_.empty()) {
       return false;
     }
-    // Comparing pointers that aren't within the same array is
-    // UB. We're doing fancy memory allocation stuff, so we cast to an
-    // integer type and carry on.
-    const auto impl_p = reinterpret_cast<uintptr_t>(impl);
-    const auto start = reinterpret_cast<uintptr_t>(&storages_[0]);
-    const auto end =
-        reinterpret_cast<uintptr_t>(&storages_[0] + storages_.size());
-    return impl_p >= start && impl_p < end;
+    constexpr std::less<> less;
+    const auto* start = &storages_[0];
+    const auto* end = start + storages_.size();
+    return !less(impl, start) && less(impl, end);
   }
 
   bool overlapWithInternalBuffer(void* data_ptr) {

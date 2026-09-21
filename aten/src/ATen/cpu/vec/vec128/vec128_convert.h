@@ -1,10 +1,25 @@
 #pragma once
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_convert.h>
+#include <c10/util/bit_cast.h>
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
-#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
+#if defined(__aarch64__)
+
+// Define this specialization to match c10::convert, as defined in TypeCast.h
+template <>
+inline void convert(
+    const float* __restrict src,
+    uint8_t* __restrict dst,
+    int64_t n) {
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dst[i] = static_cast<uint8_t>(static_cast<int64_t>(src[i]));
+  }
+}
+
+#if !defined(CPU_CAPABILITY_SVE256)
 
 // Enable auto-vectorization for clang-17+
 // GCC-12 has a bug: gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
@@ -101,7 +116,6 @@ CONVERT_TEMPLATE(int64_t, int64_t)
 CONVERT_TEMPLATE(int64_t, float)
 CONVERT_TEMPLATE(int64_t, double)
 CONVERT_TO_BOOL_TEMPLATE(int64_t)
-CONVERT_TEMPLATE(float, uint8_t)
 CONVERT_TEMPLATE(float, int8_t)
 CONVERT_TEMPLATE(float, int16_t)
 CONVERT_TEMPLATE(float, int32_t)
@@ -201,9 +215,7 @@ inline void convertFromBf16Impl(
   uint64_t len = static_cast<uint64_t>(n);
   for (uint64_t i = 0; i < len; i++) {
     uint32_t tmp = static_cast<uint32_t>(srcPtr[i]) << 16;
-    float tmpF;
-    __builtin_memcpy(&tmpF, &tmp, sizeof(float));
-    dst[i] = static_cast<to_type>(tmpF);
+    dst[i] = static_cast<to_type>(c10::bit_cast<float>(tmp));
   }
 }
 #define CONVERT_FROM_BF16_TEMPLATE(to_type)                                \
@@ -221,6 +233,62 @@ CONVERT_FROM_BF16_TEMPLATE(float)
 CONVERT_FROM_BF16_TEMPLATE(double)
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
 CONVERT_FROM_BF16_TEMPLATE(float16_t)
+#endif
+
+#ifdef __ARM_FEATURE_BF16
+
+// clang-[17, 20] crashes when autovectorizing static cast to bf16
+// Below is a workaround to have some vectorization
+// Works decently well for smaller int types
+template <typename from_type>
+inline void convertToBf16Impl(
+    const from_type* __restrict src,
+    c10::BFloat16* __restrict dst,
+    uint64_t n) {
+  bfloat16_t* dstPtr = reinterpret_cast<bfloat16_t*>(dst);
+  uint64_t loopBound = n - (n % 16);
+  uint64_t i = 0;
+  for (; i < loopBound; i += 16) {
+    float32x4_t a, b, c, d;
+    a[0] = static_cast<float>(src[i]);
+    a[1] = static_cast<float>(src[i + 1]);
+    a[2] = static_cast<float>(src[i + 2]);
+    a[3] = static_cast<float>(src[i + 3]);
+    b[0] = static_cast<float>(src[i + 4]);
+    b[1] = static_cast<float>(src[i + 5]);
+    b[2] = static_cast<float>(src[i + 6]);
+    b[3] = static_cast<float>(src[i + 7]);
+    c[0] = static_cast<float>(src[i + 8]);
+    c[1] = static_cast<float>(src[i + 9]);
+    c[2] = static_cast<float>(src[i + 10]);
+    c[3] = static_cast<float>(src[i + 11]);
+    d[0] = static_cast<float>(src[i + 12]);
+    d[1] = static_cast<float>(src[i + 13]);
+    d[2] = static_cast<float>(src[i + 14]);
+    d[3] = static_cast<float>(src[i + 15]);
+
+    vst1q_bf16(dstPtr + i, vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(a), b));
+    vst1q_bf16(dstPtr + i + 8, vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(c), d));
+  }
+
+#pragma clang loop vectorize(disable) interleave(disable) unroll(disable)
+  for (; i < n; i++) {
+    float a = static_cast<float>(src[i]);
+    dstPtr[i] = vcvth_bf16_f32(a);
+  }
+}
+
+#define CONVERT_TO_BF16_TEMPLATE(from_type)                                  \
+  template <>                                                                \
+  inline void convert(const from_type* src, c10::BFloat16* dst, int64_t n) { \
+    return convertToBf16Impl<from_type>(src, dst, n);                        \
+  }
+
+CONVERT_TO_BF16_TEMPLATE(uint8_t)
+CONVERT_TO_BF16_TEMPLATE(int8_t)
+CONVERT_TO_BF16_TEMPLATE(int16_t)
+CONVERT_TO_BF16_TEMPLATE(int32_t)
+
 #endif
 
 inline void convertBoolToBfloat16Impl(
@@ -286,6 +354,96 @@ struct VecConvert<
   }
 };
 
+template <int src_n>
+inline uint8x16_t convert_float_to_uint8(const VectorizedN<float, src_n>& src) {
+  // Widening to double before truncating puts the saturation point at the
+  // int64_t bounds rather than the int32_t ones, so every input that is not
+  // astronomically large contributes its true low byte, as the scalar
+  // float -> int64_t -> uint8_t narrowing in c10::convert does. Converting via
+  // int32_t instead would be cheaper but would report 0xff rather than the
+  // true low byte across [2^31, 2^63), where FCVTZS saturates.
+  const auto lo_i64 = [](const float32x4_t f) {
+    return vcvtq_s64_f64(vcvt_f64_f32(vget_low_f32(f)));
+  };
+  const auto hi_i64 = [](const float32x4_t f) {
+    return vcvtq_s64_f64(vcvt_high_f64_f32(f));
+  };
+  // The eight indices past the 64-byte table are out of range and read as
+  // zero, so only the low half of the result carries bytes.
+  const auto low_bytes =
+      [](int64x2_t a, int64x2_t b, int64x2_t c, int64x2_t d) {
+        const uint8x16x4_t table = {
+            vreinterpretq_u8_s64(a),
+            vreinterpretq_u8_s64(b),
+            vreinterpretq_u8_s64(c),
+            vreinterpretq_u8_s64(d)};
+        const uint8x16_t low_byte_of_each_i64 = {
+            0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120};
+        return vqtbl4q_u8(table, low_byte_of_each_i64);
+      };
+
+  // Lanes past the source are zeroed, matching the VectorizedN::loadu(buf,
+  // count) that the generic fallback ends with.
+  if constexpr (src_n == 4) {
+    return vcombine_u8(
+        vget_low_u8(low_bytes(
+            lo_i64(src[0]), hi_i64(src[0]), lo_i64(src[1]), hi_i64(src[1]))),
+        vget_low_u8(low_bytes(
+            lo_i64(src[2]), hi_i64(src[2]), lo_i64(src[3]), hi_i64(src[3]))));
+  } else if constexpr (src_n >= 2) {
+    return low_bytes(
+        lo_i64(src[0]), hi_i64(src[0]), lo_i64(src[1]), hi_i64(src[1]));
+  } else {
+    const int64x2_t zero = vdupq_n_s64(0);
+    return low_bytes(lo_i64(src[0]), hi_i64(src[0]), zero, zero);
+  }
+}
+
+template <int src_n>
+struct VecConvert<uint8_t, 1, float, src_n> {
+  static inline VectorizedN<uint8_t, 1> apply(
+      const VectorizedN<float, src_n>& src) {
+    return Vectorized<uint8_t>(convert_float_to_uint8(src));
+  }
+};
+
+template <>
+struct VecConvert<double, 2, float, 1> {
+  static inline VectorizedN<double, 2> apply(const VectorizedN<float, 1>& src) {
+    const float32x4_t f32 = src[0];
+    VectorizedN<double, 2> result;
+    result[0] = vcvt_f64_f32(vget_low_f32(f32));
+    result[1] = vcvt_high_f64_f32(f32);
+    return result;
+  }
+};
+
+// Half register to full register.
+template <>
+struct VecConvert<double, 1, float, 1> {
+  static inline VectorizedN<double, 1> apply(const VectorizedN<float, 1>& src) {
+    return Vectorized<double>(vcvt_f64_f32(vget_low_f32(src[0])));
+  }
+};
+
+template <>
+struct VecConvert<float, 1, double, 2> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<double, 2>& src) {
+    return Vectorized<float>(vcvt_high_f32_f64(vcvt_f32_f64(src[0]), src[1]));
+  }
+};
+
+// Full register to half register.
+template <>
+struct VecConvert<float, 1, double, 1> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<double, 1>& src) {
+    // Lanes past the source are zeroed, matching the VectorizedN::loadu(buf,
+    // count) that the generic fallback ends with.
+    return Vectorized<float>(
+        vcombine_f32(vcvt_f32_f64(src[0]), vdup_n_f32(0.0f)));
+  }
+};
+
 template <>
 struct VecConvert<float, 2, BFloat16, 1> {
   static inline VectorizedN<float, 2> apply(
@@ -317,6 +475,29 @@ struct VecConvert<float, 1, BFloat16, 1> {
   }
 };
 
-#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+// bf16/fp16 vec classes are not available for C10_MOBILE
+#if !defined(C10_MOBILE)
+template <>
+struct VecConvert<BFloat16, 1, float, 2> {
+  static inline VectorizedN<BFloat16, 1> apply(
+      const VectorizedN<float, 2>& src) {
+    VectorizedN<BFloat16, 1> result;
+    result[0] = convert_float_bfloat16(src[0], src[1]);
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<Half, 1, float, 2> {
+  static inline VectorizedN<Half, 1> apply(const VectorizedN<float, 2>& src) {
+    VectorizedN<Half, 1> result;
+    result[0] = convert_float_half(src[0], src[1]);
+    return result;
+  }
+};
+
+#endif // !defined(C10_MOBILE)
+#endif // !defined(CPU_CAPABILITY_SVE256)
+#endif // defined(__aarch64__)
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

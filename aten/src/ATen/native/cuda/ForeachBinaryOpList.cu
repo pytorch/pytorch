@@ -29,16 +29,14 @@ std::vector<Tensor> foreach_tensor_list_op(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
-  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors1.size());
   for (const auto& t : tensors1) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  tensor_lists.emplace_back(tensors1.vec());
-  tensor_lists.emplace_back(tensors2.vec());
-  tensor_lists.emplace_back(std::move(vec_res));
+  auto tensor_lists = c10::make_nested<Tensor>(
+      tensors1.vec(), tensors2.vec(), std::move(vec_res));
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<3>(
@@ -59,9 +57,7 @@ void foreach_tensor_list_op_(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
-  std::vector<std::vector<at::Tensor>> tensor_lists;
-  tensor_lists.emplace_back(tensors1.vec());
-  tensor_lists.emplace_back(tensors2.vec());
+  auto tensor_lists = c10::make_nested<Tensor>(tensors1.vec(), tensors2.vec());
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<2>(
@@ -420,15 +416,21 @@ void foreach_tensor_copy_list_kernel_cuda_(
         std::all_of(
             src.cbegin(),
             src.cend(),
-            [&](const auto& t) -> bool {
+            [&src](const auto& t) -> bool {
               return t.dtype() == src[0].dtype();
+            }) &&
+        std::all_of(
+            self.cbegin(),
+            self.cend(),
+            [&self](const auto& t) -> bool {
+              return t.dtype() == self[0].dtype();
             }) &&
         _check_tensors_share_sizes_and_strides({self, src}))) {
     return at::native::foreach_tensor_copy_list_kernel_slow_(
         self, src, non_blocking);
   }
 
-  std::vector<std::vector<at::Tensor>> tensor_lists{src.vec(), self.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(src.vec(), self.vec());
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND7(
       ScalarType::Half,

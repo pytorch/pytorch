@@ -5,16 +5,10 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/macros/Macros.h>
 
-// Two warninngs in Cutlass included header files
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-field-initializers")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
-
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
 // https://github.com/NVIDIA/cutlass/issues/1571
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
 
 #define BUILD_ROWWISE_FP8_KERNEL
 #endif
@@ -44,10 +38,6 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 #include <cutlass/util/packed_stride.hpp>
 
 #include <ATen/native/cuda/cutlass_common.cuh>
-
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
 
 namespace {
 
@@ -198,7 +188,7 @@ void f8f8bf16_rowwise_impl(
           cutlass::epilogue::collective::EpilogueTileAuto,
           DtypeAccum,
           DtypeEpilogue,
-          DtypeOutput,
+          void, // Indicate there is no beta scaling to save register
           LayoutOutput,
           AlignmentOutput,
           DtypeOutput,
@@ -247,17 +237,23 @@ void f8f8bf16_rowwise_impl(
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
       {M, N, K},
-      {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
+      {reinterpret_cast<const DtypeA*>(XQ.const_data_ptr()),
        stride_a,
-       reinterpret_cast<DtypeB*>(WQ.data_ptr()),
+       reinterpret_cast<const DtypeB*>(WQ.const_data_ptr()),
        stride_b},
-      {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
-                           : nullptr},
-         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
-          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
-       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+      {{{{bias.has_value()
+               ? reinterpret_cast<const DtypeBias*>(bias->const_data_ptr())
+               : nullptr}, // Bias
+         {{reinterpret_cast<const DtypeScale*>(w_scale.const_data_ptr())},
+          {{reinterpret_cast<const DtypeScale*>(x_scale.const_data_ptr())},
+           {}, // Accum
+           {}}, // XScale * Accum
+          {}}, // WScale * that
+         {}}, // Bias + that
+        {}}, // Cast to output
+       nullptr,
        stride_output,
-       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       reinterpret_cast<DtypeOutput*>(out.mutable_data_ptr()),
        stride_output}};
 
   Gemm gemm;
@@ -288,7 +284,7 @@ void f8f8bf16_rowwise_impl(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -390,7 +386,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
       TileShape, ClusterShape,
       cutlass::epilogue::collective::EpilogueTileAuto,
       DtypeAccum, DtypeEpilogue,
-      DtypeOutput, LayoutOutput, AlignmentOutput,
+      void, LayoutOutput, AlignmentOutput,
       DtypeOutput, LayoutOutput, AlignmentOutput,
       EpilogueScheduleType,
       EpilogueEVT>::CollectiveOp;
@@ -440,17 +436,23 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
       {M, N, K},
-      {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
+      {reinterpret_cast<const DtypeA*>(XQ.const_data_ptr()),
        stride_a,
-       reinterpret_cast<DtypeB*>(WQ.data_ptr()),
+       reinterpret_cast<const DtypeB*>(WQ.const_data_ptr()),
        stride_b},
-      {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
-                           : nullptr},
-         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
-          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
-       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+      {{{{bias.has_value()
+               ? reinterpret_cast<const DtypeBias*>(bias->const_data_ptr())
+               : nullptr}, // Bias
+         {{reinterpret_cast<const DtypeScale*>(w_scale.const_data_ptr())},
+          {{reinterpret_cast<const DtypeScale*>(x_scale.const_data_ptr())},
+           {}, // Accum
+           {}}, // XScale * Accum
+          {}}, // WScale * that
+         {}}, // Bias + that
+        {}}, // Cast to output
+       nullptr,
        stride_output,
-       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       reinterpret_cast<DtypeOutput*>(out.mutable_data_ptr()),
        stride_output}};
 
   Gemm gemm;
@@ -481,7 +483,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -626,22 +628,22 @@ void f8f8bf16_rowwise_impl_sm89(
   constexpr auto SplitKFactor = 1;
 
   XScaleArguments x_scale_arguments{
-      (DtypeScale*)x_scale.data_ptr(),
+      reinterpret_cast<const DtypeScale*>(x_scale.const_data_ptr()),
       DtypeScale(1),
       {cute::_1{}, cute::_0{}, problem_size.m()}
   };
   WScaleArguments w_scale_arguments{
-      (DtypeScale*)w_scale.data_ptr(),
+      reinterpret_cast<const DtypeScale*>(w_scale.const_data_ptr()),
       DtypeScale(1),
       {cute::_0{}, cute::_1{}, problem_size.n()}
   };
   BiasArguments bias_arguments{
-      bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr()) : nullptr,
+      bias.has_value() ? reinterpret_cast<const DtypeBias*>(bias->const_data_ptr()) : nullptr,
       DtypeBias(0),
       {cute::_0{}, cute::_1{}, problem_size.n()}
   };
   typename Output::Arguments output_arguments{
-    (DtypeOutput*)out.data_ptr(),
+    reinterpret_cast<DtypeOutput*>(out.mutable_data_ptr()),
     {problem_size.n(), cute::_1{}, problem_size.mn().product()}
   };
   typename EVTOutput::Arguments callback_arguments{
@@ -666,8 +668,8 @@ void f8f8bf16_rowwise_impl_sm89(
     problem_size,
     SplitKFactor,
     callback_arguments,           // arguments of EVT callbacks
-    (DtypeA*)XQ.data_ptr(),
-    (DtypeB*)WQ.data_ptr(),
+    reinterpret_cast<const DtypeA*>(XQ.const_data_ptr()),
+    reinterpret_cast<const DtypeB*>(WQ.const_data_ptr()),
     nullptr,                      // ptr C (unused)
     nullptr,                      // ptr D (unused)
     problem_size.mk().product(),  // batch stride A
@@ -697,7 +699,7 @@ void f8f8bf16_rowwise_impl_sm89(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -958,8 +960,9 @@ void dispatch_fp8_rowwise_kernel_on_sm(
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
   const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
+  const bool sm11x = properties != nullptr && properties->major == 11;
   const bool sm12x = properties != nullptr && properties->major == 12;
-  if (!(sm89 || sm9x || sm10x || sm12x)) {
+  if (!(sm89 || sm9x || sm10x || sm11x || sm12x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
@@ -968,7 +971,7 @@ void dispatch_fp8_rowwise_kernel_on_sm(
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
       /*ArchTag=*/cutlass::arch::Sm90,
       Types...>(XQ, WQ, x_scale, w_scale, bias, out);
-  } else if (sm10x) {
+  } else if (sm10x || sm11x) {
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
       /*ArchTag=*/cutlass::arch::Sm100,
       Types...>(XQ, WQ, x_scale, w_scale, bias, out);
@@ -1046,11 +1049,22 @@ void dispatch_fp8_rowwise_kernel_on_bias_dtype(
         cutlass::half_t>
         (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   } else {
-    dispatch_fp8_rowwise_kernel_on_input_dtypes<
-        float,
-        cutlass::bfloat16_t>
-        //Types...>
-        (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+    if (out.dtype() == at::kFloat) {
+      dispatch_fp8_rowwise_kernel_on_input_dtypes<
+          float,
+          float>
+          (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+    } else if (out.dtype() == at::kHalf) {
+      dispatch_fp8_rowwise_kernel_on_input_dtypes<
+          float,
+          cutlass::half_t>
+          (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+    } else {
+      dispatch_fp8_rowwise_kernel_on_input_dtypes<
+          float,
+          cutlass::bfloat16_t>
+          (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+    }
   }
 }
 
@@ -1094,10 +1108,14 @@ void check_inputs(
     TORCH_CHECK(bias->dim() == 1);
     TORCH_CHECK(bias->size(0) == b.size(1));
     TORCH_CHECK(bias->stride(0) == 1);
+    TORCH_CHECK(out.dtype() != at::kFloat, "Bias is not supported when out_dtype is set to Float32");
   }
 
   TORCH_CHECK(out.device() == a.device());
-  TORCH_CHECK(out.dtype() == at::kBFloat16 || out.dtype() == at::kHalf);
+  TORCH_CHECK(
+      out.dtype() == at::kBFloat16 || out.dtype() == at::kHalf ||
+          out.dtype() == at::kFloat,
+      "Output dtype must be bfloat16, float16, or float32, but got ", out.dtype());
   TORCH_CHECK(out.dim() == 2);
   TORCH_CHECK(out.size(0) == a.size(0));
   TORCH_CHECK(out.size(1) == b.size(1));

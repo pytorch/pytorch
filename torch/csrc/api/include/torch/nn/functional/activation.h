@@ -198,7 +198,7 @@ inline Tensor gumbel_softmax(
     auto y_hard = torch::zeros_like(logits).scatter_(dim, index, 1.0);
     ret = y_hard - y_soft.detach() + y_soft;
   } else {
-    ret = y_soft;
+    ret = std::move(y_soft);
   }
   return ret;
 }
@@ -672,6 +672,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   TORCH_INTERNAL_ASSERT(embed_dim == embed_dim_to_check);
   TORCH_INTERNAL_ASSERT(key.sizes() == value.sizes());
 
+  TORCH_CHECK(num_heads > 0, "num_heads must be greater than 0");
   const auto head_dim = embed_dim / num_heads;
   TORCH_CHECK(
       head_dim * num_heads == embed_dim,
@@ -918,9 +919,10 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       // average attention weights over heads
       attn_output_weights = attn_output_weights.sum(/*dim=*/1) / num_heads;
     }
-    return std::make_tuple(attn_output, attn_output_weights);
+    return std::make_tuple(
+        std::move(attn_output), std::move(attn_output_weights));
   } else {
-    return std::make_tuple(attn_output, Tensor());
+    return std::make_tuple(std::move(attn_output), Tensor());
   }
 }
 } // namespace detail

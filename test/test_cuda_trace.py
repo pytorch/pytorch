@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, T
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -85,6 +85,12 @@ class TestCudaTrace(TestCase):
             torch.cuda.Stream()
 
         self.mock.assert_called()
+
+    def test_stream_pool_round_robin(self):
+        # Under an active trace, lazy init used to reset the round-robin
+        # counter on each stream's first touch, see Note [HIP Lazy Streams].
+        handles = [torch.cuda.Stream().cuda_stream for _ in range(3)]
+        self.assertEqual(len(set(handles)), len(handles))
 
     def test_device_synchronization_callback(self):
         gpu_trace.register_callback_for_device_synchronization(self.mock)

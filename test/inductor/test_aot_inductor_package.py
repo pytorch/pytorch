@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import copy
+import dataclasses
 import functools
+import gc
 import io
 import os
 import shutil
@@ -27,9 +29,18 @@ from torch.export.pt2_archive._package import (
     load_pt2,
     load_weights_to_pt2_contents,
 )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    requires_triton_ptxas_compat,
+    TRITON_PTXAS_VERSION,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_FBCODE,
+    TEST_CUDA,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils import _pytree as pytree
 
 
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
@@ -71,20 +82,36 @@ def compile(
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 @parameterized_class(
     [
-        {"device": "cpu", "package_cpp_only": False},
+        {
+            "device": "cpu",
+            "package_cpp_only": False,
+            "hw_classification": HardwareClassification.GENERIC,
+        },
     ]
     + (
         [
             # FIXME: AssertionError: AOTInductor compiled library does not exist at
-            {"device": "cpu", "package_cpp_only": True}
+            {
+                "device": "cpu",
+                "package_cpp_only": True,
+                "hw_classification": HardwareClassification.GENERIC,
+            }
         ]
         if not IS_FBCODE
         else []
     )
     + (
         [
-            {"device": GPU_TYPE, "package_cpp_only": False},
-            {"device": GPU_TYPE, "package_cpp_only": True},
+            {
+                "device": GPU_TYPE,
+                "package_cpp_only": False,
+                "hw_classification": HardwareClassification.ACCELERATOR,
+            },
+            {
+                "device": GPU_TYPE,
+                "package_cpp_only": True,
+                "hw_classification": HardwareClassification.ACCELERATOR,
+            },
         ]
         if sys.platform != "darwin"
         else []
@@ -216,6 +243,87 @@ class TestAOTInductorPackage(TestCase):
         )
         self.check_model(Model(), example_inputs)
 
+    def test_int64_floor_divide_tensor_constant_divisor(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.divisor = torch.tensor(3, dtype=torch.int64)
+
+            def forward(self, x):
+                return torch.floor_divide(x, self.divisor)
+
+        example_inputs = (
+            torch.tensor([-5, -1, 0, 7, 8], dtype=torch.int64, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
+    def test_custom_output_type_missing_pytree_registration_error(self):
+        if self.device != "cpu" or self.package_cpp_only:
+            raise unittest.SkipTest("Only needs one CPU Python package variant")
+
+        @dataclasses.dataclass
+        class CustomOutput:
+            value: torch.Tensor
+
+        torch.export.register_dataclass(
+            CustomOutput,
+            serialized_type_name="test_aot_inductor_package.CustomOutput",
+        )
+        self.addCleanup(pytree._deregister_pytree_node, CustomOutput)
+        self.addCleanup(pytree.treespec_loads.cache_clear)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return CustomOutput(x + 1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package_path = Path(tmpdir) / "model.pt2"
+            example_inputs = (torch.ones(2),)
+            ep = torch.export.export(Model(), example_inputs, strict=True)
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                package_path=str(package_path),
+            )
+
+            loaded = torch._inductor.aoti_load_package(str(package_path))
+            self.assertEqual(loaded(*example_inputs).value, torch.full((2,), 2.0))
+
+            script = f"""
+import torch
+
+model = torch._inductor.aoti_load_package({str(package_path)!r})
+model(torch.ones(2))
+"""
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(
+            "import that package before loading this artifact",
+            proc.stderr,
+            msg=proc.stderr,
+        )
+        self.assertIn(
+            "torch.export.register_dataclass",
+            proc.stderr,
+            msg=proc.stderr,
+        )
+        self.assertIn(
+            "test_aot_inductor_package.CustomOutput",
+            proc.stderr,
+            msg=proc.stderr,
+        )
+
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
         # With the package artifact, that cubin path should be overridden at the run time,
@@ -250,6 +358,127 @@ class TestAOTInductorPackage(TestCase):
 
             self.assertEqual(actual, expected)
 
+    def test_load_package_with_stream_affinity(self):
+        if self.device == "cpu":
+            self.skipTest("stream affinity requires an accelerator")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Model().to(self.device)
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        expected = model(*example_inputs)
+        ep = torch.export.export(model, example_inputs, strict=True)
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep,
+            inductor_configs={
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+            },
+        )
+        loaded = torch._inductor.aoti_load_package(
+            package_path,
+            num_runners=2,
+            use_stream_affinity=True,
+        )
+
+        self.assertEqual(loaded(*example_inputs), expected)
+
+    def test_load_package_from_directory(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model()
+        with torch.no_grad():
+            model = model.to(self.device)
+            ref_model = copy.deepcopy(model)
+            ref_inputs = copy.deepcopy(example_inputs)
+            expected = ref_model(*ref_inputs)
+
+            with WritableTempFile(suffix=".pt2") as f:
+                ep = torch.export.export(model, example_inputs, strict=True)
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep,
+                    package_path=f.name,
+                    inductor_configs={
+                        "aot_inductor.package_cpp_only": self.package_cpp_only,
+                    },
+                )
+
+                # Unzip to a temporary directory
+                temp_dir = tempfile.mkdtemp()
+                try:
+                    with zipfile.ZipFile(package_path, "r") as zip_ref:
+                        zip_ref.extractall(temp_dir)
+
+                    # Identify prefix if any (ZipFile.extractall extracts as is)
+                    # The loader should be able to load from temp_dir which contains 'data/...'
+                    # or 'some_prefix/data/...'
+
+                    with (
+                        self.assertNoLogs(
+                            "torch._inductor.package.package", level="WARNING"
+                        ),
+                        self.assertNoLogs(
+                            "torch.export.pt2_archive._package", level="WARNING"
+                        ),
+                    ):
+                        loaded = torch._inductor.aoti_load_package(temp_dir)
+                    actual = loaded(*example_inputs)
+                    self.assertEqual(actual, expected)
+
+                    collision_dir = tempfile.mkdtemp()
+                    try:
+                        with zipfile.ZipFile(package_path, "r") as zip_ref:
+                            zip_ref.extractall(collision_dir)
+
+                        model_dirs = [
+                            path
+                            for path in Path(collision_dir).rglob("model")
+                            if path.is_dir() and path.parent.name == "aotinductor"
+                        ]
+                        self.assertEqual(len(model_dirs), 1)
+                        model_dirs[0].rename(model_dirs[0].with_name("model2"))
+                        with self.assertRaises(RuntimeError):
+                            load_package(collision_dir, model_name="model")
+                    finally:
+                        shutil.rmtree(collision_dir)
+
+                    # Verify robustness: move data deeper
+                    nested_dir = os.path.join(temp_dir, "nested_dir")
+                    os.makedirs(nested_dir)
+                    # Move all contents to nested_dir
+                    for item in os.listdir(temp_dir):
+                        if item != "nested_dir":
+                            shutil.move(os.path.join(temp_dir, item), nested_dir)
+
+                    # Load from root temp_dir again, it should find it in nested_dir
+                    loaded_nested = torch._inductor.aoti_load_package(temp_dir)
+                    actual_nested = loaded_nested(*example_inputs)
+                    self.assertEqual(actual_nested, expected)
+
+                    # Determine if destructor deletes the files
+                    del loaded
+                    del loaded_nested
+                    gc.collect()
+
+                    # In shared mode, the directory should NOT be deleted
+                    # We check if we can still find some files.
+                    self.assertTrue(os.path.exists(nested_dir))
+                    self.assertTrue(len(os.listdir(nested_dir)) > 0)
+
+                finally:
+                    shutil.rmtree(temp_dir)
+
     def test_linear(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -267,9 +496,9 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        TEST_CUDA and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
+        "Test is only supported on CUDA {}.{}+".format(*TRITON_PTXAS_VERSION),
     )
-    @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         self.check_package_cpp_only()
 
@@ -304,8 +533,11 @@ class TestAOTInductorPackage(TestCase):
                 if self.device == GPU_TYPE:
                     kernel_bin = get_kernel_bin_format(self.device)
                     self.assertTrue(not list(tmp_path.glob(f"*.{kernel_bin}")))
-                    # Check if .cubin.o files exist and use unique kernel names
-                    self.assertTrue(list(tmp_path.glob(f"triton_*.{kernel_bin}.o")))
+                    # Check that cubin binaries are embedded as object files.
+                    # Either individual per-kernel .o files or a single combined .o.
+                    individual_objs = list(tmp_path.glob(f"triton_*.{kernel_bin}.o"))
+                    combined_obj = list(tmp_path.glob("cubins_combined.o"))
+                    self.assertTrue(individual_objs or combined_obj)
 
                 # Check if the .so file was build successfully
                 so_path = build_path / "libaoti_model.so"
@@ -314,15 +546,11 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
-    @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 6),
-        "Test is only supported on CUDA 12.6+",
-    )
+    @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # doesn't support multi-arch binary
     def test_compile_after_package_multi_arch(self):
         if self.device != GPU_TYPE:
-            raise unittest.SkipTest("Only meant to test GPU_TYPE")
+            raise unittest.SkipTest(f"Only meant to test {GPU_TYPE}")
         self.check_package_cpp_only()
 
         class Model(torch.nn.Module):
@@ -361,11 +589,8 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # build system may be different
+    @requires_triton_ptxas_compat
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_after_package_static(self):
         # compile_standalone will set package_cpp_only=True
@@ -424,7 +649,7 @@ class TestAOTInductorPackage(TestCase):
                 self.cmake_compile(model, example_inputs, options, "")
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # build system may be different
+    @requires_triton_ptxas_compat
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_standalone_cos(self):
         # compile_standalone will set package_cpp_only=True
@@ -456,12 +681,8 @@ class TestAOTInductorPackage(TestCase):
                 a_path = build_path / "libcos.a"
                 self.assertTrue(a_path.exists())
 
-    @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 6),
-        "Test is only supported on CUDA 12.6+",
-    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # doesn't support multi-arch binary
+    @requires_triton_ptxas_compat
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter(self):
         self.check_package_cpp_only()
@@ -501,25 +722,17 @@ class TestAOTInductorPackage(TestCase):
                 # Test compiling generated files
                 result = self.cmake_compile_and_run(tmp_dir)
                 if package_example_inputs:
-                    if self.device == GPU_TYPE:
-                        self.assertEqual(
-                            result.stdout,
-                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CUDAFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
-                            " 0  0  0\n 0  0  0\n[ CUDAFloatType{3,3} ]\n",
-                        )
-                    else:
-                        self.assertEqual(
-                            result.stdout,
-                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CPUFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
-                            " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
-                        )
+                    out_str = result.stdout
+                    device_str = self.device.upper()
 
-    @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 6),
-        "Test is only supported on CUDA 12.6+",
-    )
+                    expected_result = (
+                        f"output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ {device_str}FloatType{{3,3}} ]\n"
+                        f"output_tensor2\n 0  0  0\n 0  0  0\n 0  0  0\n[ {device_str}FloatType{{3,3}} ]\n"
+                    )
+                    self.assertTrue(expected_result in out_str)
+
+    @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter_weights(self):
         self.check_package_cpp_only()
@@ -600,6 +813,28 @@ class TestAOTInductorPackage(TestCase):
                     )
                 )
                 self.assertEqual(loaded_metadata.get("dummy"), "moo")
+
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    with zipfile.ZipFile(package_path, "r") as zip_ref:
+                        zip_ref.extractall(temp_dir)
+
+                    loaded_metadata_from_directory = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        temp_dir, "model"
+                    )
+                    self.assertEqual(loaded_metadata_from_directory, loaded_metadata)
+
+                    nested_dir = os.path.join(temp_dir, "nested_dir")
+                    os.makedirs(nested_dir)
+                    for item in os.listdir(temp_dir):
+                        if item != "nested_dir":
+                            shutil.move(os.path.join(temp_dir, item), nested_dir)
+
+                    loaded_metadata_from_nested_directory = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        temp_dir, "model"
+                    )
+                    self.assertEqual(
+                        loaded_metadata_from_nested_directory, loaded_metadata
+                    )
 
                 device = loaded_metadata["AOTI_DEVICE_KEY"]
                 current_device_info = torch._inductor.codecache.get_device_information(
@@ -789,6 +1024,66 @@ class TestAOTInductorPackage(TestCase):
             self.assertTrue(
                 torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
             )
+
+    @skipif(
+        lambda device, package_cpp_only: device != "cpu" or package_cpp_only,
+        "CPU non-cpp package regression test",
+    )
+    def test_buffer_mutations_persist_across_package_calls(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("assign_one", torch.ones(1, device=device))
+                self.register_buffer("add_one", torch.ones(1, device=device))
+                self.register_buffer("slice_one", torch.ones(1, device=device))
+                self.register_buffer("add_two", torch.ones(2, device=device))
+                self.register_buffer("index_two", torch.ones(2, device=device))
+
+            def forward(self):
+                self.assign_one = self.assign_one + 1.0
+                self.add_one.add_(1.0)
+                self.slice_one[:] = self.slice_one[:] + 1.0
+                self.add_two.add_(1.0)
+                self.index_two[0] = self.index_two[0] + 1.0
+                return (
+                    self.assign_one,
+                    self.add_one,
+                    self.slice_one,
+                    self.add_two,
+                    self.index_two,
+                )
+
+        for always_keep_tensor_constants in (True, False):
+            model = Model(self.device)
+            ep = torch.export.export(model, tuple())
+            inductor_configs = {
+                "always_keep_tensor_constants": always_keep_tensor_constants,
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+            }
+            with WritableTempFile(suffix=".pt2") as f:
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep,
+                    package_path=f.name,
+                    inductor_configs=inductor_configs,
+                )
+                loaded = load_package(package_path)
+
+            actual = [tuple(out.clone() for out in loaded()) for _ in range(3)]
+            expected = []
+            for call_idx in range(3):
+                expected_one = torch.full((1,), call_idx + 2.0, device=self.device)
+                expected_two = torch.full((2,), call_idx + 2.0, device=self.device)
+                expected_index = torch.tensor([call_idx + 2.0, 1.0], device=self.device)
+                expected.append(
+                    (
+                        expected_one,
+                        expected_one,
+                        expected_one,
+                        expected_two,
+                        expected_index,
+                    )
+                )
+            self.assertEqual(actual, expected)
 
     @skipif(
         lambda device, package_cpp_only: package_cpp_only,

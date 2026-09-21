@@ -635,10 +635,10 @@ struct ReduceOp {
     using args_vec_t = std::array<arg_t, output_vec_size>;
     int dim_x = blockDim.x;
     args_vec_t* shared = (args_vec_t*)shared_memory;
-    if (dim_x > warpSize) {
+    if (dim_x > C10_WARP_SIZE) {
       int address_base = threadIdx.x + threadIdx.y*blockDim.x;
       shared[address_base] = value;
-      for (int offset = dim_x/2; offset >= warpSize; offset >>= 1) {
+      for (int offset = dim_x/2; offset >= C10_WARP_SIZE; offset >>= 1) {
         __syncthreads();
         if (threadIdx.x < offset && threadIdx.x + offset < blockDim.x) {
           args_vec_t other = shared[address_base + offset];
@@ -649,14 +649,13 @@ struct ReduceOp {
           shared[address_base] = value;
         }
       }
-      dim_x = warpSize;
+      dim_x = C10_WARP_SIZE;
     }
 
     __syncthreads();
     // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
     // matching Triton, etc.
-    // TODO(PaulZhang12): AMD and internal
-    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+    #if defined(USE_ROCM)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
     #else
     for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
@@ -818,8 +817,16 @@ struct ReduceOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
-#ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
+#ifndef USE_ROCM
       __threadfence(); // complete the acquire pattern after atomic
+#else
+      // complete the acquire pattern after atomic
+      // On ROCm, committed stores [CMTSTRS] ensure the producer block's writes are visible to global memory.
+      // But the last block (consumer) still needs an acquire fence to invalidate its (non-coherent) L1,
+      // before reading the staging buffer. An acquire-only fence at agent scope is sufficient
+      // (and cheaper than a full seq_cst __threadfence()) since it pairs with the agent-scope
+      // committed stores above.
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 #endif
       for (auto &v : value) {
         v = ident;
@@ -836,9 +843,9 @@ struct ReduceOp {
           }
         }
       } else {
+#if defined(USE_ROCM) && ROCM_VERSION <= 71300
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
-#ifdef USE_ROCM // Prefetch loads to better hide their latency
         #define PRFCH 4
         for (; input_offset < config.ctas_per_output; input_offset += step*PRFCH) {
          arg_vec_t next[PRFCH];
@@ -855,6 +862,14 @@ struct ReduceOp {
          }
         }
 #else
+#if defined(USE_ROCM)
+        int input_offset = threadIdx.y;
+        int step = blockDim.y;
+        #pragma unroll
+#else
+        index_t input_offset = threadIdx.y;
+        index_t step = blockDim.y;
+#endif
         for (; input_offset < config.ctas_per_output; input_offset += step) {
           index_t idx = config.staging_memory_offset(input_offset);
           arg_vec_t next = reduce_buffer[idx];
@@ -953,12 +968,15 @@ inline void launch_jitted_reduce_kernel(
     fn_ptr = &fn_cache[2];
   }
   if (!fn_ptr->function) {
-    int max_threads_codegen =
-        max_reduce_threads(desc.f_inputs_type) / config.output_vec_size;
-    auto code = at::cuda::jit::generate_reduction_code(
-        desc, vt0, true, false, config.output_vec_size, max_threads_codegen);
+    const std::lock_guard<std::mutex> lock{jiterator_mutex};
+    if (!fn_ptr->function) {
+      int max_threads_codegen =
+          max_reduce_threads(desc.f_inputs_type) / config.output_vec_size;
+      auto code = at::cuda::jit::generate_reduction_code(
+          desc, vt0, true, false, config.output_vec_size, max_threads_codegen);
 
-    *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name);
+      *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name);
+    }
   }
   constexpr int kernel_args = 1;
   const void* args[kernel_args];
@@ -969,7 +987,7 @@ inline void launch_jitted_reduce_kernel(
 
 class AccumulationBuffer {
  public:
-  AccumulationBuffer() {}
+  AccumulationBuffer() = default;
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
     out_ptr_ = (char*)out_ptr;
@@ -1086,12 +1104,12 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   // load instructions.
   //
   // Case 1: "vectorize along input"
-  // This case happens when we are reducing along fastest moving dimesion. In such case, threads
+  // This case happens when we are reducing along fastest moving dimension. In such case, threads
   // with the same threadIdx.y works on the same reduction cooperatively and will produce results
   // for the same output. In such case, values in each loaded vector always correspond to the same output.
   //
   // Case 2: "vectorize along output"
-  // This case happens when the fastest moving dimesion is not the dimension of reduction. In such case,
+  // This case happens when the fastest moving dimension is not the dimension of reduction. In such case,
   // threads with different threadIdx.x are independent and will produce results for different outputs.
   // In such case, values in each loaded vector always correspond to different outputs.
   if (fastest_moving_stride == sizeof(scalar_t)) {
@@ -1117,14 +1135,18 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   if (iter.ndim() == 0 || reduction_on_fastest_striding_dimension) {
     // Split the input across lanes if the input is contiguous in the reduced
     // dimension. This will require reduction between threads using warp
-    // shuffle instructions and shared memory (if block_width > warpSize).
+    // shuffle instructions and shared memory (if block_width > C10_WARP_SIZE).
     config.input_mult[0] = config.split_input(block_width);
   } else {
     // Otherwise split the output across lanes in a warp.
     config.output_mult[0] = config.split_output(block_width);
   }
 
+#ifdef USE_ROCM
+  constexpr int min_values_per_thread = 128;
+#else
   constexpr int min_values_per_thread = 16;
+#endif
   constexpr int max_values_per_thread = 256;
 
   const int warp_split_threshold =
@@ -1132,12 +1154,6 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   bool split_across_warps = config.values_per_thread() >= warp_split_threshold;
   const int num_mp =
       at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-#ifdef USE_ROCM
-  bool force_splitting_output = iter.ndim() == 2 &&
-      reduction_on_fastest_striding_dimension &&
-      config.values_per_thread() < 1024 && num_mp < 100;
-  split_across_warps = !force_splitting_output && split_across_warps;
-#endif
 
   if (split_across_warps) {
     // Divide the input across warps in a thread-block, if that leaves at least
@@ -1151,21 +1167,6 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
 
   int max_threads_per_mp =
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor;
-#ifdef USE_ROCM
-  // If the grid consists of a single threadblock, do not change the max threads per
-  // MP value. This will increase the parallelism across the y dimension of the grid.
-  bool uses_a_single_block = config.grid().x == config.grid().y == config.grid().z == 1;
-
-  if (!uses_a_single_block) {
-    // Control the number of threadblocks by adjusting the maximum number of
-    // threads per multi-processor. These numbers better reflect the maximum
-    // theoretical achievable threads per MP for the reduction operation.
-    if (iter.ndim() == 1 || iter.ndim() == 3)
-      max_threads_per_mp = 512;
-    else if (iter.ndim() == 2)
-      max_threads_per_mp = 256;
-  }
-#endif
   const int blocks_per_sm = max_threads_per_mp / config.num_threads;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
@@ -1182,37 +1183,12 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // We want the minimum of ctas_per_output1 and ctas_per_output2, so that each thread can have
     // a large number of values to deal with. But we don't want values_per_thread to be larger than
     // max_values_per_thread
-    config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
-#ifdef USE_ROCM
-    // In cases where a number of threadblocks along the y direction of the grid
-    // is needed then make sure they are reduced to the number of MPs. For
-    // smaller sizes, use half the number of MPs. For smaller sizes than half
-    // the number of MPs use the original value unless the value is less than 16
-    // blocks in which case it is more profitable to use just 1 block.
-    if (config.ctas_per_output > num_mp)
-      if (num_mp < 128)
-        config.ctas_per_output =
-            num_mp * (config.ctas_per_output > 512 ? 4 : 2);
-      else
-        config.ctas_per_output = num_mp;
-    else if (config.ctas_per_output > div_up(num_mp, 2))
-      config.ctas_per_output = div_up(num_mp, 2);
-    else if (config.ctas_per_output < 16)
-      config.ctas_per_output = 1;
-    bool is_channel_last = iter.tensor_base(1).is_contiguous(at::MemoryFormat::ChannelsLast);
-    if (iter.ndim() == 3 && !reduction_on_fastest_striding_dimension && !is_channel_last) {
-      config.ctas_per_output = 4;
-      int vpt = config.values_per_thread();
-      // Capping the number of values per thread to 2048 for now
-      // based on known use cases.
-      while (vpt >= 2048) {
-        config.ctas_per_output *= 2;
-        // Computes the new values per thread without side effects
-        vpt = config.mock_values_per_thread(config.ctas_per_output);
-      }
-    }
-#endif
+    config.ctas_per_output = std::clamp<int>(ctas_per_output1, ctas_per_output3, ctas_per_output2);
     if (config.ctas_per_output > 1) {
+#ifdef USE_ROCM
+      // Set min ctas value as 64. Having more reductions (i.e less values_per_thread) seems to improve perf.
+      config.ctas_per_output = std::max(config.ctas_per_output, 64);
+#endif
       config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
   }

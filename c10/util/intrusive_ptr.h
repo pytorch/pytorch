@@ -4,12 +4,17 @@
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
 #include <climits>
+#include <compare>
 #include <memory>
 #include <type_traits>
 
 namespace pybind11 {
 template <typename, typename...>
 class class_;
+}
+
+namespace torch::utils {
+class PyObjectPreservation;
 }
 
 namespace c10 {
@@ -33,6 +38,8 @@ constexpr uint64_t kImpracticallyHugeWeakReferenceCount =
 constexpr uint64_t kReferenceCountOne = 1;
 constexpr uint64_t kWeakReferenceCountOne = (kReferenceCountOne << 32);
 constexpr uint64_t kUniqueRef = (kReferenceCountOne | kWeakReferenceCountOne);
+// Indicates whether the object has a PyObject wrapper.
+constexpr uint64_t kHasPyObject = (uint64_t(1) << 63);
 
 template <class TTarget>
 struct intrusive_target_default_null_type final {
@@ -55,7 +62,15 @@ inline uint32_t refcount(uint64_t combined_refcount) {
 }
 
 inline uint32_t weakcount(uint64_t combined_refcount) {
-  return static_cast<uint32_t>(combined_refcount >> 32);
+  return static_cast<uint32_t>((combined_refcount & ~kHasPyObject) >> 32);
+}
+
+inline bool has_pyobject(uint64_t combined_refcount) {
+  return (combined_refcount & kHasPyObject) != 0;
+}
+
+inline bool is_uniquely_owned(uint64_t combined_refcount) {
+  return (combined_refcount & ~detail::kHasPyObject) == detail::kUniqueRef;
 }
 
 // The only requirement for refcount increment is that it happens-before
@@ -64,12 +79,6 @@ inline uint64_t atomic_combined_refcount_increment(
     std::atomic<uint64_t>& combined_refcount,
     uint64_t inc) {
   return combined_refcount.fetch_add(inc, std::memory_order_relaxed) + inc;
-}
-
-inline uint32_t atomic_refcount_increment(
-    std::atomic<uint64_t>& combined_refcount) {
-  return detail::refcount(atomic_combined_refcount_increment(
-      combined_refcount, kReferenceCountOne));
 }
 
 inline uint32_t atomic_weakcount_increment(
@@ -98,6 +107,11 @@ inline uint32_t atomic_weakcount_decrement(
   return detail::weakcount(atomic_combined_refcount_decrement(
       combined_refcount, kWeakReferenceCountOne));
 }
+
+template <class T, class = void>
+struct TargetTraits {
+  static constexpr bool can_have_pyobject = false;
+};
 
 } // namespace detail
 
@@ -155,10 +169,31 @@ class C10_API intrusive_ptr_target {
   // we can atomically operate on both at the same time for performance
   // and defined behaviors.
   //
+  // Note [PyObject preservation for Tensor and Storages]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // intrusive_ptr has special support for preserving PyObject wrappers
+  // for TensorImpl and StorageImpl. The most significant bit (kHasPyObject) of
+  // the combined_refcount_ is used to indicate whether the object has a
+  // PyObject wrapper.
+  //
+  //   - The PyObject, if it exists, holds a strong reference to the
+  //     intrusive_ptr_target.
+  //
+  //   - When the refcount goes from 1 to 2, we incref the PyObject.
+  //
+  //   - When the refcount goes from 2 to 1, we decref the PyObject.
+  //
+  // In other words, the intrusive_ptr keeps the PyObject alive as long as there
+  // are other C++ references to the intrusive_ptr_target.
+
   mutable std::atomic<uint64_t> combined_refcount_;
   static_assert(sizeof(std::atomic<uint64_t>) == 8);
   static_assert(alignof(std::atomic<uint64_t>) == 8);
-  static_assert(std::atomic<uint64_t>::is_always_lock_free);
+  // is_always_lock_free check lives in intrusive_ptr.cpp so it's only
+  // evaluated by the host compiler. CUDA-like device compilers parsing this
+  // header may target hardware without 64-bit atomics; see
+  // https://github.com/pytorch/pytorch/issues/171775 (introduced by
+  // https://github.com/pytorch/pytorch/pull/163394).
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;
@@ -171,6 +206,8 @@ class C10_API intrusive_ptr_target {
 
   template <typename T>
   friend struct ExclusivelyOwnedTensorTraits;
+
+  friend class torch::utils::PyObjectPreservation;
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -255,6 +292,16 @@ class C10_API intrusive_ptr_target {
    */
   virtual void release_resources() {}
 
+  /**
+   * These two methods are called when the refcount transitions between one
+   * and two and the object has a PyObject wrapper.
+   */
+  virtual void incref_pyobject() const noexcept {}
+  virtual void decref_pyobject() const noexcept {}
+  virtual bool try_incref_pyobject() const noexcept {
+    return false;
+  }
+
   uint32_t refcount(std::memory_order order = std::memory_order_relaxed) const {
     return detail::refcount(combined_refcount_.load(order));
   }
@@ -264,6 +311,19 @@ class C10_API intrusive_ptr_target {
     return detail::weakcount(combined_refcount_.load(order));
   }
 };
+
+namespace detail {
+
+#ifndef C10_MOBILE
+template <>
+struct TargetTraits<c10::intrusive_ptr_target> {
+  // A generic intrusive_ptr<intrusive_ptr_target> may actually be a TensorImpl
+  // or StorageImpl, so we have to allow for PyObject support.
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+
+} // namespace detail
 
 template <class TTarget, class NullType>
 class weak_intrusive_ptr;
@@ -312,51 +372,87 @@ class intrusive_ptr final {
   template <typename, typename...>
   friend class pybind11::class_;
 
-  void retain_() {
+  void retain_() noexcept {
     if (target_ != NullType::singleton()) {
-      uint32_t new_refcount =
-          detail::atomic_refcount_increment(target_->combined_refcount_);
+      uint64_t combined = detail::atomic_combined_refcount_increment(
+          target_->combined_refcount_, detail::kReferenceCountOne);
+      uint32_t new_refcount = detail::refcount(combined);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
+
+      if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+        // If the refcount transitioned from 1 to 2, we need to incref the
+        // PyObject. In other words, we need to ensure that the PyObject stays
+        // alive now that we have a C++ reference to this object in addition to
+        // the PyObject itself.
+        if (detail::has_pyobject(combined) && detail::refcount(combined) == 2) {
+          target_->incref_pyobject();
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !detail::has_pyobject(combined),
+            "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
+      }
     }
   }
 
   void reset_() noexcept {
     if (target_ != NullType::singleton()) {
-      if (target_->combined_refcount_.load(std::memory_order_acquire) ==
-          detail::kUniqueRef) {
-        // Both counts are 1, so there are no weak references and
-        // we are releasing the last strong reference. No other
-        // threads can observe the effects of this target_ deletion
-        // call (e.g. calling use_count()) without a data race.
-        target_->combined_refcount_.store(0, std::memory_order_relaxed);
-        delete target_;
+      reset_not_null_(target_);
+    }
+  }
+
+  // C10_NOINLINE to keep binary size a bit smaller. We pass TTarget* here
+  // to avoid an extra pointer dereference in the call from reset_().
+  C10_NOINLINE static void reset_not_null_(TTarget* target) noexcept {
+    if (detail::is_uniquely_owned(
+            target->combined_refcount_.load(std::memory_order_acquire))) {
+      // Both counts are 1, so there are no weak references and
+      // we are releasing the last strong reference. No other
+      // threads can observe the effects of this target deletion
+      // call (e.g. calling use_count()) without a data race.
+      target->combined_refcount_.store(0, std::memory_order_relaxed);
+      delete target;
+      return;
+    }
+
+    auto combined_refcount = detail::atomic_combined_refcount_decrement(
+        target->combined_refcount_, detail::kReferenceCountOne);
+    uint32_t new_refcount = detail::refcount(combined_refcount);
+    bool has_pyobject = detail::has_pyobject(combined_refcount);
+    if (new_refcount == 0) {
+      if (detail::weakcount(combined_refcount) == 1) {
+        delete target;
         return;
       }
-
-      auto combined_refcount = detail::atomic_combined_refcount_decrement(
-          target_->combined_refcount_, detail::kReferenceCountOne);
-      if (detail::refcount(combined_refcount) == 0) {
-        bool should_delete =
-            (combined_refcount == detail::kWeakReferenceCountOne);
-        // See comment above about weakcount. As long as refcount>0,
-        // weakcount is one larger than the actual number of weak references.
-        // So we need to decrement it here.
-        if (!should_delete) {
-          // justification for const_cast: release_resources is basically a
-          // destructor and a destructor always mutates the object, even for
-          // const objects.
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          const_cast<std::remove_const_t<TTarget>*>(target_)
-              ->release_resources();
-          should_delete = detail::atomic_weakcount_decrement(
-                              target_->combined_refcount_) == 0;
-        }
-        if (should_delete) {
-          delete target_;
-        }
+      // See comment above about weakcount. As long as refcount>0,
+      // weakcount is one larger than the actual number of weak references.
+      // So we need to decrement it here.
+      release_resources_and_decrement_weakrefs_(target);
+    } else if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+      // If the refcount transitioned from 2 to 1, we need to decref the
+      // PyObject. In other words, we don't want to keep the PyObject alive if
+      // there are no C++ references to this object other than the PyObject
+      // itself.
+      if (has_pyobject && new_refcount == 1) {
+        target->decref_pyobject();
       }
+    } else {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          !has_pyobject,
+          "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
+    }
+  }
+
+  C10_NOINLINE static void release_resources_and_decrement_weakrefs_(
+      TTarget* target) noexcept {
+    // justification for const_cast: release_resources is basically a
+    // destructor and a destructor always mutates the object, even for
+    // const objects.
+    const_cast<std::remove_const_t<TTarget>*>(target)->release_resources();
+    if (detail::atomic_weakcount_decrement(target->combined_refcount_) == 0) {
+      delete target;
     }
   }
 
@@ -422,12 +518,13 @@ class intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  intrusive_ptr(const intrusive_ptr& rhs) : target_(rhs.target_) {
+  intrusive_ptr(const intrusive_ptr& rhs) noexcept : target_(rhs.target_) {
     retain_();
   }
 
   template <class From, class FromNullType>
-  /* implicit */ intrusive_ptr(const intrusive_ptr<From, FromNullType>& rhs)
+  /* implicit */ intrusive_ptr(
+      const intrusive_ptr<From, FromNullType>& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
@@ -474,7 +571,7 @@ class intrusive_ptr final {
     return *this;
   }
 
-  TTarget* get() const noexcept {
+  [[nodiscard]] TTarget* get() const noexcept {
     return target_;
   }
 
@@ -500,26 +597,35 @@ class intrusive_ptr final {
   }
 
   // We do a lot of null-pointer checks in our code, good to have this be cheap.
-  bool defined() const noexcept {
+  [[nodiscard]] bool defined() const noexcept {
     return target_ != NullType::singleton();
   }
 
-  uint32_t use_count() const noexcept {
+  [[nodiscard]] uint32_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->refcount(std::memory_order_relaxed);
   }
 
-  uint32_t weak_use_count() const noexcept {
+  [[nodiscard]] uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->weakcount(std::memory_order_relaxed);
   }
 
-  bool unique() const noexcept {
+  [[nodiscard]] bool unique() const noexcept {
     return use_count() == 1;
+  }
+
+  /**
+   * Stronger than unique() in that it must not have any weakrefs as well.
+   */
+  [[nodiscard]] bool is_uniquely_owned() const noexcept {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(target_ != NullType::singleton());
+    return detail::is_uniquely_owned(
+        target_->combined_refcount_.load(std::memory_order_acquire));
   }
 
   /**
@@ -649,7 +755,8 @@ template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>,
     class... Args>
-inline intrusive_ptr<TTarget, NullType> make_intrusive(Args&&... args) {
+[[nodiscard]] inline intrusive_ptr<TTarget, NullType> make_intrusive(
+    Args&&... args) {
   return intrusive_ptr<TTarget, NullType>::make(std::forward<Args>(args)...);
 }
 
@@ -660,54 +767,29 @@ inline void swap(
   lhs.swap(rhs);
 }
 
-// To allow intrusive_ptr inside std::map or std::set, we need operator<
+// Pointer ordering and equality for intrusive_ptr.
+// operator<=> gives us <, >, <=, >=; operator== gives us !=.
+// clang-format off
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator<(
+[[nodiscard]] inline std::strong_ordering operator<=>(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs.get() < rhs.get();
+  return lhs.get() <=> rhs.get();
 }
+// clang-format on
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator==(
+[[nodiscard]] inline bool operator==(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.get() == rhs.get();
 }
 
 template <class TTarget1, class NullType1>
-inline bool operator==(
+[[nodiscard]] inline bool operator==(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     std::nullptr_t) noexcept {
   return lhs.get() == nullptr;
-}
-
-template <class TTarget2, class NullType2>
-inline bool operator==(
-    std::nullptr_t,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return nullptr == rhs.get();
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
-    const intrusive_ptr<TTarget1, NullType1>& lhs,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
-}
-
-template <class TTarget1, class NullType1>
-inline bool operator!=(
-    const intrusive_ptr<TTarget1, NullType1>& lhs,
-    std::nullptr_t) noexcept {
-  return !operator==(lhs, nullptr);
-}
-
-template <class TTarget2, class NullType2>
-inline bool operator!=(
-    std::nullptr_t,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(nullptr, rhs);
 }
 template <typename T>
 struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
@@ -768,7 +850,7 @@ class weak_intrusive_ptr final {
   template <class TTarget2, class NullType2>
   friend class weak_intrusive_ptr;
 
-  void retain_() {
+  void retain_() noexcept {
     if (target_ != NullType::singleton()) {
       uint32_t new_weakcount =
           detail::atomic_weakcount_increment(target_->combined_refcount_);
@@ -813,13 +895,14 @@ class weak_intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) : target_(rhs.target_) {
+  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) noexcept
+      : target_(rhs.target_) {
     retain_();
   }
 
   template <class From, class FromNullType>
   /* implicit */ weak_intrusive_ptr(
-      const weak_intrusive_ptr<From, FromNullType>& rhs)
+      const weak_intrusive_ptr<From, FromNullType>& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
@@ -879,9 +962,7 @@ class weak_intrusive_ptr final {
   }
 
   void swap(weak_intrusive_ptr& rhs) noexcept {
-    TTarget* tmp = target_;
-    target_ = rhs.target_;
-    rhs.target_ = tmp;
+    std::swap(target_, rhs.target_);
   }
 
   // NB: This should ONLY be used by the std::hash implementation
@@ -909,7 +990,7 @@ class weak_intrusive_ptr final {
     return target_;
   }
 
-  uint32_t use_count() const noexcept {
+  [[nodiscard]] uint32_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
@@ -917,14 +998,14 @@ class weak_intrusive_ptr final {
         std::memory_order_relaxed); // refcount, not weakcount!
   }
 
-  uint32_t weak_use_count() const noexcept {
+  [[nodiscard]] uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->weakcount(std::memory_order_relaxed);
   }
 
-  bool expired() const noexcept {
+  [[nodiscard]] bool expired() const noexcept {
     return use_count() == 0;
   }
 
@@ -932,6 +1013,7 @@ class weak_intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return intrusive_ptr<TTarget, NullType>();
     } else {
+      bool increfed = false;
       auto combined_refcount =
           target_->combined_refcount_.load(std::memory_order_relaxed);
       do {
@@ -940,11 +1022,30 @@ class weak_intrusive_ptr final {
           // Return nullptr.
           return intrusive_ptr<TTarget, NullType>();
         }
+        if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+          if (detail::has_pyobject(combined_refcount) &&
+              detail::refcount(combined_refcount) == 1 && !increfed) {
+            // Object has a python wrapper with no other C++ references.
+            // We need to to incref the Python object before we acquire a
+            // strong reference to the C++ object to avoid a situation
+            // where the Python object is deallocated concurrently.
+            if (!target_->try_incref_pyobject()) {
+              return intrusive_ptr<TTarget, NullType>();
+            }
+            increfed = true;
+          }
+        }
       } while (!target_->combined_refcount_.compare_exchange_weak(
           combined_refcount,
           combined_refcount + detail::kReferenceCountOne,
           std::memory_order_acquire,
           std::memory_order_relaxed));
+
+      if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+        if (increfed && detail::refcount(combined_refcount) != 1) {
+          target_->decref_pyobject();
+        }
+      }
 
       return intrusive_ptr<TTarget, NullType>(
           target_, raw::DontIncreaseRefcount{});
@@ -997,10 +1098,12 @@ class weak_intrusive_ptr final {
     return ret;
   }
 
+  // clang-format off
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-  friend bool operator<(
+  friend std::strong_ordering operator<=>(
       const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
       const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept;
+  // clang-format on
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>
   friend bool operator==(
       const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
@@ -1014,26 +1117,21 @@ inline void swap(
   lhs.swap(rhs);
 }
 
-// To allow weak_intrusive_ptr inside std::map or std::set, we need operator<
+// Pointer ordering and equality for weak_intrusive_ptr.
+// clang-format off
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator<(
+[[nodiscard]] inline std::strong_ordering operator<=>(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs.target_ < rhs.target_;
+  return lhs.target_ <=> rhs.target_;
 }
+// clang-format on
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator==(
+[[nodiscard]] inline bool operator==(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ == rhs.target_;
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
-    const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-    const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
 }
 
 // Alias for documentary purposes, to more easily distinguish
@@ -1060,7 +1158,16 @@ namespace intrusive_ptr {
 // NullType::singleton to this function
 inline void incref(intrusive_ptr_target* self) {
   if (self) {
-    detail::atomic_refcount_increment(self->combined_refcount_);
+    uint64_t combined = detail::atomic_combined_refcount_increment(
+        self->combined_refcount_, detail::kReferenceCountOne);
+
+#ifndef C10_MOBILE
+    if (detail::has_pyobject(combined) && detail::refcount(combined) == 2) {
+      self->incref_pyobject();
+    }
+#else
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!detail::has_pyobject(combined));
+#endif
   }
 }
 
@@ -1074,7 +1181,7 @@ inline void decref(intrusive_ptr_target* self) {
 }
 
 template <typename T>
-inline T* make_weak(T* self) {
+[[nodiscard]] inline T* make_weak(T* self) {
   // NB: 'this' is a strong pointer, but we return a weak pointer
   auto ptr = c10::intrusive_ptr<T>::reclaim(self);
   c10::weak_intrusive_ptr<T> wptr(ptr);
@@ -1082,7 +1189,7 @@ inline T* make_weak(T* self) {
   return wptr.release();
 }
 
-inline uint32_t use_count(intrusive_ptr_target* self) {
+[[nodiscard]] inline uint32_t use_count(intrusive_ptr_target* self) {
   auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = ptr.use_count();
   ptr.release();
@@ -1105,7 +1212,7 @@ inline void decref(weak_intrusive_ptr_target* self) {
 }
 
 template <typename T>
-inline T* lock(T* self) {
+[[nodiscard]] inline T* lock(T* self) {
   auto wptr = c10::weak_intrusive_ptr<T>::reclaim(self);
   auto ptr = wptr.lock();
   wptr.release();
@@ -1113,7 +1220,7 @@ inline T* lock(T* self) {
 }
 
 // This gives the STRONG refcount of a WEAK pointer
-inline uint32_t use_count(weak_intrusive_ptr_target* self) {
+[[nodiscard]] inline uint32_t use_count(weak_intrusive_ptr_target* self) {
   auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = wptr.use_count();
   wptr.release();

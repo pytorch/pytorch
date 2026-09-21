@@ -100,8 +100,8 @@ struct TORCH_API ClassType : public NamedType {
   std::string repr_str() const override {
     std::stringstream ss;
     ss << str()
-       << " (of Python compilation unit at: " << compilation_unit().get() << ")";
-    return ss.str();
+       << " (of Python compilation unit at: " << compilation_unit().get() << ')';
+    return std::move(ss).str();
   }
 
   const std::vector<torch::jit::Function*>& methods() const;

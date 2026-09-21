@@ -131,15 +131,10 @@ void calculateUniqueTensorIDs(
         tensor_set.insert(t.allocation_id_ref_.get().value());
       }
     }
-    tensors.erase(
-        std::remove_if(
-            tensors.begin(),
-            tensors.end(),
-            [&tensor_set](const auto& i) {
-              auto it = tensor_set.find(i.allocation_id_ref_.get().value());
-              return it == tensor_set.end();
-            }),
-        tensors.end());
+    std::erase_if(tensors, [&tensor_set](const auto& i) {
+      auto it = tensor_set.find(i.allocation_id_ref_.get().value());
+      return it == tensor_set.end();
+    });
   }
 
   // Handle the case that the storage of a TensorImpl changed.

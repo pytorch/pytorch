@@ -17,10 +17,6 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
-#include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
 #include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -585,6 +581,7 @@ Tensor to(
 // across tensors.
 std::vector<Tensor> _to_cpu(TensorList tensors) {
   std::vector<Tensor> cpu_tensors;
+  cpu_tensors.reserve(tensors.size());
   for (const auto& t : tensors) {
     cpu_tensors.push_back(t.cpu());
   }
@@ -652,7 +649,6 @@ Tensor to_dense_backward(
     default:
       TORCH_CHECK(
           false, "to_dense_backward: Unsupported input layout: ", input_layout);
-      return Tensor{};
   }
 }
 
@@ -752,7 +748,20 @@ Tensor sparse_compressed_to_dense(
     dense_reshaped_sizes.erase(
         dense_reshaped_sizes.begin(), dense_reshaped_sizes.begin() + 2);
   } else {
+    TORCH_CHECK(
+        values.dim() >= 4,
+        "sparse_compressed_to_dense: expected values to have at least 4 dimensions, but got ",
+        values.dim());
+
     std::array<int64_t, 2> blocksize = {values.size(2), values.size(3)};
+
+    TORCH_CHECK(
+        blocksize[0] > 0 && blocksize[1] > 0,
+        "sparse_compressed_to_dense: expected block sizes to be strictly positive, but got ",
+        blocksize[0],
+        " and ",
+        blocksize[1]);
+
     nrows = self.size(batch_ndim) / blocksize[0];
     ncols = self.size(batch_ndim + 1) / blocksize[1];
     dense_reshaped_sizes[1] = blocksize[0];
@@ -1182,7 +1191,7 @@ static inline void _to_sparse_check_arguments(
               ": tensor sparse size (",
               self.size(sparse_row_dim),
               ",",
-              self.size(sparse_row_dim),
+              self.size(sparse_col_dim),
               ") must be divisible by given blocksize (",
               blocksize_to[0],
               ",",
@@ -1399,7 +1408,6 @@ Tensor dense_to_sparse_with_mask(
       " to ",
       layout_to,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor dense_to_sparse_csr(
@@ -1482,7 +1490,6 @@ Tensor dense_to_sparse(
       " to ",
       layout_to,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
@@ -1766,7 +1773,6 @@ Tensor sparse_compressed_to_sparse_csr(
       false,
       "sparse_compressed_to_sparse_csr: expected SparseCsr or SparseCsc layout but got ",
       self.layout());
-  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse_csc(
@@ -1787,7 +1793,6 @@ Tensor sparse_compressed_to_sparse_csc(
       false,
       "sparse_compressed_to_sparse_csc: expected SparseCsr or SparseCsc layout but got ",
       self.layout());
-  return Tensor{};
 }
 
 Tensor coo_to_sparse_csr(
@@ -2138,8 +2143,8 @@ static Tensor _compressed_to_block_compressed_cpu(
             plain_dim,
             compressed_blocksize,
             plain_blocksize,
-            input_compressed_indices.data_ptr<index_t>(),
-            input_plain_indices.data_ptr<index_t>());
+            input_compressed_indices.const_data_ptr<index_t>(),
+            input_plain_indices.const_data_ptr<index_t>());
       });
   DimVector dense_shape{input_values.sizes().slice(1, input_values.dim() - 1)};
   DimVector values_shape{num_blocks, blocksize[0], blocksize[1]};
@@ -2170,9 +2175,9 @@ static Tensor _compressed_to_block_compressed_cpu(
                   compressed_blocksize,
                   plain_blocksize,
                   n_dense,
-                  input_compressed_indices.data_ptr<index_t>(),
-                  input_plain_indices.data_ptr<index_t>(),
-                  input_values.data_ptr<scalar_t>(),
+                  input_compressed_indices.const_data_ptr<index_t>(),
+                  input_plain_indices.const_data_ptr<index_t>(),
+                  input_values.const_data_ptr<scalar_t>(),
                   result_compressed_indices.data_ptr<index_t>(),
                   result_plain_indices.data_ptr<index_t>(),
                   result_values.data_ptr<scalar_t>());
@@ -2222,7 +2227,6 @@ Tensor sparse_compressed_to_sparse_bsr(
       false,
       "sparse_compressed_to_sparse_bsr: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ",
       self.layout());
-  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse_bsc(
@@ -2260,7 +2264,6 @@ Tensor sparse_compressed_to_sparse_bsc(
       false,
       "sparse_compressed_to_sparse_bsc: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ",
       self.layout());
-  return Tensor{};
 }
 
 Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
@@ -2273,7 +2276,6 @@ Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
       " to ",
       kSparse,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse(
@@ -2377,7 +2379,6 @@ Tensor sparse_compressed_to_sparse(
       " to ",
       layout_to,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor sparse_coo_to_sparse(
@@ -2414,7 +2415,6 @@ Tensor sparse_coo_to_sparse(
       " to ",
       layout_to,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor to_sparse(const Tensor& self, const int64_t sparse_dim) {

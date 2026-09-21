@@ -10,6 +10,7 @@ from collections import namedtuple
 import torch
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -65,6 +66,7 @@ class DistOpDispatchOverHead(DTensorTestBase):
     def world_size(self) -> int:
         return 4
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     def test_dtensor_add_op_dispatch_overhead(self):
         if torch.cuda.is_available():

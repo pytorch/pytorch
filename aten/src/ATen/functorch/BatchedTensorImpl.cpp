@@ -156,7 +156,6 @@ c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
   TORCH_CHECK(false, "accessing `data` under vmap transform is not allowed");
-  return nullptr;
 }
 
 c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
@@ -164,7 +163,6 @@ c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   TORCH_CHECK(false, "accessing `data` under vmap transform is not allowed");
-  return nullptr;
 }
 
 void BatchedTensorImpl::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {

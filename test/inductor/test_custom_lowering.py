@@ -4,9 +4,11 @@ from functools import partial
 from unittest import skipIf
 
 import torch
+from torch._inductor import config
 from torch._inductor.ir import Pointwise
-from torch._inductor.lowering import make_pointwise, register_lowering
+from torch._inductor.lowering import make_fallback, make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import ops
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
@@ -22,7 +24,7 @@ class TestCustomLowering(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.test_inductor_ops = torch.library.Library(  # noqa: TOR901
+        cls.test_inductor_ops = torch.library.Library(  # noqa: SCOPED_LIBRARY
             "test_inductor_ops", "DEF"
         )
         cls.device_list = ["Meta", "CUDA", "XPU"]
@@ -30,7 +32,7 @@ class TestCustomLowering(InductorTestCase):
             setattr(
                 cls,
                 "impl_" + device.lower(),
-                torch.library.Library(  # noqa: TOR901
+                torch.library.Library(  # noqa: SCOPED_LIBRARY
                     "test_inductor_ops", "IMPL", device
                 ),
             )
@@ -133,7 +135,15 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("add_custom", add_custom)
 
         def add_custom_lowering(a, b):
-            fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
+            if torch.version.hip:
+                # ROCm GCN assembly
+                fn = partial(
+                    ops.inline_asm_elementwise,
+                    asm="v_add_f32 $0, $1, $2",
+                    constraints="=v, v, v",
+                )
+            else:
+                fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
             return make_pointwise(fn)(a, b)
 
         register_lowering(
@@ -155,8 +165,10 @@ class TestCustomLowering(InductorTestCase):
         def foo_lowering(x):
             return x
 
-        assert torch.ops.helion_test.foo in custom_lowering_dict
-        assert torch.ops.helion_test.foo not in torch._inductor.lowering.lowerings
+        if torch.ops.helion_test.foo not in custom_lowering_dict:
+            raise AssertionError
+        if torch.ops.helion_test.foo in torch._inductor.lowering.lowerings:
+            raise AssertionError
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
@@ -208,7 +220,7 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_tanh_approx(self):
         def fn(inp):
@@ -223,7 +235,22 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
+    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
+    def test_reused_inline_asm_realized(self):
+        def fn(inp):
+            y = torch.ops.test_inductor_ops.tanh_approx(inp)
+            return y.sum(dim=0), y.sum(dim=1)
+
+        inp = torch.randn(32, 64, device=GPU_TYPE)
+        expected = (torch.tanh(inp).sum(dim=0), torch.tanh(inp).sum(dim=1))
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), inp)
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual("\n".join(code).count("tanh.approx.f32"), 1)
+
+    @requires_gpu()
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_multi_inp_asm(self):
         def fn(a, b):
@@ -236,6 +263,17 @@ class TestCustomLowering(InductorTestCase):
         out1 = a + b
         out2 = fn_opt(a, b)
         self.assertEqual(out1, out2)
+
+    @config.patch(joint_graph_constant_folding=False)
+    def test_constant_creation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.tensor(1)
+
+        make_fallback(torch.ops.aten.lift_fresh_copy.default)
+        self.assertTrue(
+            torch.allclose(torch.compile(M())(torch.ones(3)), torch.ones(3) + 1)
+        )
 
 
 if __name__ == "__main__":

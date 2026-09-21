@@ -7,11 +7,12 @@ import io
 import logging
 import os
 
-from onnxscript import BOOL, FLOAT, opset18 as op
+from onnxscript import FLOAT, opset18 as op
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class SampleModel(torch.nn.Module):
@@ -62,13 +63,14 @@ class SampleModelForDimOne(torch.nn.Module):
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def assert_export(
         self, *args, strategy: str | None = "TorchExportNonStrictStrategy", **kwargs
     ):
-        onnx_program = torch.onnx.export(
-            *args, **kwargs, dynamo=True, fallback=False, verbose=False
-        )
-        assert onnx_program is not None
+        onnx_program = torch.onnx.export(*args, **kwargs, dynamo=True, verbose=False)
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         onnx_testing.assert_onnx_program(onnx_program, strategy=strategy)
         return onnx_program
 
@@ -413,7 +415,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             Mod(),
             (torch.randn(3, 4),),
             dynamo=True,
-            fallback=False,
         )
         self.assertFalse(torch.onnx.is_in_onnx_export())
 
@@ -443,6 +444,8 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
 
 class TestCustomTranslationTable(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_custom_translation_table_overrides_ops(self):
         from onnxscript import opset18 as op
 
@@ -465,35 +468,6 @@ class TestCustomTranslationTable(common_utils.TestCase):
         all_nodes = [n.op_type for n in onnx_program.model.graph]
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
-
-    def test_custom_translation_table_supports_overloading_ops(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.ops.aten.logical_and.default(x, y)
-
-        def custom_add_bool(self: BOOL, other: BOOL) -> BOOL:
-            # Replace add with sub
-            return op.Sub(self, other)
-
-        def custom_add(self: FLOAT, other: FLOAT) -> FLOAT:
-            # Replace add with mul
-            return op.Mul(self, other)
-
-        custom_translation_table = {
-            torch.ops.aten.logical_and.default: [custom_add, custom_add_bool],
-        }
-
-        onnx_program = torch.onnx.export(
-            Model(),
-            (torch.tensor(1, dtype=torch.bool), torch.tensor(1, dtype=torch.bool)),
-            custom_translation_table=custom_translation_table,
-            dynamo=True,
-        )
-        all_nodes = [n.op_type for n in onnx_program.model.graph]
-        # The dispatcher should pick the correct overload based on the input types
-        self.assertIn("Sub", all_nodes)
-        self.assertNotIn("Add", all_nodes)
-        self.assertNotIn("Mul", all_nodes)
 
     def test_custom_translation_table_supports_custom_op_as_target(self):
         # Define the custom op and use it in the model

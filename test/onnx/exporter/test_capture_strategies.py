@@ -6,10 +6,13 @@ from __future__ import annotations
 import torch
 from torch.onnx._internal.exporter import _capture_strategies
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 @common_utils.instantiate_parametrized_tests
 class ExportStrategiesTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "strategy_cls",
         [
@@ -32,7 +35,8 @@ class ExportStrategiesTest(common_utils.TestCase):
 
         result = strategy_cls()(model, (a, b), kwargs=None, dynamic_shapes=None)
         ep = result.exported_program
-        assert ep is not None
+        if ep is None:
+            raise AssertionError("ep is None")
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
     def test_draft_export_on_data_dependent_model(self):
@@ -53,7 +57,8 @@ class ExportStrategiesTest(common_utils.TestCase):
             expected_warning = "1 issue(s) found during export, and it was not able to soundly produce a graph."
             self.assertIn(expected_warning, str(cm.output))
         ep = result.exported_program
-        assert ep is not None
+        if ep is None:
+            raise AssertionError("ep is None")
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
 

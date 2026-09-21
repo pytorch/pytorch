@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/native/ConvUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -27,7 +26,7 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 // See Note [ATen preprocessor philosophy]
 
@@ -134,7 +133,7 @@ at::Tensor miopen_convolution_relu(
   TORCH_CHECK(false, "miopen_convolution_relu: ATen not compiled with MIOpen support");
 }
 
-}}
+}
 
 #else  // AT_ROCM_ENABLED
 
@@ -278,14 +277,15 @@ BenchmarkCache<size_t> bwd_filter_wssizes;
 
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
-    data = c10::hip::HIPCachingAllocator::raw_alloc(size);
+    data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
-  Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
+  Workspace(Workspace&&) = delete;
+  Workspace& operator=(const Workspace&) = delete;
+  Workspace& operator=(Workspace&&) = delete;
   ~Workspace() {
     if (data) {
-      c10::hip::HIPCachingAllocator::raw_delete(data);
+      c10::cuda::CUDACachingAllocator::raw_delete(data);
     }
   }
 
@@ -587,7 +587,7 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   wsscache.insert(args.params, perfResults.memory);
 
   if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
-      c10::hip::HIPCachingAllocator::emptyCache();
+      c10::cuda::CUDACachingAllocator::emptyCache();
   }
 
 }
@@ -605,7 +605,7 @@ Workspace chooseAlgorithm(
   search::wsscache().find(args.params, &workspace_size);
   try {
     return Workspace(workspace_size);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
@@ -626,7 +626,7 @@ Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
   try {
     *solution_id = solution.solution_id;
     return Workspace(solution.workspace_size);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm
@@ -657,14 +657,14 @@ static inline void split_batch_dim_to_32bit_out(
     bool deterministic,
     bool depthwise,
     int64_t max_worksize,
-    func_t func_32bit) {
+    func_t func_indexing) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
   const int64_t no = output.numel();
   // Assume the shape of the tensor is (N, C, D1, D2, ...)
   // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
   if (ni <= int_max && no <= int_max) {
-    func_32bit(
+    func_indexing(
         output,
         input,
         weight,
@@ -693,7 +693,7 @@ static inline void split_batch_dim_to_32bit_out(
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
       Tensor output_ = output.narrow(0, start, split_size_);
-      func_32bit(
+      func_indexing(
           output_,
           input_,
           weight,
@@ -707,21 +707,18 @@ static inline void split_batch_dim_to_32bit_out(
     }
     return;
   }
-  // If control flow reaches here, this means even splitting N is not enough,
-  // then things starts to become complicated: For example, for conv2d, there
-  // following questions needs to be considered.
-  // - Is the memory layout NCHW or NHWC ?
-  // - If the conv is NCHW -> NC'H'W', then should we
-  //   - split only NC?
-  //   - split only N'C'?
-  //   - split both?
-  // - If the conv is NHWC, then we need to split across H, we need to be very
-  // careful about the boundary condition
-  //   to make sure that the boundary is handled correctly.
-  // - If we decide to make these splits, is the memory contiguous? Do we need
-  // to copy the memory? Considering the complexity of this issue, it is better
-  // not to use cuDNN for this case
-  TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
+  // MIOpen supports 64-bit indexing via miopenSetTensorDescriptorV2 API.
+  func_indexing(
+      output,
+      input,
+      weight,
+      padding,
+      stride,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      depthwise);
 }
 
 // ---------------------------------------------------------------------
@@ -1063,34 +1060,46 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
-  if (output_mask[0]) {
-    grad_input = miopen_convolution_transpose_backward_input(
-        grad_output,
-        weight,
-        padding,
-        stride,
-        dilation,
-        groups,
-        benchmark,
-        deterministic);
-  }
-  if (output_mask[1]) {
-    grad_weight = miopen_convolution_transpose_backward_weight(
-        weight.sizes(),
-        grad_output,
-        input,
-        padding,
-        stride,
-        dilation,
-        groups,
-        benchmark,
-        deterministic);
-  }
-  if (output_mask[2]) {
-    grad_bias = miopen_convolution_backward_bias(grad_output);
+  if (grad_output.numel() == 0) {
+    if (output_mask[0]) {
+      grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (output_mask[1]) {
+      grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (output_mask[2]) {
+      grad_bias = at::zeros({weight.size(1) * groups}, grad_output.options());
+    }
+  } else {
+    if (output_mask[0]) {
+      grad_input = miopen_convolution_transpose_backward_input(
+          grad_output,
+          weight,
+          padding,
+          stride,
+          dilation,
+          groups,
+          benchmark,
+          deterministic);
+    }
+    if (output_mask[1]) {
+      grad_weight = miopen_convolution_transpose_backward_weight(
+          weight.sizes(),
+          grad_output,
+          input,
+          padding,
+          stride,
+          dilation,
+          groups,
+          benchmark,
+          deterministic);
+    }
+    if (output_mask[2]) {
+      grad_bias = miopen_convolution_backward_bias(grad_output);
+    }
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor,Tensor,Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 // ---------------------------------------------------------------------
@@ -1228,6 +1237,9 @@ Tensor miopen_convolution_backward_input(
   TensorArg grad_input{grad_input_t, "result", 0};
   convolution_shape_check(
       c, grad_input, weight, grad_output, padding, stride, dilation, groups);
+  if (grad_input_t.numel() == 0) {
+    return grad_input_t;
+  }
 
   Tensor weight_contig = weight->contiguous(memory_format);
   Tensor grad_output_contig = grad_output->contiguous(memory_format);
@@ -1574,7 +1586,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
     }
   }
 
-  return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor, Tensor, Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 Tensor miopen_convolution_transpose_forward(
@@ -1660,6 +1672,9 @@ Tensor miopen_convolution_transpose(
       groups,
       benchmark,
       deterministic);
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
   if (bias->defined()) {
     miopen_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
   }
@@ -1763,7 +1778,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
     grad_bias = miopen_convolution_backward_bias(grad_output);
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor,Tensor,Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 // ---------------------------------------------------------------------

@@ -182,7 +182,7 @@ class AccessInfo {
   StmtPtr last_usage_{nullptr};
 
   // Whether or not this access is overlapped in the first Stmt it appears. This
-  // means we cannot use it's first Store as the initializer.
+  // means we cannot use its first Store as the initializer.
   bool firstUsageOverlapped_{false};
 
   // The cost in real ops that this access represents, to enable

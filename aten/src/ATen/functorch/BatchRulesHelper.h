@@ -141,6 +141,8 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   auto arguments = torch::jit::pop(*stack, num_arguments);
   std::vector<std::pair<Tensor, std::optional<int64_t>>> tensor_inputs;
   std::vector<int64_t> tensor_pos;
+  tensor_inputs.reserve(num_arguments);
+  tensor_pos.reserve(num_arguments);
   for (const auto idx : c10::irange(0, num_arguments)) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {

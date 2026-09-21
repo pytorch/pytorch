@@ -26,7 +26,7 @@ def unsafe_remove_auto_functionalized_pass(
     ep: ExportedProgram,
 ) -> ExportedProgram:
     """
-    This pass removes an instances of the higher order op 'auto_functionalized',
+    This pass removes all instances of the higher order op 'auto_functionalized',
     and modifies the calling EP inplace to have the original mutator op.
     This pass doesn't perform safety checks to make sure that this inplace mutation is safe.
     """
@@ -42,7 +42,10 @@ def unsafe_remove_auto_functionalized_pass(
                     node.op == "call_function" and node.target is auto_functionalized_v2
                 ):
                     func = node.args[0]
-                    assert isinstance(func, torch._ops.OpOverload)
+                    if not isinstance(func, torch._ops.OpOverload):
+                        raise AssertionError(
+                            f"Expected func to be an OpOverload, but got {type(func)}"
+                        )
                     # re-inplace everything
                     node.meta["only_clone_these_tensors"] = []
             decompose_auto_functionalized(ep.graph)

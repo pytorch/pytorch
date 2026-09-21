@@ -67,7 +67,7 @@ class TestNumbaIntegration(common.TestCase):
             self.assertRaises(AttributeError, lambda: cput.__cuda_array_interface__)
 
             # Sparse CPU/CUDA tensors do not implement the interface
-            if tp not in (torch.HalfTensor,):
+            if tp != torch.HalfTensor:
                 indices_t = torch.empty(1, cput.size(0), dtype=torch.long).clamp_(min=0)
                 sparse_t = torch.sparse_coo_tensor(indices_t, cput)
 

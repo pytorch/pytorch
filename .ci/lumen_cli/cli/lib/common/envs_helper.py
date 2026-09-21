@@ -2,11 +2,12 @@
 Environment Variables and Dataclasses Utility helpers for CLI tasks.
 """
 
+from __future__ import annotations
+
 import os
 from dataclasses import field, fields, is_dataclass, MISSING
 from pathlib import Path
 from textwrap import indent
-from typing import Optional, Union
 
 from cli.lib.common.utils import str2bool
 
@@ -18,9 +19,9 @@ def get_env(name: str, default: str = "") -> str:
 
 def env_path_optional(
     name: str,
-    default: Optional[Union[str, Path]] = None,
+    default: str | Path | None = None,
     resolve: bool = True,
-) -> Optional[Path]:
+) -> Path | None:
     """Get environment variable as optional Path."""
     val = get_env(name) or default
     if not val:
@@ -32,7 +33,7 @@ def env_path_optional(
 
 def env_path(
     name: str,
-    default: Optional[Union[str, Path]] = None,
+    default: str | Path | None = None,
     resolve: bool = True,
 ) -> Path:
     """Get environment variable as Path, raise if missing."""
@@ -61,7 +62,7 @@ def env_bool_field(
 
 def env_path_field(
     name: str,
-    default: Union[str, Path] = "",
+    default: str | Path = "",
     *,
     resolve: bool = True,
 ) -> Path:

@@ -253,7 +253,7 @@ TORCH_META_FUNC2(copysign, Tensor) (
 TORCH_META_FUNC(heaviside) (
   const Tensor& self, const Tensor& other
 ) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex() &&
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex() && !other.is_complex() &&
               (maybe_get_output().defined() ? !maybe_get_output().is_complex() : true),
               "heaviside is not yet implemented for complex tensors.");
   TORCH_CHECK(self.dtype() == other.dtype() &&
@@ -331,22 +331,22 @@ CREATE_BINARY_META_FUNC(igammac)
 CREATE_BINARY_META_FUNC(nextafter)
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
+  TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
+  TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
-    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
+    TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
-    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+    TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
 }
 
@@ -429,6 +429,7 @@ DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(ldexp_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -1568,12 +1569,42 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
   return at::full({}, 2.0, self.options()).pow(other);
 }
 
+// This function is used to dispatch to kernels that use std::ldexp on CPU and the global namespaces ::ldexp on CUDA
+// Both of these require floating types for 'self' and integer types for 'other'.
+static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(result)
+    .add_const_input(self)
+    .add_const_input(other)
+    .build();
+
+  ldexp_stub(iter.device_type(), iter);
+  return result;
+}
+
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+              "ldexp can't be cast to the desired output type ", result.scalar_type());
+
+  if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
+      isFloatingType(self.scalar_type()) &&
+      result.scalar_type() == self.scalar_type() &&
+      ldexp_stub.is_device_supported(self.device().type())) {
+    return _ldexp_int_exponent(self, other, result);
+  }
+
   return at::mul_out(result, self, _pow2(self, other));
 }
 
-
 Tensor ldexp(const Tensor& self, const Tensor& other) {
+  if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
+      isFloatingType(self.scalar_type()) &&
+      ldexp_stub.is_device_supported(self.device().type())) {
+    Tensor result = at::empty_like(self);
+    return _ldexp_int_exponent(self, other, result);
+  }
+
   return at::mul(self, _pow2(self, other));
 }
 

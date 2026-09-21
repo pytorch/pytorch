@@ -1,14 +1,22 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+import functools
+import warnings
+from typing import Any
 
 import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._triton import has_triton_block_ptr
 
 from .. import config
-from ..runtime.hints import AttrsDescriptorWrapper
-from ..utils import _type_of, expr_fits_within_32bit, triton_version_uses_attrs_dict
+from ..runtime.hints import AttrsDescriptorWrapper, DeviceProperties
+from ..utils import (
+    _type_of,
+    device_supports_fp64,
+    expr_fits_within_32bit,
+    triton_version_uses_attrs_dict,
+)
 from ..virtualized import V
 from .common import (
     ArgName,
@@ -19,6 +27,35 @@ from .common import (
     TMADescriptorArg,
     WorkspaceArg,
 )
+
+
+@functools.cache
+def _warn_block_ptr_unavailable() -> None:
+    # Fires only in the no-op case (flag on, API gone), so users who never set
+    # the flag -- and callers that patch it to False -- stay quiet.
+    warnings.warn(
+        "config.triton.use_block_ptr=True but the installed Triton no longer "
+        "provides the block-pointer frontend API (removed in "
+        "triton-lang/triton#10833); falling back to the default masked-indexing "
+        "path. This flag is deprecated and will be removed (#191012).",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+
+def use_block_ptr_enabled() -> bool:
+    """Effective block-pointer codegen setting.
+
+    Honors ``config.triton.use_block_ptr`` only where the installed Triton still
+    provides the block-pointer frontend API. When the flag is set but the API is
+    gone the request is a no-op: warn once, then fall back to masked indexing.
+    """
+    if not config.triton.use_block_ptr:
+        return False
+    if has_triton_block_ptr():
+        return True
+    _warn_block_ptr_unavailable()
+    return False
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -32,20 +69,68 @@ def should_unwrap_unspec_arg(name: str):
     return False
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
+def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
+    dtype: torch.dtype,
+    arg_name: str | None = None,
+    *,
+    device: torch.device | None = None,
+) -> bool:
+    # Triton rejects fp8e4nv pointer types before sm89, but eager CUDA can
+    # still dequantize float8_e4m3fn values by treating storage as raw bytes.
+    if dtype != torch.float8_e4m3fn or torch.version.hip is not None:
+        return False
+    if arg_name is not None and not arg_name.startswith("in_ptr"):
+        return False
+
+    if device is None:
+        try:
+            device = V.graph.get_current_device_or_throw()
+        except AttributeError:
+            return False
+
+    if device.type != "cuda":
+        return False
+
+    return DeviceProperties.create(device).cc < 89
+
+
+def triton_meta_device_props(device: torch.device) -> DeviceProperties:
+    """DeviceProperties for a kernel's triton_meta, respecting compile-on-one-rank.
+
+    Under CooR the rank-specific index is dropped so a kernel's triton_meta -- hence
+    its cache key and its generated source -- is byte-identical across ranks; the
+    launcher resolves the real device at load time.
+
+    NB: torch.device("cuda").index is None, not 0, and that None is what reaches
+    DeviceProperties. The None is load-bearing, not cosmetic: in triton_heuristics.py
+    it is the sentinel _resolve_load_device keys on to pick the running rank's current
+    device, and what sets kernel.device_agnostic -- which in turn forces the per-device
+    static launcher instead of the fast launcher, whose single baked function pointer
+    would be for the wrong GPU. Baking index=0 on every rank would make the source
+    byte-identical yet still launch on rank 0's device, so a byte-identity check alone
+    does not catch it.
+
+    Every site that builds triton_meta must go through here. Applying the rule in
+    TritonKernel alone left Triton templates (select_algorithm.py) and combo kernels
+    (triton_combo_kernel.py) baking DeviceProperties(index=N), which makes their
+    generated code differ across ranks.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if _coor_enabled():
+        device = torch.device(device.type)
+    return DeviceProperties.create(device)
+
+
+def signature_of(
+    arg: KernelArgType,
+    *,
+    size_dtype: str | None,
+    use_fp64_for_python_float: bool = True,
+) -> str:
+    """Return the Triton signature type for an Inductor kernel argument."""
     if isinstance(arg, TensorArg):
-        # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
-        # Related PR: https://github.com/triton-lang/triton/pull/2279/
-        if arg.dtype == torch.float8_e4m3fn:
-            typ = "*fp8e4nv"
-        elif arg.dtype == torch.float8_e5m2:
-            typ = "*fp8e5"
-        elif arg.dtype == torch.float8_e4m3fnuz:
-            typ = "*fp8e4b8"
-        elif arg.dtype == torch.float8_e5m2fnuz:
-            typ = "*fp8e5b16"
-        else:
-            typ = _type_of(arg.dtype)
+        typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_typ = typ.lstrip("*")
@@ -53,6 +138,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
                 return "fp32"
             else:
                 return new_typ
+        elif use_uint8_triton_storage_for_cuda_float8_e4m3fn(arg.dtype, arg.name):
+            return "*u8"
         else:
             return typ
     if isinstance(arg, SizeArg):
@@ -71,15 +158,32 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             # it should be marked as "constexpr" in the signature.
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
+            # Inductor-generated kernels use fp64 to preserve Python-float
+            # precision. User-defined Triton kernels opt out so their compiled
+            # signatures match Triton's eager specialization.
+            if (
+                use_fp64_for_python_float
+                and config._use_fp64_for_unbacked_floats
+                and device_supports_fp64(V.graph.current_device)
+            ):
+                return "fp64"
             return "fp32"
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
             arg.expr, (SymT.UNBACKED_FLOAT)
         ):
+            # Unbacked floats from .item() are runtime Python floats, so they
+            # follow the same eager-vs-Inductor signature policy as literals.
+            if (
+                use_fp64_for_python_float
+                and config._use_fp64_for_unbacked_floats
+                and device_supports_fp64(V.graph.current_device)
+            ):
+                return "fp64"
             return "fp32"
         elif isinstance(arg.expr, bool):
             return "i1"
 
-        # if this is a integer
+        # if this is an integer
         if size_dtype == "tl.int32":
             return "i32"
         elif size_dtype == "tl.int64":
@@ -101,9 +205,14 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             return "nvTmaDesc"
         else:
             # https://github.com/triton-lang/triton/blob/9695baed9b46cf957e08b157bb4133f4a4b331c5/python/triton/runtime/jit.py#L360-L363
-            assert arg.api_type == "stable"
-            assert arg.block_shape is not None
-            assert arg.dtype is not None
+            if arg.api_type != "stable":
+                raise AssertionError(
+                    f"expected api_type == 'stable', got {arg.api_type}"
+                )
+            if arg.block_shape is None:
+                raise AssertionError("expected block_shape to not be None")
+            if arg.dtype is None:
+                raise AssertionError("expected dtype to not be None")
             inner = _type_of(arg.dtype)[1:]  # strip the `*`: *fp32 -> fp32
             return f"tensordesc<{inner}{list(arg.block_shape)}>"
     if isinstance(arg, ConstexprArg):
@@ -120,13 +229,29 @@ def non_constexpr_signature(signature):
     return new_signature
 
 
+def select_tile_hint(size_hints, signature):
+    """Pick TileHint.SQUARE vs TileHint.DEFAULT for 2D pointwise; None for 1D.
+
+    SQUARE applies when the kernel has exactly 2 size hints and 4 non-constexpr
+    signature args (input, output, and 2 numel args -> a square 2D tile).
+    """
+    from torch._inductor.runtime.hints import TileHint
+
+    if len(size_hints) != 2:
+        return None
+    if len(non_constexpr_signature(signature)) == 4:
+        return TileHint.SQUARE
+    return TileHint.DEFAULT
+
+
 def signature_to_meta(
     signature: list[KernelArgType],
     *,
-    size_dtype: Optional[str],
+    size_dtype: str | None,
     argdefs: list[ArgName],
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
     is_template: bool = False,
+    use_fp64_for_python_float: bool = True,
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
@@ -136,16 +261,17 @@ def signature_to_meta(
         # risky to use tl.int32 dtype since we may have ks0*ks1 later
         # for kernels like torch.mean when dynamic shape is enabled.
         #
-        # Check config.triton.use_block_ptr, since Triton block pointer
-        # does not support 64bit indexing:
-        # https://gist.github.com/shunting314/6a41c776171720ce4561f202dcde0ad6
+        # Block pointers do not support 64-bit indexing, so keep ks indices in
+        # tl.int32 whenever the (deprecated) block-pointer path is actually
+        # active. Templates like flex attention/decoding likewise use
+        # hand-written block pointers, so they also stay on 32-bit ks indexing.
         #
-        # If the triton metadata is for a template, don't use tl.int64 index.
-        # Templates like flex attention/decoding uses block pointers which
-        # does not support 64 bit indexing.
+        # assume_32bit_indexing already asserts (and guards) that every ks* symbol
+        # fits in int32.
         if (
-            not config.triton.use_block_ptr
-            and not is_template
+            not is_template
+            and not use_block_ptr_enabled()
+            and not config.assume_32bit_indexing
             and isinstance(arg, SizeArg)
             and arg.name.startswith("ks")
         ):
@@ -153,13 +279,34 @@ def signature_to_meta(
         return size_dtype
 
     return {
-        argdefs[i].name: signature_of(arg, size_dtype=_decide_tl_dtype(arg))
+        argdefs[i].name: signature_of(
+            arg,
+            size_dtype=_decide_tl_dtype(arg),
+            use_fp64_for_python_float=use_fp64_for_python_float,
+        )
         for i, arg in zip(indices, signature)
     }
 
 
-def is_unaligned_buffer(arg: TensorArg):
-    buf_name = arg.buffer
+def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
+    """Get the layout for a buffer, handling both scheduler buffers and graph inputs."""
+    if V.graph.scheduler:
+        layout = V.graph.scheduler.get_buffer_layout(buf_name)
+    else:
+        buffer = V.graph.try_get_buffer(buf_name)
+        # output arg
+        if not buffer:
+            if buf_name != V.kernel.output_node.name:
+                raise AssertionError(
+                    f"expected buf_name == output_node.name, got {buf_name}"
+                )
+            layout = V.kernel.output_node.layout
+        else:
+            layout = buffer.get_layout()
+    return layout
+
+
+def is_unaligned_buffer_name(buf_name: str) -> bool:
     if buf_name in V.graph.unaligned_buffers:
         return True
 
@@ -173,21 +320,15 @@ def is_unaligned_buffer(arg: TensorArg):
         # all constants are assumed to be aligned
         return False
 
-    if V.graph.scheduler:
-        layout = V.graph.scheduler.get_buffer_layout(buf_name)
-    else:
-        buffer = V.graph.try_get_buffer(buf_name)
-        # output arg
-        if not buffer:
-            assert buf_name == V.kernel.output_node.name
-            layout = V.kernel.output_node.layout
-        else:
-            layout = buffer.get_layout()
-
+    layout = _get_buffer_layout(buf_name)
     if isinstance(layout, torch._inductor.ir.NonOwningLayout):
         return not layout.maybe_guard_aligned()
     else:
         return False
+
+
+def is_unaligned_buffer(arg: TensorArg):
+    return is_unaligned_buffer_name(arg.buffer)
 
 
 def _arg_equals_1(arg: KernelArgType) -> bool:
@@ -201,7 +342,7 @@ def _arg_equals_1(arg: KernelArgType) -> bool:
 def equal_1_arg_indices(
     args: list[KernelArgType],
     *,
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
 ) -> tuple[int, ...]:
     if indices is None:
         indices = list(range(len(args)))
@@ -211,10 +352,37 @@ def equal_1_arg_indices(
     return equal_to_1
 
 
+def _is_tensor_within_2gb(arg: TensorArg) -> bool:
+    """Check if a tensor argument's storage is provably within 2GB.
+
+    Mirrors HIPBackend.is_within_2gb() but uses compile-time symbolic analysis
+    instead of runtime tensor inspection. This enables canonicalize_pointers to
+    decompose pointer arithmetic into (splat(base), offset) form for buffer ops.
+    """
+    MAX_BYTES = 2**31 - 1
+    try:
+        # Graph inputs aren't tracked by the scheduler; get their layout
+        # from the graph_inputs dict to avoid KeyError in get_buffer_layout.
+        if arg.buffer in V.graph.graph_inputs:
+            inp = V.graph.graph_inputs[arg.buffer]
+            if hasattr(inp, "get_layout"):
+                layout = inp.get_layout()
+            else:
+                return False
+        else:
+            layout = _get_buffer_layout(arg.buffer)
+        storage_bytes = layout.storage_size() * arg.dtype.itemsize
+        return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
+    except Exception:
+        return False
+
+
 def config_of(
     args: list[KernelArgType],
     *,
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
+    pointer_range_override: tuple[int, ...] | None = None,
+    skip_cpp_wrapper_input_tensor_alignment: bool = False,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))
@@ -240,7 +408,7 @@ def config_of(
                 return False
             if x.expr is None:
                 return False
-            if isinstance(x.expr, float):
+            if isinstance(x.expr, (float, bool)):
                 return False
             return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
         if isinstance(x, WorkspaceArg):
@@ -250,16 +418,49 @@ def config_of(
             return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
+    def include_tensor_alignment(arg: KernelArgType) -> bool:
+        if (
+            not skip_cpp_wrapper_input_tensor_alignment
+            or not V.graph.cpp_wrapper
+            or V.graph.aot_mode
+            or not isinstance(arg, TensorArg)
+            or arg.buffer not in V.graph.graph_inputs
+        ):
+            return True
+
+        try:
+            input_idx = V.graph.graph_input_names.index(arg.buffer)
+        except ValueError:
+            return True
+        return input_idx not in (V.graph.inputs_to_check or ())
+
     if config.triton.divisible_by_16:
         divisible_by_16 = tuple(
             i
             for i, arg in zip(indices, args)
-            if is_aligned(arg, alignment=16, include_tensor=True)
+            if is_aligned(
+                arg,
+                alignment=16,
+                include_tensor=include_tensor_alignment(arg),
+            )
         )
     else:
         divisible_by_16 = ()
 
     equal_to_1 = equal_1_arg_indices(args, indices=indices)
 
-    # pyrefly: ignore [bad-argument-type]
-    return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)
+    # On AMD/HIP, tag tensor args whose storage fits in 2GB so Triton
+    # can use 32-bit pointer offsets and emit buffer load/store ops.
+    if pointer_range_override is not None:
+        pointer_range_32 = pointer_range_override
+    elif torch.version.hip is not None and config.triton.emit_pointer_range_32:
+        pointer_range_32 = tuple(
+            i
+            for i, arg in zip(indices, args)
+            if isinstance(arg, TensorArg) and _is_tensor_within_2gb(arg)
+        )
+    else:
+        pointer_range_32 = ()
+
+    # pyrefly: ignore [bad-argument-count, bad-argument-type]
+    return AttrsDescriptorWrapper(divisible_by_16, equal_to_1, pointer_range_32)

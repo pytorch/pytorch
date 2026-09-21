@@ -1,7 +1,5 @@
 #include <pybind11/pybind11.h>
-#include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
@@ -92,7 +90,7 @@ static c10::IValue preprocess(
       py::cast<torch::jit::Module>(nnapi_processed[0].attr("_c"));
   std::stringstream ss;
   shape_compute_module._save_for_mobile(ss);
-  dict.insert("shape_compute_module", ss.str());
+  dict.insert("shape_compute_module", std::move(ss).str());
 
   // transform Python lists to C++ c10::List
   c10::List<at::Tensor> weights(

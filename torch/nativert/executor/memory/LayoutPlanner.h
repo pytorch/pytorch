@@ -104,7 +104,7 @@ class LayoutPlanner {
   //
   // note: planning algorithms are allowed to change the ordering
   // of allocation specs -- so we pass the index of the spec during
-  // it's insertion s.t., each execution frame can use it to
+  // its insertion s.t., each execution frame can use it to
   // reference the correct associated max historical size / underlying
   // tensor value
   void initialize_vectors(

@@ -354,7 +354,7 @@ class UsageLogger:
                 gpu_allocated_mem_values[gpu.uuid].append(gpu.allocated_mem_value)
                 gpu_total_mem_values[gpu.uuid] = gpu.total_mem_value
 
-        for gpu_uuid in gpu_utilization.keys():
+        for gpu_uuid in gpu_utilization:
             gpu_util_stats = self._generate_stats(gpu_utilization[gpu_uuid])
             gpu_mem_util_stats = self._generate_stats(gpu_mem_utilization[gpu_uuid])
             gpu_allocated_mem_stats = self._generate_stats(gpu_allocated_mem[gpu_uuid])
@@ -419,7 +419,7 @@ class UsageLogger:
         elif self._has_amdsmi:
             # Iterate over the available GPUs
             for handle in self._gpu_handles:
-                # see https://rocm.docs.amd.com/projects/amdsmi/en/docs-5.7.0/py-interface_readme_link.html
+                # see https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-py-lib.html
                 engine_usage = amdsmi.amdsmi_get_gpu_activity(handle)
                 gpu_uuid = amdsmi.amdsmi_get_gpu_device_uuid(handle)
                 gpu_utilization = engine_usage["gfx_activity"]

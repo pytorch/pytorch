@@ -11,9 +11,6 @@
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <torch/csrc/autograd/variable.h>
-
-#include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/symbol.h>
 
@@ -60,7 +57,7 @@ void PropertyPropBase::propagateBlock(Block* block, bool insert_expands) {
   for (Node* node : block->nodes()) {
     try {
       propagateNode(node, insert_expands);
-    } catch (propagation_error& e) {
+    } catch (propagation_error&) {
       setUnshapedType(node);
     } catch (std::exception& e) {
       throw(
@@ -107,10 +104,6 @@ void PropertyPropBase::setUnshapedType(Node* node) {
   for (auto o : node->outputs()) {
     setUnshapedType(o);
   }
-}
-
-namespace prim {
-using namespace ::c10::prim;
 }
 
 #define SHAPE_ASSERT(cond) \
@@ -273,7 +266,7 @@ class ShapePropagator : public PropertyPropBase {
         aten::transpose_,
     };
 
-    if (resize_ops.count(n->kind()))
+    if (resize_ops.contains(n->kind()))
       return true;
 
     if (!n->maybeSchema())
@@ -326,7 +319,7 @@ class ShapePropagator : public PropertyPropBase {
     std::stringstream ss;
     ss << "unable to create representative value for: " << type_->str()
        << ". File a bug report";
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(std::move(ss).str());
   }
 
   void broadcastBinary(
@@ -368,8 +361,9 @@ class ShapePropagator : public PropertyPropBase {
   // know whether the dependency has been executed.
   std::unordered_map<Node*, bool> dependsOnMutationMemo_;
   bool dependsOnMutation(Node* node) {
-    if (dependsOnMutationMemo_.count(node) != 0) {
-      return dependsOnMutationMemo_[node];
+    if (auto it = dependsOnMutationMemo_.find(node);
+        it != dependsOnMutationMemo_.end()) {
+      return it->second;
     }
 
     if (aliasDb_.hasWriters(node)) {
@@ -1074,7 +1068,7 @@ class ShapePropagator : public PropertyPropBase {
         }};
 
     // aten::where is special in that its return type is the second argument's
-    // (self) type rather than the that of condition
+    // (self) type rather than that of condition
     static const register_formula_for where_op{
         {
             "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
@@ -1464,9 +1458,15 @@ class ShapePropagator : public PropertyPropBase {
             "aten::full_like(Tensor self, Scalar fill_value, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
             "aten::ones_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
             "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::rand_like.generator(Tensor self, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
             "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like.generator(Tensor self, int high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like.Tensor(Tensor self, Tensor high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like.Tensor_generator(Tensor self, Tensor high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like.low_dtype(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like.low_generator_dtype(Tensor self, int low, int high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
             "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randn_like.generator(Tensor self, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
             "aten::zeros_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
@@ -2002,7 +2002,7 @@ class ShapePropagator : public PropertyPropBase {
       auto sizes = tp->sizes().concrete_sizes().value();
       auto dims = node->get<c10::List<int64_t>>(attr::dim).value();
       bool keepdim = node->get<bool>(attr::keepdim).value();
-      std::reverse(dims.begin(), dims.end());
+      std::ranges::reverse(dims);
       for (int64_t dim : dims) {
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
         if (keepdim) {

@@ -143,7 +143,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       config = extra_json["config"].get<CoreMLConfig>();
       input_specs = extra_json["inputs"].get<std::vector<TensorSpec>>();
       output_specs = extra_json["outputs"].get<std::vector<TensorSpec>>();
-    } catch (std::exception& exn) {
+    } catch (std::exception&) {
       TORCH_CHECK(false, "Parsing model dict failed!");
     }
 
@@ -213,8 +213,9 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
 #elif TARGET_OS_MAC
     NSOperatingSystemVersion supportedVer = {10, 13, 0};
     return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:supportedVer];
-#endif
+#else
     return false;
+#endif
   }
 };
 

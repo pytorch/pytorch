@@ -1,8 +1,8 @@
 #name,backend,data_type,shape,wrapper,perf_speedup_target_c7i_metal_24xl
 phlippe_densenet,inductor,float32,static,default,1.46474287
 basic_gnn_edgecnn,inductor,float32,dynamic,default,1.30092957
-llama_v2_7b_16h,inductor,float32,dynamic,default,1.23234331
-resnet50,inductor,float32,dynamic,default,1.67742767
+llama_v2_7b_16h,inductor,float32,dynamic,default,1.10000000
+resnet50,inductor,float32,dynamic,default,1.50000000
 mobilenet_v3_large,inductor,float32,static,cpp,2.63311706
 functorch_maml_omniglot,inductor,float32,dynamic,cpp,1.126799
 yolov3,export-aot-inductor,float32,static,default,1.40687424

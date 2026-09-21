@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 
-# Unlike the rest of the PyTorch this file must be python2 compliant.
+# Unlike the rest of PyTorch, this file must be python2 compliant.
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py` or `python -m torch.utils.collect_env`
 import datetime
@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 from collections import namedtuple
-from typing import cast as _cast
+from typing import cast as _cast, Dict as _Dict
 
 
 try:
@@ -51,6 +51,7 @@ SystemEnv = namedtuple(
         "caching_allocator_config",
         "is_xnnpack_available",
         "cpu_info",
+        "rocm_compiled_version",
     ],
 )
 
@@ -654,11 +655,19 @@ def get_pip_packages(run_lambda, patterns=None):
     return pip_version, filtered_out
 
 
-def get_cachingallocator_config():
-    ca_config = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
-    if not ca_config:
-        ca_config = os.environ.get("PYTORCH_HIP_ALLOC_CONF", "")
-    return ca_config
+def get_cachingallocator_config() -> _Dict[str, str]:
+    """Return the caching allocator configuration from environment variables.
+    """
+    # pyrefly: ignore [bad-return]
+    return {
+        var: os.environ.get(var)
+        for var in (
+            "PYTORCH_CUDA_ALLOC_CONF",
+            "PYTORCH_HIP_ALLOC_CONF",
+            "PYTORCH_ALLOC_CONF",
+        )
+        if os.environ.get(var)
+    }
 
 
 def get_cuda_module_loading_config():
@@ -716,6 +725,7 @@ def get_env_info():
             not hasattr(torch.version, "hip") or torch.version.hip is None
         ):  # cuda version
             hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
+            rocm_compiled_version = "N/A"
         else:  # HIP version
 
             def get_version_or_na(cfg, prefix):
@@ -726,10 +736,14 @@ def get_env_info():
             hip_runtime_version = get_version_or_na(cfg, "HIP Runtime")
             miopen_runtime_version = get_version_or_na(cfg, "MIOpen")
             cuda_version_str = "N/A"
+            # Older wheels have no torch.version.rocm; pretty_str would
+            # otherwise render None as "Could not collect".
+            rocm_compiled_version = getattr(torch.version, "rocm", None) or "N/A"
             hip_compiled_version = torch.version.hip
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = "N/A"  # type: ignore[assignment]
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
+        rocm_compiled_version = "N/A"
 
     sys_version = sys.version.replace("\n", " ")
 
@@ -764,6 +778,7 @@ def get_env_info():
         caching_allocator_config=get_cachingallocator_config(),
         is_xnnpack_available=is_xnnpack_available(),
         cpu_info=get_cpu_info(run_lambda),
+        rocm_compiled_version=rocm_compiled_version,
     )
 
 
@@ -771,7 +786,8 @@ env_info_fmt = """
 PyTorch version: {torch_version}
 Is debug build: {is_debug_build}
 CUDA used to build PyTorch: {cuda_compiled_version}
-ROCM used to build PyTorch: {hip_compiled_version}
+ROCm SDK used to build PyTorch: {rocm_compiled_version}
+HIP used to build PyTorch: {hip_compiled_version}
 
 OS: {os}
 GCC version: {gcc_version}
@@ -791,6 +807,7 @@ Is XPU available: {is_xpu_available}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
+Caching allocator config: {caching_allocator_config}
 
 CPU:
 {cpu_info}
@@ -881,6 +898,9 @@ def pretty_str(envinfo):
             mutable_dict["conda_packages"], "[conda] "
         )
     mutable_dict["cpu_info"] = envinfo.cpu_info
+    mutable_dict["caching_allocator_config"] = envinfo.caching_allocator_config
+    if not envinfo.caching_allocator_config:
+        mutable_dict["caching_allocator_config"] = "N/A"
     return env_info_fmt.format(**mutable_dict)
 
 

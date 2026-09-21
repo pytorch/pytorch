@@ -149,6 +149,25 @@ node in your training cluster, but ideally you should pick a node that has a hig
 .. note::
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
+Shell completion
+----------------
+
+``torchrun`` can emit a completion script for ``bash``, ``zsh`` or ``tcsh``. The
+script is generated from the argument parser, so it stays in sync with the
+options above. This requires the optional `shtab <https://tqdm.github.io/shtab>`_
+package (``pip install shtab``); torchrun only imports it when the flag is used.
+
+::
+
+    # zsh
+    torchrun --print-completion zsh > ~/.zsh/completions/_torchrun
+
+    # bash
+    torchrun --print-completion bash > ~/.local/share/bash-completion/completions/torchrun
+
+Refer to your shell's documentation for the directory it loads completions from;
+the paths above are the common defaults.
+
 Note on rendezvous backend
 --------------------------
 
@@ -240,6 +259,35 @@ The following environment variables are made available to you in your script:
 13. ``PYTHON_EXEC`` - System executable override. If provided, the python user script will
     use the value of ``PYTHON_EXEC`` as executable. The `sys.executable` is used by default.
 
+Logging
+-------
+
+By default each worker's ``stdout``/``stderr`` go to the console unchanged, which
+interleaves the output of every rank with no way to tell them apart.
+
+``--redirects`` writes the streams to log files under ``--log-dir`` instead of the
+console; ``--tee`` writes them to log files *and* echoes them to the console. Both
+take the same format: a single value applies to all workers (``3`` for both
+streams, ``1`` for stdout, ``2`` for stderr), or a per-local-rank mapping such as
+``0:1,1:2``. For example ``--tee 3`` tees both streams for every worker.
+
+Tee'd console lines are prefixed with ``[${role_name}${local_rank}]:`` (e.g.
+``[default3]: foobar``). Use ``--log-line-prefix-template`` to change that; the
+macros ``${role_name}``, ``${local_rank}``, ``${rank}`` and ``${hostname}`` are
+substituted per worker. ``${hostname}`` is the name of the node the worker runs
+on, which is what identifies the offending host in a multi-node job::
+
+    torchrun --nnodes 2 --nproc-per-node 8 --tee 3 \
+             --log-line-prefix-template "${hostname}:${rank}: " train.py
+
+    r12i0n8:3: python: src/psm2_nccl_net.c:756: Assertion `r->used' failed.
+    r12i0n8:3: Fatal Python error: Segmentation fault
+
+The template may also be set with the ``TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE``
+environment variable; the command line option takes precedence.
+``--local-ranks-filter`` restricts which ranks reach the console, without
+affecting the log files written by ``--redirects``/``--tee``.
+
 Deployment
 ----------
 
@@ -276,6 +324,19 @@ Membership Changes
 2. Node arrival (scale-up): The new node is admitted to the job, all existing workers are stopped,
    a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
    ``WORLD_SIZE``.
+
+NUMA Binding
+------------
+
+On multi-GPU systems with NUMA (Non-Uniform Memory Access) architecture, you can improve
+performance by binding worker processes to CPUs near their assigned GPUs. Use the
+``--numa-binding`` flag:
+
+::
+
+    torchrun --numa-binding=node --nproc-per-node=8 train.py
+
+See :ref:`numa-api` for more details.
 
 Important Notices
 -----------------
@@ -367,15 +428,14 @@ utility
 
     if __name__ == "__main__":
         main()
-"""  # noqa: E501
+"""
 
 import os
 import sys
 import uuid
-from argparse import ArgumentParser, REMAINDER
+from argparse import Action as _Action, ArgumentParser, REMAINDER
 from collections.abc import Callable
 from importlib import metadata
-from typing import Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -393,6 +453,31 @@ from torch.utils.backend_registration import _get_custom_mod_func
 
 
 logger = get_logger(__name__)
+
+
+class _PrintCompletionAction(_Action):
+    """Print a shell completion script for ``torchrun`` and exit.
+
+    ``shtab`` derives the script from this parser, so completions stay in sync
+    with the options defined below. It is an optional dependency: torchrun only
+    imports it when this flag is used.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        try:
+            import shtab
+        except ImportError:
+            parser.exit(
+                1,
+                f"{option_string} requires the 'shtab' package: pip install shtab\n",
+            )
+        else:
+            # Completions are for the `torchrun` console script. parser.prog is
+            # `__main__.py` when invoked as `python -m torch.distributed.run`,
+            # which would bind the completion to the wrong command.
+            parser.prog = "torchrun"
+            print(shtab.complete(parser, shell=values))
+            parser.exit()
 
 
 def get_args_parser() -> ArgumentParser:
@@ -568,6 +653,18 @@ def get_args_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--log-line-prefix-template",
+        "--log_line_prefix_template",
+        action=env,
+        type=str,
+        default="",
+        help="Template for the prefix prepended to each console log line of a tee'd stream "
+        "(e.g. [--log-line-prefix-template '${hostname}:${rank}: '] renders as 'r12i0n8:3: '). "
+        "Available macros: ${role_name}, ${local_rank}, ${rank}, ${hostname}. Defaults to "
+        "'[${role_name}${local_rank}]:'.",
+    )
+
+    parser.add_argument(
         "--local-ranks-filter",
         "--local_ranks_filter",
         action=env,
@@ -610,7 +707,8 @@ def get_args_parser() -> ArgumentParser:
         type=int,
         action=env,
         default=0,
-        help="Rank of the node for multi-node distributed training.",
+        help="Rank of the node for multi-node distributed training. It is only used for static "
+        "rendezvous (i.e., when ``--rdzv-backend=static``).",
     )
     parser.add_argument(
         "--master-addr",
@@ -626,11 +724,11 @@ def get_args_parser() -> ArgumentParser:
     parser.add_argument(
         "--master-port",
         "--master_port",
-        default=29500,
+        default=None,
         type=int,
         action=env,
         help="Port on the master node (rank 0) to be used for communication during distributed "
-        "training. It is only used for static rendezvous.",
+        "training. It is only used for static rendezvous. Defaults to 29500.",
     )
     parser.add_argument(
         "--local-addr",
@@ -658,23 +756,8 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         choices=[mode.value for mode in _AffinityMode],
         default=None,
-        help="""
-        If provided, we will affinitize the worker processes based on NUMA nodes
-        for better performance. (E.g., preferring to allocate memory locally and run on CPUs on the
-        same NUMA node.)
-
-        NOTE: This is currently only supported for GPUs, and we assume
-        that the LOCAL_RANK process corresponds to the GPU with index LOCAL_RANK. If this is not
-        accurate for your workload, this feature may be a pessimization.
-
-        Available options are:
-          - node: Processes are bound to cpu cores within a NUMA node. This is a good starting point,
-          but other options may perform even slightly better in some cases.
-          - socket: Processes are bound to cpu cores within a socket.
-          - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
-          - core-complex: Processes are bound to cpu cores in a core-complex.
-          NOTE: The core-complex option might not achieve optimal performance on architectures
-          featuring a single L3 cache per socket.""",
+        help="Bind worker processes to CPUs near their assigned GPUs for better performance. "
+        "See torch/numa/binding.py for available modes and details.",
     )
 
     parser.add_argument(
@@ -689,12 +772,46 @@ def get_args_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--shutdown-timeout",
+        "--shutdown_timeout",
+        action=env,
+        type=int,
+        default=None,
+        help="Time in seconds to wait for graceful shutdown of worker processes before "
+        "sending SIGKILL. If not specified, uses TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment "
+        "variable or defaults to 30 seconds.",
+    )
+
+    parser.add_argument(
         "--virtual-local-rank",
         "--virtual_local_rank",
         action=check_env,
         help="Enable virtual local rank mode for workers. When enabled, LOCAL_RANK is set to 0 "
         "for all workers and CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its "
         "assigned GPU at device index 0.",
+    )
+
+    #
+    # Shell completion.
+    #
+
+    try:
+        import shtab
+    except ImportError:
+        # shtab is optional; fall back to the shells it supports today so the
+        # flag still validates its argument when shtab is not installed
+        choices = ["bash", "zsh", "tcsh"]
+    else:
+        choices = shtab.SUPPORTED_SHELLS
+
+    parser.add_argument(
+        "--print-completion",
+        "--print_completion",
+        action=_PrintCompletionAction,
+        choices=choices,
+        help="Print a shell completion script for torchrun to stdout and exit "
+        "(e.g. [--print-completion zsh > ~/.zsh/completions/_torchrun]). "
+        "Requires the optional 'shtab' package.",
     )
 
     #
@@ -739,7 +856,7 @@ def determine_local_world_size(nproc_per_node: str):
         return int(nproc_per_node)
     except ValueError as e:
         if nproc_per_node == "cpu":
-            num_proc = os.cpu_count()
+            num_proc = torch._utils.cpu_count()
             device_type = "cpu"
         elif nproc_per_node == "gpu":
             if not torch.cuda.is_available():
@@ -761,7 +878,7 @@ def determine_local_world_size(nproc_per_node: str):
                 num_proc = torch.accelerator.device_count()
                 device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
             else:
-                num_proc = os.cpu_count()
+                num_proc = torch._utils.cpu_count()
                 device_type = "cpu"
         else:
             raise ValueError(
@@ -798,7 +915,7 @@ def get_use_env(args) -> bool:
     return args.use_env
 
 
-def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
+def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
     """
     Attempts to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
     Provides plugin mechanism to provide custom implementation of LogsSpecs.
@@ -811,6 +928,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
         eps = metadata.entry_points()
         group = eps.select(group="torchrun.logs_specs")
         if group.select(name=logs_specs_name):
+            # pyrefly: ignore [bad-index]
             logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
@@ -819,7 +937,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
             )
 
         logger.info(
-            "Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls)
+            "Using logs_spec '%s' mapped to %s", logs_specs_name, logs_specs_cls
         )
     else:
         logs_specs_cls = DefaultLogsSpecs
@@ -827,7 +945,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     return logs_specs_cls
 
 
-def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str]]:
+def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
     if not (0 < min_nodes <= max_nodes):
@@ -847,6 +965,17 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
             "is not specified."
         )
 
+    if (
+        hasattr(args, "node_rank")
+        and args.node_rank != 0
+        and args.rdzv_backend != "static"
+    ):
+        logger.warning(
+            "node_rank is only used for static rdzv_backend. It will be ignored "
+            "for rdzv_backend=%s.",
+            args.rdzv_backend,
+        )
+
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
@@ -862,7 +991,9 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         # This env variable will be passed down to the subprocesses
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
 
-    log_line_prefix_template = os.getenv("TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE")
+    log_line_prefix_template = args.log_line_prefix_template or os.getenv(
+        "TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE"
+    )
 
     rdzv_configs = _parse_rendezvous_config(args.rdzv_conf)
 
@@ -871,7 +1002,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
 
     rdzv_endpoint = get_rdzv_endpoint(args)
 
-    ranks: Optional[set[int]] = None
+    ranks: set[int] | None = None
     if args.local_ranks_filter:
         try:
             ranks = set(map(int, args.local_ranks_filter.split(",")))
@@ -883,7 +1014,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
-    # pyrefly: ignore [bad-instantiation]
+
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
@@ -917,10 +1048,11 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         duplicate_stdout_filters=args.duplicate_stdout_filters,
         duplicate_stderr_filters=args.duplicate_stderr_filters,
         virtual_local_rank=args.virtual_local_rank,
+        shutdown_timeout=args.shutdown_timeout,
     )
 
     with_python = not args.no_python
-    cmd: Union[Callable, str]
+    cmd: Callable | str
     cmd_args = []
     use_env = get_use_env(args)
     if args.run_path:
@@ -978,6 +1110,20 @@ def run(args):
             args.rdzv_endpoint,
             args.rdzv_id,
         )
+    elif (
+        args.rdzv_backend == "static"
+        and not args.rdzv_endpoint
+        and args.master_port is None
+    ):
+        _, max_nodes = parse_min_max_nnodes(args.nnodes)
+        if max_nodes == 1:
+            args.rdzv_backend = "c10d"
+            args.rdzv_endpoint = "localhost:0"
+            args.rdzv_id = str(uuid.uuid4())
+
+    # master_port is only used for the static rendezvous backend, not c10d
+    if args.master_port is None:
+        args.master_port = 29500
 
     config, cmd, cmd_args = config_from_args(args)
     elastic_launch(

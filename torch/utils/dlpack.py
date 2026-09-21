@@ -9,6 +9,7 @@ from torch.types import Device as _Device
 __all__ = [
     "DLDeviceType",
     "from_dlpack",
+    "ReadOnlyTensorWrapper",
 ]
 
 class DLDeviceType(enum.IntEnum):
@@ -28,6 +29,71 @@ class DLDeviceType(enum.IntEnum):
     kDLWebGPU = 15,
     kDLHexagon = 16,
     kDLMAIA = 17,
+
+
+class ReadOnlyTensorWrapper(torch.Tensor):
+    r"""A zero-copy, read-only view of a tensor for DLPack interop only.
+
+    Wrapping a tensor with ``ReadOnlyTensorWrapper`` declares the intent that
+    consumers must not mutate its data. It changes only the DLPack export
+    behavior; the wrapper shares storage with the source tensor and does not
+    copy.
+
+    Both DLPack export paths are routed to read-only variants:
+
+    * the fast ``__dlpack_c_exchange_api__`` C exchange protocol (used by
+      tvm-ffi / CuteDSL) points at the const exchange API, which exports
+      through ``const_data_ptr()`` and sets
+      ``DLPACK_FLAG_BITMASK_READ_ONLY``;
+    * the ``__dlpack__()`` capsule protocol forces ``read_only=True``.
+
+    Because the export uses ``const_data_ptr()``, exporting a copy-on-write
+    tensor does not materialize it.
+
+    The wrapper is export-only: every torch operation other than the DLPack
+    protocol methods raises ``RuntimeError``. Unwrap it (e.g. via the original
+    tensor) to operate on the data.
+
+    Example::
+
+        x = torch.randn(8)
+        ro = ReadOnlyTensorWrapper(x)
+        cute.runtime.from_dlpack(ro, enable_tvm_ffi=True)  # read-only export
+    """
+
+    # Consumers discover the C exchange API on the type. Pointing it at the
+    # const variant makes the fast path export read-only.
+    # pyrefly: ignore [missing-attribute]
+    __dlpack_c_exchange_api__: object = torch._C._const_dlpack_exchange_api()
+
+    # The only torch functions the wrapper participates in. Everything else is
+    # rejected so the wrapper cannot be used as a normal tensor.
+    _DLPACK_ALLOWED = frozenset(
+        {torch.Tensor.__dlpack__, torch.Tensor.__dlpack_device__}
+    )
+
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor) -> "ReadOnlyTensorWrapper":
+        return tensor.as_subclass(cls)
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if func in cls._DLPACK_ALLOWED:
+            # Run as a plain tensor so the export internals (property accesses,
+            # is_conj(), etc.) are not re-intercepted and re-blocked.
+            with torch._C.DisableTorchFunctionSubclass():
+                return func(*args, **(kwargs or {}))
+        raise RuntimeError(
+            f"{cls.__name__} only supports DLPack export; "
+            f"'{getattr(func, '__name__', func)}' is not allowed. "
+            "Unwrap the tensor to operate on its data."
+        )
+
+    def __dlpack__(self, *, max_version=None, **kwargs):  # type: ignore[override]
+        # The capsule path can only carry read-only on the versioned protocol.
+        if max_version is None:
+            max_version = (1, 0)
+        return super().__dlpack__(max_version=max_version, read_only=True, **kwargs)
 
 
 torch._C._add_docstr(to_dlpack, r"""to_dlpack(tensor) -> PyCapsule
@@ -118,11 +184,17 @@ def from_dlpack(
         tensor([-9, -1,  2,  3])
 
     """
+
     if hasattr(ext_tensor, '__dlpack__'):
         # Only populate kwargs if any of the optional arguments are, in fact, not None. Otherwise,
         # leave them out, since we might end up falling back to no-extra-kwargs __dlpack__ call.
         kwargs: dict[str, Any] = {}
         kwargs["max_version"] = (1, 0)
+
+        # Track copy request for potential manual handling
+        requested_copy = copy
+        producer_handled_copy = True
+        cross_device_transfer = False  # Will be set to True if device transfer is needed
 
         if copy is not None:
             kwargs["copy"] = copy
@@ -130,14 +202,33 @@ def from_dlpack(
         # Parse the device parameter.
         # At this moment, it can either be a torch.device or a str representing
         # a torch.device, e.g. "cpu", "cuda", etc.
+        # Get source device first (we need it to detect cross-device transfers)
+        ext_device = ext_tensor.__dlpack_device__()
+
         if device is not None:
             if isinstance(device, str):
                 device = torch.device(device)
             if not isinstance(device, torch.device):
                 raise AssertionError(f"from_dlpack: unsupported device type: {type(device)}")
-            kwargs["dl_device"] = torch._C._torchDeviceToDLDevice(device)
 
-        ext_device = ext_tensor.__dlpack_device__()
+            # Convert target device to DLPack format
+            target_dl_device = torch._C._torchDeviceToDLDevice(device)
+
+            # Detect cross-device transfer by comparing source and target devices
+            # E.g. CPU->CUDA, cuda:0->cuda:1, etc.
+            cross_device_transfer = (ext_device != target_dl_device)
+
+            # Only pass dl_device to producer if NOT cross-device transfer
+            if not cross_device_transfer:
+                kwargs["dl_device"] = target_dl_device
+
+            # Cross-device transfer always requires a copy
+            if cross_device_transfer and copy is False:
+                raise ValueError(
+                    f"cannot move DLPack tensor from device {ext_device} to {target_dl_device} "
+                    "without copying. Set copy=None or copy=True."
+                )
+
         # ext_device is either CUDA or ROCm, we need to pass the current
         # stream
         if ext_device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM):
@@ -153,13 +244,48 @@ def from_dlpack(
             stream_ptr = 1 if is_cuda and stream.cuda_stream == 0 else stream.cuda_stream
             kwargs["stream"] = stream_ptr
 
+        # Try different parameter combinations until one works
+        dlpack = None
+
+        # Attempt 1: Try with all the parameters
         try:
-            # Try running __dlpack__ while specifying `max_version` argument.
             dlpack = ext_tensor.__dlpack__(**kwargs)
         except TypeError:
-            # If that doesn't work, try removing the `max_version` argument.
-            kwargs.pop("max_version")
+            pass
+
+        # Attempt 2: Remove max_version
+        if dlpack is None:
+            kwargs.pop("max_version", None)
+            try:
+                dlpack = ext_tensor.__dlpack__(**kwargs)
+            except TypeError:
+                pass
+
+        # Attempt 3: Remove copy
+        if dlpack is None:
+            kwargs.pop("copy", None)
+            producer_handled_copy = False
+            try:
+                dlpack = ext_tensor.__dlpack__(**kwargs)
+            except TypeError:
+                pass
+
+        # Attempt 4: Remove dl_device
+        if dlpack is None:
+            kwargs.pop("dl_device", None)
             dlpack = ext_tensor.__dlpack__(**kwargs)
+
+        tensor = torch._C._from_dlpack(dlpack)
+
+        # Manual copy if producer didn't handle it (cross-device already copies via .to())
+        if requested_copy is True and not producer_handled_copy and not cross_device_transfer:
+            tensor = tensor.clone()
+
+        # Handle cross-device transfer by moving tensor to target device
+        if cross_device_transfer:
+            tensor = tensor.to(device)
+
+        return tensor
 
     else:
         if device is not None or copy is not None:
@@ -168,4 +294,4 @@ def from_dlpack(
             )
         # Old versions just call the converter
         dlpack = ext_tensor
-    return torch._C._from_dlpack(dlpack)
+        return torch._C._from_dlpack(dlpack)

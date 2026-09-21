@@ -3,6 +3,7 @@
 #include <iostream>
 #include <random>
 #include <c10/core/SymInt.h>
+#include <c10/util/Exception.h>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #ifndef _USE_MATH_DEFINES
@@ -30,10 +31,10 @@ using namespace at;
 
 template<typename scalar_type>
 struct Foo {
-  static void apply(Tensor a, Tensor b) {
+  static void apply(Tensor a, [[maybe_unused]] Tensor b) {
     scalar_type s = 1;
     std::stringstream ss;
-    ss << "hello, dispatch: " << a.toString() << s << "\n";
+    ss << "hello, dispatch: " << a.toString() << s << '\n';
     auto data = (scalar_type*)a.data_ptr();
     (void)data;
   }
@@ -53,17 +54,17 @@ void test_overflow() {
   ASSERT_EQ(s1.toInt(), 100000);
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toHalf(), std::runtime_error);
+  ASSERT_THROW(s1.toHalf(), c10::Error);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toInt(), std::runtime_error);
+  ASSERT_THROW(s1.toInt(), c10::Error);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toInt(), std::runtime_error);
+  ASSERT_THROW(s1.toInt(), c10::Error);
 }
 
 TEST(TestScalar, TestScalar) {
@@ -73,8 +74,8 @@ TEST(TestScalar, TestScalar) {
   Scalar bar = 3.0;
   Half h = bar.toHalf();
   Scalar h2 = h;
-  cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
-       << bar.toDouble() << " " << what.isIntegral(false) << "\n";
+  cout << "H2: " << h2.toDouble() << ' ' << what.toFloat() << ' '
+       << bar.toDouble() << ' ' << what.isIntegral(false) << '\n';
   auto gen = at::detail::getDefaultCPUGenerator();
   {
     // See Note [Acquire lock when using random generators]
@@ -84,7 +85,7 @@ TEST(TestScalar, TestScalar) {
   }
   if (at::hasCUDA()) {
     auto t2 = zeros({4, 4}, at::kCUDA);
-    cout << &t2 << "\n";
+    cout << &t2 << '\n';
   }
   auto t = ones({4, 4});
 
@@ -129,7 +130,7 @@ TEST(TestScalar, TestScalar) {
       std::stringstream ss;
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
       ASSERT_NO_THROW(
-          ss << "hello, dispatch" << x.toString() << s << "\n");
+          ss << "hello, dispatch" << x.toString() << s << '\n');
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });
@@ -181,7 +182,7 @@ TEST(TestScalar, TestFormatting) {
   auto format = [] (Scalar a) {
     std::ostringstream str;
     str << a;
-    return str.str();
+    return std::move(str).str();
   };
   ASSERT_EQ("3", format(Scalar(3)));
   ASSERT_EQ("3.1", format(Scalar(3.1)));

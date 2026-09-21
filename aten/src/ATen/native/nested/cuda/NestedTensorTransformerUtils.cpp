@@ -18,7 +18,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
   const auto& sizes = nt_impl->get_nested_sizes();
   auto size_tensor_stride = sizes.stride(0);
   const int64_t batch_size = nestedtensor.size(0);
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
   int64_t cumulative_sequence_length = 0;
   for (const auto i : c10::irange(batch_size)) {
     // Calculate the cumulative sum of the sequence lengths
@@ -49,7 +49,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
     auto cumulative_seqlen = at::zeros(
         {batch_size + 1}, TensorOptions().device(at::kCPU).dtype(at::kInt));
 
-    auto* sizes_ptr = sizes.data_ptr<int64_t>();
+    const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
     auto* cumulative_seqlen_ptr = cumulative_seqlen.data_ptr<int32_t>();
 
     int64_t sum = 0;
@@ -84,7 +84,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
    */
   bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
     const int64_t* tensor_offsets_ptr =
-        tensor->get_storage_offsets().data_ptr<int64_t>();
+        tensor->get_storage_offsets().const_data_ptr<int64_t>();
     const Tensor& tensor_sizes = tensor->get_nested_sizes();
     const Tensor& tensor_strides = tensor->get_nested_strides();
 
@@ -99,7 +99,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
       return true;
     }
 
-    int64_t* previous_tensor_stride = tensor_strides.data_ptr<int64_t>();
+    const int64_t* previous_tensor_stride = tensor_strides.const_data_ptr<int64_t>();
 
     // Check initially that the first tensor's strides
     // are in strictly descending order
@@ -133,9 +133,8 @@ int64_t get_nnz(const Tensor& nestedtensor) {
 
     // Check the offsets are a constant multiple from the previous numels
     const int64_t* tensor_size_ptr = tensor_sizes.const_data_ptr<int64_t>();
-    const int64_t* tensor_stride_ptr = tensor_strides.const_data_ptr<int64_t>();
 
-    int64_t numel_0 = (tensor_size_ptr[0] * tensor_stride_ptr[0]);
+    int64_t numel_0 = (tensor_size_ptr[0] * previous_tensor_stride[0]);
     TORCH_INTERNAL_ASSERT(numel_0 > 0, "numels must be positive!");
 
     int64_t offset_constant =
@@ -144,7 +143,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
       // TODO: When 0 seq_len nested tensors are allowed we need to guard
       // against this
       int64_t previous_numel = tensor_size_ptr[(i - 1) * tensor_stride_0] *
-          tensor_stride_ptr[(i - 1) * tensor_stride_0];
+          previous_tensor_stride[(i - 1) * tensor_stride_0];
       TORCH_INTERNAL_ASSERT(previous_numel > 0, "numels must be positive!");
       int64_t current_offset_constant =
           (tensor_offsets_ptr[i] - tensor_offsets_ptr[i - 1]) / previous_numel;
@@ -180,9 +179,9 @@ int64_t get_nnz(const Tensor& nestedtensor) {
 
     constexpr int64_t head_dim_stride = 1;
     const int64_t* nt_strides =
-        tensor_impl->get_nested_strides().data_ptr<int64_t>();
+        tensor_impl->get_nested_strides().const_data_ptr<int64_t>();
     const int64_t* nt_offsets_ptr =
-        tensor_impl->get_storage_offsets().data_ptr<int64_t>();
+        tensor_impl->get_storage_offsets().const_data_ptr<int64_t>();
 
     const int64_t nnz_stride = nt_strides[0];
     const int64_t head_stride = num_heads_needs_broadcast ? 0 : nt_strides[1];
@@ -438,14 +437,14 @@ sdpa_nested_preprocessing(
   }
 
   return std::make_tuple(
-      query_buffer_reshaped,
-      key_buffer_reshaped,
-      value_buffer_reshaped,
-      cumulative_sequence_length_q,
-      cumulative_sequence_length_kv,
+      std::move(query_buffer_reshaped),
+      std::move(key_buffer_reshaped),
+      std::move(value_buffer_reshaped),
+      std::move(cumulative_sequence_length_q),
+      std::move(cumulative_sequence_length_kv),
       max_seqlen_batch_q,
       max_seqlen_batch_kv,
-      output_shape);
+      std::move(output_shape));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
@@ -531,11 +530,11 @@ sdpa_nested_preprocessing_backward(
   }
 
   return std::make_tuple(
-      grad_out_buffer_reshaped,
-      query_buffer_reshaped,
-      key_buffer_reshaped,
-      value_buffer_reshaped,
-      output_buffer_reshaped);
+      std::move(grad_out_buffer_reshaped),
+      std::move(query_buffer_reshaped),
+      std::move(key_buffer_reshaped),
+      std::move(value_buffer_reshaped),
+      std::move(output_buffer_reshaped));
 }
 
 } // namespace at::native::preprocessing

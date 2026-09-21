@@ -65,11 +65,11 @@ class AliasInfo {
   }
 
   bool isWildcardBefore() const {
-    return beforeSets_.count(wildcardSet()) != 0;
+    return beforeSets_.contains(wildcardSet());
   }
 
   bool isWildcardAfter() const {
-    return afterSets_.count(wildcardSet()) != 0;
+    return afterSets_.contains(wildcardSet());
   }
 
   // the alias info for the contained types of the type
@@ -100,18 +100,18 @@ inline bool operator==(const AliasInfo& lhs, const AliasInfo& rhs) {
 
 // this does match the way things are represented in the schema
 inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
-  out << "(";
+  out << '(';
   bool first = true;
   for (const auto& set : aliasInfo.beforeSets()) {
     if (first) {
       first = false;
     } else {
-      out << "|";
+      out << '|';
     }
     out << set.toUnqualString();
   }
   if (aliasInfo.isWrite()) {
-    out << "!";
+    out << '!';
   }
   if (aliasInfo.beforeSets() != aliasInfo.afterSets()) {
     out << " -> ";
@@ -120,12 +120,12 @@ inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
       if (first) {
         first = false;
       } else {
-        out << "|";
+        out << '|';
       }
       out << set.toUnqualString();
     }
   }
-  out << ")";
+  out << ')';
   return out;
 }
 } // namespace c10

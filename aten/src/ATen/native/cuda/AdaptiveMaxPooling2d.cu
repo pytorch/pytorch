@@ -1,12 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -193,7 +193,7 @@ __global__ void atomicadaptivemaxgradinput(
       int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
-      gpuAtomicAddNoReturn(&(gradInput[argmax]), z);
+      fastAtomicAdd(gradInput, argmax, isizeH * isizeW, z, true);
     }
   }
 }
@@ -393,7 +393,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           } else {
             // run updateGradInput kernel
-            atomicadaptivemaxgradinput<<<
+            adaptivemaxgradinput<<<
                 blocks,
                 threads,
                 0,

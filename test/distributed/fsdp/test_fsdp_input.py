@@ -8,7 +8,7 @@ from torch.nn import Linear, Module
 from torch.optim import SGD
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
@@ -28,7 +28,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestInput(FSDPTest):
+class TestInput(FSDPTestContinuous):
     @property
     def world_size(self):
         return 1
@@ -47,7 +47,10 @@ class TestInput(FSDPTest):
                 if isinstance(input, list):
                     input = input[0]
                 else:
-                    assert isinstance(input, dict), input
+                    if not isinstance(input, dict):
+                        raise AssertionError(
+                            f"Expected dict, got {type(input)}: {input}"
+                        )
                     input = input["in"]
                 return self.layer(input)
 
@@ -68,6 +71,47 @@ class TestInput(FSDPTest):
             out.sum().backward()
             optim.step()
             optim.zero_grad()
+
+    @skip_if_lt_x_gpu(1)
+    @parametrize("input_cls", [subtest(dict, name="dict"), subtest(list, name="list")])
+    def test_input_identity_preserved(self, device, input_cls):
+        """
+        Test that FSDP preserves object identity for container inputs.
+        """
+
+        class MutatingModel(Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = Linear(4, 4)
+
+            def forward(self, input):
+                if isinstance(input, list):
+                    input.append(torch.randn(4, 4, device=input[0].device))
+                    x = input[0]
+                else:
+                    assert isinstance(input, dict), input  # noqa: S101
+                    input["added"] = torch.randn(4, 4, device=input["in"].device)
+                    x = input["in"]
+                return self.layer(x)
+
+        fsdp_kwargs = {
+            "device_id": device,
+        }
+        model = FSDP(MutatingModel().to(device), **fsdp_kwargs)
+
+        in_data = torch.rand(64, 4, device=device)
+        if input_cls is list:
+            in_data = [in_data]
+            initial_len = len(in_data)
+            model(in_data)
+            # The list should have been mutated (appended to)
+            self.assertEqual(len(in_data), initial_len + 1)
+        else:
+            self.assertTrue(input_cls is dict)
+            in_data = {"in": in_data}
+            model(in_data)
+            # The dict should have been mutated (new key added)
+            self.assertIn("added", in_data)
 
 
 devices = ("cuda", "hpu", "xpu")

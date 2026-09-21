@@ -1,13 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
-#include <ATen/DynamicLibrary.h>
-#include <ATen/core/dispatch/OperatorOptions.h>
-#include <ATen/native/NonSymbolicBC.h>
-#include <ATen/native/TensorShape.h>
-#include <c10/util/irange.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/register_ops_utils.h>
-
 namespace torch::jit::fuser::cuda {
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};

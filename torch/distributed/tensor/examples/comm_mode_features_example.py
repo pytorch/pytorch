@@ -5,7 +5,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=4 comm_mode_features_example.p
 
 import argparse
 import os
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -55,7 +55,7 @@ class CommDebugModeExample:
         self.device_type = get_device_type()
 
     def _MLP_model_setup(
-        self, model_type: type, parallelize_plan: Union[None, dict] = None
+        self, model_type: type, parallelize_plan: dict | None = None
     ) -> tuple[nn.Module, torch.Tensor]:
         """
         Creates MLP or MLPStacked model for examples
@@ -282,7 +282,7 @@ class CommDebugModeExample:
     def example_MLP_operation_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed MLP model.
-        Prints a table of module opoeration level collective tracing information and logs table to comm_mode_log.txt
+        Prints a table of module operation level collective tracing information and logs table to comm_mode_log.txt
 
         Expected output:
         Global
@@ -586,7 +586,7 @@ class CommDebugModeExample:
     ) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
-        Prints a table of module opoeration level collective tracing information, excluding trivial operations and logs
+        Prints a table of module operation level collective tracing information, excluding trivial operations and logs
         table to transformer_operation_log.txt
         """
 
@@ -692,7 +692,8 @@ class CommDebugModeExample:
                         )
                     else:
                         x = block(x)
-                    assert x is not None
+                    if x is None:
+                        raise AssertionError
                     x = torch.nn.functional.relu(x)
                 return x
 
@@ -736,7 +737,8 @@ if __name__ == "__main__":
     # this script is launched via torchrun which automatically manages ProcessGroup
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    assert world_size == 4  # our example uses 4 worker ranks
+    if world_size != 4:
+        raise AssertionError  # our example uses 4 worker ranks
 
     parser = argparse.ArgumentParser(
         description="comm_mode_feature examples",

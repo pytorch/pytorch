@@ -631,6 +631,7 @@ Tensor run_quantized_addmm_context(
     return output;
   } else {
     std::vector<int64_t> shape;
+    shape.reserve(static_cast<size_t>(std::max<int64_t>(0, input_arg.dim())));
     for (const auto i : c10::irange(input_arg.dim() - 1)) {
       shape.emplace_back(input_arg.size(i));
     }
@@ -751,6 +752,7 @@ Tensor run_addmm_context(
     return output;
   } else {
     std::vector<int64_t> shape;
+    shape.reserve(static_cast<size_t>(std::max<int64_t>(0, input_arg.dim())));
     for (const auto i : c10::irange(input_arg.dim() - 1)) {
       shape.emplace_back(input_arg.size(i));
     }

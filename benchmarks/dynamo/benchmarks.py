@@ -35,16 +35,27 @@ TIMM_MODEL_NAMES = model_names(
 HF_MODELS_FILE_NAME = model_names(
     os.path.join(os.path.dirname(__file__), "huggingface_models_list.txt")
 )
+# stable_diffusion_text_encoder / stable_diffusion_unet are deliberately absent:
+# both are skipped in torchbench.yaml (#167895).
 TORCHBENCH_MODELS_FILE_NAME = model_names(
     os.path.join(os.path.dirname(__file__), "all_torchbench_models_list.txt")
 )
 
 # timm <> HF disjoint
-assert TIMM_MODEL_NAMES.isdisjoint(HF_MODELS_FILE_NAME)
+if not TIMM_MODEL_NAMES.isdisjoint(HF_MODELS_FILE_NAME):
+    raise AssertionError(
+        f"TIMM and HF model names overlap: {TIMM_MODEL_NAMES & HF_MODELS_FILE_NAME}"
+    )
 # timm <> torch disjoint
-assert TIMM_MODEL_NAMES.isdisjoint(TORCHBENCH_MODELS_FILE_NAME)
+if not TIMM_MODEL_NAMES.isdisjoint(TORCHBENCH_MODELS_FILE_NAME):
+    raise AssertionError(
+        f"TIMM and TorchBench model names overlap: {TIMM_MODEL_NAMES & TORCHBENCH_MODELS_FILE_NAME}"
+    )
 # torch <> hf disjoint
-assert TORCHBENCH_MODELS_FILE_NAME.isdisjoint(HF_MODELS_FILE_NAME)
+if not TORCHBENCH_MODELS_FILE_NAME.isdisjoint(HF_MODELS_FILE_NAME):
+    raise AssertionError(
+        f"TorchBench and HF model names overlap: {TORCHBENCH_MODELS_FILE_NAME & HF_MODELS_FILE_NAME}"
+    )
 
 
 def parse_args(args=None):

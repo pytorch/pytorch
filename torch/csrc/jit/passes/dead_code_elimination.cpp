@@ -9,10 +9,6 @@
 
 namespace torch::jit {
 
-namespace prim {
-using namespace ::c10::prim;
-}
-
 class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(
@@ -30,6 +26,8 @@ class DeadCodeEliminator {
   void run(Block* block, bool recurse) {
     // clean up unused fork inputs before starting the main algorithm
     eliminateDeadForkInputs(block, recurse);
+
+    memo_.reserve(block->owningGraph()->numNodes());
 
     // Initialize by marking the return node and all its consumed values as live
     mark(block->return_node());
@@ -97,7 +95,7 @@ class DeadCodeEliminator {
   //
   // Returns true iff this marked something we haven't marked before.
   bool markReturnNode(Node* node) {
-    if (marked_.count(node)) {
+    if (marked_.contains(node)) {
       return false;
     }
 
@@ -234,7 +232,7 @@ class DeadCodeEliminator {
   // value sets.
   // Returns true iff this marked something we haven't marked before.
   bool mark(Node* node) {
-    if (marked_.count(node)) {
+    if (marked_.contains(node)) {
       return false;
     }
 
@@ -279,7 +277,7 @@ class DeadCodeEliminator {
       // valid, as a node in grad_desc.f might be used in reverse_block.
       // Reverse_block is inlined in grad_desc.f before it's separated
       // to grad_desc.df.
-      if (!(marked_.count(node) || node->hasUses())) {
+      if (!(marked_.contains(node) || node->hasUses())) {
         GRAPH_UPDATE(
             "Node ",
             it->kind().toQualString(),
@@ -454,9 +452,9 @@ class DeadCodeEliminator {
 
   bool liveValuesContains(Value* v) {
     if (useAliasDb_) {
-      return getLiveValuesAndMemoryLocations().getValueSet().count(v);
+      return getLiveValuesAndMemoryLocations().getValueSet().contains(v);
     } else {
-      return getLiveValuesSet().count(v);
+      return getLiveValuesSet().contains(v);
     }
   }
 

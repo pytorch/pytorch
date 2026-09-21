@@ -712,7 +712,7 @@ def fake_quantize_per_tensor_affine(
             "Non-constant scale not supported",
             inputs,
         )
-    # pyrefly: ignore [missing-attribute]
+
     scale = scale.float().data  # Avoid exporter generating double type
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
@@ -757,7 +757,7 @@ def dequantize(g: jit_utils.GraphContext, input):
 @_onnx_symbolic("aten::nan_to_num")
 @symbolic_helper.parse_args("v", "f", "f", "f")
 def nan_to_num(g: jit_utils.GraphContext, input, nan, posinf, neginf):
-    # Cannot create a int type tensor with inf/nan values, so we simply
+    # Cannot create an int type tensor with inf/nan values, so we simply
     # return the original tensor
     if not symbolic_helper._is_fp(input):
         return input

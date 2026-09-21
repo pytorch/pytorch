@@ -4,13 +4,13 @@
 
 import math
 from collections.abc import MutableMapping
-from typing import Optional
 
 import torch
 from torch import Tensor
 
 from .optimizer import (
     _disable_dynamo_if_unsupported,
+    _functional_api_doc,
     _params_doc,
     _to_scalar,
     Optimizer,
@@ -18,7 +18,7 @@ from .optimizer import (
 )
 
 
-__all__ = ["Muon"]
+__all__ = ["Muon", "muon"]
 
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
 # github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
@@ -53,7 +53,7 @@ def _zeropower_via_newtonschulz(
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    ortho_grad = grad.bfloat16()
+    ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
     # Ensure spectral norm is at most 1
@@ -71,9 +71,7 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(
-    lr: float, adjust_lr_fn: Optional[str], param_shape: torch.Size
-) -> float:
+def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
 
@@ -82,6 +80,8 @@ def _adjust_lr(
         adjusted_ratio = math.sqrt(max(1, A / B))
     elif adjust_lr_fn == "match_rms_adamw":
         adjusted_ratio = 0.2 * math.sqrt(max(A, B))
+    elif adjust_lr_fn == "spectral_unclamped":
+        adjusted_ratio = math.sqrt(A / B)
     else:
         adjusted_ratio = 1.0
     return lr * adjusted_ratio
@@ -98,7 +98,7 @@ class Muon(Optimizer):
         ns_coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C),
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
-        adjust_lr_fn: Optional[str] = None,
+        adjust_lr_fn: str | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -111,6 +111,7 @@ class Muon(Optimizer):
         if adjust_lr_fn is not None and adjust_lr_fn not in [
             "original",
             "match_rms_adamw",
+            "spectral_unclamped",
         ]:
             raise ValueError(
                 f"Adjust learning rate function {adjust_lr_fn} is not supported"
@@ -242,23 +243,28 @@ Muon.__doc__ = (
     with numerical stabilization :math:`\varepsilon`.
 
     The purpose for :math:`\mathrm{AdjustLR}\!\big(\gamma;\ \mathrm{shape}\!\big(\theta_t \big) \big)`
-    is to make the orthogonalized update have a consistent :math:`RMS` across rectangular matrices.
+    is to make the orthogonalized update scale consistently across rectangular matrices.
 
     Keller's original implementation scales the update by :math:`\sqrt{\max\!\left(1, \frac{A}{B}\right)}`,
-    where :math:`A` and :math:`B` are dimension of the matrix being optimized.
+    where :math:`A` and :math:`B` are dimensions of the matrix being optimized, which represent fan-out
+    and fan-in for a Linear weight matrix.
 
-    Moonshot's implementation also focuses on matching :math:`RMS` of AdamW. The adjustment is computed as:
+    Moonshot's implementation focuses on matching :math:`RMS` of AdamW. The adjustment is computed as:
     :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}`
     The method is adopted from `Muon is Scalable for LLM Training`_. Research
     results show that with this adjustment Muon can directly reuse the learning rate
     and weight decay tuned for AdamW.
 
-    We provide two options for the learning rate adjustment: "original", which follows Keller's
-    implementation, and "match_rms_adamw", which refers to Moonshot's implementation. This gives users the
-    flexibility to choose between the two. If `adjust_lr_fn` is not specified, the default is "original".
+    Jeremy Bernstein in `Deriving Muon`_ proposes a scaling condition on the spectral norm, which
+    scales the update by :math:`\sqrt{\frac{A}{B}}`. This is similar to the Keller's "original"
+    implementation but removes clamping down to 1.
 
-    For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_
-    and `Muon is Scalable for LLM Training`_.
+    We provide these options for the learning rate adjustment: "original", which follows Keller's
+    implementation, "match_rms_adamw", which refers to Moonshot's implementation, and "spectral_unclamped",
+    which matches Bernstein's implementation. If `adjust_lr_fn` is not specified, the default is "original".
+
+    For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_,
+    `Muon is Scalable for LLM Training`_, and `Deriving Muon`_.
     """
     + rf"""
     Args:
@@ -273,13 +279,38 @@ Muon.__doc__ = (
             Newton–Schulz orthogonalization polynomial (default: ({DEFAULT_A}, {DEFAULT_B}, {DEFAULT_C}))
         eps (float, optional): term added to the denominator for numerical stability. (default: {EPS})
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
-        adjust_lr_fn (str, optional): function to adjust learning rate. One of "original" and "match_rms_adamw".
+        adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Muon only supports 2D params; use a standard optimizer
+        >>> # such as AdamW for biases, embeddings, and other non-2D
+        >>> # parameters.
+        >>> muon_params = [
+        ...     p for p in model.parameters() if p.ndim == 2
+        ... ]
+        >>> other_params = [
+        ...     p for p in model.parameters() if p.ndim != 2
+        ... ]
+        >>> optim_muon = torch.optim.Muon(
+        ...     muon_params, lr=0.02, momentum=0.95
+        ... )
+        >>> optim_adamw = torch.optim.AdamW(
+        ...     other_params, lr=3e-4, weight_decay=0.01
+        ... )
+        >>> optim_muon.zero_grad()
+        >>> optim_adamw.zero_grad()
+        >>> loss_fn(model(input), target).backward()
+        >>> optim_muon.step()
+        >>> optim_adamw.step()
 
     .. _Muon\: An optimizer for hidden layers in neural networks:
         https://kellerjordan.github.io/posts/muon/
     .. _Muon is Scalable for LLM Training:
         https://arxiv.org/pdf/2502.16982
+    .. _Deriving Muon:
+        https://jeremybernste.in/writing/deriving-muon
 
     """
 )
@@ -297,7 +328,7 @@ def _single_tensor_muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    adjust_lr_fn: Optional[str],
+    adjust_lr_fn: str | None,
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
@@ -327,7 +358,7 @@ def muon(
     grads: list[Tensor],
     muon_momentum_bufs: list[Tensor],
     *,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     lr: float,
     weight_decay: float,
     momentum: float,
@@ -335,13 +366,9 @@ def muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    adjust_lr_fn: Optional[str],
+    adjust_lr_fn: str | None,
     has_complex: bool,
 ) -> None:
-    r"""Functional API that performs Muon algorithm computation.
-
-    See :class:`~torch.optim.Muon` for details.
-    """
     if foreach is not None and foreach:
         raise RuntimeError("Foreach is not supported for Muon yet")
 
@@ -361,3 +388,6 @@ def muon(
         adjust_lr_fn=adjust_lr_fn,
         has_complex=has_complex,
     )
+
+
+muon.__doc__ = _functional_api_doc.format(optimizer="Muon")

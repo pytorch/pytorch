@@ -32,7 +32,7 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
     TEST_CUDA = torch.cuda.is_available()
     if not TEST_CUDA:
         print("CUDA not available, skipping tests", file=sys.stderr)
-        TestCase = NoTest  # type: ignore[misc, assignment] # noqa: F811
+        TestCase = NoTest  # type: ignore[misc, assignment]
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -78,7 +78,8 @@ class TestExtendedCUDAIsAvail(TestCase):
                     in_bad_fork, TestExtendedCUDAIsAvail.SUBPROCESS_REMINDER_MSG
                 )
             else:
-                assert in_bad_fork
+                if not in_bad_fork:
+                    raise AssertionError("expected in_bad_fork to be True")
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

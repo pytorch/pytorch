@@ -14,7 +14,6 @@ if defined PYTORCH_BUILD_VERSION (
 :: Set BLAS type
 if %ENABLE_APL% == 1 (
     set BLAS=APL
-    set USE_LAPACK=1
 ) else if %ENABLE_OPENBLAS% == 1 (
     set BLAS=OpenBLAS
     set OpenBLAS_HOME=%DEPENDENCIES_DIR%\OpenBLAS\install
@@ -27,8 +26,8 @@ where cl.exe
 :: change to source directory
 cd %PYTORCH_ROOT%
 
-:: copy libuv.dll
-copy %libuv_ROOT%\lib\Release\uv.dll torch\lib\uv.dll
+:: copy libuv.dll (cmake installs the dll to bin/, not lib/Release/)
+copy %libuv_ROOT%\bin\uv.dll torch\lib\uv.dll
 
 :: create virtual environment
 python -m venv .venv

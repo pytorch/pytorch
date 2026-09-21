@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <c10/util/SmallBuffer.h>
 #include <c10/core/impl/COW.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -46,7 +45,7 @@ Tensor _new_zeros_with_same_feature_meta(
   auto other_sizes = other.sym_sizes();
   auto other_strides = other.sym_strides();
   auto other_storage_offset = other.storage_offset();
-  auto other_storage_numel = other.storage().sym_nbytes() / other.itemsize();
+  auto other_storage_numel = other.storage().sym_nbytes() / c10::SymInt(other.itemsize());
 
   if (self_num_batch_dims == 0) {
     auto new_tensor = at::zeros_symint({other_storage_numel}, other.options());
@@ -88,7 +87,7 @@ Tensor _new_zeros_with_same_feature_meta(
 }
 
 bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
-  return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
+  return base.storage().sym_nbytes() / c10::SymInt(base.itemsize()) == other.storage().sym_nbytes() / c10::SymInt(other.itemsize());
 }
 
 Tensor _lazy_clone(Tensor const& self) {

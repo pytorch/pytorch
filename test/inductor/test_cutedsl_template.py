@@ -6,12 +6,13 @@ from expecttest import assert_expected_inline
 
 import torch
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
 try:
-    import cutlass  # noqa: F401
+    import cutlass
     import cutlass.cute as cute  # noqa: F401
 
     HAS_CUTLASS = True
@@ -20,6 +21,7 @@ except ImportError:
 
 if HAS_CUTLASS:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
+    from torch._inductor.codegen.cutedsl.cutedsl_scheduling import CuteDSLScheduling
     from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
     from torch._inductor.select_algorithm import PartialRender
 
@@ -71,6 +73,39 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
 class TestCuteDSLTemplate(TestCase):
     """Test cases for CuteDSL template functionality."""
 
+    # dense_gemm_efc imports cutlass.operators, which ships in a separate
+    # package that smoke_b200 cannot install (see TODO(#189590) in test.sh).
+    @unittest.skipIf(
+        not ensure_nv_universal_gemm_available(),
+        "NVIDIA Universal GEMM (cutlass_api) library not available",
+    )
+    def test_vendored_dense_efc_kernel_configuration(self):
+        from cutlass.cute.nvgpu import tcgen05
+        from cutlass.operators.providers.cutedsl.evt.converter import EFCConverter
+
+        from torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc import (
+            PersistentDenseGemmEFCKernel,
+        )
+
+        for use_2cta, tile_m, cluster_m, cta_group in (
+            (False, 128, 1, tcgen05.CtaGroup.ONE),
+            (True, 256, 2, tcgen05.CtaGroup.TWO),
+        ):
+            kernel = PersistentDenseGemmEFCKernel(
+                cutlass.Float32,
+                cutlass.BFloat16,
+                use_2cta,
+                (tile_m, 64),
+                (cluster_m, 1),
+                EFCConverter.identity_efc,
+            )
+            self.assertEqual(kernel.arch, "sm_100")
+            self.assertEqual(kernel.mma_tiler_mn, (tile_m, 64))
+            self.assertEqual(kernel.cluster_shape_mn, (cluster_m, 1))
+            self.assertEqual(kernel.cta_group, cta_group)
+            self.assertEqual(kernel.c_dtype, cutlass.BFloat16)
+            self.assertEqual(kernel.threads_per_cta, 224)
+
     def test_gen_imports(self):
         kernel = CuteDSLTemplateKernel(
             kernel_name="test_kernel",
@@ -87,7 +122,12 @@ class TestCuteDSLTemplate(TestCase):
         self.assertIsInstance(imports, str)
 
         lines = imports.strip().split("\n")
-        self.assertEqual(len(lines), 7)
+        self.assertEqual(len(lines), 8)
+
+        asm_imports = kernel.gen_imports(uses_inline_asm=True)
+        self.assertIn("inline_asm_elementwise_intrinsic", asm_imports)
+        self.assertNotIn("inline_asm_elementwise_intrinsic", imports)
+        self.assertEqual(len(asm_imports.strip().split("\n")), 9)
 
     def test_render_includes_imports(self):
         template_source = """@cute.kernel
@@ -116,7 +156,7 @@ def {{kernel_name}}_kernel():
 
         self.assertTrue(
             rendered_code_stripped.startswith("import torch"),
-            f"Code should start with 'import torch', got: {rendered_code_stripped[:50]}",
+            lambda msg: f"{msg}\nCode should start with 'import torch', got: {rendered_code_stripped[:50]}",
         )
         self.assertIn("import cutlass", rendered_code)
         self.assertIn("import cutlass.cute as cute", rendered_code)
@@ -175,10 +215,20 @@ def {{kernel_name}}_kernel():
         for line in lines:
             if line:
                 self.assertFalse(
-                    line.startswith(" "), f"Line should not be indented: '{line}'"
+                    line.startswith(" "),
+                    lambda msg: f"{msg}\nLine should not be indented: '{line}'",
                 )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        # ROCm CI images install the CuTeDSL wheel (its pip marker is
+        # x86_64-Linux, not CUDA), so HAS_CUTLASS is true there while
+        # cuInit fails: cudaErrorInsufficientDriver. Only the tests that
+        # actually launch a kernel are affected; the rest of the class is
+        # mock-based and driver-free.
+        torch.version.hip is not None,
+        "CuTeDSL kernels require an NVIDIA driver",
+    )
     def test_cutedsl_add_e2e(self):
         """End-to-end test with CuteDSL template including code generation verification."""
         from torch._inductor.ir import TensorBox
@@ -233,6 +283,10 @@ def {{kernel_name}}_kernel():
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        torch.version.hip is not None,
+        "CuTeDSL kernels require an NVIDIA driver",
+    )
     def test_cutedsl_add_e2e_autotune(self):
         """E2E test with multiple CuteDSL template variants for autotuning."""
         from torch._inductor.ir import TensorBox
@@ -265,12 +319,13 @@ def {{kernel_name}}_kernel():
                 return default_lowering(a, b)
 
             # Use autotuning to select the best variant
-            return autotune_select_algorithm(
+            node, _ = autotune_select_algorithm(
                 "cutedsl_add_autotune",
                 choices,
                 [a, b],
                 a.get_layout(),
             )
+            return node
 
         with patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}):
             # Test function
@@ -405,6 +460,257 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
         with self.assertRaises(AssertionError):
             kernel._get_subgraph(2)
 
+    def test_kexpr_prints_modular_indexing(self):
+        import sympy
+
+        from torch.utils._sympy.functions import ModularIndexing
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_kexpr",
+                input_nodes=[],
+                output_node=None,
+            )
+
+            expr = ModularIndexing(sympy.Symbol("tmp1", integer=True), 1, 2)
+            self.assertEqual(kernel.kexpr(expr), "(tmp1 % 2)")
+
+    def test_index_expr_supports_modular_indexing(self):
+        import sympy
+
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+        from torch.utils._sympy.functions import ModularIndexing
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_index_expr",
+                input_nodes=[],
+                output_node=None,
+            )
+            with V.set_kernel_handler(kernel):
+                result = CuteDSLOpOverrides.index_expr(
+                    ModularIndexing(sympy.Symbol("tmp1", integer=True), 1, 2),
+                    torch.int64,
+                )
+
+            self.assertIsInstance(result, CSEVariable)
+            self.assertEqual(result.dtype, torch.int64)
+            self.assertIn("(tmp1 % 2)", kernel.body.getvalue())
+
+    def test_index_expr_scalar_arithmetic_stays_scalar(self):
+        import sympy
+
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+        from torch.utils._sympy.functions import ModularIndexing
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_index_expr_scalar_arithmetic",
+                input_nodes=[],
+                output_node=None,
+            )
+            with V.set_kernel_handler(kernel):
+                idx = CuteDSLOpOverrides.index_expr(
+                    ModularIndexing(sympy.Symbol("idx_in", integer=True), 1, 2),
+                    torch.int64,
+                )
+                neg_result = CuteDSLOpOverrides.neg(idx)
+                add_result = CuteDSLOpOverrides.add(idx, 1)
+
+            self.assertIsInstance(idx, CSEVariable)
+            self.assertIsInstance(neg_result, CSEVariable)
+            self.assertIsInstance(add_result, CSEVariable)
+            self.assertEqual(
+                str(getattr(idx, "index_expr", None)), "ModularIndexing(idx_in, 1, 2)"
+            )
+            self.assertEqual(
+                str(getattr(add_result, "index_expr", None)),
+                "(ModularIndexing(idx_in, 1, 2)) + 1",
+            )
+            body = kernel.body.getvalue()
+            self.assertIn("tmp0 = (idx_in % 2)", body)
+            self.assertIn("tmp1 = (-tmp0)", body)
+            self.assertIn("tmp2 = (tmp0 + 1)", body)
+            self.assertNotIn("cute.TensorSSA(", body)
+            self.assertNotIn("cute.full_like(", body)
+            self.assertNotIn(".shape", body)
+            self.assertNotIn(".dtype", body)
+
+    def test_index_expr_abs_and_where_stay_scalar(self):
+        import sympy
+
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+        from torch.utils._sympy.functions import ModularIndexing
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_index_expr_abs_where",
+                input_nodes=[],
+                output_node=None,
+            )
+            with V.set_kernel_handler(kernel):
+                idx = CuteDSLOpOverrides.index_expr(
+                    ModularIndexing(sympy.Symbol("idx_in", integer=True), 1, 2),
+                    torch.int64,
+                )
+                abs_result = CuteDSLOpOverrides.abs(idx)
+                cond = CuteDSLOpOverrides.eq(idx, 0)
+                where_result = CuteDSLOpOverrides.where(cond, idx, 1)
+
+            self.assertIsInstance(idx, CSEVariable)
+            self.assertIsInstance(abs_result, CSEVariable)
+            self.assertIsInstance(cond, CSEVariable)
+            self.assertIsInstance(where_result, CSEVariable)
+            body = kernel.body.getvalue()
+            self.assertIn("tmp0 = (idx_in % 2)", body)
+            self.assertIn("mlir_math.absi(tmp0)", body)
+            self.assertIn("cute.where(", body)
+            self.assertNotIn("cute.TensorSSA(", body)
+            self.assertNotIn("cute.full_like(", body)
+            self.assertNotIn(".shape", body)
+            self.assertNotIn(".dtype", body)
+
+    def test_mod_does_not_attach_python_mod_index_expr(self):
+        import sympy
+
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_mod_index_expr",
+                input_nodes=[],
+                output_node=None,
+            )
+            with V.set_kernel_handler(kernel):
+                idx = CuteDSLOpOverrides.index_expr(
+                    sympy.Symbol("idx", integer=True), torch.int64
+                )
+                mod_result = CuteDSLOpOverrides.mod(idx, 4)
+
+            self.assertIsNone(getattr(mod_result, "index_expr", None))
+
+    def test_missing_vector_load_config_is_not_lane_uniform(self):
+        import sympy
+
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            ModificationWrapperCuteDSL,
+        )
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_missing_vector_load_config",
+                input_nodes=[],
+                output_node=None,
+            )
+            handler = ModificationWrapperCuteDSL(kernel, 0, {}, None)
+            self.assertEqual(
+                handler._analyze_index_fragment(sympy.Symbol("idx", integer=True)),
+                (False, False, None),
+            )
+
+            scalar_handler = ModificationWrapperCuteDSL(
+                kernel,
+                0,
+                {
+                    "vector_load_vec_size": 1,
+                    "vector_load_index": "idx",
+                    "vector_load_dim": -1,
+                },
+                None,
+            )
+            self.assertEqual(
+                scalar_handler._analyze_index_fragment(
+                    sympy.Symbol("idx", integer=True)
+                ),
+                (True, False, None),
+            )
+
+    def test_neg_on_loaded_tensor_cse_uses_tensor_ssa(self):
+        import sympy
+
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            ModificationWrapperCuteDSL,
+        )
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+
+        mock_buffer = MagicMock()
+        mock_buffer.dtype = torch.float32
+        mock_graph = MockGraphHandler({"buf0": mock_buffer})
+
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_neg_loaded_tensor",
+                input_nodes=[],
+                output_node=None,
+            )
+            handler = ModificationWrapperCuteDSL(kernel, 0, {}, None)
+            with V.set_kernel_handler(kernel):
+                loaded = handler.load("buf0", sympy.Integer(0))
+                neg_result = CuteDSLOpOverrides.neg(loaded)
+
+            self.assertIsInstance(loaded, CSEVariable)
+            self.assertEqual(loaded.shape, (1,))
+            self.assertIsInstance(neg_result, CSEVariable)
+            body = kernel.body.getvalue()
+            self.assertIn("tmp0 = cute.make_rmem_tensor(1, cutlass.Float32)", body)
+            self.assertIn("tmp2 = cute.TensorSSA(-tmp1, tmp1.shape, tmp1.dtype)", body)
+
+    def test_repeated_captured_load_reuses_generated_fragments(self):
+        import sympy
+
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            ModificationWrapperCuteDSL,
+        )
+
+        buffers = {}
+        for name in ("buf0", "buf1"):
+            buffer = MagicMock()
+            buffer.dtype = torch.float32
+            buffer.get_size.return_value = (16,)
+            buffers[name] = buffer
+        mock_graph = MockGraphHandler(buffers)
+
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_repeated_captured_load",
+                input_nodes=[],
+                output_node=None,
+            )
+            handler = ModificationWrapperCuteDSL(kernel, 0, {}, None)
+            with V.set_kernel_handler(kernel):
+                first = handler.load("buf0", sympy.Integer(0))
+                repeated = handler.load("buf0", sympy.Integer(0))
+                different_index = handler.load("buf0", sympy.Integer(1))
+                different_buffer = handler.load("buf1", sympy.Integer(0))
+
+        self.assertIs(first, repeated)
+        self.assertIsNot(first, different_index)
+        self.assertIsNot(first, different_buffer)
+        self.assertEqual(
+            kernel.body.getvalue().count("cute.make_rmem_tensor(1, cutlass.Float32)"),
+            3,
+        )
+
     def test_cutedsl_op_overrides(self):
         """Test the new CuteDSLOpOverrides class."""
         import torch
@@ -418,11 +724,13 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
         mock_cse_a.__str__.return_value = "tensor_a"
         mock_cse_a.dtype = torch.float32
         mock_cse_a.bounds = ValueRanges.unknown()
+        mock_cse_a.shape = (32, 64)
 
         mock_cse_b = MagicMock(spec=CSEVariable)
         mock_cse_b.__str__.return_value = "tensor_b"
         mock_cse_b.dtype = torch.float32
         mock_cse_b.bounds = ValueRanges.unknown()
+        mock_cse_b.shape = (32, 64)
 
         mock_graph = MockGraphHandler()
         with V.set_graph_handler(mock_graph):
@@ -447,15 +755,191 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
                 result = CuteDSLOpOverrides.sqrt(mock_cse_a)
                 self.assertIsInstance(result, CSEVariable)
 
-                with self.assertRaises(NotImplementedError):
-                    result = CuteDSLOpOverrides.maximum(mock_cse_a, mock_cse_b)
-                    result = CuteDSLOpOverrides.minimum(mock_cse_a, mock_cse_b)
+                result = CuteDSLOpOverrides.maximum(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
 
-        scalar_result = CuteDSLOpOverrides._ensure_tensor_ssa("5.0", mock_cse_a)
+                result = CuteDSLOpOverrides.minimum(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+
+                # Unary math ops
+                result = CuteDSLOpOverrides.rsqrt(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.exp2(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.log2(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.log10(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.tan(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.acos(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.asin(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.atan(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.floor(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                # Binary math ops
+                result = CuteDSLOpOverrides.atan2(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+
+                # Logical ops
+                result = CuteDSLOpOverrides.logical_xor(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+
+            body = kernel.body.getvalue()
+
+            # Arithmetic ops
+            self.assertIn("(tensor_a + tensor_b)", body)
+            self.assertIn("(tensor_a * tensor_b)", body)
+            self.assertIn("(tensor_a / tensor_b)", body)
+
+            # Unary math ops
+            self.assertIn("cute.math.sqrt(tensor_a)", body)
+            self.assertIn("cute.math.rsqrt(tensor_a)", body)
+            self.assertIn("cute.math.exp2(tensor_a)", body)
+            self.assertIn("cute.math.log2(tensor_a)", body)
+            self.assertIn("cute.math.log10(tensor_a)", body)
+            self.assertIn("cute.math.tan(tensor_a)", body)
+            self.assertIn("cute.math.acos(tensor_a)", body)
+            self.assertIn("cute.math.asin(tensor_a)", body)
+            self.assertIn("cute.math.atan(tensor_a)", body)
+            self.assertIn("cute.math.floor(tensor_a)", body)
+
+            # Binary math ops
+            self.assertIn("cute.math.atan2(tensor_a, tensor_b)", body)
+
+            # Logical ops
+            self.assertIn("(tensor_a ^ tensor_b)", body)
+
+        scalar_result = CuteDSLOpOverrides._ensure_tensor_ssa(
+            "5.0", mock_cse_a, is_tensor=False
+        )
         self.assertEqual(scalar_result, "cute.full_like(tensor_a, 5.0)")
 
-        tensor_result = CuteDSLOpOverrides._ensure_tensor_ssa(mock_cse_a, mock_cse_b)
+        tensor_result = CuteDSLOpOverrides._ensure_tensor_ssa(
+            mock_cse_a, mock_cse_b, is_tensor=True
+        )
         self.assertEqual(tensor_result, "tensor_a")
+
+    def test_inline_asm_three_outputs_are_shared(self):
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        source = MagicMock(spec=CSEVariable)
+        source.__str__.return_value = "tensor_a"
+        source.dtype = torch.float32
+        source.bounds = ValueRanges.unknown()
+        source.shape = (32, 64)
+        output_dtypes = (torch.float32, torch.float32, torch.float32)
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_inline_asm_three_outputs",
+                input_nodes=[],
+                output_node=None,
+            )
+            with V.set_kernel_handler(kernel):
+                results = tuple(
+                    CuteDSLOpOverrides.inline_asm_elementwise(
+                        source,
+                        asm=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                        constraints="=f,=f,=f,f",
+                        dtype=output_dtype,
+                        input_dtypes=(torch.float32,),
+                        output_dtypes=output_dtypes,
+                        output_index=output_index,
+                    )
+                    for output_index, output_dtype in enumerate(output_dtypes)
+                )
+
+        self.assertTrue(all(isinstance(result, CSEVariable) for result in results))
+        body = kernel.body.getvalue()
+        self.assertEqual(body.count("inline_asm_elementwise_intrinsic("), 1)
+        self.assertIn(
+            "result_type=(cutlass.Float32, cutlass.Float32, cutlass.Float32)",
+            body,
+        )
+
+    def test_cutedsl_op_overrides_fast_math(self):
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+            use_cutedsl_fast_math,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        mock_cse_a = MagicMock(spec=CSEVariable)
+        mock_cse_a.__str__.return_value = "tensor_a"
+        mock_cse_a.dtype = torch.float32
+        mock_cse_a.bounds = ValueRanges.unknown()
+        mock_cse_a.shape = (32, 64)
+
+        mock_cse_b = MagicMock(spec=CSEVariable)
+        mock_cse_b.__str__.return_value = "tensor_b"
+        mock_cse_b.dtype = torch.float32
+        mock_cse_b.bounds = ValueRanges.unknown()
+        mock_cse_b.shape = (32, 64)
+
+        def generate(fast_math):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_fast_math",
+                input_nodes=[],
+                output_node=None,
+            )
+            with (
+                V.set_kernel_handler(kernel),
+                use_cutedsl_fast_math(fast_math),
+            ):
+                for op_name in (
+                    "exp",
+                    "exp2",
+                    "sqrt",
+                    "rsqrt",
+                    "log",
+                    "log2",
+                    "log10",
+                    "cos",
+                    "sin",
+                    "tan",
+                    "acos",
+                    "asin",
+                    "atan",
+                    "erf",
+                    "floor",
+                    "tanh",
+                    "sigmoid",
+                ):
+                    result = getattr(CuteDSLOpOverrides, op_name)(mock_cse_a)
+                    self.assertIsInstance(result, CSEVariable)
+                result = CuteDSLOpOverrides.atan2(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+            return kernel.body.getvalue()
+
+        with V.set_graph_handler(MockGraphHandler()):
+            fast_math_body = generate(True)
+            precise_body = generate(False)
+
+        math_lines = [
+            line for line in fast_math_body.splitlines() if "cute.math." in line
+        ]
+        self.assertGreater(len(math_lines), 0)
+        self.assertTrue(all("fastmath=True" in line for line in math_lines))
+        self.assertNotIn("fastmath=True", precise_body)
 
     def test_cse_integration(self):
         """Test CSE (Common Subexpression Elimination) integration."""
@@ -476,6 +960,10 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
                 test_expr = "x"
                 var = kernel.cse.generate(kernel.body, test_expr, dtype=None)
                 self.assertTrue(str(var).startswith("tmp"))
+
+    def test_can_fuse_horizontal_returns_false(self):
+        sched = CuteDSLScheduling(scheduler=None)
+        self.assertIs(sched.can_fuse_horizontal(MagicMock(), MagicMock()), False)
 
 
 if __name__ == "__main__":

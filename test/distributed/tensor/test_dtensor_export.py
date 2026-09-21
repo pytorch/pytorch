@@ -5,10 +5,7 @@ import contextlib
 import torch
 import torch.distributed as dist
 import torch.fx.traceback as fx_traceback
-from torch._dynamo.functional_export import (
-    _dynamo_graph_capture_for_export,
-    dynamo_graph_capture_for_export,
-)
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch._guards import tracing, TracingContext
@@ -127,20 +124,20 @@ class FlexAttentionModel(torch.nn.Module):
 def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
-    # needed for stric export
+    # needed for strict export; must be cleaned up to avoid polluting global state
     torch.utils._pytree.register_constant(DTensorSpec)
+    try:
+        # install_free_tensors is required for dynamo to work
+        with torch._dynamo.config.patch(install_free_tensors=True):
+            with torch._export.utils._disable_aten_to_metadata_assertions():
+                ep = torch.export.export(model, args, kwargs, strict=True)
 
-    # install_free_tensors is required for dynamo to work
-    with torch._dynamo.config.patch(
-        install_free_tensors=True, inline_inbuilt_nn_modules=True
-    ):
-        with torch._export.utils._disable_aten_to_metadata_assertions():
-            ep = torch.export.export(model, args, kwargs, strict=True)
-
-    # joint_gm produced here is missing the backward region, due to incompatiblility
-    # between ep.module() and aot_export_joint_with_descriptors.
-    # Keeping this here to show the issue.
-    return aot_export_joint_with_descriptors_alone(ep.module(), args, kwargs)
+        # joint_gm produced here is missing the backward region, due to incompatiblility
+        # between ep.module() and aot_export_joint_with_descriptors.
+        # Keeping this here to show the issue.
+        return aot_export_joint_with_descriptors_alone(ep.module(), args, kwargs)
+    finally:
+        torch.utils._pytree._deregister_pytree_node(DTensorSpec)
 
 
 def graph_capture_and_aot_export_joint_with_descriptors_v2(model, args, kwargs=None):
@@ -148,17 +145,6 @@ def graph_capture_and_aot_export_joint_with_descriptors_v2(model, args, kwargs=N
         kwargs = {}
     gm = dynamo_graph_capture_for_export(model)(*args, **kwargs)
     fake_mode = gm.meta.get("fake_mode", None)
-    with tracing(TracingContext(fake_mode)):
-        return aot_export_joint_with_descriptors_alone(gm, args, kwargs)
-
-
-def graph_capture_and_aot_export_joint_with_descriptors(model, args, kwargs=None):
-    if kwargs is None:
-        kwargs = {}
-    with torch._dynamo.config.patch(install_free_tensors=True):
-        # TODO: switch to use the official graph_capture API once it is ready
-        gm = _dynamo_graph_capture_for_export(model)(*args, **kwargs)
-        fake_mode = gm.meta.get("fake_mode", None)
     with tracing(TracingContext(fake_mode)):
         return aot_export_joint_with_descriptors_alone(gm, args, kwargs)
 
@@ -300,42 +286,46 @@ class DTensorExportTest(TestCase):
             ]
 
             marked_nodes_bw = [
+                "view_11",
                 "mm_4",
                 "t_13",
                 "view_1",
                 "mm_5",
                 "t_14",
                 "sum_3",
-                "view_9",
+                "view_12",
                 "t_15",
                 "detach",
                 "detach_3",
                 "threshold_backward_1",
+                "view_13",
                 "t_16",
                 "mm_6",
                 "t_17",
                 "sum_4",
-                "view_10",
+                "view_14",
                 "t_18",
             ]
             unmarked_nodes_bw = [
+                "view_7",
                 "mm",
                 "t_5",
                 "view_5",
                 "mm_1",
                 "t_6",
                 "sum_1",
-                "view_7",
+                "view_8",
                 "t_7",
                 "detach_1",
                 "detach_2",
                 "threshold_backward",
+                "view_9",
                 "mm_2",
                 "t_9",
                 "mm_3",
                 "t_10",
                 "sum_2",
-                "view_8",
+                "view_10",
                 "t_11",
                 "all_reduce_2",
                 "wait_tensor_2",
@@ -359,7 +349,6 @@ class DTensorExportTest(TestCase):
         "export_fn",
         [
             graph_capture_and_aot_export_joint_with_descriptors_v2,
-            graph_capture_and_aot_export_joint_with_descriptors,
             aot_export_joint_with_descriptors_alone,
         ],
     )
@@ -383,10 +372,6 @@ class DTensorExportTest(TestCase):
             (
                 graph_capture_and_aot_export_joint_with_descriptors_v2,
                 "[[4, 10], [4], [10, 4], [10], [4, 10], [4], [10, 4], [10], [s64, 10], [s64, 10]]",
-            ),
-            (
-                graph_capture_and_aot_export_joint_with_descriptors,
-                "[[4, 10], [4], [10, 4], [10], [s22, 10], [s22, 10]]",
             ),
         ],
     )
@@ -421,7 +406,8 @@ class DTensorExportTest(TestCase):
         res = []
         for node in joint_gm.graph.nodes:
             if node.op == "placeholder":
-                assert "val" in node.meta
+                if "val" not in node.meta:
+                    raise AssertionError(f"Expected 'val' in node.meta for {node}")
                 fake_val = node.meta["val"]
                 if isinstance(fake_val, torch._subclasses.fake_tensor.FakeTensor):
                     res.append(list(fake_val.shape))
@@ -432,7 +418,6 @@ class DTensorExportTest(TestCase):
         "export_fn",
         [
             dynamo_graph_capture_for_export,
-            _dynamo_graph_capture_for_export,
         ],
     )
     def test_einsum_dtensor_export(self, export_fn):
@@ -454,11 +439,7 @@ class DTensorExportTest(TestCase):
 
         # Run model to verify it works
         output = model(*inputs)
-        with torch._dynamo.config.patch(
-            install_free_tensors=(export_fn is _dynamo_graph_capture_for_export)
-        ):
-            # TODO: switch to use the official graph_capture API once it is ready
-            gm = export_fn(model)(*inputs)
+        gm = export_fn(model)(*inputs)
         output_gm = gm(*inputs)
         self.assertEqual(output, output_gm)
 
@@ -466,7 +447,6 @@ class DTensorExportTest(TestCase):
         "export_fn",
         [
             graph_capture_and_aot_export_joint_with_descriptors_v2,
-            graph_capture_and_aot_export_joint_with_descriptors,
         ],
     )
     def test_flex_attention_dtensor_export(self, export_fn):
@@ -529,7 +509,7 @@ class DTensorExportTest(TestCase):
             return nest_fn(leaf) + 1
 
         z = torch.randn(16, 16)
-        gm = graph_capture_and_aot_export_joint_with_descriptors(fn, (z,))
+        gm = graph_capture_and_aot_export_joint_with_descriptors_v2(fn, (z,))
 
         self.assertEqual(fn(z), gm(z)[0])
 
@@ -544,7 +524,7 @@ class DTensorExportTest(TestCase):
         y = torch.randint(1, (10,)).bool()
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         y_dt = distribute_tensor(y, device_mesh, placements=[Replicate()])
-        _dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+        dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
 
         class Bar(torch.nn.Module):
             def forward(self, x):
@@ -554,26 +534,52 @@ class DTensorExportTest(TestCase):
 
         x = torch.randint(1000, (4, 64, 16))
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
-        gm = _dynamo_graph_capture_for_export(Bar())(x_dt)
+        gm = dynamo_graph_capture_for_export(Bar())(x_dt)
         self.assertExpectedInline(
+            str(gm.graph).strip(),
             """\
 graph():
-    %l_flat_args_0_ : [num_users=2] = placeholder[target=arg_0]
-    %max_1 : [num_users=1] = call_method[target=max](args = (%l_flat_args_0_,), kwargs = {})
+    %l_x_ : torch.distributed.tensor.DTensor [num_users=2] = placeholder[target=L_x_]
+    %max_1 : [num_users=1] = call_method[target=max](args = (%l_x_,), kwargs = {})
     %clamp : [num_users=1] = call_function[target=torch.clamp](args = (%max_1,), kwargs = {min: 1})
     %item : [num_users=2] = call_method[target=item](args = (%clamp,), kwargs = {})
-    %ge_1 : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
-    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_1, Runtime assertion failed for expression u0 >= 1 on node 'ge_1'), kwargs = {})
-    %res : [num_users=2] = call_function[target=operator.getitem](args = (%l_flat_args_0_, slice(None, item, None)), kwargs = {})
-    %getattr_1 : [num_users=1] = call_function[target=builtins.getattr](args = (%res, _local_tensor), kwargs = {})
-    %sym_size_int : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%getattr_1, 0), kwargs = {})
-    %ge_2 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int, 0), kwargs = {})
-    %_assert_scalar_default_1 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_2, Runtime assertion failed for expression u2 >= 0 on node 'ge_2'), kwargs = {})
-    %le : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int, 4), kwargs = {})
-    %_assert_scalar_default_2 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le, Runtime assertion failed for expression u2 <= 4 on node 'le'), kwargs = {})
-    return (res,)""",  # noqa: B950
-            str(gm.graph).strip(),
+    %ge : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
+    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge, Runtime assertion failed for expression u0 >= 1 on node 'ge'), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
+    return (getitem,)""",
         )
+
+    def test_dtensor_mark_unbacked(self):
+        device_mesh = init_device_mesh(
+            self.device_type, mesh_shape=(self.world_size // 2, 2)
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        x_dt = distribute_tensor(
+            torch.randn(64, 64), device_mesh, placements=[Replicate(), Replicate()]
+        )
+        y_dt = x_dt.clone()
+        for i in range(2):
+            torch._dynamo.decorators.mark_unbacked(x_dt, i)
+            torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+        gm = dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+        n = 0
+        for node in gm.graph.nodes:
+            if bindings := node.meta.get("unbacked_bindings", {}):
+                # 2 outer sizes, 2 inner sizes
+                self.assertEqual(len(bindings), 4)
+                n += 1
+        self.assertEqual(n, 2)  # 2 nodes with bindings (x, y)
+
+        # test size-0 tensor
+        z_dt = distribute_tensor(
+            torch.randn(0, 0), device_mesh, placements=[Replicate(), Replicate()]
+        )
+        self.assertEqual(gm(z_dt, z_dt).shape, (0, 0))
 
 
 instantiate_parametrized_tests(DTensorExportTest)

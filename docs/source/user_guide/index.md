@@ -13,7 +13,7 @@ This guide is a work in progress.
 :maxdepth: 1
 :caption: Introduction
 
-Pytorch Overview <https://docs.pytorch.org/tutorials/beginner/deep_learning_60min_blitz.html>
+PyTorch Overview <https://docs.pytorch.org/tutorials/beginner/deep_learning_60min_blitz.html>
 Get Started <https://pytorch.org/get-started/locally/>
 Learn the Basics <https://docs.pytorch.org/tutorials/beginner/basics/intro.html>
 ```
@@ -23,6 +23,14 @@ Learn the Basics <https://docs.pytorch.org/tutorials/beginner/basics/intro.html>
 :caption: Core Concepts
 
 pytorch_main_components
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Torch Compile
+
+Torch.compile <torch_compiler/torch.compiler.md>
+Torch.export <torch_compiler/export.md>
 ```
 
 ```{toctree}

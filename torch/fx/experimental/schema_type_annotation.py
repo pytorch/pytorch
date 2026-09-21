@@ -1,13 +1,17 @@
-# mypy: allow-untyped-defs
 import inspect
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.fx
 from torch._jit_internal import boolean_dispatched
 from torch.fx import Transformer
+from torch.fx.graph_module import GraphModule
 from torch.fx.node import Argument, Target
 from torch.fx.operator_schemas import _torchscript_type_to_python_type
+from torch.fx.proxy import Proxy
+
+
+__all__ = ["AnnotateTypesWithSchema"]
 
 
 class AnnotateTypesWithSchema(Transformer):
@@ -31,11 +35,11 @@ class AnnotateTypesWithSchema(Transformer):
 
     def __init__(
         self,
-        module: torch.nn.Module,
+        module: GraphModule,
         annotate_functionals: bool = True,
         annotate_modules: bool = True,
         annotate_get_attrs: bool = True,
-    ):
+    ) -> None:
         super().__init__(module)
         self.annotate_functionals = annotate_functionals
         self.annotate_modules = annotate_modules
@@ -43,7 +47,7 @@ class AnnotateTypesWithSchema(Transformer):
 
     def call_function(
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
-    ):
+    ) -> Proxy:
         python_ret_type = None
         if self.annotate_functionals and target.__module__ == "torch.nn.functional":
             target_for_analysis = target
@@ -52,7 +56,8 @@ class AnnotateTypesWithSchema(Transformer):
                 # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
                 # branches of the dispatch have exactly the same signature. If they do, use the `true`
                 # branch signature for analysis. Otherwise, leave this un-normalized
-                assert not isinstance(target, str)
+                if isinstance(target, str):
+                    raise AssertionError("target should not be a string here")
                 dispatched = boolean_dispatched[target]
                 if_true, if_false = dispatched["if_true"], dispatched["if_false"]
                 # TODO: can we emit the union of these? What are the implications on TorchScript
@@ -74,9 +79,10 @@ class AnnotateTypesWithSchema(Transformer):
 
     def call_module(
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
-    ):
+    ) -> Proxy:
         python_ret_type = None
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected str target, got {type(target)}")
         submod = self.fetch_attr(target)
         if self.annotate_modules and hasattr(submod.__class__, "__name__"):
             classname = submod.__class__.__name__
@@ -90,15 +96,16 @@ class AnnotateTypesWithSchema(Transformer):
 
     def get_attr(
         self,
-        target: torch.fx.node.Target,
+        target: Target,
         args: tuple[Argument, ...],
         kwargs: dict[str, Any],
-    ):
+    ) -> Proxy:
         attr_proxy = super().get_attr(target, args, kwargs)
 
         if self.annotate_get_attrs:
             module_itr = self.module
-            assert isinstance(target, str)
+            if not isinstance(target, str):
+                raise AssertionError(f"Expected str target, got {type(target)}")
             atoms = target.split(".")
             for i, atom in enumerate(atoms):
                 if not hasattr(module_itr, atom):
@@ -118,7 +125,7 @@ class AnnotateTypesWithSchema(Transformer):
 
         return attr_proxy
 
-    def _extract_python_return_type(self, target: Target) -> Optional[Any]:
+    def _extract_python_return_type(self, target: Target) -> Any | None:
         """
         Given a Python call target, try to extract the Python return annotation
         if it is available, otherwise return None
@@ -132,7 +139,8 @@ class AnnotateTypesWithSchema(Transformer):
             Optional[Any]: Return annotation from the `target`, or None if it was
                 not available.
         """
-        assert callable(target)
+        if not callable(target):
+            raise AssertionError(f"Expected callable target, got {type(target)}")
         try:
             sig = inspect.signature(target)
         except (ValueError, TypeError):

@@ -16,3 +16,25 @@ def fn(val, call):
     val = call(val)
     val = val + 1
     return val
+
+
+_MODULE_CONST = 1
+
+
+def fn_with_module_global(x):
+    x = x + _MODULE_CONST
+    torch._dynamo.graph_break()
+    return x + _MODULE_CONST + 1
+
+
+HELPER_CONSTANT = torch.tensor([100.0])
+
+
+def closure_with_graph_break(x):
+    captured = x + 1
+
+    def inner():
+        torch._dynamo.graph_break()
+        return captured + HELPER_CONSTANT
+
+    return inner()

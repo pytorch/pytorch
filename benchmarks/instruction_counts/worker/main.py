@@ -24,7 +24,7 @@ import pickle
 import sys
 import timeit
 import traceback
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -117,13 +117,17 @@ class WorkerUnpickler(pickle.Unpickler):
 
     def load_input(self) -> WorkerTimerArgs:
         result = self.load()
-        assert isinstance(result, WorkerTimerArgs)
+        if not isinstance(result, WorkerTimerArgs):
+            raise AssertionError(f"expected WorkerTimerArgs, got {type(result)}")
         return result
 
-    def load_output(self) -> Union[WorkerTimerArgs, WorkerOutput, WorkerFailure]:
+    def load_output(self) -> WorkerTimerArgs | WorkerOutput | WorkerFailure:
         """Convenience method for type safe loading."""
         result = self.load()
-        assert isinstance(result, (WorkerTimerArgs, WorkerOutput, WorkerFailure))
+        if not isinstance(result, (WorkerTimerArgs, WorkerOutput, WorkerFailure)):
+            raise AssertionError(
+                f"expected WorkerTimerArgs, WorkerOutput, or WorkerFailure, got {type(result)}"
+            )
         return result
 
 
@@ -159,18 +163,21 @@ def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
 
 
 def main(communication_file: str) -> None:
-    result: Union[WorkerOutput, WorkerFailure]
+    result: WorkerOutput | WorkerFailure
     try:
         with open(communication_file, "rb") as f:
             timer_args: WorkerTimerArgs = WorkerUnpickler(f).load_input()
-            assert isinstance(timer_args, WorkerTimerArgs)
+            if not isinstance(timer_args, WorkerTimerArgs):
+                raise AssertionError(
+                    f"expected WorkerTimerArgs, got {type(timer_args)}"
+                )
         result = _run(timer_args)
 
     except KeyboardInterrupt:
         # Runner process sent SIGINT.
         sys.exit()
 
-    except BaseException:  # noqa: B036
+    except BaseException:
         trace_f = io.StringIO()
         traceback.print_exc(file=trace_f)
         result = WorkerFailure(failure_trace=trace_f.getvalue())

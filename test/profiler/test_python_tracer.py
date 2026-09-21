@@ -27,9 +27,7 @@ class TestPythonTracer(TestCase):
 
         names = ["Alice", "Bob"]
 
-        with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
-        ) as prof:
+        with profile(activities=[ProfilerActivity.CPU], with_stack=True) as prof:
             sorted(names, key=get_key)
 
         with TemporaryFileName(mode="w+") as fname:
@@ -53,9 +51,7 @@ class TestPythonTracer(TestCase):
         vi = sys.version_info
         from sys import monitoring
 
-        with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
-        ):
+        with profile(activities=[ProfilerActivity.CPU], with_stack=True):
             name = monitoring.get_tool(2)
             if vi.micro < 5:
                 self.assertEqual(name, "PyTorch Profiler")

@@ -71,8 +71,8 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
   std::tuple<at::Tensor, at::Tensor> fake_quant_out;
   at::Tensor x_min, x_max;
   if (per_row_fake_quant) {
-    float* x_min_data = inp_running_min.data_ptr<float>();
-    float* x_max_data = inp_running_max.data_ptr<float>();
+    const float* x_min_data = inp_running_min.const_data_ptr<float>();
+    const float* x_max_data = inp_running_max.const_data_ptr<float>();
     for (const auto i : c10::irange(inp_running_min.numel())) {
 #ifdef USE_FBGEMM
       auto x_qparams = fbgemm::ChooseQuantizationParams(
@@ -215,7 +215,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
         ch_axis);
   }
   auto mask = at::ones_like(self, at::kBool, MemoryFormat::Preserve);
-  return std::make_tuple(self.clone(), mask);
+  return std::make_tuple(self.clone(), std::move(mask));
 }
 
 at::Tensor fused_moving_avg_obs_fake_quant(

@@ -226,9 +226,9 @@ class Stat {
     for (auto& kv : stats) {
       std::stringstream key;
       key << name_;
-      key << ".";
+      key << '.';
       key << aggregationName(kv.first);
-      e.data[key.str()] = kv.second;
+      e.data[std::move(key).str()] = kv.second;
     }
 
     logEvent(e);

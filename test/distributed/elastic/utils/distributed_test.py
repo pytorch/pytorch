@@ -20,10 +20,12 @@ from torch.distributed.elastic.utils.distributed import (
     get_socket_with_port,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     IS_WINDOWS,
+    MI200_ARCH,
     run_tests,
-    skipIfRocm,
+    skipIfRocmArch,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -50,6 +52,8 @@ if IS_WINDOWS or IS_MACOS:
 
 
 class DistributedUtilTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_create_store_single_server(self):
         store = create_c10d_store(is_server=True, server_addr=socket.gethostname())
         self.assertIsNotNone(store)
@@ -143,7 +147,8 @@ class DistributedUtilTest(TestCase):
         )
         self.assertFalse(store.libuvBackend)
         del os.environ["USE_LIBUV"]
-        assert "USE_LIBUV" not in os.environ
+        if "USE_LIBUV" in os.environ:
+            raise AssertionError("Expected USE_LIBUV to be removed from os.environ")
 
         # libuv backend is enabled by default
         store = create_c10d_store(
@@ -174,7 +179,7 @@ class DistributedUtilTest(TestCase):
                 is_server=True, server_addr=server_addr, server_port=store1.port
             )
 
-    @skipIfRocm
+    @skipIfRocmArch(MI200_ARCH)
     def test_port_already_in_use_on_worker(self):
         sock = get_socket_with_port()
         with closing(sock):

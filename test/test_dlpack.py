@@ -2,6 +2,7 @@
 
 import torch
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import xfailCUDAIfSM89OrLaterOnWindows
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -10,9 +11,10 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    onlyOn,
     skipCUDAIfNotRocm,
-    skipCUDAIfRocm,
     skipMeta,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -21,11 +23,17 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
-    skipIfMPS,
     skipIfTorchDynamo,
+    TEST_WITH_ROCM,
     TestCase,
+    xfailIfTorchDynamo,
 )
-from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
+from torch.utils.dlpack import (
+    DLDeviceType,
+    from_dlpack,
+    ReadOnlyTensorWrapper,
+    to_dlpack,
+)
 
 
 # Wraps a tensor, exposing only DLPack methods:
@@ -102,26 +110,26 @@ class TestTorchDlPack(TestCase):
             # DLPack protocol that establishes correct stream order
             # does not behave as expected on Jetson
             stream.synchronize()
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
+        stream = torch.Stream()
+        with stream:
             z = from_dlpack(x)
         stream.synchronize()
         return z
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_streams(self, device, dtype):
         # Create a stream where the tensor will reside
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
+        stream = torch.Stream()
+        with stream:
             # Do an operation in the actual stream
             x = make_tensor((5,), dtype=dtype, device=device) + 1
         z = self._dlpack_conversion_with_streams(stream, x)
         self.assertEqual(z, x)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
     @dtypes(
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
@@ -131,8 +139,8 @@ class TestTorchDlPack(TestCase):
         torch.float4_e2m1fn_x2,
     )
     def test_dlpack_conversion_with_streams_narrow_precision(self, device, dtype):
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
+        stream = torch.Stream()
+        with stream:
             x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
         z = self._dlpack_conversion_with_streams(stream, x)
@@ -157,7 +165,6 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(x, y)
 
     @skipMeta
-    @skipIfMPS  # MPS crashes with noncontiguous now
     @onlyNativeDeviceTypes
     @dtypes(
         *all_types_and_complex_and(
@@ -167,6 +174,11 @@ class TestTorchDlPack(TestCase):
             torch.uint16,
             torch.uint32,
             torch.uint64,
+        )
+    )
+    @dtypesIfMPS(
+        *all_mps_types_and(
+            torch.bool, torch.cfloat, torch.chalf, torch.uint16, torch.uint32
         )
     )
     def test_from_dlpack_noncontinguous(self, device, dtype):
@@ -246,7 +258,8 @@ class TestTorchDlPack(TestCase):
     def test_from_dlpack_dtype(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
-        assert x.dtype == y.dtype
+        if x.dtype != y.dtype:
+            raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipMeta
     @onlyCUDA
@@ -260,9 +273,11 @@ class TestTorchDlPack(TestCase):
 
             def __dlpack__(self, stream=None):
                 if torch.version.hip is None:
-                    assert stream == 1
+                    if stream != 1:
+                        raise AssertionError(f"expected stream=1, got {stream}")
                 else:
-                    assert stream == 0
+                    if stream != 0:
+                        raise AssertionError(f"expected stream=0, got {stream}")
                 capsule = self.tensor.__dlpack__(stream=stream)
                 return capsule
 
@@ -273,7 +288,6 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_convert_default_stream(self, device):
         # tests run on non-default stream, so _sleep call
         # below will run on a non-default stream, causing
@@ -286,7 +300,9 @@ class TestTorchDlPack(TestCase):
             x = torch.zeros(1, device=device)
             torch.cuda._sleep(2**20)
             self.assertTrue(torch.cuda.default_stream().query())
-            x.__dlpack__(stream=1)
+            # ROCm uses stream 0 for default stream, CUDA uses stream 1
+            default_stream_id = 0 if torch.version.hip else 1
+            x.__dlpack__(stream=default_stream_id)
         # check that the default stream has work (a pending cudaStreamWaitEvent)
         self.assertFalse(torch.cuda.default_stream().query())
 
@@ -300,14 +316,21 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_cuda_per_thread_stream(self, device):
         # Test whether we raise an error if we are trying to use per-thread default
         # stream, which is currently not supported by PyTorch.
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(
-            BufferError, "per-thread default stream is not supported"
-        ):
+
+        if TEST_WITH_ROCM:
+            context = self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: 2"
+            )
+        else:
+            context = self.assertRaisesRegex(
+                BufferError, "per-thread default stream is not supported"
+            )
+
+        with context:
             x.__dlpack__(stream=2)
 
     @skipMeta
@@ -327,11 +350,18 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_invalid_cuda_streams(self, device):
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(AssertionError, r"unsupported stream on CUDA: \d"):
-            x.__dlpack__(stream=0)
+
+        if TEST_WITH_ROCM:
+            # On ROCm, stream=0 is valid (default stream).
+            self.assertIsNotNone(x.__dlpack__(stream=0))
+        else:
+            # CUDA raises AssertionError for stream=0
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on CUDA: \d"
+            ):
+                x.__dlpack__(stream=0)
 
     @skipMeta
     def test_dlpack_invalid_cpu_stream(self):
@@ -351,7 +381,7 @@ class TestTorchDlPack(TestCase):
         with self.assertRaisesRegex(
             BufferError, r"Can't export tensors on a different CUDA device"
         ):
-            with torch.device(dev1):
+            with torch.accelerator.device_index(torch.device(dev1).index):
                 x.__dlpack__()
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
@@ -385,6 +415,29 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(z.shape, (1,))
         # Stride normalization has been removed, strides should be preserved
         self.assertEqual(z.stride(), (3,))
+
+    @xfailIfTorchDynamo
+    @skipMeta
+    @onlyCPU
+    def test_from_dlpack_negative_strides(self, device):
+        # torch.from_dlpack() on a NumPy array with negative strides used to
+        # abort the process instead of raising a catchable Python exception.
+        # See https://github.com/pytorch/pytorch/issues/188023.
+        import numpy as np
+
+        # 1-D negative stride
+        a1 = np.arange(8.0)[::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a1)
+
+        # 2-D, one negative axis
+        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a2)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -450,8 +503,9 @@ class TestTorchDlPack(TestCase):
             # DLPack support only available from NumPy 1.22 onwards.
             # Here, we test having another framework (NumPy) calling our
             # Tensor.__dlpack__ implementation.
-            arr = np.from_dlpack(t)
-            self.assertEqual(t, arr)
+            np_from_dlpack = np.from_dlpack(t)
+            np_from_copy = t.numpy()
+            self.assertEqual(np_from_dlpack, np_from_copy)
 
         # We can't use the array created above as input to from_dlpack.
         # That's because DLPack imported NumPy arrays are read-only.
@@ -499,7 +553,8 @@ class TestTorchDlPack(TestCase):
         self._test_from_dlpack(device, out_device="cpu", copy=True)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3077")
     def test_no_copy(self, device):
         # No copy, since tensor lives in the same device.
         self._test_from_dlpack(device)
@@ -512,6 +567,24 @@ class TestTorchDlPack(TestCase):
     def test_needs_copy_error(self, device):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
+
+    def test_dlpack_copy_fallback(self):
+        """Test that copy parameter works even with producers that don't support it"""
+        import numpy as np
+
+        # Test copy=True - should work even if NumPy doesn't support copy parameter
+        np_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        t = from_dlpack(np_array, copy=True)
+
+        # Verify it's a copy by modifying tensor and checking NumPy unchanged
+        t[0] = 999.0
+        self.assertEqual(np_array[0], 1.0)
+
+        # Test copy=None (default) - should be zero-copy view
+        np_array2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+        t2 = from_dlpack(np_array2)
+        t2[0] = 999.0
+        self.assertEqual(np_array2[0], 999.0)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -534,8 +607,535 @@ class TestTorchDlPack(TestCase):
         ):
             from_dlpack(inp)
 
+    @xfailCUDAIfSM89OrLaterOnWindows
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")
+    def test_dlpack_exchange_api(self, device):
+        """Comprehensive test of all DLPack Exchange API functions using inline C++"""
+        # Check that the C API capsule exists and get it
+        self.assertTrue(hasattr(torch.Tensor, "__dlpack_c_exchange_api__"))
+        api_capsule = torch.Tensor.__dlpack_c_exchange_api__
+        self.assertEqual(
+            type(api_capsule).__name__, "PyCapsule", "API should be a PyCapsule"
+        )
+        self.assertRegex(str(api_capsule), r'capsule object "dlpack_exchange_api"')
+        tensor = torch.arange(24, dtype=torch.float32, device=device).reshape(2, 3, 4)
 
-instantiate_device_type_tests(TestTorchDlPack, globals(), allow_mps=True)
+        source = """
+        #include <torch/extension.h>
+        #include <ATen/dlpack.h>
+        #include <pybind11/pybind11.h>
+        #include <memory>
+
+        namespace py = pybind11;
+
+        void test_dlpack_exchange_api(at::Tensor tensor, py::object api_obj, bool test_stream_exchange) {
+            PyObject* api_capsule = api_obj.ptr();
+            TORCH_CHECK(PyCapsule_IsValid(api_capsule, "dlpack_exchange_api"),
+                        "Invalid or mismatched DLPack exchange API capsule");
+            const DLPackExchangeAPI* api =
+                static_cast<const DLPackExchangeAPI*>(
+                    PyCapsule_GetPointer(api_capsule, "dlpack_exchange_api"));
+
+            // Test 1: API structure and version
+            {
+                TORCH_CHECK(api != nullptr, "API pointer is NULL");
+                TORCH_CHECK(api->header.version.major == DLPACK_MAJOR_VERSION,
+                            "Expected major version ", DLPACK_MAJOR_VERSION,
+                            ", got ", api->header.version.major);
+                TORCH_CHECK(api->header.version.minor == DLPACK_MINOR_VERSION,
+                            "Expected minor version ", DLPACK_MINOR_VERSION,
+                            ", got ", api->header.version.minor);
+                TORCH_CHECK(api->managed_tensor_allocator != nullptr,
+                            "managed_tensor_allocator is NULL");
+                TORCH_CHECK(api->managed_tensor_from_py_object_no_sync != nullptr,
+                            "managed_tensor_from_py_object_no_sync is NULL");
+                TORCH_CHECK(api->managed_tensor_to_py_object_no_sync != nullptr,
+                            "managed_tensor_to_py_object_no_sync is NULL");
+                TORCH_CHECK(api->dltensor_from_py_object_no_sync != nullptr,
+                            "dltensor_from_py_object_no_sync is NULL");
+                TORCH_CHECK(api->current_work_stream != nullptr,
+                            "current_work_stream is NULL");
+            }
+
+            // Test 2: managed_tensor_allocator
+            {
+                DLTensor prototype;
+                prototype.device.device_type = kDLCPU;
+                prototype.device.device_id = 0;
+                prototype.ndim = 3;
+                int64_t shape[3] = {3, 4, 5};
+                prototype.shape = shape;
+                prototype.strides = nullptr;
+                DLDataType dtype;
+                dtype.code = kDLFloat;
+                dtype.bits = 32;
+                dtype.lanes = 1;
+                prototype.dtype = dtype;
+                prototype.data = nullptr;
+                prototype.byte_offset = 0;
+
+                DLManagedTensorVersioned* out_tensor = nullptr;
+                int result = api->managed_tensor_allocator(
+                    &prototype, &out_tensor, nullptr, nullptr);
+                TORCH_CHECK(result == 0, "Allocator failed with code ", result);
+                TORCH_CHECK(out_tensor != nullptr, "Allocator returned NULL");
+                TORCH_CHECK(out_tensor->dl_tensor.ndim == 3,
+                            "Expected ndim 3, got ", out_tensor->dl_tensor.ndim);
+                TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 3,
+                            "Expected shape[0] = 3, got ", out_tensor->dl_tensor.shape[0]);
+                TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 4,
+                            "Expected shape[1] = 4, got ", out_tensor->dl_tensor.shape[1]);
+                TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 5,
+                            "Expected shape[2] = 5, got ", out_tensor->dl_tensor.shape[2]);
+                TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat,
+                            "Expected dtype code kDLFloat, got ",
+                            out_tensor->dl_tensor.dtype.code);
+                TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32,
+                            "Expected dtype bits 32, got ", out_tensor->dl_tensor.dtype.bits);
+                TORCH_CHECK(out_tensor->dl_tensor.device.device_type == kDLCPU,
+                            "Expected device type kDLCPU, got ",
+                            out_tensor->dl_tensor.device.device_type);
+                if (out_tensor->deleter) {
+                    out_tensor->deleter(out_tensor);
+                }
+            }
+
+            // Test 3: managed_tensor_from_py_object_no_sync
+            {
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                    THPVariable_Wrap(tensor), &Py_DecRef);
+                TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor to PyObject");
+
+                DLManagedTensorVersioned* out_tensor = nullptr;
+                int result = api->managed_tensor_from_py_object_no_sync(
+                    py_obj.get(), &out_tensor);
+
+                TORCH_CHECK(result == 0,
+                            "from_py_object_no_sync failed with code ", result);
+                TORCH_CHECK(out_tensor != nullptr,
+                            "from_py_object_no_sync returned NULL");
+                TORCH_CHECK(out_tensor->version.major == DLPACK_MAJOR_VERSION,
+                            "Expected major version ", DLPACK_MAJOR_VERSION,
+                            ", got ", out_tensor->version.major);
+                TORCH_CHECK(out_tensor->version.minor == DLPACK_MINOR_VERSION,
+                            "Expected minor version ", DLPACK_MINOR_VERSION,
+                            ", got ", out_tensor->version.minor);
+                TORCH_CHECK(out_tensor->dl_tensor.ndim == 3,
+                            "Expected ndim 3, got ", out_tensor->dl_tensor.ndim);
+                TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 2,
+                            "Expected shape[0] = 2, got ", out_tensor->dl_tensor.shape[0]);
+                TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 3,
+                            "Expected shape[1] = 3, got ", out_tensor->dl_tensor.shape[1]);
+                TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 4,
+                            "Expected shape[2] = 4, got ", out_tensor->dl_tensor.shape[2]);
+                TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat,
+                            "Expected dtype code kDLFloat, got ",
+                            out_tensor->dl_tensor.dtype.code);
+                TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32,
+                            "Expected dtype bits 32, got ",
+                            out_tensor->dl_tensor.dtype.bits);
+                TORCH_CHECK(out_tensor->dl_tensor.data != nullptr,
+                            "Data pointer is NULL");
+
+                if (out_tensor->deleter) {
+                    out_tensor->deleter(out_tensor);
+                }
+            }
+
+            // Test 4: managed_tensor_to_py_object_no_sync
+            {
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                    THPVariable_Wrap(tensor), &Py_DecRef);
+                TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor to PyObject");
+
+                DLManagedTensorVersioned* managed_tensor = nullptr;
+                int result = api->managed_tensor_from_py_object_no_sync(
+                    py_obj.get(), &managed_tensor);
+                TORCH_CHECK(result == 0, "from_py_object_no_sync failed");
+                TORCH_CHECK(managed_tensor != nullptr,
+                            "from_py_object_no_sync returned NULL");
+
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj_out(
+                    nullptr, &Py_DecRef);
+                PyObject* py_obj_out_raw = nullptr;
+                result = api->managed_tensor_to_py_object_no_sync(
+                    managed_tensor, reinterpret_cast<void**>(&py_obj_out_raw));
+                py_obj_out.reset(py_obj_out_raw);
+
+                TORCH_CHECK(result == 0,
+                            "to_py_object_no_sync failed with code ", result);
+                TORCH_CHECK(py_obj_out.get() != nullptr,
+                            "to_py_object_no_sync returned NULL");
+                TORCH_CHECK(THPVariable_Check(py_obj_out.get()),
+                            "Returned PyObject is not a Tensor");
+
+                at::Tensor result_tensor = THPVariable_Unpack(py_obj_out.get());
+                TORCH_CHECK(result_tensor.dim() == 3,
+                            "Expected 3 dimensions, got ", result_tensor.dim());
+                TORCH_CHECK(result_tensor.size(0) == 2,
+                            "Expected size(0) = 2, got ", result_tensor.size(0));
+                TORCH_CHECK(result_tensor.size(1) == 3,
+                            "Expected size(1) = 3, got ", result_tensor.size(1));
+                TORCH_CHECK(result_tensor.size(2) == 4,
+                            "Expected size(2) = 4, got ", result_tensor.size(2));
+                TORCH_CHECK(result_tensor.scalar_type() == at::kFloat,
+                            "Expected dtype kFloat, got ", result_tensor.scalar_type());
+            }
+
+            // Test 5: dltensor_from_py_object_no_sync (non-owning conversion)
+            DLDeviceType device_type;
+            int32_t device_id;
+            {
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                    THPVariable_Wrap(tensor), &Py_DecRef);
+                TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor to PyObject");
+
+                DLTensor dltensor;
+                int result = api->dltensor_from_py_object_no_sync(py_obj.get(), &dltensor);
+                TORCH_CHECK(result == 0,
+                            "dltensor_from_py_object_no_sync failed with code ", result);
+                TORCH_CHECK(dltensor.ndim == 3, "Expected ndim 3, got ", dltensor.ndim);
+                TORCH_CHECK(dltensor.shape[0] == 2,
+                            "Expected shape[0] = 2, got ", dltensor.shape[0]);
+                TORCH_CHECK(dltensor.shape[1] == 3,
+                            "Expected shape[1] = 3, got ", dltensor.shape[1]);
+                TORCH_CHECK(dltensor.shape[2] == 4,
+                            "Expected shape[2] = 4, got ", dltensor.shape[2]);
+                TORCH_CHECK(dltensor.dtype.code == kDLFloat,
+                            "Expected dtype code kDLFloat, got ", dltensor.dtype.code);
+                TORCH_CHECK(dltensor.dtype.bits == 32,
+                            "Expected dtype bits 32, got ", dltensor.dtype.bits);
+                TORCH_CHECK(dltensor.data != nullptr, "Data pointer is NULL");
+
+                // Capture device info for stream test
+                device_type = dltensor.device.device_type;
+                device_id = dltensor.device.device_id;
+            }
+
+            // Test 6: current_work_stream
+            {
+                if (test_stream_exchange) {
+                    void* stream_out = nullptr;
+                    int result = api->current_work_stream(device_type, device_id, &stream_out);
+                    TORCH_CHECK(result == 0,
+                                "current_work_stream failed with code ", result);
+                    TORCH_CHECK(stream_out != nullptr,
+                                "Expected stream to be non-NULL");
+                }
+            }
+        }
+        """
+
+        # Load and compile the inline C++ test
+        from torch.utils import cpp_extension
+
+        module = cpp_extension.load_inline(
+            name="test_dlpack_exchange_api",
+            cpp_sources=[source],
+            functions=["test_dlpack_exchange_api"],
+            verbose=False,
+            with_cuda=device.startswith("cuda"),
+            with_sycl=device.startswith("xpu"),
+        )
+
+        # Run the comprehensive C++ test
+        module.test_dlpack_exchange_api(
+            tensor, api_capsule, device.startswith(("cuda", "xpu"))
+        )
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")
+    def test_dlpack_exchange_api_sliced(self, device):
+        # Regression: on MPS, DLTensor.data is an opaque id<MTLBuffer>, so
+        # toDLPackNonOwning must export the storage base and carry the view
+        # offset in byte_offset rather than doing pointer arithmetic on the
+        # handle. Every other backend keeps exporting data_ptr() with
+        # byte_offset == 0, which consumers such as CuteDSL rely on.
+        api_capsule = torch.Tensor.__dlpack_c_exchange_api__
+        base = torch.arange(24, dtype=torch.float32, device=device).reshape(4, 6)
+        sliced = base[1:3, :]  # storage_offset = 6, elemsize = 4 -> byte_offset = 24
+
+        source = """
+        #include <torch/extension.h>
+        #include <ATen/dlpack.h>
+        #include <pybind11/pybind11.h>
+        #include <memory>
+
+        namespace py = pybind11;
+
+        void check_sliced_dltensor(
+            at::Tensor base, at::Tensor sliced, py::object api_obj) {
+            const DLPackExchangeAPI* api =
+                static_cast<const DLPackExchangeAPI*>(
+                    PyCapsule_GetPointer(api_obj.ptr(), "dlpack_exchange_api"));
+            TORCH_CHECK(api != nullptr, "API pointer is NULL");
+
+            std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                THPVariable_Wrap(sliced), &Py_DecRef);
+            TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor");
+
+            DLTensor dltensor;
+            int result = api->dltensor_from_py_object_no_sync(py_obj.get(), &dltensor);
+            TORCH_CHECK(result == 0,
+                        "dltensor_from_py_object_no_sync failed with code ", result);
+
+            // base covers the whole storage, so its data_ptr() is the storage
+            // base (on MPS, the unmodified id<MTLBuffer>).
+            void* expected_data;
+            uint64_t expected_offset;
+            if (sliced.device().type() == at::kMPS) {
+                expected_data = base.mutable_data_ptr();
+                expected_offset =
+                    sliced.storage_offset() * c10::elementSize(sliced.scalar_type());
+            } else {
+                expected_data = sliced.mutable_data_ptr();
+                expected_offset = 0;
+            }
+
+            TORCH_CHECK(dltensor.data == expected_data,
+                        "unexpected DLTensor.data for a sliced tensor");
+            TORCH_CHECK(dltensor.byte_offset == expected_offset,
+                        "byte_offset should be ", expected_offset,
+                        ", got ", dltensor.byte_offset);
+        }
+        """
+
+        from torch.utils import cpp_extension
+
+        module = cpp_extension.load_inline(
+            name="test_sliced_dltensor",
+            cpp_sources=[source],
+            functions=["check_sliced_dltensor"],
+            verbose=False,
+            with_cuda=device.startswith("cuda"),
+            with_sycl=device.startswith("xpu"),
+        )
+        module.check_sliced_dltensor(base, sliced, api_capsule)
+
+    @skipMeta
+    @onlyOn(["xpu", "cuda"])
+    def test_numpy_cross_device_transfer(self, device):
+        """Test cross-device transfer from NumPy (CPU) to PyTorch (CUDA/XPU).
+
+        This tests the fix for issue #169186 where torch.from_dlpack(numpy_array, device="cuda")
+        would fail with "unsupported device requested" because PyTorch incorrectly asked
+        NumPy to create a CUDA DLPack capsule instead of handling the device transfer itself.
+
+        According to the DLPack spec, the consumer (PyTorch) is responsible for constructing
+        the final array on the target device, not the producer (NumPy).
+        """
+        import numpy as np
+
+        device_type = torch.device(device).type
+        np_array = np.arange(10, dtype=np.float32)
+        expected = torch.arange(10, dtype=torch.float32, device=device)
+
+        # Test 1: copy=None (default) - should allow copy for cross-device
+        t1 = from_dlpack(np_array, device=device)
+        self.assertEqual(t1.device.type, device_type)
+        self.assertEqual(t1, expected)
+
+        # Test 2: copy=True - explicit copy
+        t2 = from_dlpack(np_array, device=device, copy=True)
+        self.assertEqual(t2.device.type, device_type)
+        self.assertEqual(t2, expected)
+
+        # Test 3: copy=False - should raise ValueError (can't do cross-device without copy)
+        with self.assertRaisesRegex(
+            ValueError, r"cannot move .* tensor from .* to .* without copying"
+        ):
+            from_dlpack(np_array, device=device, copy=False)
+
+        # Test 4: device as string vs torch.device object (both should work)
+        t_str = from_dlpack(np_array, device=device_type)
+        t_obj = from_dlpack(np_array, device=torch.device(device_type))
+        self.assertEqual(t_str.device.type, device_type)
+        self.assertEqual(t_obj.device.type, device_type)
+        self.assertEqual(t_str, t_obj)
+
+        # Test 5: Regression - CPU -> CPU should still be zero-copy (share memory)
+        np_array2 = np.arange(5, dtype=np.float32)
+        t_cpu = from_dlpack(np_array2, device="cpu", copy=None)
+        self.assertEqual(t_cpu.device.type, "cpu")
+        # Should share memory
+        self.assertEqual(t_cpu.data_ptr(), torch.from_numpy(np_array2).data_ptr())
+        # Mutation should affect both
+        t_cpu[0] = 999
+        self.assertEqual(np_array2[0], 999)
+
+    @skipMeta
+    @onlyOn(["xpu", "cuda"])
+    @deviceCountAtLeast(2)
+    def test_numpy_cross_device_multi_gpu(self, devices):
+        """Test cross-device transfer to specific CUDA devices (cuda:0, cuda:1, etc)."""
+        import numpy as np
+
+        dev0, dev1 = devices[:2]
+        np_array = np.arange(5, dtype=np.float32)
+
+        # Test transfer to cuda:0
+        t0 = from_dlpack(np_array, device=dev0)
+        self.assertEqual(t0.device, torch.device(dev0))
+        expected = torch.arange(5, dtype=torch.float32, device=dev0)
+        self.assertEqual(t0, expected)
+
+        # Test transfer to cuda:1
+        t1 = from_dlpack(np_array, device=dev1)
+        self.assertEqual(t1.device, torch.device(dev1))
+        expected = torch.arange(5, dtype=torch.float32, device=dev1)
+        self.assertEqual(t1, expected)
+
+        # Verify they're on different devices
+        self.assertNotEqual(t0.device, t1.device)
+
+
+instantiate_device_type_tests(
+    TestTorchDlPack, globals(), allow_mps=True, allow_xpu=True
+)
+
+
+# ReadOnlyTensorWrapper is an eager, runtime-only export shim that rejects all
+# ops except the DLPack protocol; Dynamo tracing probes it (e.g. descriptor
+# __get__) and trips that rejection, and __dlpack__ does not work under Dynamo
+# anyway (see skips above). These tests are eager-only.
+@skipIfTorchDynamo(
+    "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
+)
+class TestReadOnlyDLPack(TestCase):
+    # These tests exercise the read-only DLPack export path and the
+    # ReadOnlyTensorWrapper subclass. The behavior (const_data_ptr export, the
+    # READ_ONLY flag, copy-on-write preservation, op rejection) is device
+    # independent, so they run on CPU.
+
+    def test_read_only_export_does_not_materialize_cow(self):
+        # Exporting a copy-on-write tensor read-only must not materialize it,
+        # because the export goes through const_data_ptr().
+        base = torch.arange(8, dtype=torch.float32)
+        clone = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(base))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        # const_data_ptr() is the pointer the read-only export actually hands
+        # out (storage base + view offset) and does not materialize COW, so it
+        # is the right thing to compare against. _data_address would only match
+        # when storage_offset() == 0.
+        data_before = clone.const_data_ptr()
+        clone.__dlpack__(max_version=(1, 0), read_only=True)
+
+        # Still copy-on-write, same data pointer, source untouched too.
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+        self.assertTrue(torch._C._is_cow_tensor(base))
+        self.assertEqual(clone.const_data_ptr(), data_before)
+
+    def test_writable_export_materializes_cow(self):
+        # Control: the default (writable) export goes through data_ptr(), which
+        # materializes a copy-on-write tensor. This guards against the read-only
+        # test passing for the wrong reason.
+        base = torch.arange(8, dtype=torch.float32)
+        clone = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        clone.__dlpack__(max_version=(1, 0))
+        self.assertFalse(torch._C._is_cow_tensor(clone))
+
+    def test_read_only_requires_versioned(self):
+        # read_only cannot be represented on the legacy (unversioned) struct.
+        x = torch.arange(4, dtype=torch.float32)
+        with self.assertRaisesRegex(BufferError, "versioned DLPack"):
+            x.__dlpack__(read_only=True)
+        with self.assertRaisesRegex(BufferError, "versioned DLPack"):
+            x.__dlpack__(max_version=(0, 8), read_only=True)
+
+    def test_wrapper_shares_storage(self):
+        x = torch.arange(8, dtype=torch.float32)
+        ro = ReadOnlyTensorWrapper(x)
+        self.assertIsInstance(ro, torch.Tensor)
+        # Use a disabled-subclass guard to read the address without tripping the
+        # op-rejection logic.
+        with torch._C.DisableTorchFunctionSubclass():
+            self.assertEqual(ro.data_ptr(), x.data_ptr())
+
+    def test_wrapper_routes_fast_path_to_const_api(self):
+        # tvm-ffi / CuteDSL read __dlpack_c_exchange_api__ off the type. The
+        # wrapper must expose the const (read-only) exchange API, not the
+        # default writable one.
+        def _ptr(capsule):
+            import ctypes
+
+            get = ctypes.pythonapi.PyCapsule_GetPointer
+            get.restype = ctypes.c_void_p
+            get.argtypes = [ctypes.py_object, ctypes.c_char_p]
+            return get(capsule, b"dlpack_exchange_api")
+
+        wrapper_api = _ptr(ReadOnlyTensorWrapper.__dlpack_c_exchange_api__)
+        const_api = _ptr(torch._C._const_dlpack_exchange_api())
+        default_api = _ptr(torch._C._dlpack_exchange_api())
+        tensor_api = _ptr(torch.Tensor.__dlpack_c_exchange_api__)
+
+        self.assertEqual(wrapper_api, const_api)
+        self.assertNotEqual(wrapper_api, default_api)
+        self.assertEqual(tensor_api, default_api)
+
+    def test_wrapper_allows_dlpack_methods(self):
+        x = torch.arange(8, dtype=torch.float32)
+        ro = ReadOnlyTensorWrapper(x)
+        # __dlpack_device__ and __dlpack__ must work; round-trip must be exact.
+        self.assertEqual(ro.__dlpack_device__(), x.__dlpack_device__())
+        back = from_dlpack(ro)
+        self.assertEqual(back, x)
+        with torch._C.DisableTorchFunctionSubclass():
+            self.assertEqual(back.data_ptr(), x.data_ptr())
+
+    def test_wrapper_forbids_other_operations(self):
+        x = torch.arange(8, dtype=torch.float32).reshape(2, 4)
+        ro = ReadOnlyTensorWrapper(x)
+        ops = [
+            lambda: ro + 1,
+            lambda: ro * 2,
+            lambda: ro @ ro.T,
+            lambda: ro.sum(),
+            lambda: ro.clone(),
+            lambda: ro.reshape(8),
+            lambda: ro.mul_(2),
+            lambda: ro.data_ptr(),
+            lambda: ro.to(torch.float64),
+            lambda: torch.add(ro, ro),
+        ]
+        for op in ops:
+            with self.assertRaisesRegex(RuntimeError, "only supports DLPack export"):
+                op()
+
+    def _require_numpy_versioned_dlpack(self):
+        # Read-only export requires the versioned (DLPack 1.0) protocol. NumPy
+        # only consumes versioned capsules from 2.1 onwards; older NumPy has
+        # from_dlpack but errors on a versioned capsule ("PyCapsule_GetPointer
+        # called with incorrect name"). Return the numpy module or skip.
+        np = __import__("numpy")
+        version = tuple(int(p) for p in np.__version__.split(".")[:2])
+        if version < (2, 1):
+            self.skipTest("numpy too old to consume versioned DLPack capsules")
+        return np
+
+    def test_wrapper_numpy_export_is_read_only(self):
+        # NumPy honors DLPACK_FLAG_BITMASK_READ_ONLY: a wrapped tensor exported
+        # to NumPy must be non-writeable, while a plain tensor is writeable.
+        np = self._require_numpy_versioned_dlpack()
+        x = torch.arange(8, dtype=torch.float32)
+        self.assertTrue(np.from_dlpack(x).flags.writeable)
+        self.assertFalse(np.from_dlpack(ReadOnlyTensorWrapper(x)).flags.writeable)
+
+    def test_wrapper_numpy_export_does_not_materialize_cow(self):
+        np = self._require_numpy_versioned_dlpack()
+        base = torch.arange(8, dtype=torch.float32)
+        clone = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+        arr = np.from_dlpack(ReadOnlyTensorWrapper(clone))
+        self.assertFalse(arr.flags.writeable)
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
 
 if __name__ == "__main__":
     run_tests()

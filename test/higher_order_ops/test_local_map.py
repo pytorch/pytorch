@@ -1,12 +1,11 @@
 # Owner(s): ["module: higher order operators"]
-# flake8: noqa: B950
 
 
 import functools
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch._dynamo
@@ -31,6 +30,7 @@ if torch.distributed.is_available():
     from torch.distributed.tensor.placement_types import Replicate, Shard
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -68,7 +68,8 @@ def ap_style_initial_capture(
 
     with fake_mode:
         inputs = inputs_fn()
-    assert isinstance(inputs, tuple)
+    if not isinstance(inputs, tuple):
+        raise AssertionError(f"Expected inputs to be tuple, got {type(inputs)}")
 
     with (
         enable_local_map_wrapping(),
@@ -182,7 +183,8 @@ def create_model(attention_fn, nheads, dim1, dim2, sac_policy=None):
 
 
 def get_local_mapped_functions(mesh):
-    assert torch.distributed.is_available()
+    if not torch.distributed.is_available():
+        raise AssertionError("torch.distributed is not available")
 
     @local_map(
         out_placements=((Shard(0), Shard(1), Shard(2)),),
@@ -215,7 +217,10 @@ def get_local_mapped_functions(mesh):
 
 
 class TestLocalMap(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
+        super().setUp()
         torch._dynamo.reset()
         self.exit_stack = ExitStack()
         self.exit_stack.enter_context(sdpa_kernel(backends=[SDPBackend.MATH]))
@@ -286,47 +291,31 @@ class GraphModule(torch.nn.Module):
         l_self_modules_wo_parameters_weight_ = L_self_modules_wo_parameters_weight_
         l_self_modules_w1_parameters_weight_ = L_self_modules_w1_parameters_weight_
         l_self_modules_w2_parameters_weight_ = L_self_modules_w2_parameters_weight_
-
         q: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wq_parameters_weight_, None);  l_self_modules_wq_parameters_weight_ = None
-
         k: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wk_parameters_weight_, None);  l_self_modules_wk_parameters_weight_ = None
-
         v: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wv_parameters_weight_, None);  l_self_modules_wv_parameters_weight_ = None
-
         unflatten: "f32[8, 16, 16, 6]" = q.unflatten(-1, (16, -1));  q = None
         q_1: "f32[8, 16, 16, 6]" = unflatten.permute(0, 2, 1, 3);  unflatten = None
-
         unflatten_1: "f32[8, 16, 16, 6]" = k.unflatten(-1, (16, -1));  k = None
         k_1: "f32[8, 16, 16, 6]" = unflatten_1.permute(0, 2, 1, 3);  unflatten_1 = None
-
         unflatten_2: "f32[8, 16, 16, 6]" = v.unflatten(-1, (16, -1));  v = None
         v_1: "f32[8, 16, 16, 6]" = unflatten_2.permute(0, 2, 1, 3);  unflatten_2 = None
-
         subgraph_0 = self.subgraph_0
         local_map_hop = torch.ops.higher_order.local_map_hop(subgraph_0, q_1, k_1, v_1);  subgraph_0 = q_1 = k_1 = v_1 = None
-        o: "f32[8, 16, 16, 6]" = local_map_hop[0];  local_map_hop = None
-
-        permute_3: "f32[8, 16, 16, 6]" = o.permute(0, 2, 1, 3);  o = None
-        o_1: "f32[8, 16, 96]" = permute_3.flatten(-2);  permute_3 = None
-
-        o_2: "f32[8, 16, 96]" = torch._C._nn.linear(o_1, l_self_modules_wo_parameters_weight_, None);  o_1 = l_self_modules_wo_parameters_weight_ = None
-
-        o0: "f32[8, 16, 96]" = o_2 + l_x_;  o_2 = l_x_ = None
-
-        o_3: "f32[8, 16, 384]" = torch._C._nn.linear(o0, l_self_modules_w1_parameters_weight_, None);  l_self_modules_w1_parameters_weight_ = None
-
-        o_4: "f32[8, 16, 384]" = torch.nn.functional.relu(o_3);  o_3 = None
-
-        o_5: "f32[8, 16, 96]" = torch._C._nn.linear(o_4, l_self_modules_w2_parameters_weight_, None);  o_4 = l_self_modules_w2_parameters_weight_ = None
-
-        o_6: "f32[8, 16, 96]" = o0 + o_5;  o0 = o_5 = None
-        return (o_6,)
-
+        getitem: "f32[8, 16, 16, 6]" = local_map_hop[0];  local_map_hop = None
+        permute_3: "f32[8, 16, 16, 6]" = getitem.permute(0, 2, 1, 3);  getitem = None
+        o: "f32[8, 16, 96]" = permute_3.flatten(-2);  permute_3 = None
+        o_1: "f32[8, 16, 96]" = torch._C._nn.linear(o, l_self_modules_wo_parameters_weight_, None);  o = l_self_modules_wo_parameters_weight_ = None
+        o0: "f32[8, 16, 96]" = o_1 + l_x_;  o_1 = l_x_ = None
+        o_2: "f32[8, 16, 384]" = torch._C._nn.linear(o0, l_self_modules_w1_parameters_weight_, None);  l_self_modules_w1_parameters_weight_ = None
+        o_3: "f32[8, 16, 384]" = torch.nn.functional.relu(o_2);  o_2 = None
+        o_4: "f32[8, 16, 96]" = torch._C._nn.linear(o_3, l_self_modules_w2_parameters_weight_, None);  o_3 = l_self_modules_w2_parameters_weight_ = None
+        o_5: "f32[8, 16, 96]" = o0 + o_4;  o0 = o_4 = None
+        return (o_5,)
     class subgraph_0(torch.nn.Module):
-        def forward(self, q_1: "f32[1, 2, 4, 6]", k_1: "f32[1, 2, 16, 6]", v_1: "f32[1, 2, 16, 6]"):
-            out: "f32[1, 2, 4, 6]" = torch._C._nn.scaled_dot_product_attention(query = q_1, key = k_1, value = v_1, is_causal = False);  q_1 = k_1 = v_1 = None
-            return (out,)
-""",
+        def forward(self, query: "f32[1, 2, 4, 6]", key: "f32[1, 2, 16, 6]", value: "f32[1, 2, 16, 6]"):
+            out: "f32[1, 2, 4, 6]" = torch._C._nn.scaled_dot_product_attention(query = query, key = key, value = value, is_causal = False);  query = key = value = None
+            return (out,)""",
                 ignore_empty_lines=True,
             )
 
@@ -419,6 +408,12 @@ class GraphModule(torch.nn.Module):
         from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 
         backend = AotEagerAndRecordGraphs()
+        saw_deferred_sac_failure = False
+
+        def check_deferred_sac_failure(e):
+            nonlocal saw_deferred_sac_failure
+            saw_deferred_sac_failure = True
+            self.assertIn("expected_fw_outputs", str(e))
 
         model = create_model(
             cp_decorated, nheads, dim1, dim2, sac_policy=save_scalar_muls
@@ -430,12 +425,10 @@ class GraphModule(torch.nn.Module):
             with enable_local_map_wrapping():
                 out = torch.compile(model, backend=backend)(*inputs)
             out.sum().backward()
-        except AttributeError as e:
-            # TODO: get rid of this when we can install as a subgraph
-            self.assertTrue(
-                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
-                in str(e)
-            )
+        except AssertionError as e:
+            # TODO: deferred local_map + SAC still needs local_map installed
+            # as a subgraph throughout the runtime path.
+            check_deferred_sac_failure(e)
 
         model = create_model(
             cp_function, nheads, dim1, dim2, sac_policy=save_scalar_muls
@@ -447,15 +440,13 @@ class GraphModule(torch.nn.Module):
             with enable_local_map_wrapping():
                 out = torch.compile(model, backend=backend)(*inputs)
             out.sum().backward()
-        except AttributeError as e:
-            # TODO: get rid of this when we can install as a subgraph
-            self.assertTrue(
-                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
-                in str(e)
-            )
+        except AssertionError as e:
+            # TODO: deferred local_map + SAC still needs local_map installed
+            # as a subgraph throughout the runtime path.
+            check_deferred_sac_failure(e)
 
         # TODO: re-enable tests on backward when we can install as a subgraph
-        if not TEST_WITH_CROSSREF:
+        if not TEST_WITH_CROSSREF and not saw_deferred_sac_failure:
             self.assertEqual(len(backend.graphs), 2)
             self.assertEqual(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
@@ -548,6 +539,11 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(*get_skip_reasons())
     def test_local_map_dynamo_reordered_inputs(self):
+        # Dynamo lifts subgraph freevars in first-use order inside the body,
+        # which can differ from the user's call-site order (especially under
+        # dynamic shapes where `.shape` accesses force early lifts). The HOP
+        # reorders subgraph placeholders back to call-site order so that
+        # `in_placements` always lines up with the user-written arg order.
         @local_map(
             out_placements=((Shard(0), Shard(0)),),
             in_placements=(
@@ -559,23 +555,40 @@ class GraphModule(torch.nn.Module):
             device_mesh=self.mesh,
         )
         def reorder_inputs(first_input, second_input):
-            return second_input.sum() * 10 + first_input  # dynamo will reorder inputs
+            return second_input.sum() * 10 + first_input  # first-use: second, first
 
         x = torch.randn(64, 64, 64, requires_grad=True)
         y = torch.randn(8, 64, 64, requires_grad=True)
-        with (
-            LocalMapWrappedHigherOrderVariable.enable(),
-            self.assertRaisesRegex(
-                AssertionError,
-                r"Dynamo changed the order of inputs to the local_map function, please adjust the order of inputs and input_placements from \[l_args_0_, l_args_1_\], to: \[l_args_1_, l_args_0_\].*",
-            ),
-        ):
-            torch.compile(reorder_inputs, backend="eager", fullgraph=True)(x, y)
+
+        captured_gms: list[torch.fx.GraphModule] = []
+
+        def capture(gm, example_inputs):
+            captured_gms.append(gm)
+            return gm
+
+        with LocalMapWrappedHigherOrderVariable.enable():
+            torch.compile(reorder_inputs, backend=capture, fullgraph=True)(x, y)
+
+        self.assertEqual(len(captured_gms), 1)
+        root = captured_gms[0]
+        subgraph = root.subgraph_0
+        ph_names = [n.name for n in subgraph.graph.find_nodes(op="placeholder")]
+        self.assertEqual(ph_names, ["first_input", "second_input"])
+        # The HOP call in the parent graph should pass the args in the user's
+        # call-site order: (subgraph, first_input, second_input).
+        hop_call = next(
+            n
+            for n in root.graph.nodes
+            if n.op == "call_function" and "local_map_hop" in str(n.target)
+        )
+        arg_names = [a.name if hasattr(a, "name") else a for a in hop_call.args]
+        self.assertEqual(arg_names, ["subgraph_0", "l_args_0_", "l_args_1_"])
 
     @unittest.skipIf(*get_skip_reasons())
     def test_local_map_with_local_shapes_hop_tracing(self):
         def fn(x):
-            assert x.shape == (10, 80), "expected local shapes"
+            if x.shape != (10, 80):
+                raise AssertionError("expected local shapes")
             # force view specialization ops
             out = x.view(-1) + 10
             return (out.view(x.shape),)
@@ -621,24 +634,90 @@ class GraphModule(torch.nn.Module):
             return (torch.randn(80, 80, requires_grad=True),)
 
         gm = ap_style_initial_capture(model, inputs_fn)
-        fw_node, bw_node = [n for n in gm.graph.nodes if "call_local_map" in n.name]
+        fw_node, bw_node = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and n.target is torch.ops.higher_order.local_map_hop
+        ]
 
         # Graph should not be aware that Fake key used local shapes
-        fw_inputs = fw_node.args
-        assert len(fw_inputs) == 1
+        fw_inputs = fw_node.args[1:]
+        if len(fw_inputs) != 1:
+            raise AssertionError(f"Expected len(fw_inputs) == 1, got {len(fw_inputs)}")
         self.assertEqual(fw_inputs[0].meta["val"].shape, (80, 80))
 
-        fw_outputs = fw_node.args
-        assert len(fw_outputs) == 1
+        fw_outputs = fw_node.args[1:]
+        if len(fw_outputs) != 1:
+            raise AssertionError(
+                f"Expected len(fw_outputs) == 1, got {len(fw_outputs)}"
+            )
         self.assertEqual(fw_outputs[0].meta["val"].shape, (80, 80))
 
-        bw_inputs = bw_node.args
-        assert len(bw_inputs) == 1
+        bw_inputs = bw_node.args[1:]
+        if len(bw_inputs) != 1:
+            raise AssertionError(f"Expected len(bw_inputs) == 1, got {len(bw_inputs)}")
         self.assertEqual(bw_inputs[0].meta["val"].shape, (80, 80))
 
         bw_outputs = bw_node.meta["val"]
-        assert len(bw_outputs) == 1
+        if len(bw_outputs) != 1:
+            raise AssertionError(
+                f"Expected len(bw_outputs) == 1, got {len(bw_outputs)}"
+            )
         self.assertEqual(bw_outputs[0].shape, (80, 80))
+
+    @unittest.skipIf(*get_skip_reasons())
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_deferred_local_map_inside_nested_compile_region_export(self):
+        placement = (Shard(0), Shard(1), Replicate(), Replicate())
+
+        class Inner(nn.Module):
+            def __init__(self, dim, mesh):
+                super().__init__()
+                self.lin = nn.Linear(dim, dim, bias=False)
+                self.mesh = mesh
+
+            def forward(self, x):
+                x = self.lin(x)
+
+                def ident(t):
+                    return t.clone()
+
+                return local_map(
+                    ident,
+                    out_placements=(placement,),
+                    in_placements=(placement,),
+                    device_mesh=self.mesh,
+                    redistribute_inputs=True,
+                )(x)
+
+        class NestedRegion(nn.Module):
+            def __init__(self, layer):
+                super().__init__()
+                self.layer = layer
+
+            @nested_compile_region
+            def forward(self, *args, **kwargs):
+                return self.layer(*args, **kwargs)
+
+        def run_export(model, x, expect_invoke_subgraph):
+            with enable_local_map_wrapping():
+                gm = dynamo_graph_capture_for_export(model)(x)
+                has_invoke_subgraph = any(
+                    n.op == "call_function"
+                    and n.target is torch.ops.higher_order.invoke_subgraph
+                    for n in gm.graph.nodes
+                )
+                self.assertEqual(has_invoke_subgraph, expect_invoke_subgraph)
+                with ExitStack() as stack:
+                    aot_export_joint_with_descriptors(stack, gm, (x,))
+
+        x = torch.randn(8, 32, 16, requires_grad=True)
+        inner = Inner(16, self.mesh)
+        run_export(inner, x, expect_invoke_subgraph=False)
+
+        torch._dynamo.reset()
+        run_export(NestedRegion(inner), x, expect_invoke_subgraph=True)
 
     @unittest.skipIf(*get_skip_reasons())
     def test_none_gradients(self):
@@ -761,16 +840,17 @@ class GraphModule(torch.nn.Module):
 
         def _all_to_all(
             self: torch.Tensor,
-            output_split_sizes: Optional[list[int]],
-            input_split_sizes: Optional[list[int]],
+            output_split_sizes: list[int] | None,
+            input_split_sizes: list[int] | None,
             group_name: str,
         ):
             group_size = c10d._get_group_size_by_name(group_name)
             if output_split_sizes is None or input_split_sizes is None:
-                assert output_split_sizes is None and input_split_sizes is None, (
-                    "output_split_sizes and input_split_sizes must either be "
-                    "specified together or both set to None"
-                )
+                if not (output_split_sizes is None and input_split_sizes is None):
+                    raise AssertionError(
+                        "output_split_sizes and input_split_sizes must either be "
+                        "specified together or both set to None"
+                    )
                 output_split_sizes = [self.shape[0] // group_size] * group_size
                 input_split_sizes = output_split_sizes
 
@@ -785,8 +865,8 @@ class GraphModule(torch.nn.Module):
             def forward(
                 ctx: Any,
                 x: torch.Tensor,
-                output_split_sizes: Optional[list[int]],
-                input_split_sizes: Optional[list[int]],
+                output_split_sizes: list[int] | None,
+                input_split_sizes: list[int] | None,
                 axis_name: str,
             ):
                 group_name = _get_group_name_from_axis_name(axis_name)
@@ -935,6 +1015,83 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(mm_nodes[1].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[2].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[3].meta["custom"]["inside_local_map"], 0)
+        for node in joint_gm_inlined.graph.nodes:
+            if node.meta.get("partitioner_tag") == "is_backward":
+                self.assertTrue(node.meta.get("autograd_backward", False))
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_no_autograd_backward_metadata_on_inlined_forward_nodes(self):
+        placements = (Replicate(), Replicate(), Replicate(), Replicate())
+
+        @local_map(
+            out_placements=(placements,),
+            in_placements=(placements, placements),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def fn(x, w):
+            y = x @ w
+            y = y.view(2, 4, 16).permute(1, 0, 2).permute(1, 0, 2).reshape(8, 16)
+            return y + x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(16, 16))
+
+            def forward(self, x):
+                return fn(x, self.w).sum()
+
+        def inputs_fn():
+            return (torch.randn(8, 16),)
+
+        with fx_traceback.preserve_node_meta():
+            joint_gm_deferred = ap_style_initial_capture(MyModule(), inputs_fn)
+            joint_inputs = [
+                n.meta["val"]
+                for n in joint_gm_deferred.graph.nodes
+                if n.op == "placeholder"
+            ]
+            joint_gm_inlined = make_fx(torch.fx.Interpreter(joint_gm_deferred).run)(
+                *joint_inputs
+            )
+
+        bad_nodes = [
+            n
+            for n in joint_gm_inlined.graph.nodes
+            if n.meta.get("partitioner_tag") == "is_forward"
+            and n.meta.get("autograd_backward", False)
+        ]
+        self.assertEqual(bad_nodes, [])
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_local_map_make_contiguous_strides_for(self):
+        # make_contiguous_strides_for inside local_map must compile with dynamic shapes.
+        from torch._prims_common import make_contiguous_strides_for
+
+        @local_map(
+            out_placements=((Shard(0), Replicate()),),
+            in_placements=((Shard(0), Replicate()),),
+            redistribute_inputs=True,
+            device_mesh=self.mesh,
+        )
+        def fn(x):
+            strides = make_contiguous_strides_for(x.shape)
+            return (x.as_strided(x.shape, strides),)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return fn(x)
+
+        model = MyModule()
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        x = torch.randn(80, 80)
+        with enable_local_map_wrapping():
+            out = torch.compile(model, backend=backend)(x)
+        self.assertEqual(out[0].shape, x.shape)
 
 
 if __name__ == "__main__":

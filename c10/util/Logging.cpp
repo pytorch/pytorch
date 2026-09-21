@@ -53,6 +53,9 @@ void ThrowEnforceNotMet(
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg();
   }
+  // TORCH_CHECK has no way to carry the `condition` string or the `caller`
+  // pointer that this Error was built with.
+  // @allow-raw-throw: CAFFE_ENFORCE's throw site
   throw std::move(e);
 }
 
@@ -71,6 +74,9 @@ void ThrowEnforceFiniteNotMet(
     const char* condition,
     const std::string& msg,
     const void* caller) {
+  // TORCH_CHECK has no way to carry the `condition` string or the `caller`
+  // pointer that this EnforceFiniteError was built with.
+  // @allow-raw-throw: CAFFE_ENFORCE_FINITE's throw site
   throw c10::EnforceFiniteError(
       file, line, condition, msg, GetFetchStackTrace()(), caller);
 }
@@ -113,6 +119,64 @@ Error::Error(SourceLocation source_location, std::string msg)
           std::move(msg),
           std::make_shared<PyTorchStyleBacktrace>(source_location)) {}
 
+// Explicit constructor definitions for Error subclasses. Required because
+// clang-cl does not emit dllexport symbols for constructors inherited via
+// `using Base::Base;` (llvm/llvm-project#162640), which causes LNK2019 in
+// any DLL that links against c10 from outside (torch_hip.dll, inline C++
+// extensions, etc.). Each definition just delegates to the base class
+// constructor so behavior is unchanged.
+ErrorAlwaysShowCppStacktrace::ErrorAlwaysShowCppStacktrace(
+    SourceLocation loc,
+    std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+IndexError::IndexError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+ValueError::ValueError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+TypeError::TypeError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+NotImplementedError::NotImplementedError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+BufferError::BufferError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+EnforceFiniteError::EnforceFiniteError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+OnnxfiBackendSystemError::OnnxfiBackendSystemError(
+    SourceLocation loc,
+    std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+LinAlgError::LinAlgError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+OutOfMemoryError::OutOfMemoryError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+SyntaxError::SyntaxError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+DistError::DistError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+DistBackendError::DistBackendError(SourceLocation loc, std::string msg)
+    : DistError(loc, std::move(msg)) {}
+
+DistStoreError::DistStoreError(SourceLocation loc, std::string msg)
+    : DistError(loc, std::move(msg)) {}
+
+DistNetworkError::DistNetworkError(SourceLocation loc, std::string msg)
+    : DistError(loc, std::move(msg)) {}
+
+DistQueueEmptyError::DistQueueEmptyError(SourceLocation loc, std::string msg)
+    : DistStoreError(loc, std::move(msg)) {}
+
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 using APIUsageMetadataLoggerType = std::function<void(
     const std::string&,
@@ -150,7 +214,8 @@ DDPUsageLoggerType* GetDDPUsageLogger() {
 
 auto& EventSampledHandlerRegistry() {
   static auto& registry =
-      *new std::map<std::string, std::unique_ptr<EventSampledHandler>>();
+      *new std::
+          map<std::string, std::unique_ptr<EventSampledHandler>, std::less<>>();
   return registry;
 }
 
@@ -163,7 +228,7 @@ void InitEventSampledHandlers(
   static bool flag [[maybe_unused]] = [&]() {
     auto& registry = EventSampledHandlerRegistry();
     for (auto& [event, handler] : handlers) {
-      auto entry = registry.find(std::string{event});
+      auto entry = registry.find(event);
       if (entry == registry.end()) {
         entry = registry.emplace(event, nullptr).first;
       }
@@ -180,7 +245,7 @@ const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
 
   // The getter can be executed from different threads.
   std::lock_guard<std::mutex> lock(guard);
-  auto entry = registry.find(std::string{event});
+  auto entry = registry.find(event);
   if (entry == registry.end()) {
     entry = registry.emplace(event, nullptr).first;
   }
@@ -293,11 +358,13 @@ using fLI::FLAGS_minloglevel;
 using fLI::FLAGS_v;
 
 MessageLogger::MessageLogger(
-    const char* file,
-    int line,
+    SourceLocation source_location,
     int severity,
     bool exit_on_fatal)
-    : stream_(), severity_(severity), exit_on_fatal_(exit_on_fatal) {}
+    : stream_(),
+      severity_(severity),
+      exit_on_fatal_(exit_on_fatal),
+      source_location_(source_location) {}
 
 MessageLogger::~MessageLogger() noexcept(false) {
   if (severity_ == ::google::GLOG_FATAL) {
@@ -313,7 +380,10 @@ void MessageLogger::DealWithFatal() {
   if (exit_on_fatal_) {
     LOG(FATAL) << stream_.str();
   } else {
-    throw c10::Error(stream_.str(), nullptr, nullptr);
+    // source_location_ is the CHECK_* site, not this function, so TORCH_CHECK
+    // would report the wrong location.
+    // @allow-raw-throw: DealWithFatal's throw site, C10_USE_GLOG build
+    throw c10::Error(source_location_, stream_.str());
   }
 }
 
@@ -439,11 +509,12 @@ void ShowLogInfoToStderr() {
 }
 
 MessageLogger::MessageLogger(
-    const char* file,
-    int line,
+    SourceLocation source_location,
     int severity,
     bool exit_on_fatal)
-    : severity_(severity), exit_on_fatal_(exit_on_fatal) {
+    : severity_(severity),
+      exit_on_fatal_(exit_on_fatal),
+      source_location_(source_location) {
   if (severity_ < FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
@@ -453,7 +524,7 @@ MessageLogger::MessageLogger(
   time(&rawtime);
 
 #ifndef _WIN32
-  struct tm raw_timeinfo = {0};
+  struct tm raw_timeinfo = {};
   struct tm* timeinfo = &raw_timeinfo;
   localtime_r(&rawtime, timeinfo);
 #else
@@ -463,7 +534,7 @@ MessageLogger::MessageLogger(
 
 #ifndef _WIN32
   // Get the current nanoseconds since epoch
-  struct timespec ts = {0};
+  struct timespec ts = {};
   clock_gettime(CLOCK_MONOTONIC, &ts);
   long ns = ts.tv_nsec;
 #else
@@ -473,13 +544,13 @@ MessageLogger::MessageLogger(
   if (GLOBAL_RANK != -1) {
     stream_ << "[rank" << GLOBAL_RANK << "]:";
   }
-  stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
+  stream_ << '[' << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-          << std::setfill('0') << " " << std::setw(2) << timeinfo->tm_hour
-          << ":" << std::setw(2) << timeinfo->tm_min << ":" << std::setw(2)
-          << timeinfo->tm_sec << "." << std::setw(9) << ns << " "
-          << c10::detail::StripBasename(std::string(file)) << ":" << line
-          << "] ";
+          << std::setfill('0') << ' ' << std::setw(2) << timeinfo->tm_hour
+          << ':' << std::setw(2) << timeinfo->tm_min << ':' << std::setw(2)
+          << timeinfo->tm_sec << '.' << std::setw(9) << ns << ' '
+          << c10::detail::StripBasename(std::string(source_location_.file))
+          << ':' << source_location_.line << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
@@ -488,7 +559,7 @@ MessageLogger::~MessageLogger() noexcept(false) {
     // Nothing needs to be logged.
     return;
   }
-  stream_ << "\n";
+  stream_ << '\n';
 #ifdef ANDROID
   static const int android_log_levels[] = {
       ANDROID_LOG_FATAL, // LOG_FATAL
@@ -531,7 +602,10 @@ void MessageLogger::DealWithFatal() {
   if (exit_on_fatal_) {
     abort();
   } else {
-    throw c10::Error(stream_.str(), nullptr, nullptr);
+    // source_location_ is the CHECK_* site, not this function, so TORCH_CHECK
+    // would report the wrong location.
+    // @allow-raw-throw: DealWithFatal's throw site, non-glog build
+    throw c10::Error(source_location_, stream_.str());
   }
 }
 
@@ -551,10 +625,8 @@ void setLogLevelFlagFromEnv() {
     return;
   }
 
-  std::transform(
-      level.begin(), level.end(), level.begin(), [](unsigned char c) {
-        return toupper(c);
-      });
+  std::ranges::transform(
+      level, level.begin(), [](unsigned char c) { return toupper(c); });
 
   if (level == "0" || level == "INFO") {
     FLAGS_caffe2_log_level = 0;

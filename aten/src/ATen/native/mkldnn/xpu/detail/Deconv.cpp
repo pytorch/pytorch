@@ -1,5 +1,5 @@
-#include <ATen/ATen.h>
-#include <c10/xpu/XPUFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/empty.h>
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
@@ -175,7 +175,8 @@ sycl::event deconvolution(
 
   // create primitive desc
   dnnl::memory::dims _stride = stride.vec();
-  dnnl::memory::dims _padding = padding.vec();
+  dnnl::memory::dims _padding_l = padding.vec();
+  dnnl::memory::dims _padding_r = padding_r(padding, dst_padding);
   dnnl::memory::dims _dilation = deconv_compatible_dilation(dilation);
 
   // construct primitive attr
@@ -190,6 +191,8 @@ sycl::event deconvolution(
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
+  at::native::onednn::apply_tf32_if_allowed(pattr);
+
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,
@@ -200,8 +203,8 @@ sycl::event deconvolution(
       dst_md,
       _stride,
       _dilation,
-      _padding,
-      _padding,
+      _padding_l,
+      _padding_r,
       pattr);
 
   dnnl::memory src_m, weight_m, dst_m, bia_m;
@@ -244,6 +247,7 @@ sycl::event deconvolution_backward_data(
     const at::Tensor& weight,
     IntArrayRef stride,
     IntArrayRef padding,
+    IntArrayRef dst_padding,
     IntArrayRef dilation,
     int64_t groups,
     bool bias_defined,
@@ -272,8 +276,11 @@ sycl::event deconvolution_backward_data(
     pattr.set_deterministic(true);
 #endif
 
+  at::native::onednn::apply_tf32_if_allowed(pattr);
+
   dnnl::memory::dims _stride = stride.vec();
-  dnnl::memory::dims _padding = padding.vec();
+  dnnl::memory::dims _padding_l = padding.vec();
+  dnnl::memory::dims _padding_r = padding_r(padding, dst_padding);
   dnnl::memory::dims _dilation = deconv_compatible_dilation(dilation);
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
@@ -285,8 +292,8 @@ sycl::event deconvolution_backward_data(
       dst_md,
       _stride,
       _dilation,
-      _padding,
-      _padding,
+      _padding_l,
+      _padding_r,
       pattr);
 
   // create bwd primitive desc
@@ -299,8 +306,8 @@ sycl::event deconvolution_backward_data(
           dst_md,
           _stride,
           _dilation,
-          _padding,
-          _padding,
+          _padding_l,
+          _padding_r,
           deconv_fwd_pd,
           pattr);
 
@@ -342,6 +349,7 @@ sycl::event deconvolution_backward_weights(
     const at::Tensor& src,
     IntArrayRef stride,
     IntArrayRef padding,
+    IntArrayRef dst_padding,
     IntArrayRef dilation,
     int64_t groups,
     const std::vector<sycl::event>& deps) {
@@ -361,7 +369,8 @@ sycl::event deconvolution_backward_weights(
 
   // create fwd primitive desc hint
   dnnl::memory::dims _stride = stride.vec();
-  dnnl::memory::dims _padding = padding.vec();
+  dnnl::memory::dims _padding_l = padding.vec();
+  dnnl::memory::dims _padding_r = padding_r(padding, dst_padding);
   dnnl::memory::dims _dilation = deconv_compatible_dilation(dilation);
   dnnl::primitive_attr pattr;
 
@@ -371,6 +380,7 @@ sycl::event deconvolution_backward_weights(
     pattr.set_deterministic(true);
 #endif
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  at::native::onednn::apply_tf32_if_allowed(pattr);
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,
@@ -381,8 +391,8 @@ sycl::event deconvolution_backward_weights(
       dst_md,
       _stride,
       _dilation,
-      _padding,
-      _padding,
+      _padding_l,
+      _padding_r,
       pattr);
 
   auto deconv_bwd_w_pd = dnnl::deconvolution_backward_weights::primitive_desc(
@@ -394,8 +404,8 @@ sycl::event deconvolution_backward_weights(
       dst_md,
       _stride,
       _dilation,
-      _padding,
-      _padding,
+      _padding_l,
+      _padding_r,
       deconv_fwd_pd,
       pattr);
 

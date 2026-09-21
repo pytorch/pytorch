@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
@@ -6,6 +6,7 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 
 from ..ir import GraphPartitionSignature
+from ..runtime.hints import TritonMeta
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
@@ -25,9 +26,9 @@ class CppWrapperMps(CppWrapperGpu):
     @staticmethod
     def create(
         is_subgraph: bool,
-        subgraph_name: Optional[str],
-        parent_wrapper: Optional[PythonWrapperCodegen],
-        partition_signatures: Optional[GraphPartitionSignature] = None,
+        subgraph_name: str | None,
+        parent_wrapper: PythonWrapperCodegen | None,
+        partition_signatures: GraphPartitionSignature | None = None,
     ) -> "CppWrapperMps":
         return CppWrapperMps()
 
@@ -36,14 +37,16 @@ class CppWrapperMps(CppWrapperGpu):
         kernel_name: str,
         call_args: list[str],
         *,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         triton: bool = True,
-        arg_types: Optional[tuple[Any, ...]] = None,
-        raw_keys: Optional[tuple[Any, ...]] = None,
-        raw_args: Optional[tuple[Any, ...]] = None,
-        triton_meta: Optional[dict[str, Any]] = None,
+        arg_types: tuple[Any, ...] | None = None,
+        raw_keys: tuple[Any, ...] | None = None,
+        raw_args: tuple[Any, ...] | None = None,
+        triton_meta: TritonMeta | None = None,
+        inductor_meta: dict[str, Any] | None = None,
         graph_name: str = "",
-        original_fxnode_name: Optional[str] = None,
+        original_fxnode_name: str | None = None,
+        current_stream_idx: int | None = None,
     ) -> None:
         """
         Generates MPS kernel call code. It should look something like:
@@ -73,11 +76,14 @@ class CppWrapperMps(CppWrapperGpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
             )
 
-        assert device.type == "mps"
+        if device.type != "mps":
+            raise AssertionError(f"expected device.type == 'mps', got {device.type}")
 
-        assert arg_types is not None
+        if arg_types is None:
+            raise AssertionError("expected arg_types to not be None")
 
         new_args = []
         for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
@@ -95,7 +101,7 @@ class CppWrapperMps(CppWrapperGpu):
             raise NotImplementedError("No threads or group_size provided")
 
         # Check if threads is a single value or an array-like structure
-        threads_str = str(threads)
+        threads_str = threads
         is_single_value = (
             threads_str.startswith("{")
             and threads_str.endswith("}")
@@ -115,7 +121,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
             else:
                 # Extract group size value if it's also in braces
-                group_size_str = str(group_size)
+                group_size_str = group_size
                 if group_size_str.startswith("{") and group_size_str.endswith("}"):
                     group_size_value = group_size_str[1:-1].strip()
                 else:
@@ -162,7 +168,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
                 new_args.append("}")
             else:
-                group_size_str = str(group_size)
+                group_size_str = group_size
                 group_size_size = get_array_size(group_size_str)
                 new_args.append("{")
                 new_args.append(f"    uint64_t {threads_var}[] = {threads};")
@@ -216,8 +222,7 @@ class CppWrapperMps(CppWrapperGpu):
         )
 
     @staticmethod
-    def get_device_include_path(device: str) -> str:
-        assert V.graph.aot_mode
+    def get_device_include_path_aot(device: str) -> str:
         return (
             "#include <torch/csrc/inductor/aoti_include/mps.h>\n"
             "#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>"
@@ -234,9 +239,6 @@ class CppWrapperMps(CppWrapperGpu):
                 AOTIMetalShaderLibraryHandle lib_handle = nullptr;
                 AOTIMetalKernelFunctionHandle kern_handle = nullptr;
 
-                aoti_torch_mps_create_shader_library(mps_lib_0_source, &lib_handle);
-                aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
-
                 // RAII wrapper with custom deleter
                 auto lib_deleter = [](AOTIMetalShaderLibraryHandle h) {
                     if (h) aoti_torch_mps_delete_shader_library(h);
@@ -245,8 +247,16 @@ class CppWrapperMps(CppWrapperGpu):
                 using LibDeleter = decltype(lib_deleter);
                 using LibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, LibDeleter>;
 
+                AOTI_TORCH_ERROR_CODE_CHECK(
+                    aoti_torch_mps_create_shader_library(mps_lib_0_source, &lib_handle));
+                // Owns the library now; the kernel function check below can throw.
+                LibPtr lib(lib_handle, lib_deleter);
+
+                AOTI_TORCH_ERROR_CODE_CHECK(
+                    aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle));
+
                 // Return pair of kernel handle and library smart pointer for cleanup
-                return std::make_pair(kern_handle, LibPtr(lib_handle, lib_deleter));
+                return std::make_pair(kern_handle, std::move(lib));
             }();
             return kernel_handle.first;
         }
@@ -282,9 +292,6 @@ AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{
         AOTIMetalShaderLibraryHandle lib_handle = nullptr;
         AOTIMetalKernelFunctionHandle kern_handle = nullptr;
 
-        aoti_torch_mps_create_shader_library({lib_name}_source, &lib_handle);
-        aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
-
         // RAII wrapper with custom deleter
         auto lib_deleter = [](AOTIMetalShaderLibraryHandle h) {{
             if (h) aoti_torch_mps_delete_shader_library(h);
@@ -293,8 +300,16 @@ AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{
         using LibDeleter = decltype(lib_deleter);
         using LibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, LibDeleter>;
 
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_create_shader_library({lib_name}_source, &lib_handle));
+        // Owns the library now; the kernel function check below can throw.
+        LibPtr lib(lib_handle, lib_deleter);
+
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle));
+
         // Return pair of kernel handle and library smart pointer for cleanup
-        return std::make_pair(kern_handle, LibPtr(lib_handle, lib_deleter));
+        return std::make_pair(kern_handle, std::move(lib));
     }}();
     return kernel_handle.first;
 }}

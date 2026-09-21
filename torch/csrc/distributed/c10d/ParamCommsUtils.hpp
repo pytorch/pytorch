@@ -5,6 +5,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace torch {
@@ -23,7 +24,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       std::vector<int64_t> outSplitSizes,
       int globalRankStart,
       int globalRankStride,
-      int worldSize);
+      int worldSize,
+      bool isAsynchronizedOp = true);
 
   ~ParamCommsDebugInfo() override = default;
 
@@ -79,6 +81,23 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     return groupRanks_;
   }
 
+  bool isAsynchronizedOp() const {
+    return isAsynchronizedOp_;
+  }
+
+  int64_t getSequenceNumber() const {
+    return sequenceNumber_;
+  }
+
+  bool getIsP2P() const {
+    return isP2P_;
+  }
+
+  void setSequenceInfo(int64_t seqNum, bool isP2P) {
+    sequenceNumber_ = seqNum;
+    isP2P_ = isP2P;
+  }
+
  private:
   std::tuple<std::string, std::string> pgName_; // <group_name, group_desc>
   int rank_{};
@@ -92,7 +111,24 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   int globalRankStart_{};
   int globalRankStride_{};
   std::vector<int64_t> groupRanks_;
+  bool isAsynchronizedOp_{};
+  int64_t sequenceNumber_{-1};
+  bool isP2P_{false};
 };
+
+// Helper to set sequence info from tuple-typed seq arguments (NCCL backend).
+// No-op fallback for backends that pass non-tuple seq types (e.g., XPU/XCCL).
+template <typename A, typename B>
+inline void maybeSetSequenceInfo(
+    const std::shared_ptr<ParamCommsDebugInfo>& info,
+    const std::tuple<A, B>& seq) {
+  info->setSequenceInfo(std::get<0>(seq), std::get<1>(seq));
+}
+
+template <typename T>
+inline void maybeSetSequenceInfo(
+    const std::shared_ptr<ParamCommsDebugInfo>&,
+    const T&) {}
 
 #define RECORD_PARAM_COMMS(                                                    \
     seq,                                                                       \
@@ -118,7 +154,9 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       outSplitSizes,                                                           \
       globalRankStart,                                                         \
       globalRankStride,                                                        \
-      worldSize);                                                              \
+      worldSize,                                                               \
+      false);                                                                  \
+  torch::maybeSetSequenceInfo(paramCommsInfo, seq);                            \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       seq,                                                                     \
@@ -129,11 +167,44 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       outSplitSizes,                                                           \
       globalRankStart,                                                         \
       globalRankStride,                                                        \
-      worldSize};                                                              \
+      worldSize,                                                               \
+      false};                                                                  \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION(at::kParamCommsCallName, paramInputs);
 
-#define RECORD_PARAM_COMMS_DATA(                                               \
+#define RECORD_PARAM_COMMS_DATA(         \
+    seq,                                 \
+    pgName,                              \
+    InputTensors,                        \
+    OutputTensors,                       \
+    rank,                                \
+    collName,                            \
+    inNelems,                            \
+    outNelems,                           \
+    dType,                               \
+    inSplitSizes,                        \
+    outSplitSizes,                       \
+    globalRankStart,                     \
+    globalRankStride,                    \
+    worldSize)                           \
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP( \
+      seq,                               \
+      pgName,                            \
+      InputTensors,                      \
+      OutputTensors,                     \
+      rank,                              \
+      collName,                          \
+      inNelems,                          \
+      outNelems,                         \
+      dType,                             \
+      inSplitSizes,                      \
+      outSplitSizes,                     \
+      globalRankStart,                   \
+      globalRankStride,                  \
+      worldSize,                         \
+      true);
+
+#define RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(                                 \
     seq,                                                                       \
     pgName,                                                                    \
     InputTensors,                                                              \
@@ -147,7 +218,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     outSplitSizes,                                                             \
     globalRankStart,                                                           \
     globalRankStride,                                                          \
-    worldSize)                                                                 \
+    worldSize,                                                                 \
+    isAsyncOp)                                                                 \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
       pgName,                                                                  \
       rank,                                                                    \
@@ -159,7 +231,9 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       outSplitSizes,                                                           \
       globalRankStart,                                                         \
       globalRankStride,                                                        \
-      worldSize);                                                              \
+      worldSize,                                                               \
+      isAsyncOp);                                                              \
+  torch::maybeSetSequenceInfo(paramCommsInfo, seq);                            \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(InputTensors),                                               \
@@ -171,7 +245,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       outSplitSizes,                                                           \
       globalRankStart,                                                         \
       globalRankStride,                                                        \
-      worldSize};                                                              \
+      worldSize,                                                               \
+      isAsyncOp};                                                              \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION_WITH_INPUTS_OUTPUTS(                                         \
       at::kParamCommsCallName,                                                 \

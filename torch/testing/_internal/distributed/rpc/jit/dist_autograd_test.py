@@ -19,7 +19,7 @@ def local_add(t1, t2):
 
 
 @torch.jit.script
-def remote_add(t1, t2, dst: str):  # noqa: E999
+def remote_add(t1, t2, dst: str):
     return rpc_async(dst, local_add, (t1, t2)).wait()
 
 

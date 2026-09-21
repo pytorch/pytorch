@@ -1,5 +1,5 @@
 import weakref
-from typing import cast, Optional
+from typing import cast
 
 import torch.nn as nn
 
@@ -20,19 +20,18 @@ def _insert_module_state(module: nn.Module, state: _State) -> None:
     _module_state_mapping[module] = weakref.ref(state)
 
 
-def _get_module_state(module: nn.Module) -> Optional[_State]:
+def _get_module_state(module: nn.Module) -> _State | None:
     """
     Return the ``_State`` in ``model``.
 
     Given a ``module``, this API finds out if the module is also a ``_State``
     instance or if the module is managed by a composable API. If the module
-    is also a ``_State``, ``module`` will be casted to ``_State` and returned.
+    is also a ``_State``, ``module`` will be casted to ``_State`` and returned.
     If it is managed by a composable API, the corresponding ``_State`` will
     be returned.
     """
     global _module_state_mapping
     if isinstance(module, _State):
-        # pyrefly: ignore [redundant-cast]
         return cast(_State, module)
     else:
         # https://github.com/pytorch/pytorch/issues/107054

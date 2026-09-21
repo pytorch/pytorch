@@ -40,22 +40,33 @@ Unit tests for _pycute.complement
 import logging
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class TestComplement(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def helper_test_complement(self, layout):
         layoutR = complement(layout)
 
         _LOGGER.debug(f"{layout}  =>  {layoutR}")
 
-        # Post-condition: test disjointness of the codomains
+        # Post-condition: test disjointedness of the codomains
         for a in range(size(layout)):
             for b in range(size(layoutR)):
-                assert (layout(a) != layoutR(b)) or (layout(a) == 0 and layoutR(b) == 0)
+                if not (
+                    (layout(a) != layoutR(b)) or (layout(a) == 0 and layoutR(b) == 0)
+                ):
+                    raise AssertionError(
+                        f"Invariant violated at a={a}, b={b}: layout(a)={layout(a)}, layoutR(b)={layoutR(b)}"
+                    )
 
     def test_complement(self):
         test = Layout(1, 0)

@@ -121,6 +121,13 @@ class TORCH_API TCPStore : public Store {
 
   int64_t queueLen(const std::string& key) override;
 
+  std::vector<std::string> listKeys() override;
+
+  void barrier(
+      const std::string& key,
+      int64_t world_size,
+      const std::chrono::milliseconds& timeout) override;
+
   // Waits for all workers to join.
   void waitForWorkers();
 

@@ -17,7 +17,7 @@ from torch.nn.utils._expanded_weights.expanded_weights_utils import (
     unpack_expanded_weight_or_tensor,
 )
 from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
-from torch.testing._internal.common_cuda import TEST_CUDA, tf32_off
+from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
@@ -31,21 +31,22 @@ from torch.testing._internal.common_nn import (
     TestBase,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     freeze_rng_state,
+    HardwareClassification,
     make_tensor,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_ACCELERATOR,
     TestCase,
 )
 from torch.utils._pytree import tree_map_only
 
 
-class TestContext:
-    pass
-
-
 class TestExpandedWeightHelperFunction(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_forward_helper(self, device):
         input = torch.randn(3, 4, device=device)
         weight = torch.randn(5, 4, device=device)
@@ -68,12 +69,19 @@ class TestExpandedWeightHelperFunction(TestCase):
             self.assertEqual(res, expected)
 
             self.assertEqual(len(expanded_args), 2)
-            assert expanded_args[0] is args[0]  # avoids property checks in assertEquals
-            assert expanded_args[1] is args[1]  # avoids property checks in assertEquals
+            if (
+                expanded_args[0] is not args[0]
+            ):  # avoids property checks in assertEquals
+                raise AssertionError("expanded_args[0] should be args[0]")
+            if (
+                expanded_args[1] is not args[1]
+            ):  # avoids property checks in assertEquals
+                raise AssertionError("expanded_args[1] should be args[1]")
             self.assertEqual(len(expanded_kwargs), 1)
-            assert (
-                expanded_kwargs["bias"] is args[2]
-            )  # avoids property checks in assertEquals
+            if (
+                expanded_kwargs["bias"] is not args[2]
+            ):  # avoids property checks in assertEquals
+                raise AssertionError("expanded_kwargs['bias'] should be args[2]")
 
     def test_forward_helper_failure_args(self, device):
         weight = torch.randn(5, 4, device=device)
@@ -218,6 +226,8 @@ class TestExpandedWeightHelperFunction(TestCase):
 
 
 class TestExpandedWeightFunctional(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _compare_ew_and_for_loop_per_sample_grads(self, op, sample_input, reduction):
         input = sample_input.input
         args = sample_input.args
@@ -614,6 +624,8 @@ class TestExpandedWeightFunctional(TestCase):
 
 
 class TestExpandedWeightModule(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _do_test(
         self,
         module,
@@ -731,10 +743,8 @@ class TestExpandedWeightModule(TestCase):
             for expected_grad in expected_grads
             if expected_grad is not None
         )
-        assert [
+        for actual, expected in zip(actual_grads, expected_grads):
             self.assertEqual(actual, 2 * expected)
-            for (actual, expected) in zip(actual_grads, expected_grads)
-        ]
 
     def _do_test_rnn_packed_sequence(
         self, module, input, args=None, kwargs=None, atol=None, rtol=None
@@ -798,7 +808,8 @@ class TestExpandedWeightModule(TestCase):
 
             def forward(self, *inps):
                 ret = self.m(*inps)
-                assert isinstance(ret, tuple)
+                if not isinstance(ret, tuple):
+                    raise AssertionError(f"expected tuple, got {type(ret)}")
                 return ret[0]
 
         def batch_hidden(h):
@@ -869,9 +880,9 @@ class TestExpandedWeightModule(TestCase):
                     rtol=rtol,
                 )
 
-    def test_per_sample_api_failing(self):
-        module = nn.Linear(10, 10)
-        input = torch.randn(64, 10)
+    def test_per_sample_api_failing(self, device):
+        module = nn.Linear(10, 10).to(device)
+        input = torch.randn(64, 10, device=device)
         with self.assertRaisesRegex(RuntimeError, r"Module passed must be nn.Module"):
             call_for_per_sample_grads("fail")(input)
         with self.assertRaisesRegex(
@@ -885,13 +896,13 @@ class TestExpandedWeightModule(TestCase):
             loss.backward()  # populate grad_sample fields
             call_for_per_sample_grads(module)(input)
 
-        module = nn.Linear(10, 10)  # reset to not have grad_sample fields
+        module = nn.Linear(10, 10).to(device)  # reset to not have grad_sample fields
         with self.assertRaisesRegex(
             RuntimeError, r"Expected loss_reduction argument to be sum or mean"
         ):
             call_for_per_sample_grads(module, loss_reduction="")(input)
 
-    def test_per_sample_api_compute_batch_size(self):
+    def test_per_sample_api_compute_batch_size(self, device):
         class CustomModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -900,9 +911,9 @@ class TestExpandedWeightModule(TestCase):
             def forward(self, input1, input2):
                 return self.linear(input1) + self.linear(input2)
 
-        module = CustomModule()
-        input1 = torch.randn(4, 5)
-        input2 = torch.randn(5, 5)
+        module = CustomModule().to(device)
+        input1 = torch.randn(4, 5, device=device)
+        input2 = torch.randn(5, 5, device=device)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -910,16 +921,16 @@ class TestExpandedWeightModule(TestCase):
         ):
             call_for_per_sample_grads(module)(input1, input2)
 
-        input2 = torch.randn(4, 5)
+        input2 = torch.randn(4, 5, device=device)
         call_for_per_sample_grads(module)(input1, input2)
 
-        module = CustomModule()
+        module = CustomModule().to(device)
         call_for_per_sample_grads(module)(input1, input2=input2)
 
-        module = CustomModule()
+        module = CustomModule().to(device)
         call_for_per_sample_grads(module)(input1=input1, input2=input2)
 
-    def test_per_sample_api_compute_batch_size_not_pytreeable(self):
+    def test_per_sample_api_compute_batch_size_not_pytreeable(self, device):
         @dataclass
         class NonPytreeableTuple:
             elem1: torch.Tensor
@@ -933,8 +944,10 @@ class TestExpandedWeightModule(TestCase):
             def forward(self, input1, input2):
                 return self.linear(input1.elem1) + self.linear(input1.elem2)
 
-        input = NonPytreeableTuple(torch.randn(4, 5), torch.randn(4, 5))
-        model = CustomModule()
+        input = NonPytreeableTuple(
+            torch.randn(4, 5, device=device), torch.randn(4, 5, device=device)
+        )
+        model = CustomModule().to(device)
         with self.assertRaisesRegex(
             RuntimeError,
             "ExpandedWeights cannot compute the batch size from the inputs",
@@ -947,16 +960,18 @@ class TestExpandedWeightModule(TestCase):
         ):
             call_for_per_sample_grads(model)(input, torch.randn(5))
 
-        model = CustomModule()  # TODO: functional call bug, sam will fix
+        model = CustomModule().to(device)  # TODO: functional call bug, sam will fix
         call_for_per_sample_grads(model)(input, torch.randn(4, 5))
-        model = CustomModule()
+        model = CustomModule().to(device)
         call_for_per_sample_grads(model, batch_size=4)(input, torch.randn(5))
 
 
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
         self.test_cpu = kwargs.get("test_cpu", True)
-        self.test_cuda = kwargs.get("test_cuda", True)
+        self.test_accelerator = kwargs.get(
+            "test_accelerator", kwargs.get("test_cuda", True)
+        )
         super().__init__(*args, **kwargs)
 
     @property
@@ -968,7 +983,7 @@ class ContextManagerTests(TestBase):
         module = self.constructor(*self.constructor_args).to(**kwargs)
         if "Embedding" in self.get_name():
             kwargs["dtype"] = torch.long
-        input = self._get_input().to(**kwargs)
+        input = self._get_input().detach().clone().to(**kwargs)
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest(
                 "Can't get per sample gradients when no batch dim or batch dim is 0"
@@ -981,7 +996,7 @@ class ContextManagerTests(TestBase):
 
     def test_context_manager_multiple_inputs(self, test_case, device):
         module = self.constructor(*self.constructor_args).to(device)
-        input = self._get_input()
+        input = self._get_input().detach().clone()
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest(
                 "Can't get per sample gradients when no batch dim or batch dim is 0"
@@ -1013,6 +1028,7 @@ def filter_supported_tests(t):
 supported_tests = [
     t for t in module_tests + get_new_module_tests() if filter_supported_tests(t)
 ]
+accelerator = ACCELERATOR_TYPE._value
 for test_param in supported_tests:
     if "constructor" not in test_param:
         name = test_param.pop("module_name")
@@ -1040,12 +1056,16 @@ for test_param in supported_tests:
                 )
             ),
         )
-    if TEST_CUDA and test.test_cuda:
+    if TEST_ACCELERATOR and test.test_accelerator:
         # since this checks derivatives, only use double for precision
         setattr(
             TestExpandedWeightModule,
-            test_name + "_cuda_double",
-            decorator(lambda self, test=test: test.test_context_manager(self, "cuda")),
+            test_name + f"_{accelerator}_double",
+            decorator(
+                lambda self, test=test, acc=accelerator: test.test_context_manager(
+                    self, acc
+                )
+            ),
         )
 
 # ------------- HELPER FUNCTIONS -----------------
@@ -1092,9 +1112,10 @@ def supported_inputs(op, sample_inputs, supported_inputs=True):
         ]
         batched_input_size = dict(zip(convolutions, [3, 4, 5]))
         if op.name == "nn.functional.linear":
-            is_supported_input = (
-                input.input.dim() > 1
-            )  # input of rank 1 means no batch dim
+            # input of rank 1 means no batch dim; the per-sample-grad
+            # computation assumes a 2-D weight
+            weight = input.args[0]
+            is_supported_input = input.input.dim() > 1 and weight.dim() == 2
         elif op.name == "nn.functional.layer_norm":
             normalized_shape = input.args[0]
             is_supported_input = (
@@ -1153,8 +1174,10 @@ def clone_if_tensor(t):
         return t
 
 
-instantiate_device_type_tests(TestExpandedWeightHelperFunction, globals())
-instantiate_device_type_tests(TestExpandedWeightFunctional, globals())
-instantiate_device_type_tests(TestExpandedWeightModule, globals())
+instantiate_device_type_tests(
+    TestExpandedWeightHelperFunction, globals(), allow_xpu=True
+)
+instantiate_device_type_tests(TestExpandedWeightFunctional, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestExpandedWeightModule, globals(), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

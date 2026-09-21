@@ -16,6 +16,7 @@ The `torch.signal` module, modeled after SciPy's [signal](https://docs.scipy.org
 ```{eval-rst}
 .. automodule:: torch.signal.windows
 .. currentmodule:: torch.signal.windows
+.. currentmodule:: torch.signal.windows.windows
 ```
 
 ```{eval-rst}

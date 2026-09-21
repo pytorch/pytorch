@@ -107,15 +107,32 @@ if(INTERN_BUILD_ATEN_OPS)
             list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
           endif()
         endif()
-        # We will need to gate against CUDA version, because sm_103a is available on CUDA 12.9+
+        # We need to gate against CUDA version, because sm_103a and sm_103f are available on CUDA 12.9+
         if("${_arch}" STREQUAL "103a" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
           if(_existing_arch_flags MATCHES ".*compute_100.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_103a,code=sm_103a")
           endif()
         endif()
+        if("${_arch}" STREQUAL "103f" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
+          if(_existing_arch_flags MATCHES ".*compute_100.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_103f,code=sm_103f")
+          endif()
+        endif()
+        # We need to gate against CUDA version, because sm_110a is available on CUDA 13.0+
+        if("${_arch}" STREQUAL "110a" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
+          if(_existing_arch_flags MATCHES ".*compute_110.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_110a,code=sm_110a")
+          endif()
+        endif()
         if("${_arch}" STREQUAL "120a")
           if(_existing_arch_flags MATCHES ".*compute_120.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_120a,code=sm_120a")
+          endif()
+        endif()
+        # We will need to gate against CUDA version, sm_121a was introduced in CUDA 12.9
+        if("${_arch}" STREQUAL "121a" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
+          if(_existing_arch_flags MATCHES ".*compute_120.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_121a,code=sm_121a")
           endif()
         endif()
       endforeach()
@@ -126,13 +143,13 @@ if(INTERN_BUILD_ATEN_OPS)
 
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
-      "89;90a;100a;103a;120a")
+      "89;90a;100a;103f;110a;120a;121a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
       "90a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
-      "90a;100a;103a")
+      "90a;100a;103f;110a")
 
   endif()
 
@@ -149,6 +166,11 @@ if(INTERN_BUILD_ATEN_OPS)
   set(GEN_XPU_FLAG)
   if(USE_XPU)
     set(GEN_XPU_FLAG --xpu)
+  endif()
+
+  set(GEN_MTIA_FLAG)
+  if(USE_MTIA)
+    set(GEN_MTIA_FLAG --mtia)
   endif()
 
   set(CUSTOM_BUILD_FLAGS)
@@ -233,15 +255,30 @@ if(INTERN_BUILD_ATEN_OPS)
       "${Python_EXECUTABLE}" -m torchgen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      --headeronly-install-dir ${CMAKE_BINARY_DIR}/torch/headeronly/core
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${GEN_MPS_FLAG}
       ${GEN_XPU_FLAG}
+      ${GEN_MTIA_FLAG}
       ${CUSTOM_BUILD_FLAGS}
   )
 
   file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
   file(GLOB_RECURSE sources_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
+  # The arch list this configure RESOLVED, for tools/native_aot/build_stage2.py to
+  # target. Recorded rather than re-derived there: EnvVarForwarding.cmake forwards
+  # the environment into the cache only when the variable is undefined, and
+  # Dependencies.cmake then shadows the cache with the environment, so neither
+  # source alone is what nvcc was given. This runs after both (caffe2/ is a
+  # subdirectory of the top-level list file), so ${TORCH_CUDA_ARCH_LIST} here is it.
+  file(WRITE "${CMAKE_BINARY_DIR}/native_aot/arch_list.txt" "${TORCH_CUDA_ARCH_LIST}")
+  # Native-AOT declarations are codegen inputs: they add DispatchStub
+  # declarations and structured-wrapper call sites (torchgen/native_aot.py;
+  # the loader torchgen consumes is torchgen/native_aot_decl.py, already
+  # covered by all_python above).
+  file(GLOB native_aot_manifests CONFIGURE_DEPENDS
+       "${CMAKE_CURRENT_LIST_DIR}/../torch/_native/ops/*/aot.py")
   set(declarations_yaml_templates "")
 
   foreach(gen_type "headers" "sources" "declarations_yaml")
@@ -290,6 +327,10 @@ if(INTERN_BUILD_ATEN_OPS)
       ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
       ${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake
       ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake)
+    if(gen_type STREQUAL "headers")
+      list(APPEND OUTPUT_LIST
+        "${CMAKE_BINARY_DIR}/torch/headeronly/core/enum_tag.h")
+    endif()
     if(USE_XPU)
       list(APPEND OUTPUT_LIST
         ${xpu_generated_${gen_type}}
@@ -304,6 +345,7 @@ if(INTERN_BUILD_ATEN_OPS)
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
+        ${native_aot_manifests}
       WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   endforeach()
@@ -344,8 +386,12 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
 
-  if(CXX_AVX512_FOUND)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX512_CPU_DEFINITION")
+  if(CXX_AVX512_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
+    add_compile_definitions("HAVE_AVX512_CPU_DEFINITION")
+    # HIP code also needs CPU feature defines for DispatchStub ABI compatibility
+    if(USE_ROCM)
+      string(APPEND CMAKE_HIP_FLAGS " -DHAVE_AVX512_CPU_DEFINITION")
+    endif()
     list(APPEND CPU_CAPABILITY_NAMES "AVX512")
     if(MSVC)
       list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX512")
@@ -354,8 +400,11 @@ if(INTERN_BUILD_ATEN_OPS)
     endif(MSVC)
   endif(CXX_AVX512_FOUND)
 
-  if(CXX_AVX2_FOUND)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
+  if(CXX_AVX2_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
+    add_compile_definitions("HAVE_AVX2_CPU_DEFINITION")
+    if(USE_ROCM)
+      string(APPEND CMAKE_HIP_FLAGS " -DHAVE_AVX2_CPU_DEFINITION")
+    endif()
 
     # Some versions of GCC pessimistically split unaligned load and store
     # instructions when using the default tuning. This is a bad choice on
@@ -387,26 +436,24 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
   endif(CXX_AVX2_FOUND)
 
-  if(CXX_VSX_FOUND)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_VSX_CPU_DEFINITION")
+  if(CXX_VSX_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
+    add_compile_definitions("HAVE_VSX_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "VSX")
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_VSX_FLAGS}")
   endif(CXX_VSX_FOUND)
 
-  if(CXX_ZVECTOR_FOUND)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_ZVECTOR_CPU_DEFINITION")
+  if(CXX_ZVECTOR_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
+    add_compile_definitions("HAVE_ZVECTOR_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "ZVECTOR")
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
   endif(CXX_ZVECTOR_FOUND)
 
-  if(CXX_SVE_FOUND AND CXX_SVE256_FOUND AND CXX_ARM_BF16_FOUND)
+  if(CXX_SVE256_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
+    add_compile_definitions("HAVE_SVE_CPU_DEFINITION")
     list(APPEND CPU_CAPABILITY_NAMES "SVE256")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION -DHAVE_ARM_BF16_CPU_DEFINITION")
-    if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-    else()
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-    endif()
+    list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -msve-vector-bits=256")
+    list(APPEND CPU_CAPABILITY_NAMES "SVE128")
+    list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -msve-vector-bits=128")
   endif()
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
@@ -418,6 +465,11 @@ if(INTERN_BUILD_ATEN_OPS)
     function(process_vec NAME)
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
+      # IMPL is absolute here; make it relative to NEW_IMPL's directory so the
+      # generated #include is worktree-independent (ccache/re-cc friendly).
+      if(USE_RELATIVE_PATHS)
+        file(RELATIVE_PATH IMPL "${CMAKE_BINARY_DIR}/aten/src/ATen" "${IMPL}")
+      endif()
       configure_file("${PROJECT_SOURCE_DIR}/cmake/IncludeSource.cpp.in" ${NEW_IMPL})
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp} PARENT_SCOPE) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
@@ -458,7 +510,7 @@ if(INTERN_BUILD_ATEN_OPS)
 endif()
 
 function(append_filelist name outputvar)
-  set(_rootdir "${Torch_SOURCE_DIR}/")
+  set(_rootdir "${CMAKE_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
       ${PROJECT_SOURCE_DIR}/build_variables.bzl

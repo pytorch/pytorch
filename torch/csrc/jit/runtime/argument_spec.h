@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/Export.h>
@@ -18,7 +19,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 namespace torch::jit {
 
 // GraphExecutor creates specializations of Graphs for different
-// dimensionalitities and types of inputs.
+// dimensionalities and types of inputs.
 
 struct ArgumentInfo {
   friend struct ArgumentSpec;
@@ -115,9 +116,8 @@ struct ArgumentSpec {
   }
 
   void combineHash(const ArgumentInfo& arg) {
-    ArgumentInfo::plain_data_type arg_data = 0;
-    std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
-    hash_code = c10::hash_combine(hash_code, arg_data);
+    hash_code = c10::hash_combine(
+        hash_code, c10::bit_cast<ArgumentInfo::plain_data_type>(arg));
   }
 
   // equality is fast: check ninputs, and then check the raw array data,
@@ -153,7 +153,7 @@ struct ArgumentSpec {
   bool isPresent(size_t i) const {
     return optional_presence[i];
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -181,7 +181,7 @@ struct TORCH_API ArgumentSpecCreator {
     ENTER_OBJECT, // same as ENTER_TUPLE, but the input is a class
     LEAVE, // pop the top-most list from the stack
     SKIP, // consume an element from the top-most list, and discard
-    SPECIALIZE_OPTIONAL_TENSOR, // consume a optional tensor for the top-most
+    SPECIALIZE_OPTIONAL_TENSOR, // consume an optional tensor for the top-most
                                 // list, and add it to the ArgSpec key being
                                 // created
     SPECIALIZE_TENSOR, // consume a tensor for the top-most
@@ -308,7 +308,7 @@ struct CompleteArgumentSpec {
   size_t size() const {
     return ninputs;
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -380,7 +380,7 @@ struct CompleteArgumentInfo {
   }
 
  private:
-  // offsetinto sizes_strides() array where the sizes start for tensor j
+  // offset into sizes_strides() array where the sizes start for tensor j
   // [valid range] valid range is [0, ninputs]
   // (i.e. you can ask for the offset at ninputs, which would be the offset of
   // the next tensor if it existed)
@@ -402,12 +402,12 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad() << ", dims=" << info.dim()
-      << ")";
+      << ')';
   return out;
 }
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
-  out << "{";
+  out << '{';
   for (const auto i : c10::irange(spec.numTensors())) {
     if (i > 0)
       out << ", ";
@@ -419,7 +419,7 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
       out << ", ";
     out << spec.isPresent(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -431,20 +431,20 @@ inline std::ostream& operator<<(
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad()
-      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ")";
+      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ')';
   return out;
 }
 
 inline std::ostream& operator<<(
     std::ostream& out,
     const CompleteArgumentSpec& spec) {
-  out << "{";
+  out << '{';
   for (const auto i : c10::irange(spec.size())) {
     if (i > 0)
       out << ", ";
     out << spec.at(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -488,13 +488,14 @@ struct hash<c10::TensorType> {
 
 template <>
 struct hash<torch::jit::ArgumentSpec> {
-  size_t operator()(const torch::jit::ArgumentSpec& spec) const {
+  size_t operator()(const torch::jit::ArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };
 template <>
 struct hash<torch::jit::CompleteArgumentSpec> {
-  size_t operator()(const torch::jit::CompleteArgumentSpec& spec) const {
+  size_t operator()(
+      const torch::jit::CompleteArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };

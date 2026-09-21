@@ -73,3 +73,19 @@
 .. autoclass:: torch.distributed.fsdp.StateDictSettings
   :members:
 ```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.fsdp.wrap
+
+.. autofunction:: always_wrap_policy
+
+.. autofunction:: enable_wrap
+
+.. autofunction:: lambda_auto_wrap_policy
+
+.. autofunction:: size_based_auto_wrap_policy
+
+.. autofunction:: transformer_auto_wrap_policy
+
+.. autofunction:: wrap
+```

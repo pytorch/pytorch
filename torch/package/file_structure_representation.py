@@ -120,10 +120,10 @@ def _create_directory_from_file_list(
 
         file_list (List[str]): List of files to add to the top-level directory.
 
-        include (Union[List[str], str]): An optional pattern that limits what is included from the file_list to
+        include (list[str] | str): An optional pattern that limits what is included from the file_list to
             files whose name matches the pattern.
 
-        exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+        exclude (list[str] | str): An optional pattern that excludes files whose name match the pattern.
 
     Returns:
             :class:`Directory`: a :class:`Directory` file structure representation created from a list of files.

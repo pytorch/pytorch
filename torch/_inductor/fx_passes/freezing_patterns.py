@@ -3,7 +3,7 @@ import functools
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
-from torch._inductor.utils import GPU_TYPES
+from torch._inductor.utils import _device_is_available, GPU_TYPES
 
 from ..._dynamo.utils import counters
 from .. import config
@@ -43,7 +43,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
     lazy_init()
     # We need a few rounds of binary folding to get rid of all the
-    # unnecessary nodes, but may need a good method to chose the rounds number.
+    # unnecessary nodes, but may need a good method to choose the rounds number.
     # works like: conv+binary+binary.
     binary_folding = counters["inductor"]["binary_folding"]
     fake_tensor_prop(gm, aot_example_inputs, True)
@@ -89,7 +89,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
 
 @init_once_fakemode
-def lazy_init():
+def lazy_init(input_device: torch.device | None = None):
     if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _mkldnn_weight_pack_init
 
@@ -121,15 +121,20 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
     )
 
 
+def _addmm_pattern_device() -> str:
+    # Resolve availability through the DeviceInterface registry rather than
+    # getattr(torch, gpu): GPU_TYPES may include out-of-tree PrivateUse1
+    # backends that register an interface but expose no torch.<name> module.
+    return next((gpu for gpu in GPU_TYPES if _device_is_available(gpu)), "cpu")
+
+
 @functools.cache
 def addmm_patterns_init():
     """
     addmm related patterns.
     To avoid duplication, also includes int8 WoQ GEMM pattern without bias.
     """
-    device = next(
-        (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
-    )
+    device = _addmm_pattern_device()
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
     scale = functools.partial(torch.empty, (10,), device=device, requires_grad=False)
 
@@ -187,7 +192,7 @@ def addmm_patterns_init():
 
             if not all(
                 inp.op == "get_attr"
-                and inp.meta["val"].shape == inps[0].meta["val"].shape
+                and inp.meta["val"].shape[:-1] == inps[0].meta["val"].shape[:-1]
                 for inp in inps
             ):
                 return False
@@ -221,9 +226,10 @@ def addmm_patterns_init():
         return (inp @ w1, inp @ w2, inp @ w3)
 
     def matmul_replacement(inp, w1, w2, w3):
-        cat_t = torch.cat((w1, w2, w3), dim=1)
+        weights = (w1, w2, w3)
+        cat_t = torch.cat(weights, dim=1)
         mm = inp @ cat_t
-        return mm.chunk(3, dim=1)
+        return mm.split([w.size(1) for w in weights], dim=1)
 
     register_replacement(
         # pyrefly: ignore [bad-argument-type]
@@ -243,9 +249,10 @@ def addmm_patterns_init():
         return (inp @ w1, inp @ w2)
 
     def matmul_replacement_two(inp, w1, w2):
-        cat_t = torch.cat((w1, w2), dim=1)
+        weights = (w1, w2)
+        cat_t = torch.cat(weights, dim=1)
         mm = inp @ cat_t
-        return mm.chunk(2, dim=1)
+        return mm.split([w.size(1) for w in weights], dim=1)
 
     register_replacement(
         # pyrefly: ignore [bad-argument-type]
@@ -269,9 +276,10 @@ def addmm_patterns_init():
         )
 
     def addmm_fuse_replacement_second(inp, w1, w2, w3, b1, b2, b3):
-        cat_w = torch.cat((w1, w2, w3), dim=1)
+        weights = (w1, w2, w3)
+        cat_w = torch.cat(weights, dim=1)
         cat_b = torch.cat((b1, b2, b3))
-        return aten.addmm(cat_b, inp, cat_w).chunk(3, dim=1)
+        return aten.addmm(cat_b, inp, cat_w).split([w.size(1) for w in weights], dim=1)
 
     register_replacement(
         # pyrefly: ignore [bad-argument-type]

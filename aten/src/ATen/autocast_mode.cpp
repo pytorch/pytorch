@@ -2,6 +2,8 @@
 
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
+#include <c10/core/GradMode.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/util/flat_hash_map.h>
 
 namespace at::autocast {
@@ -121,10 +123,14 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
   if (is_eligible(arg, device_type) && (arg.scalar_type() != to_type)) {
     // Heuristic:  Do what Apex does, and cache lower_precision_fp casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
+    //
+    // Fix #158232: Don't cache in inference_mode - those tensors can't be reused
+    // for training since enable_grad() cannot override inference_mode.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
                          arg.is_leaf() && !arg.is_view() && cache_enabled &&
-                         !at::caching::is_cached_tensor(arg));
+                         !at::caching::is_cached_tensor(arg) &&
+                         !c10::InferenceMode::is_enabled());
 
     if (can_try_cache) {
       const std::lock_guard<std::mutex> lock(cached_casts_mutex);
@@ -132,6 +138,12 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
       if (it != get_cached_casts().end()) {
         return std::get<1>(it->second);
       } else {
+        // Fix #158232: When caching in no_grad() context, we still need grad_fn
+        // on the cached tensor so it can be reused in grad-enabled contexts.
+        // The AutoGradMode RAII guard temporarily enables grad for .to() only.
+        // Note: arg.requires_grad() is guaranteed true here (checked in can_try_cache)
+        // and inference_mode is excluded above since enable_grad can't override it.
+        c10::AutoGradMode enable_grad(true);
         auto casted_arg = arg.to(to_type);
         get_cached_casts().emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
         return casted_arg;
@@ -179,6 +191,9 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
 #define _KERNEL_CUDA_FP32(...) KERNEL_CUDA(__VA_ARGS__, fp32)
 
   AT_FORALL_FP32(_KERNEL_CUDA_FP32)
+
+  // Standalone (not in AT_FORALL_FP32, which also feeds MTIA/MAIA/XPU).
+  KERNEL_CUDA(linalg_matrix_sqrth, fp32)
 
   // fp32_set_opt_dtype
 #define _KERNEL_CUDA_FP32_SET_OPT_DTYPE(...) \
@@ -292,21 +307,15 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   // fp32_set_opt_dtype
   KERNEL_MPS(prod, fp32)
   KERNEL_MPS(prod, dim_int, fp32)
-  KERNEL_MPS(prod, dim_Dimname, fp32)
   KERNEL_MPS(softmax, int, fp32)
-  KERNEL_MPS(softmax, Dimname, fp32)
   KERNEL_MPS(log_softmax, int, fp32)
-  KERNEL_MPS(log_softmax, Dimname, fp32)
   KERNEL_MPS(cumprod, fp32)
-  KERNEL_MPS(cumprod, dimname, fp32)
   KERNEL_MPS(cumsum, fp32)
-  KERNEL_MPS(cumsum, dimname, fp32)
   KERNEL_MPS(linalg_vector_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, str_ord, fp32)
   KERNEL_MPS(sum, fp32)
   KERNEL_MPS(sum, dim_IntList, fp32)
-  KERNEL_MPS(sum, dim_DimnameList, fp32)
   //
   // promote
   KERNEL_MPS(addcdiv, promote)
@@ -360,7 +369,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(polar, fp32)
   KERNEL_CPU(prod, fp32)
   KERNEL_CPU(prod, dim_int, fp32)
-  KERNEL_CPU(prod, dim_Dimname, fp32)
   KERNEL_CPU(quantile, fp32)
   KERNEL_CPU(quantile, scalar, fp32)
   KERNEL_CPU(nanquantile, fp32)
@@ -373,7 +381,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(grid_sampler_3d, fp32)
   KERNEL_CPU(trace, fp32)
   KERNEL_CPU(view_as_complex, fp32)
-  KERNEL_CPU(cholesky, fp32)
   KERNEL_CPU(cholesky_inverse, fp32)
   KERNEL_CPU(cholesky_solve, fp32)
   KERNEL_CPU(inverse, fp32)
@@ -434,6 +441,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(linalg_svdvals, fp32)
   KERNEL_CPU(linalg_eigvals, fp32)
   KERNEL_CPU(linalg_eigvalsh, fp32)
+  KERNEL_CPU(linalg_matrix_sqrth, fp32)
   KERNEL_CPU(linalg_inv, fp32)
   KERNEL_CPU(linalg_householder_product, fp32)
   KERNEL_CPU(linalg_tensorinv, fp32)
@@ -441,7 +449,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(fake_quantize_per_tensor_affine, fp32)
   KERNEL_CPU(geqrf, fp32)
   KERNEL_CPU(_lu_with_info, fp32)
-  KERNEL_CPU(qr, fp32)
   KERNEL_CPU(svd, fp32)
   KERNEL_CPU(triangular_solve, fp32)
   KERNEL_CPU(fractional_max_pool2d, fp32)
@@ -460,7 +467,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(stack, promote)
   KERNEL_CPU(cat, promote)
   KERNEL_CPU(index_copy, promote)
-  KERNEL_CPU(index_copy, dimname, promote)
 
 }
 

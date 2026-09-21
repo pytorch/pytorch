@@ -1,0 +1,1067 @@
+# Owner(s): ["module: dsl-native-ops"]
+
+import base64
+import contextlib
+import hashlib
+import importlib.util
+import os
+import subprocess
+import sys
+import tempfile
+import textwrap
+import uuid
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
+from unittest.mock import call, patch
+
+from torch._native import common_utils as native_common_utils, triton_utils
+from torch._vendor.packaging.version import Version
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfNoCuteDSL,
+    TestCase,
+)
+
+
+def _subprocess_lastline(script, env=None):
+    """Run script in a fresh interpreter and return the last line of stdout."""
+    result = subprocess.check_output(
+        [sys.executable, "-c", script],
+        cwd=os.path.dirname(os.path.realpath(__file__)),
+        text=True,
+    ).strip()
+    return result.rsplit("\n", 1)[-1]
+
+
+_WHEEL_DISTRIBUTIONS = tuple(
+    name for name in triton_utils._TRITON_DISTRIBUTIONS if name != "triton"
+)
+_MODULE_ORIGIN = "/site-packages/triton/__init__.py"
+
+
+def _triton_installed(versions):
+    return patch.object(
+        triton_utils,
+        "_available_version",
+        side_effect=lambda distribution: (
+            Version(versions[distribution]) if distribution in versions else None
+        ),
+    )
+
+
+def _triton_provided_by(*distributions, raises=False):
+    kwargs = (
+        {"side_effect": RuntimeError("unreadable metadata")}
+        if raises
+        else {"return_value": {"triton": list(distributions)} if distributions else {}}
+    )
+    return patch.object(triton_utils, "_packages_distributions", **kwargs)
+
+
+class _FileHash:
+    def __init__(self, mode, value):
+        self.mode = mode
+        self.value = value
+
+
+class _InstalledFile:
+    def __init__(self, path, contents=None, *, hash_encoding="base64"):
+        self._path = path
+        self.hash = None
+        if contents is not None:
+            digest = hashlib.sha256(contents).digest()
+            if hash_encoding == "hex":
+                value = digest.hex()
+            elif hash_encoding == "uppercase_hex":
+                value = digest.hex().upper()
+            else:
+                value = base64.urlsafe_b64encode(digest).decode()
+                if hash_encoding == "base64":
+                    value = value.rstrip("=")
+            self.hash = _FileHash("sha256", value)
+
+    def locate(self):
+        return self._path
+
+
+class _InstalledDistribution:
+    def __init__(self, paths):
+        self.files = (
+            None
+            if paths is None
+            else [
+                p if isinstance(p, _InstalledFile) else _InstalledFile(p) for p in paths
+            ]
+        )
+
+
+def _triton_module_at(origin):
+    return patch.object(triton_utils, "_module_origin", return_value=origin)
+
+
+def _triton_records(files_by_distribution):
+    def lookup(name):
+        if name not in files_by_distribution:
+            raise PackageNotFoundError(name)
+        return _InstalledDistribution(files_by_distribution[name])
+
+    return patch.object(triton_utils, "_distribution", side_effect=lookup)
+
+
+def _import_module_directly(module_name, file_name):
+    """Import a module directly without triggering package imports."""
+    test_dir = os.path.dirname(os.path.abspath(__file__))
+    pytorch_root = os.path.dirname(os.path.dirname(test_dir))
+    module_path = os.path.join(pytorch_root, "torch", "_native", file_name)
+
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestNativeDSLOps(TestCase):
+    """Tests for the torch._native DSL ops framework."""
+
+    def setUp(self):
+        """Clear all caches before each test to ensure test isolation."""
+        super().setUp()
+        self._cache_functions_to_clear = [
+            (
+                "torch._native.common_utils",
+                ["check_native_jit_disabled", "check_native_version_skip"],
+            ),
+            (
+                "torch._native.triton_utils",
+                [
+                    "_check_runtime_available",
+                    "_version_is_sufficient",
+                    "check_native_jit_disabled",
+                    "check_native_version_skip",
+                ],
+            ),
+            (
+                "torch._native.cutedsl_utils",
+                [
+                    "_version_is_ok",
+                    "check_native_jit_disabled",
+                    "check_native_version_skip",
+                ],
+            ),
+            (
+                "torch._native.helion_utils",
+                [
+                    "_version_is_sufficient",
+                    "check_native_jit_disabled",
+                    "check_native_version_skip",
+                ],
+            ),
+            (
+                "torch._native.flydsl_utils",
+                [
+                    "_check_runtime_available",
+                    "_get_flydsl_device_arch",
+                    "_is_supported_arch",
+                    "_version_is_ok",
+                    "check_native_jit_disabled",
+                    "check_native_version_skip",
+                ],
+            ),
+        ]
+        self._clear_function_caches()
+
+    def _clear_function_caches(self):
+        """Helper method to clear function caches with error handling."""
+        for module_name, function_names in self._cache_functions_to_clear:
+            try:
+                module = __import__(module_name, fromlist=function_names)
+                for func_name in function_names:
+                    if hasattr(module, func_name):
+                        getattr(module, func_name).cache_clear()
+            except (AttributeError, ImportError):
+                # Some functions might not exist or be cached, ignore errors
+                pass
+
+    def test_consistent_helper_interface(self):
+        """Test all registered DSL utils expose consistent public APIs."""
+        from torch.testing._internal.common_utils import get_all_dsls
+
+        # Automatically discover all registered DSLs
+        dsl_names = get_all_dsls()
+        if not dsl_names:
+            # Fallback to hardcoded list if registry not available
+            dsl_names = ["triton", "cutedsl", "helion"]
+
+        modules_info = [
+            (f"{dsl}_utils.py", f"torch._native.{dsl}_utils") for dsl in dsl_names
+        ]
+
+        # Import modules directly to avoid dependency issues
+        modules = {}
+        for file_name, module_name in modules_info:
+            modules[module_name] = _import_module_directly(module_name, file_name)
+
+        required_methods = {
+            "runtime_available",
+            "runtime_version",
+            "register_op_override",
+            "deregister_op_overrides",
+        }
+
+        # Test each module has required methods and they're callable
+        public_apis = {}
+        for module_name, mod in modules.items():
+            with self.subTest(module=module_name, test="required_methods"):
+                public = {name for name in dir(mod) if not name.startswith("_")}
+                public_apis[module_name] = public
+
+                self.assertTrue(
+                    required_methods <= public,
+                    lambda msg: f"{msg}\n{module_name} missing: {required_methods - public}",
+                )
+
+                for method_name in required_methods:
+                    with self.subTest(module=module_name, method=method_name):
+                        self.assertTrue(callable(getattr(mod, method_name)))
+
+        # Test modules expose identical public APIs
+        api_sets = list(public_apis.values())
+        if len(api_sets) > 1:
+            for i, api_set in enumerate(api_sets[1:], 1):
+                self.assertEqual(
+                    api_sets[0],
+                    api_set,
+                    lambda msg: f"{msg}\nModule {i} should have identical public API to module 0",
+                )
+
+        # Test runtime functions return expected types
+        for module_name, mod in modules.items():
+            with self.subTest(module=module_name, test="runtime_functions"):
+                # runtime_available should return bool
+                self.assertIsInstance(mod.runtime_available(), bool)
+
+                # runtime_version should return Version or None
+                ver = mod.runtime_version()
+                if ver is not None:
+                    from torch._vendor.packaging.version import Version
+
+                    self.assertIsInstance(ver, Version)
+
+    def test_no_dsl_imports_after_import_torch(self):
+        """import torch must not transitively import DSL runtimes.
+
+        Note: cuda.bindings may appear because importlib.util.find_spec on
+        nested modules (e.g. cuda.bindings.driver) imports parent packages
+        as a side-effect.  We check only the primary DSL runtimes here.
+        """
+        script = textwrap.dedent("""\
+            import sys
+            import torch
+            dsl_modules = ["triton", "cutlass", "tvm_ffi", "helion", "flydsl"]
+            leaked = [m for m in dsl_modules if m in sys.modules]
+            print(repr(leaked))
+        """)
+        result = _subprocess_lastline(script)
+        self.assertEqual(
+            result,
+            "[]",
+            lambda msg: f"{msg}\nDSL modules leaked on import torch: {result}",
+        )
+
+    def test_no_external_packaging_dependency(self):
+        """torch._native must not import the external `packaging` package.
+
+        It should use the vendored copy at torch._vendor.packaging instead.
+        This guards against ModuleNotFoundError in environments where the
+        external `packaging` is not installed (e.g. torchvision Windows CI).
+        """
+        script = textwrap.dedent("""\
+            import sys
+            # Remove external packaging from sys.modules if already loaded
+            for mod_name in list(sys.modules):
+                if mod_name == "packaging" or mod_name.startswith("packaging."):
+                    del sys.modules[mod_name]
+            # Block external packaging from being imported
+            import importlib.abc
+            import importlib.machinery
+            class BlockPackaging(importlib.abc.MetaPathFinder):
+                def find_module(self, fullname, path=None):
+                    if fullname == "packaging" or fullname.startswith("packaging."):
+                        return self
+                def load_module(self, fullname):
+                    raise ImportError(f"External {fullname} is blocked")
+            sys.meta_path.insert(0, BlockPackaging())
+            import torch
+            print("OK")
+        """)
+        result = _subprocess_lastline(script)
+        self.assertEqual(result, "OK")
+
+    @parametrize("env_value, expected", [(None, False), ("1", True)])
+    def test_check_native_jit_disabled_environment_variable(self, env_value, expected):
+        """Test TORCH_DISABLE_NATIVE_JIT environment variable behavior."""
+        from torch._native.common_utils import check_native_jit_disabled
+
+        if env_value is None:
+            os.environ.pop("TORCH_DISABLE_NATIVE_JIT", None)
+        else:
+            os.environ["TORCH_DISABLE_NATIVE_JIT"] = env_value
+
+        try:
+            # Clear cache so function re-reads environment variable
+            check_native_jit_disabled.cache_clear()
+            self.assertEqual(check_native_jit_disabled(), expected)
+        finally:
+            # Clean up environment variable
+            os.environ.pop("TORCH_DISABLE_NATIVE_JIT", None)
+
+    def test_unavailable_reason_missing(self):
+        """Nonexistent package -> _unavailable_reason returns a string."""
+        common_utils = _import_module_directly(
+            "torch._native.common_utils", "common_utils.py"
+        )
+        reason = common_utils._unavailable_reason(
+            [("nonexistent_pkg_xyz", "nonexistent_pkg_xyz")]
+        )
+        self.assertIsNotNone(reason)
+        self.assertIn("nonexistent_pkg_xyz", reason)
+
+    def test_available_version_parsing(self):
+        """Test _available_version parses various version formats and handles invalid ones."""
+        from torch._vendor.packaging.version import Version
+
+        common_utils = _import_module_directly(
+            "torch._native.common_utils", "common_utils.py"
+        )
+
+        # Test with real package that has clean version
+        ver = common_utils._available_version("typing_extensions")
+        self.assertIsInstance(ver, Version)
+
+        # Test various version format scenarios
+        version_scenarios = [
+            ("0.7.0rc1", Version("0.7.0rc1"), "pre-release version"),
+            ("3.1.0.post1", Version("3.1.0.post1"), "post-release version"),
+            ("2.4.0a1", Version("2.4.0a1"), "alpha version"),
+            ("1.2.3", Version("1.2.3"), "standard version"),
+            ("abc", None, "invalid version string"),
+        ]
+
+        for version_str, expected_result, description in version_scenarios:
+            with self.subTest(version=version_str, scenario=description):
+                with patch("importlib.metadata.version", return_value=version_str):
+                    result = common_utils._available_version("fake_package")
+                    self.assertEqual(
+                        result,
+                        expected_result,
+                        lambda msg: f"{msg}\n_available_version({version_str!r}) = {result}",
+                    )
+
+    def test_registry_mechanics(self):
+        """_get_or_create_library caches Library instances per dispatch_key."""
+        import torch._native.registry as registry
+        import torch.library
+
+        # Save original state for restoration
+        original_libs = dict(registry._libs)
+        original_filter_state = (
+            set(registry._filter_state._dsl_names),
+            set(registry._filter_state._op_symbols),
+            set(registry._filter_state._dispatch_keys),
+        )
+
+        try:
+            cpu_key = ("_native", "CPU")
+            cuda_key = ("_native", "CUDA")
+            registry._libs.pop(cpu_key, None)
+            registry._libs.pop(cuda_key, None)
+
+            lib1 = registry._get_or_create_library("CPU")
+            self.assertIsInstance(lib1, torch.library.Library)
+            lib2 = registry._get_or_create_library("CPU")
+            self.assertIs(lib1, lib2, "should return cached instance")
+
+            # Different dispatch key -> different Library
+            lib3 = registry._get_or_create_library("CUDA")
+            self.assertIsNot(lib1, lib3)
+
+            # cleanup
+            registry._libs.pop(cpu_key, None)
+            registry._libs.pop(cuda_key, None)
+        finally:
+            # Restore original registry state
+            registry._libs.clear()
+            registry._libs.update(original_libs)
+
+            # Restore filter state
+            filter_state = registry._filter_state
+            filter_state._dsl_names.clear()
+            filter_state._op_symbols.clear()
+            filter_state._dispatch_keys.clear()
+            filter_state._dsl_names.update(original_filter_state[0])
+            filter_state._op_symbols.update(original_filter_state[1])
+            filter_state._dispatch_keys.update(original_filter_state[2])
+
+    def test_deregister_op_overrides_functionality(self):
+        """Test deregister_op_overrides methods exist, are callable, and work correctly."""
+        modules_to_test = [
+            ("triton_utils.py", "torch._native.triton_utils"),
+            ("cutedsl_utils.py", "torch._native.cutedsl_utils"),
+            ("helion_utils.py", "torch._native.helion_utils"),
+        ]
+
+        # Use the preserve_filter_state context manager pattern
+        from torch._native.registry import _filter_state
+
+        original_filter_state = (
+            set(_filter_state._dsl_names),
+            set(_filter_state._op_symbols),
+            set(_filter_state._dispatch_keys),
+        )
+
+        try:
+            for file_name, module_name in modules_to_test:
+                with self.subTest(module=module_name):
+                    mod = _import_module_directly(module_name, file_name)
+
+                    # Test method exists and is callable
+                    self.assertTrue(hasattr(mod, "deregister_op_overrides"))
+                    self.assertTrue(callable(mod.deregister_op_overrides))
+
+                    # Test method can be called without error (should be no-op when no overrides registered)
+                    try:
+                        mod.deregister_op_overrides()
+                    except Exception as e:
+                        self.fail(
+                            f"deregister_op_overrides on {module_name} raised exception: {e}"
+                        )
+        finally:
+            # Restore original filter state
+            _filter_state._dsl_names.clear()
+            _filter_state._op_symbols.clear()
+            _filter_state._dispatch_keys.clear()
+            _filter_state._dsl_names.update(original_filter_state[0])
+            _filter_state._op_symbols.update(original_filter_state[1])
+            _filter_state._dispatch_keys.update(original_filter_state[2])
+
+    def test_register_op_skips_when_jit_disabled(self):
+        """register_op_override does not call through when TORCH_DISABLE_NATIVE_JIT=1."""
+        from torch._native import cutedsl_utils, helion_utils, triton_utils
+
+        # Test the actual environment variable behavior to ensure it works
+        # Set TORCH_DISABLE_NATIVE_JIT=1 and clear caches
+        with patch.dict(os.environ, {"TORCH_DISABLE_NATIVE_JIT": "1"}):
+            # Import and clear caches for both modules
+            from torch._native.common_utils import check_native_jit_disabled
+
+            check_native_jit_disabled.cache_clear()
+
+            # Import functions from each module and clear their caches too
+            triton_utils.check_native_jit_disabled.cache_clear()
+            cutedsl_utils.check_native_jit_disabled.cache_clear()
+            helion_utils.check_native_jit_disabled.cache_clear()
+
+            # Verify the function returns True
+            self.assertTrue(check_native_jit_disabled())
+
+            with (
+                patch.object(triton_utils, "_register_op_override_impl") as triton_mock,
+                patch.object(
+                    cutedsl_utils, "_register_op_override_impl"
+                ) as cutedsl_mock,
+                patch.object(helion_utils, "_register_op_override_impl") as helion_mock,
+            ):
+                # Use a unique operation name
+                unique_op = f"test_jit_disabled_{uuid.uuid4().hex[:8]}.Tensor"
+                triton_utils.register_op_override(
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
+                )
+                cutedsl_utils.register_op_override(
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
+                )
+                helion_utils.register_op_override(
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
+                )
+                self.assertEqual(triton_mock.call_count, 0)
+                self.assertEqual(cutedsl_mock.call_count, 0)
+                self.assertEqual(helion_mock.call_count, 0)
+
+    def test_helion_availability_requires_supported_backend_and_version(self):
+        from torch._native import helion_utils
+        from torch._vendor.packaging.version import Version
+
+        with patch.dict(os.environ, {"HELION_BACKEND": "metal"}):
+            helion_utils._check_runtime_available.cache_clear()
+            helion_utils._version_is_sufficient.cache_clear()
+            self.assertFalse(helion_utils.runtime_available())
+
+        helion_utils._check_runtime_available.cache_clear()
+        helion_utils._version_is_sufficient.cache_clear()
+        with patch.object(
+            helion_utils,
+            "_check_runtime_available",
+            return_value=(True, Version("1.2.0")),
+        ):
+            self.assertTrue(helion_utils.runtime_available())
+            self.assertTrue(helion_utils._version_is_sufficient())
+
+        helion_utils._check_runtime_available.cache_clear()
+        helion_utils._version_is_sufficient.cache_clear()
+        with patch.object(
+            helion_utils,
+            "_check_runtime_available",
+            return_value=(True, Version("1.0.0")),
+        ):
+            self.assertTrue(helion_utils.runtime_available())
+            self.assertFalse(helion_utils._version_is_sufficient())
+
+    def test_version_skip_env_var_overrides(self):
+        """TORCH_NATIVE_SKIP_VERSION_CHECK=1 allows non-blessed versions."""
+        from torch._vendor.packaging.version import Version
+
+        fake_version = Version("1.0.0")
+
+        # Set the environment variable and clear caches
+        with patch.dict(os.environ, {"TORCH_NATIVE_SKIP_VERSION_CHECK": "1"}):
+            # Import fresh modules to avoid cached state
+            from torch._native import cutedsl_utils, helion_utils, triton_utils
+            from torch._native.common_utils import check_native_version_skip
+
+            # Clear all relevant caches to ensure clean state
+            check_native_version_skip.cache_clear()
+
+            utils = (triton_utils, cutedsl_utils, helion_utils)
+            op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
+
+            for module in utils:
+                # Clear cached lookups so the patched runtime takes effect.
+                for attr_name in dir(module):
+                    attr = getattr(module, attr_name)
+                    if hasattr(attr, "cache_clear"):
+                        attr.cache_clear()
+
+                with (
+                    patch.object(
+                        module,
+                        "_check_runtime_available",
+                        return_value=(True, fake_version),
+                    ),
+                    patch.object(module, "_register_op_override_impl") as mock,
+                ):
+                    module.register_op_override(
+                        "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                    )
+                    self.assertEqual(
+                        mock.call_count,
+                        1,
+                        f"{module.__name__}: impl not called under skip flag",
+                    )
+
+    @parametrize("env_value, expected", [(None, False), ("1", True)])
+    def test_check_native_version_skip_environment_variable(self, env_value, expected):
+        """Test TORCH_NATIVE_SKIP_VERSION_CHECK environment variable behavior."""
+        from torch._native.common_utils import check_native_version_skip
+
+        if env_value is None:
+            os.environ.pop("TORCH_NATIVE_SKIP_VERSION_CHECK", None)
+        else:
+            os.environ["TORCH_NATIVE_SKIP_VERSION_CHECK"] = env_value
+
+        try:
+            # Clear cache so function re-reads environment variable
+            check_native_version_skip.cache_clear()
+            self.assertEqual(check_native_version_skip(), expected)
+        finally:
+            # Clean up environment variable
+            os.environ.pop("TORCH_NATIVE_SKIP_VERSION_CHECK", None)
+
+    def test_dsl_registry_functionality(self):
+        """Test that DSL registry works correctly"""
+        from torch.testing._internal.common_utils import (
+            get_all_dsls,
+            get_available_dsls,
+            is_dsl_available,
+        )
+
+        # Test registry returns expected DSLs
+        all_dsls = get_all_dsls()
+        self.assertIsInstance(all_dsls, list)
+        self.assertIn("triton", all_dsls)
+        self.assertIn("cutedsl", all_dsls)
+        self.assertIn("helion", all_dsls)
+
+        # Test available DSLs are subset of all DSLs
+        available_dsls = get_available_dsls()
+        self.assertIsInstance(available_dsls, list)
+        for dsl in available_dsls:
+            self.assertIn(dsl, all_dsls)
+
+        # Test availability check function
+        for dsl in all_dsls:
+            availability = is_dsl_available(dsl)
+            self.assertIsInstance(availability, bool)
+            # If DSL is in available list, it should return True
+            if dsl in available_dsls:
+                self.assertTrue(availability)
+
+    def test_dsl_test_helpers(self):
+        """Test that DSL test helper decorators work"""
+        from torch.testing._internal.common_utils import (
+            skipIfDSLUnavailable,
+            skipIfNoHelionDSL,
+            skipIfNoTritonDSL,
+            skipUnlessDSLAvailable,
+        )
+
+        # Test that decorators are callable
+        self.assertTrue(callable(skipIfNoTritonDSL))
+        self.assertTrue(callable(skipIfNoCuteDSL))
+        self.assertTrue(callable(skipIfNoHelionDSL))
+        self.assertTrue(callable(skipIfDSLUnavailable))
+        self.assertTrue(callable(skipUnlessDSLAvailable))
+
+        # Test dynamic decorators can be called
+        try:
+            decorator1 = skipIfDSLUnavailable("nonexistent_dsl")
+            decorator2 = skipUnlessDSLAvailable("triton")
+            self.assertTrue(callable(decorator1))
+            self.assertTrue(callable(decorator2))
+        except Exception as e:
+            self.fail(f"Dynamic DSL decorators failed: {e}")
+
+    def test_cache_invalidation_after_re_registration(self):
+        """Test that caches are properly invalidated when DSLs are re-registered"""
+        from unittest.mock import Mock
+
+        from torch._native.dsl_registry import DSLRegistry
+
+        # Create a fresh registry for this test
+        registry = DSLRegistry()
+
+        # Create mock DSL modules
+        mock_dsl_1 = Mock()
+        mock_dsl_1.runtime_available.return_value = False  # Initially unavailable
+        mock_dsl_1.runtime_version.return_value = None
+
+        mock_dsl_2 = Mock()
+        mock_dsl_2.runtime_available.return_value = True  # Available
+        mock_dsl_2.runtime_version.return_value = None
+
+        # Register first DSL and cache results
+        registry.register_dsl("test_cache_dsl", mock_dsl_1)
+        initial_available = registry.is_dsl_available("test_cache_dsl")
+        initial_list = registry.list_available_dsls()
+
+        self.assertFalse(initial_available)
+        self.assertNotIn("test_cache_dsl", initial_list)
+
+        # Re-register with different module that is available
+        registry.register_dsl("test_cache_dsl", mock_dsl_2)
+
+        # Verify cache was invalidated and new results are returned
+        new_available = registry.is_dsl_available("test_cache_dsl")
+        new_list = registry.list_available_dsls()
+
+        self.assertTrue(
+            new_available, "Cache should be invalidated and return new result"
+        )
+        self.assertIn(
+            "test_cache_dsl",
+            new_list,
+            "Available DSLs list should reflect new registration",
+        )
+
+    def test_incomplete_protocol_implementation(self):
+        """Test that registration fails when module doesn't implement required protocol methods"""
+        from torch._native.dsl_registry import DSLRegistry
+
+        # Create a fresh registry for this test
+        registry = DSLRegistry()
+
+        # Create an object missing required protocol methods (not using Mock)
+        class IncompleteModule:
+            def runtime_available(self):
+                return True
+
+            # Missing: runtime_version, register_op_override, deregister_op_overrides
+
+        incomplete_module = IncompleteModule()
+
+        # Attempt to register should raise TypeError due to missing methods
+        with self.assertRaises(TypeError) as cm:
+            registry.register_dsl("incomplete_dsl", incomplete_module)
+
+        self.assertIn("missing required methods", str(cm.exception))
+        self.assertIn("runtime_version", str(cm.exception))
+        self.assertIn("register_op_override", str(cm.exception))
+
+        # Verify DSL was not registered
+        self.assertNotIn("incomplete_dsl", registry.list_all_dsls())
+
+
+class TestTritonDistributionDiscovery(TestCase):
+    def setUp(self):
+        super().setUp()
+        for default in (_triton_module_at(_MODULE_ORIGIN), _triton_records({})):
+            default.start()
+            self.addCleanup(default.stop)
+
+    def test_named_distribution_uses_fast_path(self):
+        with (
+            _triton_installed({"triton": "3.7.1"}),
+            _triton_provided_by() as scan,
+            _triton_module_at(_MODULE_ORIGIN) as origin,
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+        scan.assert_not_called()
+        origin.assert_not_called()
+
+    @parametrize("distribution", _WHEEL_DISTRIBUTIONS)
+    def test_known_distribution_names(self, distribution):
+        with (
+            _triton_installed({distribution: "3.7.1"}),
+            _triton_provided_by(distribution),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+    def test_source_checkout_reports_no_version(self):
+        with (
+            _triton_installed({}),
+            _triton_provided_by(),
+            self.assertLogs("torch._native.triton_utils", level="INFO") as logs,
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        self.assertIn("no installed distribution", "\n".join(logs.output))
+
+    def test_scanned_provider_without_version(self):
+        with (
+            _triton_installed({}),
+            _triton_provided_by("pytorch-triton-rocm"),
+            self.assertLogs("torch._native.triton_utils", level="INFO") as logs,
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        self.assertIn("no installed distribution", "\n".join(logs.output))
+
+    def test_unreadable_scan_is_caught(self):
+        with (
+            _triton_installed({}),
+            _triton_provided_by(raises=True) as scan,
+            self.assertLogs("torch._native.triton_utils", level="WARNING") as logs,
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        scan.assert_called_once()
+        self.assertIn("will not register", "\n".join(logs.output))
+
+    @parametrize("hash_encoding", ("base64", "padded_base64", "hex", "uppercase_hex"))
+    def test_record_hash_selects_live_distribution(self, hash_encoding):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
+
+            with (
+                _triton_installed({"triton": "3.2.0", "pytorch-triton-rocm": "3.7.1"}),
+                _triton_records(
+                    {
+                        "triton": [_InstalledFile(origin, b'__version__ = "3.2.0"\n')],
+                        "pytorch-triton-rocm": [
+                            _InstalledFile(
+                                origin, contents, hash_encoding=hash_encoding
+                            )
+                        ],
+                    }
+                ),
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "pytorch-triton-rocm") as scan,
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+            scan.assert_not_called()
+
+    def test_unresolved_known_collision_scans_unlisted_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
+
+            with (
+                _triton_installed(
+                    {
+                        "triton": "3.2.0",
+                        "triton-rocm": "3.3.0",
+                        "triton-nightly": "3.7.1",
+                    }
+                ),
+                _triton_records(
+                    {
+                        "triton": [_InstalledFile(origin)],
+                        "triton-rocm": [
+                            _InstalledFile(origin, b'__version__ = "3.3.0"\n')
+                        ],
+                        "triton-nightly": [_InstalledFile(origin, contents)],
+                    }
+                ) as metadata,
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "triton-rocm", "triton-nightly") as scan,
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+            scan.assert_called_once()
+            for name in ("triton", "triton-rocm"):
+                self.assertEqual(metadata.call_args_list.count(call(name)), 1)
+
+    def test_unlisted_distribution_is_scanned(self):
+        with (
+            _triton_installed({"triton-nightly": "3.7.1"}),
+            _triton_records({"triton-nightly": [_MODULE_ORIGIN]}),
+            _triton_provided_by("triton-nightly") as scan,
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+        scan.assert_called_once()
+
+    def test_single_editable_install_skips_ownership(self):
+        with (
+            _triton_installed({"triton": "3.7.1"}),
+            _triton_records(
+                {
+                    "triton": [
+                        "/site-packages/__editable__.triton-3.7.1.pth",
+                        "/site-packages/__editable___triton_3_7_1_finder.py",
+                        "/site-packages/triton-3.7.1.dist-info/METADATA",
+                        "/site-packages/triton-3.7.1.dist-info/RECORD",
+                        "/site-packages/triton-3.7.1.dist-info/top_level.txt",
+                    ]
+                }
+            ) as distribution,
+            _triton_module_at("/src/triton/__init__.py") as origin,
+            _triton_provided_by("triton"),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+        distribution.assert_not_called()
+        origin.assert_not_called()
+
+    def test_unreadable_provider_is_skipped(self):
+        def version_of(distribution):
+            if distribution == "broken-triton":
+                raise ValueError("broken metadata")
+            return Version("3.7.1") if distribution == "triton-nightly" else None
+
+        with (
+            patch.object(triton_utils, "_available_version", side_effect=version_of),
+            _triton_records({"triton-nightly": [_MODULE_ORIGIN]}),
+            _triton_provided_by("broken-triton", "triton-nightly"),
+            self.assertLogs("torch._native.triton_utils", level="WARNING"),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+    def test_normalized_provider_is_not_retried(self):
+        with (
+            _triton_installed({}) as version_lookup,
+            _triton_provided_by("triton_rocm"),
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        self.assertNotIn(
+            "triton_rocm",
+            [call.args[0] for call in version_lookup.call_args_list],
+        )
+
+    def test_missing_record_is_undecidable(self):
+        with _triton_records({"triton": None}):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
+            )
+
+    def test_missing_record_hash_is_undecidable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "__init__.py"
+            origin.write_bytes(b"")
+            self.assertIsNone(triton_utils._record_hash_matches(origin, None))
+
+    def test_unsupported_record_hash_is_undecidable(self):
+        record = _InstalledFile(_MODULE_ORIGIN)
+        record.hash = _FileHash("unsupported", "")
+        with _triton_records({"triton": [record]}):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
+            )
+
+    def test_empty_record_does_not_match(self):
+        with _triton_records({"triton": []}):
+            self.assertIs(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN),
+                False,
+            )
+
+    def test_record_without_origin_does_not_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            origin = root / "triton" / "__init__.py"
+            other = root / "other" / "__init__.py"
+            origin.parent.mkdir()
+            other.parent.mkdir()
+            origin.write_bytes(b"triton")
+            other.write_bytes(b"other")
+
+            with _triton_records({"triton": [_InstalledFile(other, b"other")]}):
+                self.assertIs(
+                    triton_utils._distribution_matches("triton", str(origin)),
+                    False,
+                )
+
+    def test_resolved_record_path_matches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            origin = root / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b"triton"
+            origin.write_bytes(contents)
+            recorded = origin.parent / ".." / "triton" / "__init__.py"
+
+            with _triton_records({"triton": [_InstalledFile(recorded, contents)]}):
+                self.assertIs(
+                    triton_utils._distribution_matches("triton", str(origin)),
+                    True,
+                )
+
+    def test_editable_record_is_undecidable(self):
+        with _triton_records(
+            {
+                "triton": [
+                    "/site-packages/__editable__.triton-3.7.1.pth",
+                    "/site-packages/__editable___triton_3_7_1_finder.py",
+                    "/site-packages/triton-3.7.1.dist-info/RECORD",
+                ]
+            }
+        ):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", "/src/triton/__init__.py")
+            )
+
+    def test_hash_tie_uses_fast_path_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
+            record = _InstalledFile(origin, contents)
+
+            with (
+                _triton_installed(
+                    {"triton": "3.7.1", "pytorch-triton-rocm": "3.7.1+rocm"}
+                ),
+                _triton_records({"triton": [record], "pytorch-triton-rocm": [record]}),
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "pytorch-triton-rocm") as scan,
+                self.assertLogs("torch._native.triton_utils", level="WARNING"),
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+            scan.assert_not_called()
+
+    def test_nameless_provider_is_skipped(self):
+        with (
+            _triton_installed({}),
+            _triton_provided_by(None),
+            self.assertLogs("torch._native.triton_utils", level="WARNING"),
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+
+class TestTritonModuleOrigin(TestCase):
+    def test_absent_module_has_no_origin(self):
+        self.assertIsNone(triton_utils._module_origin("_no_such_native_dsl_module"))
+
+    def test_broken_parent_package_declines_instead_of_raising(self):
+        with patch.object(triton_utils, "_find_spec", side_effect=ImportError("boom")):
+            self.assertIsNone(triton_utils._module_origin("triton"))
+
+
+class TestTritonVersionGate(TestCase):
+    def setUp(self):
+        super().setUp()
+        for verdict in (
+            triton_utils._check_runtime_available,
+            triton_utils._version_is_sufficient,
+            native_common_utils.check_native_version_skip,
+            native_common_utils.check_native_jit_disabled,
+        ):
+            verdict.cache_clear()
+            self.addCleanup(verdict.cache_clear)
+
+    @contextlib.contextmanager
+    def _installed_triton(self, versions, *distributions):
+        """Run the gate against an importable Triton described by `versions`."""
+        with (
+            _triton_installed(versions),
+            _triton_provided_by(*distributions),
+            _triton_module_at(_MODULE_ORIGIN),
+            _triton_records({}),
+            patch.object(triton_utils._cuda, "is_built", return_value=True),
+            patch.object(triton_utils, "_unavailable_reason", return_value=None),
+            patch.object(triton_utils, "check_native_version_skip", return_value=False),
+        ):
+            yield
+
+    def test_wheel_distribution_name_passes_the_gate(self):
+        with self._installed_triton({"triton-rocm": "3.7.1"}, "triton-rocm"):
+            self.assertTrue(triton_utils.runtime_available())
+            self.assertEqual(triton_utils.runtime_version(), Version("3.7.1"))
+            self.assertTrue(triton_utils._version_is_sufficient())
+
+    def test_versionless_install_still_fails_the_gate(self):
+        with self._installed_triton({}):
+            self.assertTrue(triton_utils.runtime_available())
+            self.assertIsNone(triton_utils.runtime_version())
+            self.assertFalse(triton_utils._version_is_sufficient())
+
+    @parametrize("version", ("3.6.0", "3.42.0"))
+    def test_supported_versions_pass_the_gate(self, version):
+        with self._installed_triton({"triton-rocm": version}, "triton-rocm"):
+            self.assertTrue(triton_utils._version_is_sufficient())
+
+    # The off-major cases clear the minor threshold.
+    @parametrize("version", ("3.5.9", "2.9.0", "4.6.0"))
+    def test_unsupported_versions_fail_the_gate(self, version):
+        with self._installed_triton({"triton-rocm": version}, "triton-rocm"):
+            self.assertFalse(triton_utils._version_is_sufficient())
+
+    def test_version_skip_overrides_an_unsupported_version(self):
+        with (
+            self._installed_triton({"triton-rocm": "3.5.0"}, "triton-rocm"),
+            patch.object(triton_utils, "check_native_version_skip", return_value=True),
+        ):
+            self.assertTrue(triton_utils._version_is_sufficient())
+
+    def test_version_skip_does_not_rescue_an_unreported_version(self):
+        with (
+            self._installed_triton({}),
+            patch.object(triton_utils, "check_native_version_skip", return_value=True),
+        ):
+            self.assertFalse(triton_utils._version_is_sufficient())
+
+
+instantiate_parametrized_tests(TestNativeDSLOps)
+instantiate_parametrized_tests(TestTritonDistributionDiscovery)
+instantiate_parametrized_tests(TestTritonVersionGate)
+
+
+if __name__ == "__main__":
+    run_tests()

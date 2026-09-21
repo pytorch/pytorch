@@ -153,7 +153,8 @@ class TestTracer(JitTestCase):
             return (x,)
 
         jit_f2 = torch.jit.trace(f2, x)
-        assert f2(x) == jit_f2(x)  # fails
+        if f2(x) != jit_f2(x):
+            raise AssertionError(f"Traced output {jit_f2(x)} != eager output {f2(x)}")
 
     def test_trace_out_operator_with_two_output(self):
         example_input = torch.rand(2, 8)
@@ -569,8 +570,10 @@ class TestTracer(JitTestCase):
 
         with warnings.catch_warnings(record=True) as warns:
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
-        for warn in warns:
-            self.assertIs(warn.category, torch.jit.TracerWarning)
+        # torch.jit.trace emits a deprecation FutureWarning; keep only the
+        # tracer warnings this test cares about.
+        warns = [w for w in warns if w.category is torch.jit.TracerWarning]
+        self.assertTrue(warns)
         warns = [str(w.message) for w in warns]
         self.assertIn("a Python integer", warns[0])
         self.assertIn("a Python boolean", warns[1])
@@ -1152,10 +1155,14 @@ class TestTracer(JitTestCase):
     def test_trace_detach_redispatch(self):
         def foo(x, w):
             y = torch.matmul(x, w)
-            assert y.requires_grad
+            if not y.requires_grad:
+                raise AssertionError("Expected y.requires_grad to be True")
             y = y.detach()
             # Make sure trace kernel redispatches to the right lower kernel.
-            assert not y.requires_grad
+            if y.requires_grad:
+                raise AssertionError(
+                    "Expected y.requires_grad to be False after detach"
+                )
             return y
 
         x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
@@ -1180,10 +1187,14 @@ class TestTracer(JitTestCase):
     def test_trace_detach_inplace_redispatch(self):
         def foo(x, w):
             y = torch.matmul(x, w)
-            assert y.requires_grad
+            if not y.requires_grad:
+                raise AssertionError("Expected y.requires_grad to be True")
             y.detach_()
             # Make sure trace kernel redispatches to the right lower kernel.
-            assert not y.requires_grad
+            if y.requires_grad:
+                raise AssertionError(
+                    "Expected y.requires_grad to be False after detach_"
+                )
             return y
 
         x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
@@ -1926,9 +1937,12 @@ class TestTracer(JitTestCase):
 
         traced = torch.jit.trace(foo, (torch.rand(3, 3), torch.rand(3, 3)))
         graph_str = str(traced.graph)
-        assert "bar" in graph_str
-        assert "baz" in graph_str
-        assert "quick_brown_fox" in graph_str
+        if "bar" not in graph_str:
+            raise AssertionError(f"'bar' not found in graph: {graph_str}")
+        if "baz" not in graph_str:
+            raise AssertionError(f"'baz' not found in graph: {graph_str}")
+        if "quick_brown_fox" not in graph_str:
+            raise AssertionError(f"'quick_brown_fox' not found in graph: {graph_str}")
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tracing_hooks(self):

@@ -7,7 +7,7 @@
 namespace c10 {
 
 void FunctionSchema::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) const {
@@ -90,7 +90,7 @@ std::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const 
   while (!typeStack.empty()) {
     TypePtr current = typeStack.top();
     typeStack.pop();
-    if (!containedTypes.count(current)) {
+    if (!containedTypes.contains(current)) {
       for (const TypePtr& containedType : current->containedTypes()) {
         typeStack.push(containedType);
       }
@@ -210,9 +210,9 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
 
   out << schema.name();
   if (!schema.overload_name().empty()) {
-    out << "." << schema.overload_name();
+    out << '.' << schema.overload_name();
   }
-  out << "(";
+  out << '(';
 
   bool seen_kwarg_only = false;
   for (const auto i : c10::irange(schema.arguments().size())) {
@@ -254,7 +254,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   if (returns.size() == 1 && !schema.is_varret()) {
     std::stringstream return_ss;
     return_ss << returns.at(0);
-    auto return_str = return_ss.str();
+    auto return_str = std::move(return_ss).str();
 
     // enclosing the single return item with parenthesis if the return type
     // starts with a left parenthesis.
@@ -273,7 +273,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   }
 
   if (need_paren) {
-    out << "(";
+    out << '(';
   }
   for (const auto i : c10::irange(returns.size())) {
     if (i > 0) {
@@ -288,7 +288,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
     out << "...";
   }
   if (need_paren) {
-    out << ")";
+    out << ')';
   }
   return out;
 }
@@ -471,7 +471,7 @@ bool FunctionSchema::isForwardCompatibleWith(
     if (!arguments().at(i).isForwardCompatibleWith(old.arguments().at(i))) {
       if (why_not) {
         why_not
-            << "'" << arguments().at(i).name() << "'"
+            << '\'' << arguments().at(i).name() << '\''
             << " is not forward compatible with the older version of the schema";
       }
       return false;
@@ -511,7 +511,7 @@ bool FunctionSchema::isForwardCompatibleWith(
              .isForwardCompatibleWith(old.arguments().at(i))) {
       if (why_not) {
         why_not << "Out argument '"
-                << "'" << arguments().at(i).name()
+                << '\'' << arguments().at(i).name()
                 << " is not FC with the older version of the schema";
       }
       return false;

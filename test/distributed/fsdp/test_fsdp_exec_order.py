@@ -10,7 +10,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
@@ -100,7 +100,7 @@ class Model(torch.nn.Module):
         return fsdp_model.to(device)
 
 
-class TestFSDPExecOrder(FSDPTest):
+class TestFSDPExecOrder(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",

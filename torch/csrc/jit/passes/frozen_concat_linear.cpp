@@ -1,14 +1,8 @@
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/frozen_concat_linear.h>
-#include <torch/csrc/jit/passes/frozen_conv_folding.h>
-#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
-#include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -159,7 +153,7 @@ class ConcatLinearLayers {
 
     for (size_t i = 0; i < linear_layer_group.size(); i++) {
       Node* base_node = linear_layer_group[i];
-      if (checked_nodes.count(base_node) != 0) {
+      if (checked_nodes.contains(base_node)) {
         continue;
       }
 
@@ -175,7 +169,7 @@ class ConcatLinearLayers {
       // see if there is anything that we can coalesce `base_node` with.
       for (size_t j = i + 1; j < linear_layer_group.size(); j++) {
         auto node = linear_layer_group[j];
-        if (checked_nodes.count(node) != 0) {
+        if (checked_nodes.contains(node)) {
           continue;
         }
         auto weight = constant_as<Tensor>(node->namedInput("weight")).value();

@@ -15,7 +15,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from typing import Optional, TextIO, Union
+from typing import TextIO
 
 
 try:
@@ -32,13 +32,13 @@ def find_free_port():
     Find a free port and binds a temporary socket to it so that the port can be "reserved" until used.
 
     .. note:: the returned socket must be closed before using the port,
-              otherwise a ``address already in use`` error will happen.
+              otherwise an ``address already in use`` error will happen.
               The socket should be held and closed as close to the
               consumer of the port as possible since otherwise, there
               is a greater chance of race-condition where a different
               process may see the port as being free and take it.
 
-    Returns: a socket binded to the reserved free port
+    Returns: a socket bound to the reserved free port
 
     Usage::
 
@@ -53,18 +53,20 @@ def find_free_port():
 
     for addr in addrs:
         family, type, proto, _, _ = addr
+        s = None
         try:
             s = socket.socket(family, type, proto)
             s.bind(("localhost", 0))
             s.listen(0)
             return s
         except OSError as e:
-            s.close()  # type: ignore[possibly-undefined]
-            print(f"Socket creation attempt failed: {e}")
+            if s is not None:
+                s.close()
+            logger.warning("Socket creation attempt failed: %s", e)
     raise RuntimeError("Failed to create a socket")
 
 
-def stop_etcd(subprocess, data_dir: Optional[str] = None):
+def stop_etcd(subprocess, data_dir: str | None = None):
     if subprocess and subprocess.poll() is None:
         logger.info("stopping etcd server")
         subprocess.terminate()
@@ -107,7 +109,7 @@ class EtcdServer:
         etcd_binary_path: path of etcd server binary (see above for fallback path)
     """
 
-    def __init__(self, data_dir: Optional[str] = None):
+    def __init__(self, data_dir: str | None = None):
         self._port = -1
         self._host = "localhost"
 
@@ -123,7 +125,7 @@ class EtcdServer:
             data_dir if data_dir else tempfile.mkdtemp(prefix="torchelastic_etcd_data")
         )
         self._etcd_cmd = None
-        self._etcd_proc: Optional[subprocess.Popen] = None
+        self._etcd_proc: subprocess.Popen | None = None
 
     def _get_etcd_server_process(self) -> subprocess.Popen:
         if not self._etcd_proc:
@@ -149,10 +151,10 @@ class EtcdServer:
         self,
         timeout: int = 60,
         num_retries: int = 3,
-        stderr: Union[int, TextIO, None] = None,
+        stderr: int | TextIO | None = None,
     ) -> None:
         """
-        Start the server, and waits for it to be ready. When this function returns the sever is ready to take requests.
+        Start the server, and waits for it to be ready. When this function returns the server is ready to take requests.
 
         Args:
             timeout: time (in seconds) to wait for the server to be ready
@@ -176,8 +178,8 @@ class EtcdServer:
             except Exception as e:
                 curr_retries += 1
                 stop_etcd(self._etcd_proc)
-                logger.warning(  # noqa: G200
-                    "Failed to start etcd server, got error: %s, retrying", str(e)
+                logger.warning(
+                    "Failed to start etcd server, got error: %s, retrying", e
                 )
                 if curr_retries >= num_retries:
                     shutil.rmtree(self._base_data_dir, ignore_errors=True)
@@ -185,7 +187,7 @@ class EtcdServer:
         atexit.register(stop_etcd, self._etcd_proc, self._base_data_dir)
 
     def _start(
-        self, data_dir: str, timeout: int = 60, stderr: Union[int, TextIO, None] = None
+        self, data_dir: str, timeout: int = 60, stderr: int | TextIO | None = None
     ) -> None:
         sock = find_free_port()
         sock_peer = find_free_port()

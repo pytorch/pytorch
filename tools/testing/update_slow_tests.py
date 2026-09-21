@@ -3,7 +3,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import requests
 from clickhouse import query_clickhouse  # type: ignore[import]
@@ -159,9 +159,7 @@ def add_labels(source_repo: str, pr_number: int, labels: list[str]) -> None:
     )
 
 
-def search_for_open_pr(
-    source_repo: str, search_string: str
-) -> Optional[tuple[int, str]]:
+def search_for_open_pr(source_repo: str, search_string: str) -> tuple[int, str] | None:
     params = {
         "q": f"is:pr is:open in:title author:pytorchupdatebot repo:{source_repo} {search_string}",
         "sort": "created",

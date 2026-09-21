@@ -1,11 +1,8 @@
 #include <torch/csrc/lazy/core/tensor_impl.h>
 
-#include <c10/core/Allocator.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
 namespace torch::lazy {
@@ -56,7 +53,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
 
   c10::DeviceIndex deviceCount() const noexcept override {
     // This will get called when autograd initializes its device pool
-    // regardless whether we have a backend registered aforehand.
+    // regardless whether we have a backend registered beforehand.
     if (!hasBackend()) {
       return 0;
     }

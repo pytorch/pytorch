@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -25,6 +26,7 @@ if TEST_NUMPY:
 
 
 class TestLoadStateDict(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -205,6 +207,7 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180632")
     @swap([True, False])
     def test_load_state_dict_child(self):
         base_module = nn.Linear(1, 1)
@@ -493,14 +496,18 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
                         return cls(src._data)
                     return cls(src)
         else:
-            assert isinstance(src, cls), (
-                f"Expected isinstance(src, {cls}) but got {type(src)}"
-            )
-            assert (
+            if not isinstance(src, cls):
+                raise AssertionError(
+                    f"Expected isinstance(src, {cls}) but got {type(src)}"
+                )
+            if not (
                 type(dest) is torch.Tensor
                 or type(dest) is torch.nn.Parameter
                 or issubclass(cls, type(dest))
-            )
+            ):
+                raise AssertionError(
+                    f"Expected dest to be Tensor, Parameter, or subclass of {cls}, got {type(dest)}"
+                )
             if assign:
                 return src.detach()
             else:
@@ -590,6 +597,8 @@ class MyWrapperLoadTensor(MyLoadTensor):
 
 
 class TestLoadStateDictSwap(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfCrossRef
     @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
     @swap([True])

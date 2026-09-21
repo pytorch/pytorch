@@ -47,7 +47,7 @@ from torchgen.api.python import (
     returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
-from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
+from torchgen.model import _TorchDispatchModeKey, DispatchKey, SchemaKind, Variant
 from torchgen.utils import FileManager
 
 
@@ -150,8 +150,6 @@ blocklist = [
     "einsum",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
-    # Manually define named tensor type stubs in __init__.pyi.in
-    "align_tensors",
     "meshgrid",
     "cartesian_prod",
     "block_diag",
@@ -202,7 +200,6 @@ arithmetic_ops = (
     "pow",
     "mod",
     "truediv",
-    "matmul",
     "floordiv",
     "radd",
     "rsub",
@@ -217,6 +214,10 @@ arithmetic_ops = (
     "ifloordiv",
     "imod",  # inplace ops
 )
+# `@` is the only binary operator that never accepts a Python scalar: matmul
+# between a Tensor and an int/float/bool raises TypeError at runtime, so it must
+# not be typed like the other arithmetic operators.
+matmul_ops = ("matmul",)
 logic_ops = (
     "and",
     "or",
@@ -228,7 +229,7 @@ logic_ops = (
     "ior",
     "ixor",  # inplace ops
 )
-binary_ops = shift_ops + arithmetic_ops + logic_ops
+binary_ops = shift_ops + arithmetic_ops + matmul_ops + logic_ops
 
 symmetric_comparison_ops = ("eq", "ne")
 asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
@@ -246,7 +247,8 @@ def sig_for_ops(opname: str) -> list[str]:
 
     # we have to do this by hand, because they are hand-bound in Python
 
-    assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
+    if not (opname.endswith("__") and opname.startswith("__")):
+        raise AssertionError(f"Unexpected op {opname}")
 
     name = opname[2:-2]
     if name == "rpow":
@@ -255,11 +257,16 @@ def sig_for_ops(opname: str) -> list[str]:
         ]
     elif name in arithmetic_ops:
         if name.startswith("i"):
-            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`
+            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`.
+            # `__idiv__` is not a real Python 3 in-place dunder (Python 3 uses `__itruediv__` /
+            # `__ifloordiv__`), so ruff's PYI034 doesn't fire on it and the noqa would be unused.
+            suffix = "" if name == "idiv" else "  # noqa: PYI034"
             return [
-                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # noqa: PYI034"
+                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...{suffix}"
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
+    elif name in matmul_ops:
+        return [f"def {opname}(self, other: Tensor) -> Tensor: ..."]
     elif name in logic_ops:
         return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in shift_ops:
@@ -271,7 +278,9 @@ def sig_for_ops(opname: str) -> list[str]:
             f"def {opname}(self, other: object) -> _bool: ...",
         ]
     elif name in asymmetric_comparison_ops:
-        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
+        return [
+            f"def {opname}(self, other: Tensor | Number | PySymType | _complex) -> Tensor: ..."
+        ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     if name in to_py_type_ops:
@@ -314,6 +323,23 @@ def generate_type_hints(sig_group: PythonSignatureGroup) -> list[str]:
     )
     if type_hint_vararg:
         type_hints.append(type_hint_vararg)
+
+    # Keep this in sync with the Python binding return-self special case in
+    # tools/autograd/gen_python_functions.py:emit_single_dispatch.
+    if (
+        str(sig_group.base.func.name).startswith("_foreach_")
+        and sig_group.base.func.kind() == SchemaKind.inplace
+    ):
+        old_suffix = " -> None: ..."
+        return_type = "tuple[Tensor, ...] | list[Tensor]"
+        if not all(hint.endswith(old_suffix) for hint in type_hints):
+            raise AssertionError(
+                "Expected generated in-place foreach hints to return None"
+            )
+        type_hints = [
+            f"{hint.removesuffix(old_suffix)} -> {return_type}: ..."
+            for hint in type_hints
+        ]
 
     return type_hints
 
@@ -990,11 +1016,12 @@ def gather_docstrs() -> dict[str, str]:
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
     docstr = inspect.cleandoc(docstr).strip()
     if "..." in hint:  # function or method
-        assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
+        if not hint.endswith("..."):
+            raise AssertionError(f"Hint `{hint}` does not end with '...'")
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property
@@ -1070,7 +1097,7 @@ def gen_pyi(
                         "dtype: _dtype | None = None",
                         "device: DeviceLikeType | None = None",
                         "copy: _bool | None = None",
-                        "requires_grad: _bool = False",
+                        "requires_grad: _bool | None = None",
                     ],
                     "Tensor",
                 )
@@ -1484,7 +1511,10 @@ def gen_pyi(
             # deprecated structseqs are currently not included for torch functions
             tuple_name, tuple_def = structseq
             if tuple_name in structseqs:
-                assert structseqs[tuple_name] == tuple_def
+                if structseqs[tuple_name] != tuple_def:
+                    raise AssertionError(
+                        f"Duplicate structseq {tuple_name} with different definition"
+                    )
             else:
                 structseqs[tuple_name] = tuple_def
 
@@ -1698,7 +1728,6 @@ def gen_pyi(
                     "Tensor",
                 )
             ],
-            "has_names": [defs("has_names", ["self"], "_bool")],
             "is_contiguous": [
                 defs(
                     "is_contiguous",
@@ -1904,7 +1933,10 @@ def gen_pyi(
             # deprecated structseqs are currently not included for torch functions
             tuple_name, tuple_def = structseq
             if tuple_name in structseqs:
-                assert structseqs[tuple_name] == tuple_def
+                if structseqs[tuple_name] != tuple_def:
+                    raise AssertionError(
+                        f"Duplicate structseq {tuple_name} with different definition"
+                    )
             else:
                 structseqs[tuple_name] = tuple_def
 
@@ -1994,6 +2026,7 @@ def gen_pyi(
             "cfloat",
             "complex128",
             "cdouble",
+            "bcomplex32",
             "quint8",
             "qint8",
             "qint32",

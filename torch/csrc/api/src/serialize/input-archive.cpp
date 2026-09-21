@@ -113,9 +113,11 @@ void InputArchive::load_from(
     size_t size() const override {
       return size_;
     }
-    size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
-        const override {
-      (void)what;
+    size_t read(
+        uint64_t pos,
+        void* buf,
+        size_t n,
+        [[maybe_unused]] const char* what = "") const override {
       if (pos >= size_) {
         return 0;
       }

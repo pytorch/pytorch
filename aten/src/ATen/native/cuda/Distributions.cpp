@@ -28,12 +28,20 @@ Tensor _s_poisson_cuda(const Tensor& lambda, std::optional<Generator> gen_) {
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, std::optional<Generator> gen_) {
+  TORCH_CHECK_VALUE(
+      at::isFloatingType(count.scalar_type()),
+      "binomial only supports floating-point dtypes for count, got: ",
+      count.scalar_type());
+  TORCH_CHECK_VALUE(
+      at::isFloatingType(prob.scalar_type()),
+      "binomial only supports floating-point dtypes for prob, got: ",
+      prob.scalar_type());
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   Tensor ret = at::empty(count.sizes(), count.options());
   at::TensorIterator iter = at::TensorIteratorConfig()
       .add_output(ret)
-      .add_input(count)
-      .add_input(prob)
+      .add_const_input(count)
+      .add_const_input(prob)
       .build();
   launch_binomial_cuda_kernel(iter, gen);
   return ret;
@@ -55,8 +63,8 @@ Tensor _s_dirichlet_cuda(const Tensor& alpha, std::optional<Generator> gen_) {
   auto gamma_sum = ret.sum(/*dim=*/-1, /*keepdim=*/true);
   at::TensorIterator iter = at::TensorIteratorConfig()
       .add_output(ret)
-      .add_input(ret)
-      .add_input(gamma_sum)
+      .add_const_input(ret)
+      .add_const_input(gamma_sum)
       .build();
   launch_dirichlet_kernel(iter);
   return ret;
@@ -66,8 +74,8 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
   TensorIterator iter = at::TensorIteratorConfig()
       .add_output(ret)
-      .add_input(self)
-      .add_input(output)
+      .add_const_input(self)
+      .add_const_input(output)
       .build();
   launch_standard_gamma_grad_kernel(iter);
   return ret;
@@ -77,9 +85,9 @@ Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& 
   Tensor ret = at::empty(x.sizes(), x.options());
   TensorIterator iter = at::TensorIteratorConfig()
       .add_output(ret)
-      .add_input(x)
-      .add_input(alpha)
-      .add_input(total)
+      .add_const_input(x)
+      .add_const_input(alpha)
+      .add_const_input(total)
       .build();
   launch_dirichlet_grad_kernel(iter);
   return ret;

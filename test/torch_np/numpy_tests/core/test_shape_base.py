@@ -95,10 +95,16 @@ class TestAtleast1d(TestCase):
 
     def test_r1array(self):
         """Test to make sure equivalent Travis O's r1array function"""
-        assert atleast_1d(3).shape == (1,)
-        assert atleast_1d(3j).shape == (1,)
-        assert atleast_1d(3.0).shape == (1,)
-        assert atleast_1d([[2, 3], [4, 5]]).shape == (2, 2)
+        if atleast_1d(3).shape != (1,):
+            raise AssertionError(f"shape mismatch: {atleast_1d(3).shape} != (1,)")
+        if atleast_1d(3j).shape != (1,):
+            raise AssertionError(f"shape mismatch: {atleast_1d(3j).shape} != (1,)")
+        if atleast_1d(3.0).shape != (1,):
+            raise AssertionError(f"shape mismatch: {atleast_1d(3.0).shape} != (1,)")
+        if atleast_1d([[2, 3], [4, 5]]).shape != (2, 2):
+            raise AssertionError(
+                f"shape mismatch: {atleast_1d([[2, 3], [4, 5]]).shape} != (2, 2)"
+            )
 
 
 class TestAtleast2d(TestCase):
@@ -134,9 +140,16 @@ class TestAtleast2d(TestCase):
 
     def test_r2array(self):
         """Test to make sure equivalent Travis O's r2array function"""
-        assert atleast_2d(3).shape == (1, 1)
-        assert atleast_2d([3j, 1]).shape == (1, 2)
-        assert atleast_2d([[[3, 1], [4, 5]], [[3, 5], [1, 2]]]).shape == (2, 2, 2)
+        if atleast_2d(3).shape != (1, 1):
+            raise AssertionError(f"shape mismatch: {atleast_2d(3).shape} != (1, 1)")
+        if atleast_2d([3j, 1]).shape != (1, 2):
+            raise AssertionError(
+                f"shape mismatch: {atleast_2d([3j, 1]).shape} != (1, 2)"
+            )
+        if atleast_2d([[[3, 1], [4, 5]], [[3, 5], [1, 2]]]).shape != (2, 2, 2):
+            raise AssertionError(
+                f"shape mismatch: {atleast_2d([[[3, 1], [4, 5]], [[3, 5], [1, 2]]]).shape} != (2, 2, 2)"
+            )
 
 
 class TestAtleast3d(TestCase):
@@ -290,7 +303,8 @@ class TestConcatenate(TestCase):
         a = np.eye(3)
         b = np.concatenate([a])
         b[0, 0] = 2
-        assert b[0, 0] != a[0, 0]
+        if b[0, 0] == a[0, 0]:
+            raise AssertionError("concatenate should return a copy")
 
     def test_exceptions(self):
         # test axis must be in bounds
@@ -350,18 +364,24 @@ class TestConcatenate(TestCase):
         b = list(range(3))
 
         r = np.concatenate((a, a), axis=None)
-        assert r.dtype == a.dtype
-        assert r.ndim == 1
+        if r.dtype != a.dtype:
+            raise AssertionError(f"dtype mismatch: {r.dtype} != {a.dtype}")
+        if r.ndim != 1:
+            raise AssertionError(f"ndim mismatch: {r.ndim} != 1")
 
         r = np.concatenate((a, b), axis=None)
-        assert r.size == a.size + len(b)
-        assert r.dtype == a.dtype
+        if r.size != a.size + len(b):
+            raise AssertionError(f"size mismatch: {r.size} != {a.size + len(b)}")
+        if r.dtype != a.dtype:
+            raise AssertionError(f"dtype mismatch: {r.dtype} != {a.dtype}")
 
         out = np.zeros(a.size + len(b))
         r = np.concatenate((a, b), axis=None)
         rout = np.concatenate((a, b), axis=None, out=out)
-        assert out is rout
-        assert np.all(r == rout)
+        if out is not rout:
+            raise AssertionError("out should be rout")
+        if not np.all(r == rout):
+            raise AssertionError("r should equal rout")
 
     @xpassIfTorchDynamo_np  # (reason="concatenate(x, axis=None) relies on x being a sequence")
     def test_large_concatenate_axis_None(self):
@@ -369,7 +389,8 @@ class TestConcatenate(TestCase):
         # This also had a bug with many arrays (see gh-5979).
         x = np.arange(1, 100)
         r = np.concatenate(x, None)
-        assert np.all(x == r)
+        if not np.all(x == r):
+            raise AssertionError("concatenate with axis=None should work")
 
         # This should probably be deprecated:
         r = np.concatenate(x, 100)  # axis is >= MAXDIMS
@@ -462,9 +483,13 @@ class TestConcatenate(TestCase):
             res_dtype = concatenate(
                 to_concat, dtype=out.dtype, axis=axis, casting=casting
             )
-            assert res_out is out
+            if res_out is not out:
+                raise AssertionError("res_out should be out")
             assert_array_equal(out, res_dtype)
-            assert res_dtype.dtype == out_dtype
+            if res_dtype.dtype != out_dtype:
+                raise AssertionError(
+                    f"dtype mismatch: {res_dtype.dtype} != {out_dtype}"
+                )
 
         with assert_raises(TypeError):
             concatenate(to_concat, out=out, dtype=out_dtype, axis=axis)
@@ -518,8 +543,14 @@ class TestStackMisc(TestCase):
             assert_equal(np.stack(arrays, axis).shape, expected_shape)
 
         # empty arrays
-        assert stack([[], [], []]).shape == (3, 0)
-        assert stack([[], [], []], axis=1).shape == (0, 3)
+        if stack([[], [], []]).shape != (3, 0):
+            raise AssertionError(
+                f"shape mismatch: {stack([[], [], []]).shape} != (3, 0)"
+            )
+        if stack([[], [], []], axis=1).shape != (0, 3):
+            raise AssertionError(
+                f"shape mismatch: {stack([[], [], []], axis=1).shape} != (0, 3)"
+            )
 
         # out
         out = np.zeros_like(r1)
@@ -569,9 +600,13 @@ class TestStackMisc(TestCase):
         else:
             res_out = stack(to_concat, out=out, axis=axis, casting=casting)
             res_dtype = stack(to_concat, dtype=out_dtype, axis=axis, casting=casting)
-            assert res_out is out
+            if res_out is not out:
+                raise AssertionError("res_out should be out")
             assert_array_equal(out, res_dtype)
-            assert res_dtype.dtype == out_dtype
+            if res_dtype.dtype != out_dtype:
+                raise AssertionError(
+                    f"dtype mismatch: {res_dtype.dtype} != {out_dtype}"
+                )
 
         with assert_raises(TypeError):
             stack(to_concat, out=out, dtype=out_dtype, axis=axis)
@@ -610,23 +645,29 @@ class TestBlock(TestCase):
         a = np.eye(3)
         b = block(a)
         b[0, 0] = 2
-        assert b[0, 0] != a[0, 0]
+        if b[0, 0] == a[0, 0]:
+            raise AssertionError("block should return a copy")
 
     def test_block_total_size_estimate(self, block):
         _, _, _, total_size = _block_setup([1])
-        assert total_size == 1
+        if total_size != 1:
+            raise AssertionError(f"total_size mismatch: {total_size} != 1")
 
         _, _, _, total_size = _block_setup([[1]])
-        assert total_size == 1
+        if total_size != 1:
+            raise AssertionError(f"total_size mismatch: {total_size} != 1")
 
         _, _, _, total_size = _block_setup([[1, 1]])
-        assert total_size == 2
+        if total_size != 2:
+            raise AssertionError(f"total_size mismatch: {total_size} != 2")
 
         _, _, _, total_size = _block_setup([[1], [1]])
-        assert total_size == 2
+        if total_size != 2:
+            raise AssertionError(f"total_size mismatch: {total_size} != 2")
 
         _, _, _, total_size = _block_setup([[1, 2], [3, 4]])
-        assert total_size == 4
+        if total_size != 4:
+            raise AssertionError(f"total_size mismatch: {total_size} != 4")
 
     def test_block_simple_row_wise(self, block):
         a_2d = np.ones((2, 2))
@@ -855,8 +896,10 @@ class TestBlock(TestCase):
 
         b_f = [[[arr_f, arr_f], [arr_f, arr_f]], [[arr_f, arr_f], [arr_f, arr_f]]]
 
-        assert block(b_c).flags["C_CONTIGUOUS"]
-        assert block(b_f).flags["F_CONTIGUOUS"]
+        if not block(b_c).flags["C_CONTIGUOUS"]:
+            raise AssertionError("block(b_c) should be C_CONTIGUOUS")
+        if not block(b_f).flags["F_CONTIGUOUS"]:
+            raise AssertionError("block(b_f) should be F_CONTIGUOUS")
 
         arr_c = np.zeros((3, 3), order="C")
         arr_f = np.zeros((3, 3), order="F")
@@ -865,8 +908,10 @@ class TestBlock(TestCase):
 
         b_f = [[arr_f, arr_f], [arr_f, arr_f]]
 
-        assert block(b_c).flags["C_CONTIGUOUS"]
-        assert block(b_f).flags["F_CONTIGUOUS"]
+        if not block(b_c).flags["C_CONTIGUOUS"]:
+            raise AssertionError("block(b_c) should be C_CONTIGUOUS")
+        if not block(b_f).flags["F_CONTIGUOUS"]:
+            raise AssertionError("block(b_f) should be F_CONTIGUOUS")
 
 
 if __name__ == "__main__":

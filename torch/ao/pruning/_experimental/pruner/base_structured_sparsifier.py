@@ -287,6 +287,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                 if matched is None:
                     continue
 
+                # pyrefly: ignore [no-matching-overload]
                 first_module = modules.get(node.target)
                 # check if first module exists and has appropriate parameterization, otherwise skip
                 if (

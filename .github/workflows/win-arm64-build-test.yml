@@ -1,3 +1,4 @@
+# Owner(s): ["module: windows", "module: arm"]
 name: windows-arm64-build-test
 
 on:
@@ -23,7 +24,12 @@ permissions:
   contents: read
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   build:
+    needs: check-ci
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
     runs-on: "windows-11-arm64-preview"
@@ -31,7 +37,7 @@ jobs:
     steps:
       - name: configure aws credentials
         id: aws_creds
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_sscache
           aws-region: us-east-1

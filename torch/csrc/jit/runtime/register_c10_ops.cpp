@@ -1,8 +1,5 @@
-#include <ATen/core/ATenOpList.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/record_function.h>
-#include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch::jit {

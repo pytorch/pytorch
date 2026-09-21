@@ -3,7 +3,6 @@
 #include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 
-#include <c10/util/C++17.h>
 #include <type_traits>
 
 namespace c10 {
@@ -83,6 +82,11 @@ inline bool KernelFunction::isValid() const {
 
 inline bool KernelFunction::isFallthrough() const {
   return boxed_kernel_func_.isFallthrough();
+}
+
+template <class KernelFunctor>
+inline const KernelFunctor* KernelFunction::boxedKernelFunctor() const {
+  return boxed_kernel_func_.getFunctor<KernelFunctor>();
 }
 
 inline void KernelFunction::callBoxed(
@@ -218,11 +222,6 @@ inline KernelFunction KernelFunction::makeFallthrough() {
 inline KernelFunction KernelFunction::makeAmbiguousAutogradOther() {
   return KernelFunction::makeFromBoxedKernel(
       BoxedKernel::makeAmbiguousAutogradOther());
-}
-
-inline KernelFunction KernelFunction::makeNamedNotSupported() {
-  return KernelFunction::makeFromBoxedKernel(
-      BoxedKernel::makeNamedNotSupported());
 }
 
 template <bool AllowLegacyTypes, class KernelFunctor>

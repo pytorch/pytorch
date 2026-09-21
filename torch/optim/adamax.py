@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -10,6 +10,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
@@ -30,11 +31,11 @@ class Adamax(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 2e-3,
+        lr: float | Tensor = 2e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         *,
         maximize: bool = False,
         differentiable: bool = False,
@@ -127,7 +128,7 @@ class Adamax(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -233,7 +234,7 @@ def _single_tensor_adamax(
     eps: float,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
@@ -300,7 +301,7 @@ def _single_tensor_adamax(
             bias_correction = 1 - beta1 ** _get_value(step_t)
             clr = lr / bias_correction
 
-            param.addcdiv_(exp_avg, exp_inf, value=-clr)
+            param.addcdiv_(exp_avg, exp_inf, value=-clr)  # type: ignore[arg-type]
 
 
 def _multi_tensor_adamax(
@@ -313,7 +314,7 @@ def _multi_tensor_adamax(
     eps: float,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
@@ -402,7 +403,7 @@ def _multi_tensor_adamax(
         torch._foreach_add_(grouped_grads, eps)
         torch._foreach_maximum_(grouped_exp_infs, grouped_grads)
 
-        bias_corrections: Union[tuple[Tensor, ...], list[Tensor]]
+        bias_corrections: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             bias_corrections = torch._foreach_pow(beta1, grouped_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg
@@ -416,7 +417,7 @@ def _multi_tensor_adamax(
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
             ]
             step_size = [(_get_value(lr) / bc) * -1 for bc in bias_corrections]
-            torch._foreach_addcdiv_(
+            torch._foreach_addcdiv_(  # type: ignore[arg-type]
                 grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size
             )
 
@@ -430,7 +431,7 @@ def adamax(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     maximize: bool = False,
     differentiable: bool = False,
     capturable: bool = False,
@@ -439,14 +440,9 @@ def adamax(
     eps: float,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
 ) -> None:
-    r"""Functional API that performs adamax algorithm computation.
-
-    See :class:`~torch.optim.Adamax` for details.
-    """
-
     if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
@@ -483,3 +479,6 @@ def adamax(
         has_complex=has_complex,
         capturable=capturable,
     )
+
+
+adamax.__doc__ = _functional_api_doc.format(optimizer="Adamax")

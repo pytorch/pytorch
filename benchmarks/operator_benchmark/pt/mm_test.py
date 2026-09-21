@@ -47,6 +47,23 @@ class MmOpBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input_one, input_two):
         return self.op_func(input_one, input_two)
 
+    def get_memory_traffic_bytes(self):
+        """Override for matmul: (M, N) @ (N, K) -> (M, K)
+        Memory traffic: read(M*N + N*K) + write(M*K)
+        """
+        input_one = self.inputs["input_one"]
+        input_two = self.inputs["input_two"]
+        M, N = input_one.shape
+        N_check, K = input_two.shape
+        if N != N_check:
+            raise AssertionError(
+                f"Matrix dimensions must match for matmul: N={N}, N_check={N_check}"
+            )
+
+        bytes_per_element = input_one.element_size()
+        total_elements = M * N + N * K + M * K
+        return total_elements * bytes_per_element
+
 
 op_bench.generate_pt_tests_from_op_list(
     ops_list, mm_short_configs + mm_long_configs, MmOpBenchmark

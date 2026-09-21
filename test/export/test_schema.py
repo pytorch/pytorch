@@ -6,10 +6,17 @@ from torch._export.serde.schema_check import (
     SchemaUpdateError,
     update_schema,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_FBCODE,
+    run_tests,
+    TestCase,
+)
 
 
 class TestSchema(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_schema_compatibility(self):
         msg = """
 Detected an invalidated change to export schema. Please run the following script to update the schema:
@@ -138,6 +145,8 @@ Example(s):
             thrift_checksum_next="",
             thrift_schema="",
             thrift_schema_path="",
+            enum_converter_header="",
+            enum_converter_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
@@ -177,6 +186,8 @@ Example(s):
             thrift_checksum_next="",
             thrift_schema="",
             thrift_schema_path="",
+            enum_converter_header="",
+            enum_converter_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
@@ -219,6 +230,8 @@ Example(s):
             thrift_checksum_next="",
             thrift_schema="",
             thrift_schema_path="",
+            enum_converter_header="",
+            enum_converter_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -284,6 +297,8 @@ Example(s):
             thrift_checksum_next="",
             thrift_schema="",
             thrift_schema_path="",
+            enum_converter_header="",
+            enum_converter_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -319,6 +334,8 @@ Example(s):
             thrift_checksum_next="",
             thrift_schema="",
             thrift_schema_path="",
+            enum_converter_header="",
+            enum_converter_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -361,6 +378,8 @@ Example(s):
             thrift_checksum_next="",
             thrift_schema="",
             thrift_schema_path="",
+            enum_converter_header="",
+            enum_converter_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -400,6 +419,8 @@ Example(s):
             thrift_checksum_next="",
             thrift_schema="",
             thrift_schema_path="",
+            enum_converter_header="",
+            enum_converter_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])

@@ -1,7 +1,6 @@
 """Scalar pointwise operator implementation."""
 
 import random
-from typing import Optional
 
 import torch
 
@@ -9,7 +8,7 @@ from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec
 
 
-class ScalarPointwiseOperator(Operator):
+class ScalarPointwiseOperatorBase(Operator):
     """Base class for scalar pointwise operations."""
 
     def __init__(self, name: str, symbol: str):
@@ -17,7 +16,7 @@ class ScalarPointwiseOperator(Operator):
         self.symbol = symbol
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Scalar operations don't have specific torch ops, they use Python operators."""
         return None
 
@@ -52,28 +51,28 @@ class ScalarPointwiseOperator(Operator):
         return f"{output_name} = {input_names[0]} {self.symbol} {input_names[1]}"
 
 
-class ScalarAddOperator(ScalarPointwiseOperator):
+class ScalarAddOperator(ScalarPointwiseOperatorBase):
     """Operator for scalar addition."""
 
     def __init__(self):
         super().__init__("scalar_add", "+")
 
 
-class ScalarMulOperator(ScalarPointwiseOperator):
+class ScalarMulOperator(ScalarPointwiseOperatorBase):
     """Operator for scalar multiplication."""
 
     def __init__(self):
         super().__init__("scalar_mul", "*")
 
 
-class ScalarSubOperator(ScalarPointwiseOperator):
+class ScalarSubOperator(ScalarPointwiseOperatorBase):
     """Operator for scalar subtraction."""
 
     def __init__(self):
         super().__init__("scalar_sub", "-")
 
 
-class ScalarDivOperator(ScalarPointwiseOperator):
+class ScalarDivOperator(ScalarPointwiseOperatorBase):
     """Operator for scalar division."""
 
     def __init__(self):

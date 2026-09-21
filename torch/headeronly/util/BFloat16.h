@@ -12,7 +12,7 @@
 #include <iosfwd>
 #include <ostream>
 
-#if defined(__CUDACC__) && !defined(USE_ROCM)
+#if defined(__CUDACC__) && (!defined(USE_ROCM) || (TORCH_HIP_VERSION >= 702))
 #include <cuda_bf16.h>
 #endif
 
@@ -46,7 +46,7 @@ struct alignas(2) BFloat16 {
   /* implicit */ inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 
-#if defined(__CUDACC__) && !defined(USE_ROCM)
+#if defined(__CUDACC__) && (!defined(USE_ROCM) || (TORCH_HIP_VERSION >= 702))
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
 #endif
@@ -124,8 +124,9 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 /// Constructors
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
     :
-#if defined(__CUDACC__) && !defined(USE_ROCM) && defined(__CUDA_ARCH__) && \
-    __CUDA_ARCH__ >= 800
+#if defined(__CUDACC__) &&                                                   \
+    (!defined(USE_ROCM) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800 || \
+     defined(USE_ROCM) && (TORCH_HIP_VERSION >= 702))
       x(__bfloat16_as_ushort(__float2bfloat16(value)))
 #elif defined(__SYCL_DEVICE_ONLY__) && \
     defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
@@ -139,7 +140,7 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
-#if defined(__CUDACC__) && !defined(USE_ROCM)
+#if defined(__CUDACC__) && (!defined(USE_ROCM) || (TORCH_HIP_VERSION >= 702))
   return __bfloat162float(*reinterpret_cast<const __nv_bfloat16*>(&x));
 #elif defined(__SYCL_DEVICE_ONLY__) && \
     defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
@@ -149,7 +150,7 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
 #endif
 }
 
-#if defined(__CUDACC__) && !defined(USE_ROCM)
+#if defined(__CUDACC__) && (!defined(USE_ROCM) || (TORCH_HIP_VERSION >= 702))
 inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
   x = *reinterpret_cast<const unsigned short*>(&value);
 }
@@ -470,7 +471,7 @@ class numeric_limits<c10::BFloat16> {
     return c10::BFloat16(0x7FC0, c10::BFloat16::from_bits());
   }
   static constexpr c10::BFloat16 signaling_NaN() {
-    return c10::BFloat16(0x7F80, c10::BFloat16::from_bits());
+    return c10::BFloat16(0x7FA0, c10::BFloat16::from_bits());
   }
   static constexpr c10::BFloat16 denorm_min() {
     return c10::BFloat16(0x0001, c10::BFloat16::from_bits());

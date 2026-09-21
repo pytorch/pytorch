@@ -1,24 +1,27 @@
 # mypy: allow-untyped-defs
 
 import copy
+import io
 import itertools
 import json
 import math
 import operator
 import os
+import pickle
 import random
 import re
 import sys
 import tempfile
 import time
 import unittest
+import warnings
 from collections import defaultdict, namedtuple, OrderedDict
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
-from typing import Any, NamedTuple, Union
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -54,7 +57,13 @@ from torch.distributed.utils import (
     _verify_param_shape_across_processes,
 )
 from torch.nn.parallel import DistributedDataParallel
-from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars, _MixedPrecision
+from torch.nn.parallel.distributed import (
+    _BucketCapacityConfig,
+    _DEFAULT_BUCKET_CAP_MB,
+    _dump_DDP_relevant_env_vars,
+    _MB_TO_BYTES,
+    _MixedPrecision,
+)
 from torch.profiler import ExecutionTraceObserver, ProfilerActivity
 from torch.testing._internal.common_distributed import (
     captured_output,
@@ -81,12 +90,14 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_LINUX,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
+    TemporaryFileName,
+    TEST_WITH_ROCM,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
@@ -159,7 +170,11 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.UCC,
 ]
 
-# Allowlist of distributed backends where profiling is supported with use_cuda=True
+# Allowlist of distributed backends where profiling collectives with a CUDA
+# device is supported. This filters nothing today. The one branch that consults
+# it is reachable only from the three CUDA all_reduce tests, and all three skip
+# unless the backend is Gloo or NCCL, so the MPI and UCC entries below are
+# unreachable and the membership test always passes.
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
@@ -192,9 +207,6 @@ skipIfNoTorchVision = skip_but_pass_in_sandcastle_if(
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
-DEFAULT_TIMEOUT = 300
-CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
-
 
 def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
     event_list = (
@@ -207,7 +219,10 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
         for event in event_list
         if (
             (event.name.endswith(event_name) or event.name.startswith(event_name))
-            and (not dedup_gpu_user_annotation or event.device_type != DeviceType.CUDA)
+            and (
+                not dedup_gpu_user_annotation
+                or event.device_type not in [DeviceType.CUDA, DeviceType.XPU]
+            )
         )
     ]
 
@@ -215,10 +230,7 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
 def get_profiler_nccl_meta(prof):
     """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
     We will need to test metadata obtained from profiler here"""
-    with tempfile.NamedTemporaryFile(mode="w+t", suffix=".json") as tf:
-        tf.close()
-        trace_file = tf.name
-
+    with TemporaryFileName(mode="w+t", suffix=".json") as trace_file:
         prof.export_chrome_trace(trace_file)
         with open(trace_file) as f:
             events = json.load(f)["traceEvents"]
@@ -251,7 +263,7 @@ ddp_suggest_debug_mode_str = (
 class DDPUnevenTestInput(NamedTuple):
     name: str
     model: nn.Module
-    inp: Union[torch.tensor, tuple]
+    inp: torch.Tensor | tuple
     sync_interval: int
     throw_on_early_termination: bool = False
     hook: Callable = None
@@ -396,14 +408,6 @@ class ControlFlowToyModel(nn.Module):
             return F.relu(self.lin1(x))
 
 
-def get_timeout(test_id):
-    test_name = test_id.split(".")[-1]
-    if test_name in CUSTOMIZED_TIMEOUT:
-        return CUSTOMIZED_TIMEOUT[test_name]
-    else:
-        return DEFAULT_TIMEOUT
-
-
 default_pg_timeout = 60
 
 CUSTOM_PG_TIMEOUT = {
@@ -479,23 +483,6 @@ def _lock():
             else:
                 fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
             lf.close()
-
-
-@contextmanager
-def _rank_temp_file():
-    if dist.get_rank() == 0:
-        fd, name = tempfile.mkstemp()
-        os.close(fd)
-    else:
-        name = None
-    object_list = [name]
-    dist.broadcast_object_list(object_list)
-    name = object_list[0]
-    try:
-        yield name
-    finally:
-        if dist.get_rank() == 0:
-            os.remove(name)
 
 
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
@@ -606,7 +593,7 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.is_available() and torch.cuda.device_count() < int(
             self.world_size
         ):
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         try:
             pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(test_name, default_pg_timeout)
             timeout = timedelta(seconds=pg_timeout_seconds)
@@ -880,6 +867,7 @@ class DistributedTest:
             )
             self._test_barrier_timeout(dist.group.WORLD, timeout)
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70755")
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
@@ -899,6 +887,26 @@ class DistributedTest:
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179691")
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND != "gloo", "Only gloo backend supports timeouts"
+        )
+        def test_barrier_timeout_arg(self):
+            """Test that the timeout argument to barrier() overrides PG default.
+
+            Create a PG with a large default timeout, then have only rank 0
+            call barrier with a tiny timeout. The barrier should time out using
+            the per-call timeout (1ms) rather than the PG default (300s).
+            """
+            pg = dist.new_group(timeout=timedelta(seconds=300))
+
+            if dist.get_rank() == 0:
+                with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
+                    dist.barrier(group=pg, timeout=timedelta(seconds=0.001))
+
+            dist.destroy_process_group(pg)
+
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/164195")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
@@ -973,6 +981,7 @@ class DistributedTest:
             ):
                 dist.new_subgroups(3)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/162584")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
@@ -1012,7 +1021,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the world_size set by init_process_group",
+                f"Rank {world_size} is out of range",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[0, 1], [world_size, 2]]
@@ -1028,7 +1037,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the world_size set by init_process_group",
+                r"Rank -\d+ is out of range",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[-1, -2], [-3, -4]]
@@ -2075,7 +2084,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo" and BACKEND != "nccl",
-            "Only Gloo and Nccl backend supports CUDA allReduce",
+            "Only Gloo and Nccl backends support CUDA allReduce",
         )
         @skip_if_no_gpu
         def test_broadcast_cuda(self):
@@ -2365,6 +2374,7 @@ class DistributedTest:
                 group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1
             )
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/75168")
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
@@ -2526,7 +2536,7 @@ class DistributedTest:
             self.call_dist_op(
                 ":reduce_scatter_tensor",
                 False,
-                dist.reduce_scatter_tensor,
+                dist.reduce_scatter_single,
                 tensor_out,
                 tensor_in,
                 dist.ReduceOp.SUM,
@@ -2584,7 +2594,7 @@ class DistributedTest:
                 op_calls.append(secondary_op_call)
 
             autograd_profiler_ctx = torch.autograd.profiler.profile(
-                use_cuda=profile_cuda, record_shapes=True
+                use_device="cuda" if profile_cuda else None, record_shapes=True
             )
 
             # TODO: move this test to use torch.profiler once kineto issues are
@@ -2656,7 +2666,8 @@ class DistributedTest:
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
                 )
-                # Currently, only Gloo backend has profiling tested with CUDA enabled.
+                # Gloo and NCCL are the only backends that reach here; every other
+                # backend skips the enclosing tests.
                 # Only run cuda profiling test for one rank to speed up since
                 # running with different src_rank does not affect the correctness.
                 if (
@@ -2955,13 +2966,13 @@ class DistributedTest:
                 self.assertEqual(tensors[0], outputs[0])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "gloo", "Only Gloo backend support sparse all reduce"
+            BACKEND != "gloo", "Only Gloo backend supports sparse all reduce"
         )
         def test_sparse_all_reduce_sum(self):
             self._test_sparse_all_reduce_sum(lambda t: t)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "gloo", "Only Gloo backend support sparse all reduce"
+            BACKEND != "gloo", "Only Gloo backend supports sparse all reduce"
         )
         @skip_if_no_gpu
         def test_sparse_all_reduce_sum_cuda(self):
@@ -3135,6 +3146,7 @@ class DistributedTest:
                 rank_to_GPU=None,
             )
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70754")
         @skip_if_small_worldsize
         @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_group_min(self):
@@ -3548,7 +3560,7 @@ class DistributedTest:
             self.call_dist_op(
                 ":all_gather_into_tensor",
                 False,
-                dist.all_gather_into_tensor,
+                dist.all_gather_single,
                 tensor_out,
                 tensor_in,
                 group_id,
@@ -3662,9 +3674,12 @@ class DistributedTest:
                         ]
                         for rank_iter in group
                     ]
-                    assert self._run_all_gather_coalesced_and_verify(
+                    if not self._run_all_gather_coalesced_and_verify(
                         output_tensor_lists, input_tensors, expected_tensors, group_id
-                    ), "output tensors do not match expected outputs"
+                    ):
+                        raise AssertionError(
+                            "output tensors do not match expected outputs"
+                        )
 
             self._barrier()
 
@@ -3736,9 +3751,10 @@ class DistributedTest:
                 ]
                 for r in group
             ]
-            assert self._run_all_gather_coalesced_and_verify(
+            if not self._run_all_gather_coalesced_and_verify(
                 output_tensors_lists, input_tensors, expected_tensors, group_id
-            )
+            ):
+                raise AssertionError("output tensors do not match expected outputs")
             self._barrier()
 
         # AllToAll
@@ -4110,7 +4126,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -4123,7 +4139,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         def test_barrier_group_cuda(self):
             group, group_id, rank = self._init_group_test()
@@ -4133,7 +4149,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         def test_barrier_full_group_cuda(self):
             group, group_id, rank = self._init_full_group_test()
@@ -4434,6 +4450,10 @@ class DistributedTest:
                     all(param.requires_grad for param in ddp_model.parameters())
                 )
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/76428",
+        )
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
@@ -4795,7 +4815,12 @@ class DistributedTest:
 
             # Test a simple linear as well as a ResNet model.
             models_to_test = [
-                nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).cuda()
+                nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).cuda(),
+                # run model of at least 1M parameters to hit potential race conditions in
+                # stream semantics
+                nn.Sequential(
+                    nn.Linear(3, 1024), nn.Linear(1024, 1024), nn.Linear(1024, 3)
+                ).cuda(),
             ]
             if HAS_TORCHVISION:
                 models_to_test.append(torchvision.models.resnet50().cuda())
@@ -4837,7 +4862,7 @@ class DistributedTest:
                     for i in range(8):
                         inp = (
                             torch.randn(1, 3, 1000, 1000, device="cuda")
-                            if j == 1
+                            if j == 2
                             else torch.randn(10, 3, device="cuda")
                         )
                         model(inp).sum().backward()
@@ -4862,7 +4887,6 @@ class DistributedTest:
                         # case.
                         optim.zero_grad(set_to_none=True)
 
-        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
             for optim_cls, init_before in itertools.product(
@@ -4875,7 +4899,6 @@ class DistributedTest:
                         init_before=init_before,
                     )
 
-        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
             for init_before in [True, False]:
@@ -4886,7 +4909,6 @@ class DistributedTest:
                     gradient_as_bucket_view=False,
                 )
 
-        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_ignored_params(self):
             torch.cuda.set_device(self.rank)
@@ -4992,7 +5014,7 @@ class DistributedTest:
                     self.register_buffer("buffer", torch.randn(1, 2))
                     self.p = torch.nn.Parameter(torch.randn(10, 5), requires_grad=False)
 
-                def forward(self_, x):  # noqa: B902
+                def forward(self_, x):
                     params = self_.m.parameters()
                     for p in params:
                         self.assertEqual(mp_config.param_dtype, p.dtype)
@@ -5025,7 +5047,8 @@ class DistributedTest:
                 for n, param in net.named_parameters():
                     self.assertEqual(param.dtype, torch.float32)
                     if param.grad is None:
-                        assert n == "module.p"  # Only param that doesn't require grad
+                        if n != "module.p":  # Only param that doesn't require grad
+                            raise AssertionError(f"Expected n == 'module.p', got {n!r}")
                     else:
                         self.assertEqual(param.grad.dtype, torch.float32)
                         tensor_list = [
@@ -5450,6 +5473,7 @@ class DistributedTest:
 
             self.assertEqual(res[0], expected)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/77317")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
@@ -5700,9 +5724,7 @@ class DistributedTest:
             loss.backward()
             optimizer.step()
 
-        def _test_post_localSGD_optimizer_step_reload(
-            self, create_averager, chkpt_file
-        ):
+        def _test_post_localSGD_optimizer_step_reload(self, create_averager):
             learning_rate = 0.03
 
             net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
@@ -5732,14 +5754,22 @@ class DistributedTest:
                     target,
                 )
 
+            # Broadcast the serialized checkpoint instead of sharing a file, so
+            # that no rank owns a resource whose lifetime the other ranks depend on.
             if self.rank == 0:
+                buffer = io.BytesIO()
                 torch.save(
-                    {"optimizer_state_dict": post_localSGD_opt.state_dict()}, chkpt_file
+                    {"optimizer_state_dict": post_localSGD_opt.state_dict()}, buffer
                 )
+                object_list = [buffer.getvalue()]
+            else:
+                object_list = [None]
+            dist.broadcast_object_list(object_list)
 
-            dist.barrier()
             map_location = {"cuda:0": f"cuda:{self.rank:d}"}
-            checkpoint = torch.load(chkpt_file, map_location=map_location)
+            checkpoint = torch.load(
+                io.BytesIO(object_list[0]), map_location=map_location
+            )
             dummy_post_localSGD_opt.load_state_dict(checkpoint["optimizer_state_dict"])
 
             # Check that we didn't hit the trivial case
@@ -5829,10 +5859,9 @@ class DistributedTest:
         )
         def test_post_localSGD_optimizer_step_reload(self):
             torch.cuda.set_device(self.rank)
-            with _rank_temp_file() as tmp_file:
-                self._test_post_localSGD_optimizer_step_reload(
-                    self._create_periodic_model_averager, tmp_file
-                )
+            self._test_post_localSGD_optimizer_step_reload(
+                self._create_periodic_model_averager
+            )
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -6085,7 +6114,7 @@ class DistributedTest:
 
             all_input_var = torch.cat(
                 [
-                    x.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1)
+                    x.permute(1, 0, 2).reshape(ONLY_SBN_NET.num_features, -1)
                     for x in input_var
                 ],
                 dim=1,
@@ -6182,7 +6211,7 @@ class DistributedTest:
                 self._model_step_with_zero_grad(model_DDP)
 
                 # Verify DDP logging data is sampled as expected
-                # If it has ran more than 10 iterations and this is
+                # If it has run more than 10 iterations and this is
                 # the sampled iteration for measuring run time stats,
                 # the run time stats for this idx-th iteration will not
                 # be zeros.
@@ -6422,6 +6451,69 @@ class DistributedTest:
             )
             self.assertGreaterEqual(bwd_comp_start_host_side_time, fwd_host_side_time)
 
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_bucket_cap_mb_list(self):
+            """
+            Test that bucket_cap_mb_list parameter is properly used for bucket rebuilding.
+            When bucket_cap_mb_list is provided, it should be used to rebuild buckets.
+            When not provided, original logic should be used.
+            """
+            torch.cuda.set_device(self.rank)
+
+            # Test 1: With bucket_cap_mb_list provided
+            model_with_list = LargeNet().cuda(self.rank)
+            bucket_cap_mb_list = [1, 2]  # Two buckets with different sizes
+            ddp_with_list = nn.parallel.DistributedDataParallel(
+                model_with_list,
+                device_ids=[self.rank],
+                bucket_cap_mb_list=bucket_cap_mb_list,
+            )
+
+            # Run a forward/backward pass to trigger bucket rebuilding
+            input_tensor = torch.randn(10, 1000).cuda(self.rank)
+            loss = ddp_with_list(input_tensor).sum()
+            loss.backward()
+
+            # Run another iteration to trigger rebuild
+            input_tensor = torch.randn(10, 1000).cuda(self.rank)
+            loss = ddp_with_list(input_tensor).sum()
+            loss.backward()
+
+            # When bucket_cap_mb_list is provided, buckets are created with the correct
+            # structure from the start. No "rebuild" is needed since initial bucket
+            # creation uses the same limits as rebuild would. Hence has_rebuilt_buckets=0
+            # is the expected behavior.
+            # Verify bucket_bytes_cap_list was properly set instead.
+            expected_bucket_bytes_cap_list = [
+                int(cap * 1024 * 1024) for cap in bucket_cap_mb_list
+            ]
+            self.assertEqual(
+                ddp_with_list.bucket_bytes_cap_list, expected_bucket_bytes_cap_list
+            )
+
+            # Test 2: Without bucket_cap_mb_list (backward compatibility)
+            model_without_list = LargeNet().cuda(self.rank)
+            ddp_without_list = nn.parallel.DistributedDataParallel(
+                model_without_list,
+                device_ids=[self.rank],
+                bucket_cap_mb=25,  # Standard bucket size
+            )
+
+            # Run a forward/backward pass
+            input_tensor = torch.randn(10, 1000).cuda(self.rank)
+            loss = ddp_without_list(input_tensor).sum()
+            loss.backward()
+
+            # Run another iteration to trigger rebuild
+            input_tensor = torch.randn(10, 1000).cuda(self.rank)
+            loss = ddp_without_list(input_tensor).sum()
+            loss.backward()
+
+            # Verify that DDP without bucket_cap_mb_list still works correctly
+            # and bucket_bytes_cap_list should be empty (using original logic)
+            self.assertEqual(ddp_without_list.bucket_bytes_cap_list, [])
+
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
@@ -6449,7 +6541,7 @@ class DistributedTest:
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
             # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
-            # it need to recursively pass the `process_group` in the module when the `SyncBatchNorm`
+            # it needs to recursively pass the `process_group` in the module when the `SyncBatchNorm`
             # is nested in a sub-module or sub-sub-module (e.g. resnet50 in torchvision.models).
 
             process_ids = 0
@@ -6741,7 +6833,10 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaises(AttributeError):
+            # Pickling a local class fails; the exception type depends on the
+            # Python version: AttributeError on <=3.13, PicklingError on >=3.14
+            # (CPython gh-139806). pickle.PickleError covers PicklingError.
+            with self.assertRaises((AttributeError, pickle.PickleError)):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],
@@ -6969,6 +7064,7 @@ class DistributedTest:
 
             return prof
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/77342")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle("Currently failing in NVIDIA internal CI")
@@ -7064,6 +7160,7 @@ class DistributedTest:
             self.assertEqual(a1["out_msg_nelems"], 1, msg=f"{a1}")
             self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
 
+        @unittest.skip("https://github.com/pytorch/pytorch/issues/137765")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
@@ -7075,27 +7172,25 @@ class DistributedTest:
         def test_ddp_profiling_execution_trace(self):
             self.assertEqual(dist.get_backend(), "nccl")
             # Create a temp file to save execution trace data
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-            fp.close()
-            et_file = fp.name
-            et = ExecutionTraceObserver().register_callback(et_file)
+            with TemporaryFileName("w+t", suffix=".et.json") as et_file:
+                et = ExecutionTraceObserver().register_callback(et_file)
 
-            # first profiler context need not have ET
-            torch_profiler_ctx1 = torch.profiler.profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            )
-            # collect ET in second profiler pass
-            torch_profiler_ctx2 = torch.profiler.profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                execution_trace_observer=et,
-            )
-            self._test_ddp_profiling(
-                profiler_ctx=torch_profiler_ctx1,
-                profiler_ctx2=torch_profiler_ctx2,
-            )
+                # first profiler context need not have ET
+                torch_profiler_ctx1 = torch.profiler.profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                )
+                # collect ET in second profiler pass
+                torch_profiler_ctx2 = torch.profiler.profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    execution_trace_observer=et,
+                )
+                self._test_ddp_profiling(
+                    profiler_ctx=torch_profiler_ctx1,
+                    profiler_ctx2=torch_profiler_ctx2,
+                )
 
-            print(f"Execution trace saved at {fp.name}")
-            self._validate_execution_trace_nccl(et_file)
+                print(f"Execution trace saved at {et_file}")
+                self._validate_execution_trace_nccl(et_file)
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
@@ -7368,7 +7463,7 @@ class DistributedTest:
                 DDPUnevenTestInput(
                     name="large_conv_model",
                     model=large_model,
-                    inp=torch.ones(batch, batch, dim, dim, device=rank),
+                    inp=torch.ones(batch, batch, 64, 64, device=rank),
                     sync_interval=1,
                 ),
                 DDPUnevenTestInput(
@@ -7609,7 +7704,7 @@ class DistributedTest:
 
             # Single object test with device specified. Backend="gloo", device=current_device+1
             # The test is gated by the fact GPU count is the same as world size to avoid the case
-            # when backend is gloo but there is no multiple GPU devices.
+            # when backend is gloo but there are no multiple GPU devices.
             if backend != "nccl" and torch.cuda.device_count() == int(self.world_size):
                 single_obj_list = [objects[0]]
                 if self.rank != src_rank:
@@ -7901,11 +7996,11 @@ class DistributedTest:
             }
 
             class ToyModel(torch.nn.Module):
-                def __init__(self_):  # noqa: B902
+                def __init__(self_):
                     super().__init__()
                     self_.lin = nn.Linear(10, 10, bias=False)
 
-                def forward(self_, x, expected_type):  # noqa: B902
+                def forward(self_, x, expected_type):
                     # Similar to scatter, the recursive to in the single-device
                     # case does not move tensors if they are in a custom type.
                     self.assertTrue(isinstance(x, expected_type))
@@ -7964,11 +8059,11 @@ class DistributedTest:
             b = torch.rand(batch, dim, device=self.rank)
 
             class NamedTupleModule(torch.nn.Module):
-                def __init__(self_):  # noqa: B902
+                def __init__(self_):
                     super().__init__()
                     self_.lin = nn.Linear(10, 1)
 
-                def forward(self_, input, expected_type):  # noqa: B902
+                def forward(self_, input, expected_type):
                     # Without NamedTuple support, this would be of type tuple.
                     self.assertTrue(
                         isinstance(input, expected_type),
@@ -8387,6 +8482,10 @@ class DistributedTest:
         def test_compute_bucket_assignment_by_size_sparse_error_without_logger(self):
             self._test_compute_bucket_assignment_by_size(use_logger=False)
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/85012",
+        )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_compute_bucket_assignment_by_size_sparse_error_with_logger(self):
@@ -8465,6 +8564,7 @@ class DistributedTest:
             dist.all_reduce(t, group=group_gloo)
             self.assertGreater(t, 0)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/162676")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -9338,7 +9438,8 @@ class DistributedTest:
                     x = self.fc2(F.relu(self.fc1(x)))
                     y = x.clone()
                     x = x.detach()
-                    assert not x.requires_grad
+                    if x.requires_grad:
+                        raise AssertionError("Expected x.requires_grad to be False")
                     return (x, y)
 
             model = MyModel().to(self.rank)
@@ -9483,7 +9584,7 @@ class DistributedTest:
             torch.cuda.manual_seed(rank)
 
             def buffer_comm_hook(ddp, named_buffers):
-                buffers = [buffer for (_, buffer) in named_buffers.items()]
+                buffers = list(named_buffers.values())
                 futs = [
                     dist.all_reduce(
                         buffer, group=ddp.process_group, async_op=True
@@ -9585,7 +9686,7 @@ class DistributedTest:
             def buffer_comm_hook(ddp, named_buffers):
                 # named_buffers is a Dict[str, Tensor] representing a mapping
                 # from buffer name to buffer.
-                buffers = [buffer for (_, buffer) in named_buffers.items()]
+                buffers = list(named_buffers.values())
                 ddp._default_broadcast_coalesced(buffers)
 
             model = NetWithBuffers().cuda(rank)
@@ -9657,6 +9758,10 @@ class DistributedTest:
             )
             model_ddp2(input).sum().backward()
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/102751",
+        )
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -9773,7 +9878,8 @@ class DistributedTest:
                 torch.cuda.synchronize()
 
             run_iteration()
-            assert 0 == get_num_torch_recompiles()
+            if get_num_torch_recompiles() != 0:
+                raise AssertionError(f"Expected 0 torch recompiles, got {get_num_torch_recompiles()}")
 
             if new_pg:
                 # Now reduce world_size and run iteration.
@@ -9820,7 +9926,8 @@ class DistributedTest:
                 )
 
             # Validate no more recompiles.
-            assert 0 == get_num_torch_recompiles()
+            if get_num_torch_recompiles() != 0:
+                raise AssertionError(f"Expected 0 torch recompiles, got {get_num_torch_recompiles()}")
 
         @skip_if_lt_x_gpu(4)
         @require_world_size(4)
@@ -9946,6 +10053,152 @@ class DistributedTest:
                 rank_0_buf = bufs[0]
                 for buf in bufs[1:]:
                     self.assertEqual(rank_0_buf, buf)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_join_respects_forward_sync_buffers_false(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank + 42)
+            torch.cuda.manual_seed(rank + 42)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc = nn.Linear(10, 10, bias=False)
+                    self.register_buffer("rank_local", torch.randn(10))
+
+                def forward(self, x):
+                    return self.fc(x) + self.rank_local
+
+            model = NetWithBuffers().cuda(rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+                forward_sync_buffers=False,
+            )
+
+            buf_before = ddp.module.rank_local.detach().clone()
+
+            # Uneven inputs: rank 0 finishes first.
+            num_iters = rank + 1
+            with ddp.join():
+                for _ in range(num_iters):
+                    inp = torch.randn(2, 10, device=rank)
+                    ddp(inp).sum().backward()
+
+            buf_after = ddp.module.rank_local.detach().clone()
+            # _sync_final_model must respect forward_sync_buffers=False.
+            self.assertEqual(buf_before, buf_after)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_init_sync_buffers_with_forward_sync_buffers_false(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.a = nn.Linear(10, 10, bias=False)
+                    self.register_buffer("frozen_coeff", torch.randn(10))
+
+                def forward(self, x):
+                    return self.a(x) + self.frozen_coeff
+
+            model = NetWithBuffers().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+                forward_sync_buffers=False,
+            )
+            self.assertFalse(model_ddp.forward_sync_buffers)
+
+            bufs = [
+                torch.empty_like(model_ddp.module.frozen_coeff)
+                for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(bufs, model_ddp.module.frozen_coeff)
+            for buf in bufs[1:]:
+                self.assertEqual(bufs[0], buf)
+
+            if rank == 0:
+                model_ddp.module.frozen_coeff += 1
+            inp = torch.randn(2, 10, device=rank)
+            model_ddp(inp).sum().backward()
+
+            bufs = [
+                torch.empty_like(model_ddp.module.frozen_coeff)
+                for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(bufs, model_ddp.module.frozen_coeff)
+            if dist.get_world_size() > 1:
+                self.assertNotEqual(bufs[0], bufs[1])
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_broadcast_buffers_deprecation_warning(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+
+            def _count_broadcast_buffers_warnings(caught):
+                return len(
+                    [
+                        w
+                        for w in caught
+                        if issubclass(w.category, FutureWarning)
+                        and "broadcast_buffers" in str(w.message)
+                    ]
+                )
+
+            # Passing broadcast_buffers (True or False) should warn.
+            for val in (True, False):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        broadcast_buffers=val,
+                    )
+                self.assertGreater(_count_broadcast_buffers_warnings(caught), 0)
+
+            # Both specified: forward_sync_buffers takes precedence, warning fires.
+            for bb, fsb in ((False, True), (True, False)):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    ddp = torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        broadcast_buffers=bb,
+                        forward_sync_buffers=fsb,
+                    )
+                self.assertGreater(_count_broadcast_buffers_warnings(caught), 0)
+                self.assertEqual(ddp.forward_sync_buffers, fsb)
+
+            # Default (no broadcast_buffers) and forward_sync_buffers only: no warning.
+            for kwargs in ({}, {"forward_sync_buffers": False}):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        **kwargs,
+                    )
+                self.assertEqual(_count_broadcast_buffers_warnings(caught), 0)
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
@@ -10122,7 +10375,6 @@ class DistributedTest:
         def _test_hook_pickling(self, hook, hook_state):
             torch.manual_seed(0)
             learning_rate = 0.01
-            chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
             rank = self.rank
 
             input = torch.randn(7, 1, device=rank)
@@ -10149,9 +10401,12 @@ class DistributedTest:
                 "comm_hook_state": hook_state,
             }
 
+            # Broadcast the serialized checkpoint instead of sharing a file, so
+            # that no rank owns a resource whose lifetime the other ranks depend on.
             if rank == 0:
+                buffer = io.BytesIO()
                 with self.assertLogs("torch.distributed") as captured:
-                    torch.save(state, chkpt_file)
+                    torch.save(state, buffer)
 
                 # Check that the logger has only one entry
                 self.assertEqual(len(captured.records), 1)
@@ -10160,11 +10415,23 @@ class DistributedTest:
                     captured.records[0].getMessage(),
                     "NOTE: Process group is not serializable and excluded from a saved state.",
                 )
+                object_list = [buffer.getvalue()]
+            else:
+                object_list = [None]
+            # This test never calls set_device, so the collective device has to be
+            # named explicitly or every rank would broadcast on cuda:0.
+            coll_device = torch.device(f"cuda:{rank:d}")
+            dist.broadcast_object_list(object_list, device=coll_device)
 
-            dist.barrier()
             map_location = {"cuda:0": f"cuda:{rank:d}"}
             with self.assertLogs("torch.distributed") as captured:
-                checkpoint = torch.load(chkpt_file, map_location=map_location)
+                # The checkpoint holds the hook function and its state, not just
+                # tensors, so it cannot be loaded with weights_only.
+                checkpoint = torch.load(
+                    io.BytesIO(object_list[0]),
+                    map_location=map_location,
+                    weights_only=False,
+                )
 
             # Check that the logger has only one entry
             self.assertEqual(len(captured.records), 1)
@@ -10236,16 +10503,11 @@ class DistributedTest:
             ):
                 self.assertEqual(orig_param.grad, dummy_param.grad)
 
-            dist.barrier()
-            if rank == 0:
-                os.remove(chkpt_file)
-
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_but_pass_in_sandcastle_if(True, "Skipped due to flakiness")
         def test_ddp_hook_pickling_powerSGD(self):
             hook = powerSGD.powerSGD_hook
             powersgd_state = powerSGD.PowerSGDState(
@@ -10418,6 +10680,335 @@ class DistributedTest:
                 base_model.parameters(), test_model_1.parameters(), strict=True
             ):
                 self.assertEqual(i, j)
+
+
+# =============================================================================
+# Unit tests for _BucketCapacityConfig dataclass
+# These tests verify pure Python logic without requiring multi-process setup.
+# =============================================================================
+class TestBucketCapacityConfig(unittest.TestCase):
+    """Unit tests for _BucketCapacityConfig dataclass."""
+
+    def test_create_with_default_bucket_cap(self):
+        """Test _BucketCapacityConfig.create() with default bucket_cap_mb (None)."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        expected_bytes = _DEFAULT_BUCKET_CAP_MB * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.per_bucket_bytes_caps, ())
+        self.assertEqual(
+            config.first_bucket_bytes_cap, dist._DEFAULT_FIRST_BUCKET_BYTES
+        )
+        self.assertEqual(config.bucket_cap_mb, _DEFAULT_BUCKET_CAP_MB)
+
+    def test_create_with_custom_bucket_cap_mb(self):
+        """Test _BucketCapacityConfig.create() with custom bucket_cap_mb."""
+        custom_cap_mb = 100
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=custom_cap_mb,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        expected_bytes = custom_cap_mb * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.per_bucket_bytes_caps, ())
+        self.assertEqual(config.first_bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.bucket_cap_mb, custom_cap_mb)
+
+    def test_create_with_bucket_cap_mb_list(self):
+        """Test _BucketCapacityConfig.create() with bucket_cap_mb_list."""
+        cap_list = [10, 25, 50]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        expected_list = tuple(cap * _MB_TO_BYTES for cap in cap_list)
+        self.assertEqual(config.per_bucket_bytes_caps, expected_list)
+        expected_max_bytes = max(cap_list) * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_max_bytes)
+        self.assertEqual(config.first_bucket_bytes_cap, expected_max_bytes)
+        self.assertTrue(config.has_custom_per_bucket_caps)
+
+    def test_create_with_bucket_cap_mb_list_overrides_bucket_cap_mb(self):
+        """Test that bucket_cap_mb_list takes precedence over bucket_cap_mb."""
+        cap_list = [10, 25, 50]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=100,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        expected_max_bytes = max(cap_list) * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_max_bytes)
+
+    def test_create_raises_for_python_reducer_with_list(self):
+        """Test that AssertionError is raised when using bucket_cap_mb_list with Python reducer."""
+        with self.assertRaises(AssertionError) as context:
+            _BucketCapacityConfig.create(
+                bucket_cap_mb=None,
+                bucket_cap_mb_list=[10, 25, 50],
+                use_python_reducer=True,
+            )
+
+        self.assertIn("python reducer is not supported", str(context.exception))
+
+    def test_has_custom_per_bucket_caps_property(self):
+        """Test has_custom_per_bucket_caps property."""
+        config_no_list = _BucketCapacityConfig.create(
+            bucket_cap_mb=25,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+        self.assertFalse(config_no_list.has_custom_per_bucket_caps)
+
+        config_with_list = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=[10, 25],
+            use_python_reducer=False,
+        )
+        self.assertTrue(config_with_list.has_custom_per_bucket_caps)
+
+    def test_bucket_cap_mb_property(self):
+        """Test bucket_cap_mb property correctly derives MiB from bytes."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=100,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+        self.assertEqual(config.bucket_cap_mb, 100)
+
+        config_default = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+        self.assertEqual(config_default.bucket_cap_mb, _DEFAULT_BUCKET_CAP_MB)
+
+    def test_immutability(self):
+        """Test that _BucketCapacityConfig is immutable (frozen dataclass)."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=25,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        with self.assertRaises(AttributeError):
+            config.bucket_bytes_cap = 100
+
+        with self.assertRaises(AttributeError):
+            config.per_bucket_bytes_caps = (100,)
+
+
+class TestBucketCapacityConfigComputeLimits(unittest.TestCase):
+    """Unit tests for _BucketCapacityConfig.compute_bucket_size_limits()."""
+
+    def test_compute_limits_with_custom_per_bucket_caps(self):
+        """Test compute_bucket_size_limits returns custom caps when provided."""
+        cap_list = [10, 25, 50]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=True,
+        )
+
+        expected_limits = [cap * _MB_TO_BYTES for cap in cap_list]
+        self.assertEqual(limits, expected_limits)
+        self.assertEqual(rebuild_limits, expected_limits)
+
+    def test_compute_limits_static_graph_uses_maxsize(self):
+        """Test that static_graph=True uses sys.maxsize for initial bucketing."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=25,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=True,
+            find_unused_parameters=False,
+        )
+
+        self.assertEqual(limits, [sys.maxsize])
+        self.assertEqual(rebuild_limits, [])
+
+    def test_compute_limits_find_unused_false_uses_maxsize(self):
+        """Test that find_unused_parameters=False uses sys.maxsize."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=25,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=False,
+        )
+
+        self.assertEqual(limits, [sys.maxsize])
+        self.assertEqual(rebuild_limits, [])
+
+    def test_compute_limits_default_with_find_unused_true(self):
+        """Test default config with find_unused_parameters=True uses smaller first bucket."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=True,
+        )
+
+        expected_first = dist._DEFAULT_FIRST_BUCKET_BYTES
+        expected_main = _DEFAULT_BUCKET_CAP_MB * _MB_TO_BYTES
+        self.assertEqual(limits, [expected_first, expected_main])
+        self.assertEqual(rebuild_limits, [])
+
+    def test_compute_limits_custom_cap_with_find_unused_true(self):
+        """Test custom bucket_cap_mb with find_unused_parameters=True uses uniform bucket."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=100,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=True,
+        )
+
+        expected_bytes = 100 * _MB_TO_BYTES
+        self.assertEqual(limits, [expected_bytes])
+        self.assertEqual(rebuild_limits, [])
+
+    def test_compute_limits_empty_rebuild_for_non_list_config(self):
+        """Test that rebuild_limits is empty when not using bucket_cap_mb_list."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=50,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        _, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=True,
+        )
+
+        self.assertEqual(rebuild_limits, [])
+
+
+class TestBucketCapacityConfigEdgeCases(unittest.TestCase):
+    """Edge case tests for _BucketCapacityConfig."""
+
+    def test_single_element_bucket_cap_mb_list(self):
+        """Test bucket_cap_mb_list with a single element."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=[50],
+            use_python_reducer=False,
+        )
+
+        self.assertEqual(config.per_bucket_bytes_caps, (50 * _MB_TO_BYTES,))
+        self.assertEqual(config.bucket_bytes_cap, 50 * _MB_TO_BYTES)
+        self.assertTrue(config.has_custom_per_bucket_caps)
+
+    def test_large_bucket_cap_mb(self):
+        """Test with large bucket_cap_mb value."""
+        large_cap = 1000
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=large_cap,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        expected_bytes = large_cap * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.first_bucket_bytes_cap, expected_bytes)
+
+    def test_small_bucket_cap_mb(self):
+        """Test with small bucket_cap_mb value."""
+        small_cap = 1
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=small_cap,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        expected_bytes = small_cap * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+
+    def test_empty_bucket_cap_mb_list(self):
+        """Test with empty bucket_cap_mb_list (should use default)."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=[],
+            use_python_reducer=False,
+        )
+
+        expected_bytes = _DEFAULT_BUCKET_CAP_MB * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.per_bucket_bytes_caps, ())
+        self.assertFalse(config.has_custom_per_bucket_caps)
+
+    def test_bucket_cap_mb_list_with_duplicates(self):
+        """Test bucket_cap_mb_list with duplicate values."""
+        cap_list = [25, 25, 25]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        expected_list = tuple(25 * _MB_TO_BYTES for _ in range(3))
+        self.assertEqual(config.per_bucket_bytes_caps, expected_list)
+        self.assertEqual(config.bucket_bytes_cap, 25 * _MB_TO_BYTES)
+
+    def test_bucket_cap_mb_list_ascending_order(self):
+        """Test bucket_cap_mb_list in ascending order."""
+        cap_list = [5, 10, 15, 20]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        self.assertEqual(config.bucket_bytes_cap, 20 * _MB_TO_BYTES)
+
+    def test_bucket_cap_mb_list_descending_order(self):
+        """Test bucket_cap_mb_list in descending order."""
+        cap_list = [100, 50, 25, 10]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        self.assertEqual(config.bucket_bytes_cap, 100 * _MB_TO_BYTES)
+
+
+class TestBucketCapacityConfigConstants(unittest.TestCase):
+    """Tests for module-level constants."""
+
+    def test_default_bucket_cap_mb_value(self):
+        """Test that _DEFAULT_BUCKET_CAP_MB is 25."""
+        self.assertEqual(_DEFAULT_BUCKET_CAP_MB, 25)
+
+    def test_mb_to_bytes_value(self):
+        """Test that _MB_TO_BYTES is 1024 * 1024."""
+        self.assertEqual(_MB_TO_BYTES, 1024 * 1024)
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

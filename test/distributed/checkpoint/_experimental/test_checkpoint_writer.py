@@ -3,7 +3,7 @@
 import os
 import shutil
 import tempfile
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock
 
 import torch
@@ -13,7 +13,11 @@ from torch.distributed.checkpoint._experimental.checkpoint_writer import (
     WriterHook,
 )
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class MockWriterHook(WriterHook):
@@ -22,10 +26,10 @@ class MockWriterHook(WriterHook):
     def __init__(self):
         self.pre_commit_called = False
         self.commit_called = False
-        self.pre_commit_path: Optional[str] = None
-        self.commit_path: Optional[str] = None
-        self.pre_commit_kwargs: Optional[dict[str, Any]] = None
-        self.commit_kwargs: Optional[dict[str, Any]] = None
+        self.pre_commit_path: str | None = None
+        self.commit_path: str | None = None
+        self.pre_commit_kwargs: dict[str, Any] | None = None
+        self.commit_kwargs: dict[str, Any] | None = None
 
     def pre_commit(self, path: str, **kwargs: Any):
         self.pre_commit_called = True
@@ -39,6 +43,8 @@ class MockWriterHook(WriterHook):
 
 
 class TestCheckpointWriterConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_default_values(self):
         """Test that CheckpointWriterConfig has the correct default values."""
         options = CheckpointWriterConfig()
@@ -51,6 +57,8 @@ class TestCheckpointWriterConfig(TestCase):
 
 
 class TestCheckpointWriter(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Create a temporary directory for test checkpoints

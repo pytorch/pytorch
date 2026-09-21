@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorProperties.h>
@@ -13,10 +12,15 @@
 #include <ATen/ops/contiguous_native.h>
 #include <ATen/ops/cudnn_is_acceptable_native.h>
 #include <ATen/ops/detach_native.h>
+#include <ATen/ops/dim_native.h>
 #include <ATen/ops/equal.h>
+#include <ATen/ops/get_device_native.h>
+#include <ATen/ops/is_contiguous_native.h>
 #include <ATen/ops/is_same_size_native.h>
 #include <ATen/ops/is_set_to_native.h>
+#include <ATen/ops/numel_native.h>
 #include <ATen/ops/size_native.h>
+#include <ATen/ops/storage_offset_native.h>
 #include <ATen/ops/stride_native.h>
 #include <ATen/ops/sym_is_contiguous_native.h>
 #include <ATen/ops/sym_numel_native.h>
@@ -76,14 +80,28 @@ c10::SymInt sym_storage_offset(const Tensor& self) {
   return self.sym_storage_offset();
 }
 
-int64_t size(const Tensor& self, Dimname dim) {
-  size_t pos_dim = dimname_to_position(self, dim);
-  return self.sizes()[pos_dim];
+int64_t numel(const Tensor& self) {
+  return self.numel();
 }
 
-int64_t stride(const Tensor& self, Dimname dim) {
-  size_t pos_dim = dimname_to_position(self, dim);
-  return self.strides()[pos_dim];
+int64_t dim(const Tensor& self) {
+  return self.dim();
+}
+
+int64_t get_device(const Tensor& self) {
+  return self.get_device();
+}
+
+int64_t storage_offset(const Tensor& self) {
+  return self.storage_offset();
+}
+
+bool is_contiguous(const Tensor& self) {
+  return self.is_contiguous();
+}
+
+bool is_contiguous(const Tensor& self, at::MemoryFormat memory_format) {
+  return self.is_contiguous(memory_format);
 }
 
 bool cudnn_is_acceptable(const TensorBase& self) {

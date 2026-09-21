@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <map>
 #include <unordered_map>
 #include <vector>
 #include <utility>
@@ -114,9 +115,45 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
         return my_handles[device];
     }
 
+#ifdef USE_ROCM
+    // hipblaslt cannot share a single handle across multiple streams, so this
+    // overload returns a handle unique to each (device, stream) pair.
+    Handle_t reserve(int device, void* stream)
+    {
+        auto key = std::make_pair(device, stream);
+        // If this thread already has a handle for this (device, stream), return it
+        if(my_stream_handles.find(key) != my_stream_handles.end())
+        return my_stream_handles[key];
+
+        // otherwise, either grab a handle from the pool if one is available,
+        // or if not, create a new one.
+        auto parent = weak_parent.lock();
+        TORCH_CHECK(parent, "Cannot create handle during program termination");
+        std::lock_guard<std::mutex> guard(parent->mutex);
+
+        if(parent->available_handles[device].size() > 0)
+        {
+        my_stream_handles[key] = parent->available_handles[device].back();
+        parent->available_handles[device].pop_back();
+        }
+        else
+        {
+        parent->created_handles[device].emplace_back(true /*create*/);
+        my_stream_handles[key] = parent->created_handles[device].back().handle;
+        }
+
+        return my_stream_handles[key];
+    }
+#endif
+
     private:
     // Stores the per-device handles currently owned by this thread
     std::unordered_map<int, Handle_t> my_handles;
+#ifdef USE_ROCM
+    // Stores per-(device, stream) handles for ROCm, where hipblaslt
+    // requires a unique handle per stream.
+    std::map<std::pair<int, void*>, Handle_t> my_stream_handles;
+#endif
 
     std::weak_ptr<DeviceThreadHandlePool> weak_parent;
 
@@ -134,6 +171,18 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
             for(auto d_h : my_handles)
                 parent->available_handles[d_h.first].push_back(d_h.second);
         }
+#ifdef USE_ROCM
+        if(!my_stream_handles.empty()) {
+            auto parent = weak_parent.lock();
+            if (!parent) {
+                return;
+            }
+
+            std::lock_guard<std::mutex> guard(parent->mutex);
+            for(auto& [key, handle] : my_stream_handles)
+                parent->available_handles[key.first].push_back(handle);
+        }
+#endif
     }
     };
 

@@ -2,7 +2,6 @@
 import contextlib
 import logging
 import re
-from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -12,6 +11,7 @@ import torch.utils
 
 from ...utils._ordered_set import OrderedSet
 from .. import ir
+from ..cpu_vec_isa import pick_vec_isa, VecAMX
 from ..ir import TensorBox
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
@@ -140,6 +140,55 @@ inline void {{kernel_name}}_mul_scale_kernel(
   }
 }
 
+// One row of flash-attention online softmax, shared by the AMX and non-AMX paths.
+// This only tracks the running max/sum.
+//   qk_row     -> this kv block's raw scores (overwritten in place)
+//   p_row      -> output probabilities, the A operand of the following P@V gemm
+//   row_max/row_sum -> running softmax statistics carried across kv blocks
+//   dst_row    -> running P@V accumulator that must be rescaled when row_max grows
+template <typename scalar_t, typename accum_t>
+inline void {{kernel_name}}_online_softmax_row(
+    accum_t* qk_row,
+    scalar_t* p_row,
+    int64_t cur_kvSplitSize,
+    accum_t& row_max,
+    accum_t& row_sum,
+    accum_t* dst_row,
+    int64_t headSize_v,
+    bool first_block,
+    bool need_pack) {
+  using Vec = at::vec::Vectorized<accum_t>;
+  accum_t block_max = -std::numeric_limits<accum_t>::infinity();
+  {{kernel_name}}_mul_reduce_max_fusion_kernel(
+      qk_row, static_cast<accum_t>(1), cur_kvSplitSize, qk_row, block_max);
+  accum_t new_max = row_max > block_max ? row_max : block_max;
+  if (new_max == -std::numeric_limits<accum_t>::infinity()) {
+    // Whole row masked out: emit zero probabilities and leave the stats
+    // untouched, which also avoids `nan = exp2f(-inf - (-inf))`.
+    {{kernel_name}}_fill_stub(p_row, static_cast<scalar_t>(0), cur_kvSplitSize);
+  } else {
+    // exp_reduce_sum seeds val with new_max, so it computes exp(qk - new_max)
+    // and returns sum() in block_sum.
+    accum_t block_sum = new_max;
+    {{kernel_name}}_exp_reduce_sum_fusion_kernel(
+        qk_row, cur_kvSplitSize, p_row, block_sum);
+    // Rescale the previous running sum/accumulator from row_max to new_max.
+    accum_t exp_tmp = std::exp(row_max - new_max);
+    row_sum = block_sum + exp_tmp * row_sum;
+    if (!first_block) {
+      at::vec::map<accum_t>(
+          [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
+          dst_row, dst_row, headSize_v);
+    }
+  }
+  row_max = new_max;
+  // P is the VNNI2 A operand of P@V; VNNI2 packs K in pairs, so an odd
+  // cur_kvSplitSize needs one zero-padded column to complete the last pair.
+  if (need_pack && cur_kvSplitSize % 2 != 0) {
+    p_row[cur_kvSplitSize] = static_cast<scalar_t>(0);
+  }
+}
+
 """
 
 BRGEMM_PACK_FUNCTIONS = r"""
@@ -208,14 +257,16 @@ ALLOCATE_BUFFER = r"""
   {{buffer_dtype}}* {{buffer_name}} = ({{buffer_dtype}}*){{buffer_name}}_data_ptr;
 """
 
-FLEX_ATTENTION_TEMPLATE = r"""
+INIT_PARAMS = r"""
 {{template.header().getvalue()}}
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/Context.h>
+#include <ATen/cpu/Utils.h>
 {{template.codegen_micro_gemm(kernel.kernel_name)}}
 {{template.codegen_softmax_fusion(kernel.kernel_name)}}
 {{template.codegen_brgemm_pack_function(kernel.kernel_name)}}
+{{template.codegen_amx_helpers(kernel.kernel_name)}}
 {%- set kernel_args = {"query": query, "key": key, "value": value,
                        "kv_num_blocks": kv_num_blocks, "kv_indices": kv_indices,
                        "full_kv_num_blocks": full_kv_num_blocks, "full_kv_indices": full_kv_indices } %}
@@ -225,16 +276,18 @@ extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
   {{ kernel.maybe_codegen_profile() }}
-  int64_t qBlockSize = {{qBlockSize}};
-  int64_t kvBlockSize = {{kvBlockSize}};
-  int64_t num_thread = {{num_thread}};
 
-  // dtypes of kernel and internal buffers
+  // dtypes
   using scalar_t = {{kernel.dtype(query)}};
   constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
   using Vec = at::vec::Vectorized<accum_t>;
   accum_t scaling_factor = {{scale}};
+
+  // sizes
+  int64_t qBlockSize = {{qBlockSize}};
+  int64_t kvBlockSize = {{kvBlockSize}};
+  int64_t num_thread = {{num_thread}};
   int64_t batchSize = {{kernel.size(query, 0)}};
   int64_t qSize = {{kernel.size(query, 1)}};
   int64_t num_head = {{kernel.size(query, 2)}};
@@ -255,6 +308,18 @@ extern "C"
   int64_t gqa_shards_kvi = num_head / num_head_kvi;
   int64_t bs_shards_kvi = batchSize / batchSize_kvi;
 
+  int64_t kvSize = {{kernel.size(key, 1)}};
+
+  int64_t qSplitSize = qBlockSize;
+  int64_t kvSplitSize = kvBlockSize;
+
+  qSplitSize = qSplitSize > qSize ? qSize : qSplitSize;
+  kvSplitSize = kvSplitSize > kvSize ? kvSize : kvSplitSize;
+  int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
+  int64_t kvSlice = (kvSize + kvSplitSize - 1) / kvSplitSize;
+  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
+
+  // Strides
   int64_t kviStrideB = {{kernel.stride(kv_indices, 0)}};
   int64_t kviStrideH = {{kernel.stride(kv_indices, 1)}};
   int64_t kviStrideQ = {{kernel.stride(kv_indices, 2)}};
@@ -276,7 +341,6 @@ extern "C"
   auto kv_num_blocks_data = kv_num_blocks;
   auto kv_indices_data = kv_indices;
 
-  // Strides
   int64_t qStrideB = {{kernel.stride(query, 0)}};
   int64_t qStrideM = {{kernel.stride(query, 1)}};
   int64_t qStrideH = {{kernel.stride(query, 2)}};
@@ -290,18 +354,15 @@ extern "C"
   int64_t oStrideM = {{kernel.stride(output, 2)}};
   int64_t oStrideH = {{kernel.stride(output, 1)}};
 
-  int64_t kvSize = {{kernel.size(key, 1)}};
+  // Inputs/outputs buffers
+  const scalar_t* q_data = query;
+  const scalar_t* k_data = key;
+  const scalar_t* v_data = value;
+  scalar_t* out_data = output;
 
-  int64_t qSplitSize = qBlockSize;
-  int64_t kvSplitSize = kvBlockSize;
+"""
 
-
-  qSplitSize = qSplitSize > qSize ? qSize : qSplitSize;
-  kvSplitSize = kvSplitSize > kvSize ? kvSize : kvSplitSize;
-  int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
-  int64_t kvSlice = (kvSize + kvSplitSize - 1) / kvSplitSize;
-  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
-
+FLEX_ATTENTION_TEMPLATE = r"""
   bool need_pack = false;
   // Whether pack is needed for BFloat16/Half
   if (is_reduced_type) {
@@ -328,26 +389,42 @@ extern "C"
   int64_t ekvTail = need_pack && (kvTail % 2 != 0) ? kvTail + 1 : kvTail;
   int64_t kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
 
+  // Check criteria for enabling AMX + AVX512 interleave in QK and Softmax
+{%- if amx_supported %}
+  static const bool amx_ok = at::cpu::init_amx();
+  bool use_amx_overlap = amx_ok
+      && need_pack
+      && std::is_same_v<scalar_t, at::BFloat16>
+      && (headSize % 32 == 0)
+      && (headSize_v % 32 == 0)
+      && (kvSplitSize % 32 == 0);
+{%- else %}
+  // Not compiled with -mamx-*, so no AMX code was emitted below.
+  constexpr bool use_amx_overlap = false;
+{%- endif %}
+
+  // AMX tiles always store in 16-row units, so a round up is applied
+  int64_t eqSplitSize = use_amx_overlap ? (qSplitSize + 15) / 16 * 16 : qSplitSize;
+
   // Allocate per thread temp buf (accumulate type)
   int64_t _size_per_thread =
-      /* qk     */ qSplitSize * kvSplitSize +
+      /* qk     */ eqSplitSize * kvSplitSize +
       /* qk_max */ qSplitSize +
       /* qk_sum */ qSplitSize +
-      /* dst    */ qSplitSize * headSize_v;
-
-  // Inputs/outputs buffers
-  const scalar_t* q_data = query;
-  const scalar_t* k_data = key;
-  const scalar_t* v_data = value;
-  scalar_t* out_data = output;
+      /* dst    */ eqSplitSize * headSize_v;
 
   // Buffers to store accum results, padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
-  {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*qSplitSize*ekvSplitSize")}}
+  {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*eqSplitSize*ekvSplitSize")}}
+{%- if amx_supported %}
+  // Double-buffers of the qk scores for overlapping; only the AMX path ping-pongs
+  int64_t qk_data2_size = use_amx_overlap ? num_thread*eqSplitSize*kvSplitSize : 0;
+  {{template.codegen_allocate_buffer("qk_data2_data", "accum_t", "qk_data2_size")}}
+{%- endif %}
   {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*eheadSize*kvSize")}}
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
-  {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*qSplitSize*eheadSize")}}
+  {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*eqSplitSize*eheadSize")}}
   if (need_pack) {
     // Pack K, V
     at::parallel_for(0, batchSize_k * num_head_k * kvSlice, 1, [&](int64_t begin, int64_t end) {
@@ -401,17 +478,29 @@ extern "C"
     at::native::data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
     int ompIdx = at::get_thread_num();
     accum_t* buf_ptr = buf_data + ompIdx * _size_per_thread;
-    accum_t* qk_data = buf_ptr;
-    accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
+    accum_t* qk_data_buf = buf_ptr;
+    accum_t* qk_max_data = qk_data_buf + eqSplitSize * kvSplitSize;
     accum_t* qk_sum_data = qk_max_data + qSplitSize;
     accum_t* dst_data = qk_sum_data + qSplitSize;
     scalar_t *qk_reduced_data =
         is_reduced_type
-            ? buf_reduced_data + ompIdx * qSplitSize * ekvSplitSize
+            ? buf_reduced_data + ompIdx * eqSplitSize * ekvSplitSize
             : nullptr;
     scalar_t* query_t_padding_ptr = (!headSize_even && need_pack)
-            ? query_padding_ptr + ompIdx * qSplitSize * eheadSize
+            ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
             : nullptr;
+{%- if amx_supported %}
+    // amx_state is released at the end of each q-block so it never carries a stale tile config across a
+    // brgemm fallback (tail case).
+    AMXState amx_state;
+    // Ping-pong score buffers; qk_data2_data is unallocated off the AMX path
+    accum_t* amx_score_buf[2] = {
+        qk_data_buf,
+        use_amx_overlap ? qk_data2_data + ompIdx * eqSplitSize * kvSplitSize : nullptr};
+    scalar_t* amx_q_ptr = use_amx_overlap
+            ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
+            : nullptr;
+{%- endif %}
 
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
@@ -447,19 +536,72 @@ extern "C"
         {{kernel.kernel_name}}_fill_stub(qk_sum_data,
             static_cast<accum_t>(0), cur_qSplitSize);
 
-        if (!headSize_even && need_pack) {
+        auto q_block_ptr = q_data + i * qStrideB + j * qStrideH + m * qStrideM;
+        if (use_amx_overlap) {
+{%- if amx_supported %}
+          // Round the rows up to a multiple of 16 so the AMX Q@K^T reads whole
+          // A tiles.
+          {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
+            q_block_ptr,
+            amx_q_ptr,
+            cur_qSplitSize,
+            headSize,
+            (cur_qSplitSize + 15) / 16 * 16,
+            eheadSize,
+            qStrideM);
+{%- endif %}
+        } else if (!headSize_even && need_pack) {
           // Pad query if headSize is not even
           {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
-            q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+            q_block_ptr,
             query_t_padding_ptr,
             cur_qSplitSize,
             headSize,
             cur_qSplitSize,
             eheadSize,
-            qStrideM
-          );
+            qStrideM);
         }
       }
+
+{%- if amx_supported %}
+      // init variables for QK GEMM and Softmax overlapping
+      int amx_buf_sel = 0; // index for the ping-pong buffer
+      bool amx_pend = false; // a flag to indicate if there is any pending scoren[t - 1]
+      int64_t amx_pend_n = 0, amx_pend_n_idx = 0;
+      int64_t amx_pend_kvSplitSize = 0, amx_pend_ekvSplitSize = 0;
+      accum_t* amx_pend_buf = nullptr;
+      auto i_kv_qblk = is_broadcast_bs_kv ? i/bs_shards : i;
+      auto j_kv_qblk = is_broadcast_head_kv ? j/gqa_shards : j;
+
+
+      // Finishes the pending block's remaining softmax rows and PV
+      // Handle the tail cases and end-of-kv-loop
+      auto amx_drain_pending = [&](int64_t start_row) {
+        for (int64_t row = start_row; row < cur_qSplitSize; ++row) {
+          {{kernel.kernel_name}}_online_softmax_row<scalar_t>(
+              amx_pend_buf + row * amx_pend_kvSplitSize,
+              {{kernel.kernel_name}}_conditional_data_ptr(amx_pend_buf, qk_reduced_data) + row * amx_pend_ekvSplitSize,
+              amx_pend_kvSplitSize,
+              qk_max_data[row], qk_sum_data[row],
+              dst_data + row * headSize_v, headSize_v,
+              amx_pend_n_idx == 0, need_pack);
+        }
+        int64_t amx_pv_psize = amx_pend_n / kvSplitSize * ekvSplitSize;
+        const uint16_t* amx_p_ptr = reinterpret_cast<const uint16_t*>(
+            {{kernel.kernel_name}}_conditional_data_ptr(amx_pend_buf, qk_reduced_data));
+        const uint16_t* amx_v_ptr = reinterpret_cast<const uint16_t*>(
+            value_reorder_ptr + i_kv_qblk * num_head_k * kv_padding_size * headSize_v +
+            j_kv_qblk * kv_padding_size * headSize_v + amx_pv_psize * headSize_v);
+        if (amx_pend_n_idx > 0) {
+          {{kernel.kernel_name}}_amx_gemm<true>(amx_state, amx_p_ptr, amx_v_ptr, dst_data,
+              cur_qSplitSize, headSize_v, amx_pend_ekvSplitSize, amx_pend_ekvSplitSize, headSize_v, headSize_v);
+        } else {
+          {{kernel.kernel_name}}_amx_gemm<false>(amx_state, amx_p_ptr, amx_v_ptr, dst_data,
+              cur_qSplitSize, headSize_v, amx_pend_ekvSplitSize, amx_pend_ekvSplitSize, headSize_v, headSize_v);
+        }
+        amx_pend = false;
+      };
+{%- endif %}
 
 {%- if has_full_kv_block %}
       for (int64_t n_idx = 0; n_idx < kv_indice_num + full_kv_indice_num ; n_idx += 1) {
@@ -477,7 +619,65 @@ extern "C"
         auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
         auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
 
-        if (!need_pack) {
+        // AMX overlap
+        bool amx_this_block = use_amx_overlap && (cur_kvSplitSize % 32 == 0);
+{%- if amx_supported %}
+        accum_t* qk_data = amx_this_block ? amx_score_buf[amx_buf_sel] : qk_data_buf;
+{%- else %}
+        accum_t* qk_data = qk_data_buf;
+{%- endif %}
+
+{%- if amx_supported %}
+        // Remove resources if fall back to brgemm is required
+        if (use_amx_overlap && !amx_this_block && amx_pend) {
+          amx_drain_pending(0);
+          amx_state.release([]() { _tile_release(); });
+        }
+{%- endif %}
+
+        // Interleave the QK[t] and Softmax(score[t - 1]) within this KV loop
+        if (amx_this_block) {
+{%- if amx_supported %}
+          int64_t amx_soft_row = 0;
+          int64_t amx_nsteps = (cur_qSplitSize + 31) / 32 * (cur_kvSplitSize / 32) * (headSize / 32);
+          int64_t amx_rows_per_step = amx_nsteps > 0 ? (cur_qSplitSize + amx_nsteps - 1) / amx_nsteps : cur_qSplitSize;
+          if (amx_rows_per_step < 1) amx_rows_per_step = 1;
+          // Define the callback function to overlap QK[t] and Softmax(score[t - 1])
+          auto amx_softmax_cb = [&]() {
+            if (!amx_pend) return;
+            int64_t rend = amx_soft_row + amx_rows_per_step;
+            for (; amx_soft_row < rend && amx_soft_row < cur_qSplitSize; ++amx_soft_row) {
+              {{kernel.kernel_name}}_online_softmax_row<scalar_t>(
+                  amx_pend_buf + amx_soft_row * amx_pend_kvSplitSize,
+                  {{kernel.kernel_name}}_conditional_data_ptr(amx_pend_buf, qk_reduced_data) + amx_soft_row * amx_pend_ekvSplitSize,
+                  amx_pend_kvSplitSize,
+                  qk_max_data[amx_soft_row], qk_sum_data[amx_soft_row],
+                  dst_data + amx_soft_row * headSize_v, headSize_v,
+                  amx_pend_n_idx == 0, need_pack);
+            }
+          };
+          // Execute the GEMM and Softmax
+          {{kernel.kernel_name}}_amx_gemm_cb<false>(
+              amx_state,
+              reinterpret_cast<const uint16_t*>(amx_q_ptr),
+              reinterpret_cast<const uint16_t*>(
+                  key_reorder_ptr + i_kv * num_head_k * eheadSize * kvSize +
+                  j_kv * eheadSize * kvSize + n * eheadSize),
+              qk_data,
+              cur_qSplitSize,
+              cur_kvSplitSize,
+              headSize,
+              eheadSize,
+              cur_kvSplitSize,
+              cur_kvSplitSize,
+              amx_softmax_cb);
+          // Finish the previous block: any softmax rows the callback did not
+          // reach, then its deferred P@V (now that its P is complete).
+          if (amx_pend) {
+            amx_drain_pending(amx_soft_row);
+          }
+{%- endif %}
+        } else if (!need_pack) {
           auto k_addr =
               k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
 
@@ -552,110 +752,106 @@ extern "C"
         }
 
 {%- endif %}
-        // Update coefficients with Softmax
-        accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
-        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-          // apply scaling factor and max per row in fusion
-          {{kernel.kernel_name}}_mul_reduce_max_fusion_kernel(
-              qk_data + row * cur_kvSplitSize,
-              static_cast<accum_t>(1),
-              cur_kvSplitSize,
-              qk_data + row * cur_kvSplitSize,
-              tmp_max);
-          tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
-          if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
-            // to avoid `nan = exp2f(-inf - (-inf))`
-            {{kernel.kernel_name}}_fill_stub(
-              {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
-              static_cast<scalar_t>(0), cur_kvSplitSize);
-          } else {
-            tmp_sum = tmp_max;
-            // qk <- exp(qk - max) and sum per row
-            {{kernel.kernel_name}}_exp_reduce_sum_fusion_kernel(
-              qk_data + row * cur_kvSplitSize, cur_kvSplitSize,
-              {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
-              tmp_sum);
-            // exp_tmp <- exp(max[row] - max)
-            exp_tmp = std::exp(qk_max_data[row] - tmp_max);
-            // sum[row] <- sum + exp_tmp * sum[row]
-            qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
-            // max[row] <- max
-            qk_max_data[row] = tmp_max;
-            // dst <- dst * exp_tmp
-            if (n_idx > 0) {
-              at::vec::map<accum_t>(
-              [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-              dst_data + row * headSize_v,
-              dst_data + row * headSize_v,
-              headSize_v);
-            }
+        if (amx_this_block) {
+{%- if amx_supported %}
+          // Overlap path: scores + mods for this block are done; defer its online
+          // softmax and P@V to the next block's QK GEMM (interleaved above). Just
+          // record it as pending and flip to the other score buffer.
+          amx_pend = true;
+          amx_pend_n = n;
+          amx_pend_n_idx = n_idx;
+          amx_pend_kvSplitSize = cur_kvSplitSize;
+          amx_pend_ekvSplitSize = cur_ekvSplitSize;
+          amx_pend_buf = qk_data;
+          amx_buf_sel ^= 1;
+{%- endif %}
+        } else {
+          // Update coefficients with Softmax
+          for (int64_t row = 0; row < cur_qSplitSize; ++row) {
+            {{kernel.kernel_name}}_online_softmax_row<scalar_t>(
+                qk_data + row * cur_kvSplitSize,
+                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
+                cur_kvSplitSize,
+                qk_max_data[row], qk_sum_data[row],
+                dst_data + row * headSize_v, headSize_v,
+                n_idx == 0, need_pack);
           }
-          if (need_pack && cur_kvSplitSize % 2 != 0) {
-            // Pad: [qSplitSize, cur_kvSplitSize] -> [qSplitSize, cur_kvSplitSize + 1]
-            *(qk_reduced_data + row * (1 + cur_kvSplitSize) + cur_kvSplitSize) = scalar_t(0);
-          }
-        }
-        // Calculate Softmax(q @ k.T) @ v
-        if (!need_pack) {
-          auto v_addr =
-              v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-          // Fallback Half brgemm is slower than micro gemm
-          if (!std::is_same_v<scalar_t, at::Half>) {
-            at::native::cpublas::brgemm(
+          // Calculate Softmax(q @ k.T) @ v (non-AMX paths; the AMX path defers P@V)
+          if (!need_pack) {
+            auto v_addr =
+                v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+            // Fallback Half brgemm is slower than micro gemm
+            if (!std::is_same_v<scalar_t, at::Half>) {
+              at::native::cpublas::brgemm(
+                    cur_qSplitSize,
+                    headSize_v,
+                    cur_ekvSplitSize,
+                    cur_ekvSplitSize,
+                    vStrideN,
+                    headSize_v,
+                    n_idx > 0,
+                    {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                    v_addr,
+                    dst_data,
+                    need_pack);
+            } else {
+              if (n_idx > 0) {
+                {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
+                  {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                  v_addr,
+                  dst_data,
                   cur_qSplitSize,
                   headSize_v,
                   cur_ekvSplitSize,
                   cur_ekvSplitSize,
                   vStrideN,
-                  headSize_v,
-                  n_idx > 0,
+                  headSize_v);
+              } else {
+                {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
                   {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
                   v_addr,
                   dst_data,
-                  need_pack);
-          } else {
-            if (n_idx > 0) {
-              {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
-                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                v_addr,
-                dst_data,
-                cur_qSplitSize,
-                headSize_v,
-                cur_ekvSplitSize,
-                cur_ekvSplitSize,
-                vStrideN,
-                headSize_v);
-            } else {
-              {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
-                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                v_addr,
-                dst_data,
-                cur_qSplitSize,
-                headSize_v,
-                cur_ekvSplitSize,
-                cur_ekvSplitSize,
-                vStrideN,
-                headSize_v);
+                  cur_qSplitSize,
+                  headSize_v,
+                  cur_ekvSplitSize,
+                  cur_ekvSplitSize,
+                  vStrideN,
+                  headSize_v);
+              }
             }
+          } else {
+            int64_t psize = n / kvSplitSize * ekvSplitSize;
+            at::native::cpublas::brgemm(
+                cur_qSplitSize,
+                headSize_v,
+                cur_ekvSplitSize,
+                cur_ekvSplitSize,
+                headSize_v,
+                headSize_v,
+                n_idx > 0,
+                qk_reduced_data,
+                value_reorder_ptr +
+                    i_kv * num_head_k * kv_padding_size * headSize_v +
+                    j_kv * kv_padding_size * headSize_v + psize * headSize_v,
+                dst_data,
+                need_pack);
           }
-        } else {
-          int64_t psize = n / kvSplitSize * ekvSplitSize;
-          at::native::cpublas::brgemm(
-              cur_qSplitSize,
-              headSize_v,
-              cur_ekvSplitSize,
-              cur_ekvSplitSize,
-              headSize_v,
-              headSize_v,
-              n_idx > 0,
-              qk_reduced_data,
-              value_reorder_ptr +
-                  i_kv * num_head_k * kv_padding_size * headSize_v +
-                  j_kv * kv_padding_size * headSize_v + psize * headSize_v,
-              dst_data,
-              need_pack);
-        }
+        }  // end else (non-AMX softmax + P@V)
+      }  // end for n_idx (KV blocks)
+
+{%- if amx_supported %}
+      // Drain the last pending AMX block: its softmax + P@V were deferred waiting
+      // for a next-block QK to interleave with, but it is the final block.
+      if (amx_pend) {
+        amx_drain_pending(0);
       }
+
+      // Release AMX tiles held by this q-block's GEMMs so a subsequent brgemm
+      // fallback (or the next q-block) starts from a clean tile configuration.
+      if (use_amx_overlap) {
+        amx_state.release([]() { _tile_release(); });
+      }
+{%- endif %}
 
       // dst <- dst / sum[row]
       // reorder MHA output with strides
@@ -683,8 +879,389 @@ extern "C"
 }
 """
 
+FLEX_DECODING_TEMPLATE = r"""
+  int64_t PARTITION_SIZE = {{partition_size}};
+
+  // Check if score / mask mod dependent on batch_size / num_head
+  // Go into a fast path if independent
+  bool bs_head_independent_mod = true;
+  int64_t first_num_kvblocks = kv_num_blocks[0];
+  int64_t first_full_num_kvblocks = full_kv_num_blocks[0];
+  for (const auto& b : c10::irange(batchSize_kvi)) {
+    for (const auto& h : c10::irange(num_head_kvi)) {
+      if (*(kv_num_blocks + b * num_kviStrideB + h * num_kviStrideH) != first_num_kvblocks
+          || *(full_kv_num_blocks + b * full_num_kviStrideB + h * full_num_kviStrideH) != first_full_num_kvblocks) {
+        bs_head_independent_mod = false;
+        break;
+      }
+    }
+  }
+
+  int64_t num_kvblocks_per_seq = kv_num_blocks[0] + full_kv_num_blocks[0];
+  int64_t num_kvblocks_per_partition = PARTITION_SIZE / kvBlockSize;
+  int64_t num_partitions = (num_kvblocks_per_seq + num_kvblocks_per_partition - 1) / num_kvblocks_per_partition;
+  if (!bs_head_independent_mod) {
+    num_partitions =
+        (kvSize + PARTITION_SIZE - 1) / PARTITION_SIZE;
+  }
+
+  // Allocate temp buf (accumulate type)
+  int64_t _accum_buff_size =
+      /* max_logits_ptr */ batchSize * num_head * num_partitions +
+      /* exp_sum_ptr    */ batchSize * num_head * num_partitions +
+      /* tmp_out_ptr    */ batchSize * num_head * num_partitions * headSize_v +
+      /* logits_ptrs    */ num_thread * PARTITION_SIZE;
+
+  {{template.codegen_allocate_buffer("buf_data", "accum_t", "_accum_buff_size")}}
+  accum_t* max_logits_ptr = buf_data;
+  accum_t* exp_sum_ptr = max_logits_ptr + batchSize * num_head * num_partitions;
+  accum_t* tmp_out_ptr = exp_sum_ptr + batchSize * num_head * num_partitions;
+  accum_t* logits_ptrs = tmp_out_ptr + batchSize * num_head * num_partitions * headSize_v;
+  {{template.codegen_allocate_buffer("logits_reduced_ptrs", "scalar_t", "num_thread * PARTITION_SIZE")}}
+
+  auto max_logits_strideN = num_head * num_partitions;
+  auto max_logits_strideH = num_partitions;
+  auto exp_sum_strideN = num_head * num_partitions;
+  auto exp_sum_strideH = num_partitions;
+  auto tmp_out_strideN = num_head * num_partitions * headSize_v;
+  auto tmp_out_strideH = num_partitions * headSize_v;
+  auto tmp_out_strideS = headSize_v;
+
+  // Attention loop
+  at::parallel_for(0, batchSize * num_head * num_partitions, 1, [&](int64_t begin, int64_t end) {
+    int64_t i = 0, j = 0, partition_id = 0;
+    at::native::data_index_init(begin, i, batchSize, j, num_head, partition_id, num_partitions);
+    int ompIdx = at::get_thread_num();
+    accum_t* logits = logits_ptrs + ompIdx * PARTITION_SIZE;
+    scalar_t* logits_reduced =
+        is_reduced_type
+            ? logits_reduced_ptrs + ompIdx * PARTITION_SIZE
+            : nullptr;
+
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
+      auto kvblock_offset = num_kvblocks_per_partition * partition_id;
+      auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
+      auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
+      auto kv_logical_num_data = kv_num_blocks_data + i_kvi * num_kviStrideB +
+                              j_kvi * num_kviStrideH;
+      int64_t kv_indice_num = *kv_logical_num_data;
+      std::vector<int64_t> kv_indice_list(kv_indice_num);
+      for(int64_t kv_i = 0; kv_i < kv_indice_num; kv_i++){
+        auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
+                                  j_kvi * kviStrideH + kv_i;
+        kv_indice_list[kv_i] = *kv_logical_data;
+      }
+{%- if has_full_kv_block %}
+      auto full_kv_logical_num_data = full_kv_num_blocks_data + i_kvi * num_kviStrideB +
+                              j_kvi * num_kviStrideH;
+      int64_t full_kv_indice_num = *full_kv_logical_num_data;
+      std::vector<int64_t> full_kv_indice_list(full_kv_indice_num);
+      for(int64_t kv_i = 0; kv_i < full_kv_indice_num; kv_i++){
+        auto full_kv_logical_data = full_kv_indices_data + i_kvi * full_kviStrideB +
+                                  j_kvi * full_kviStrideH + kv_i;
+        full_kv_indice_list[kv_i] = *full_kv_logical_data;
+      }
+{%- endif %}
+      int64_t cur_qSplitSize = 1;
+      auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
+      auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
+      accum_t* tmp_out = tmp_out_ptr + i * tmp_out_strideN +
+            j * tmp_out_strideH + partition_id * tmp_out_strideS;
+
+      // Initialize logits
+      {{kernel.kernel_name}}_fill_stub(logits,
+            static_cast<accum_t>(0), PARTITION_SIZE);
+      if (is_reduced_type) {
+        {{kernel.kernel_name}}_fill_stub(logits_reduced,
+            static_cast<scalar_t>(0), PARTITION_SIZE);
+      }
+
+
+      // 1) calculate the matmul(query, key) for this partition
+      int64_t token_num = 0;
+{%- if has_full_kv_block %}
+      int64_t n_idx_start = kvblock_offset;
+      int64_t n_idx_end = std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num + full_kv_indice_num);
+      if (!bs_head_independent_mod) {
+        n_idx_start = 0;
+        n_idx_end = kv_indice_num + full_kv_indice_num;
+      }
+      for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
+        auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
+{%- else %}
+      int64_t n_idx_start = kvblock_offset;
+      int64_t n_idx_end = std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num);
+      if (!bs_head_independent_mod) {
+        n_idx_start = 0;
+        n_idx_end = kv_indice_num;
+      }
+      for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
+        auto n = kv_indice_list[n_idx]*kvSplitSize;
+{%- endif %}
+        if (!bs_head_independent_mod
+            && (n < partition_id * PARTITION_SIZE
+            || n >= std::min(partition_id * PARTITION_SIZE + PARTITION_SIZE, kvSize))) {
+          continue;
+        }
+        auto cur_n = n/kvSplitSize;
+        int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
+
+        auto k_addr =
+            k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+
+        {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<false>(
+            q_data + i * qStrideB + j * qStrideH,
+            k_addr,
+            logits + token_num,
+            cur_qSplitSize,
+            cur_kvSplitSize,
+            headSize,
+            qStrideM,
+            kStrideN,
+            cur_kvSplitSize);
+
+        {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(logits + token_num, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
+
+{%- if score_mod and mask_mod %}
+        // TODO: reduce the number of calls of q_idx and kv_idx initialization
+        std::vector<int64_t> q_idx(cur_qSplitSize);
+        for (int64_t i = 0; i < cur_qSplitSize; ++i) {
+          q_idx[i] = i;
+        }
+
+        std::vector<int64_t> kv_idx(cur_kvSplitSize);
+        for (int64_t i = 0; i < cur_kvSplitSize; ++i) {
+          kv_idx[i] = n + i;
+        }
+
+        std::vector<int64_t> b_idx = {i};
+        std::vector<int64_t> h_idx = {j};
+
+        accum_t* in_ptr0 = logits + token_num;
+
+        const auto in_ptr1 = b_idx.data();
+        const auto in_ptr2 = h_idx.data();
+        const auto in_ptr3 = q_idx.data();
+        const auto in_ptr4 = kv_idx.data();
+
+        // apply score mod function
+        {
+            {{ template.generate_other_buffer("score_others", 0, "len_score_other", kernel.args) }}
+            accum_t* out_ptr{{score_buf_idx}} = in_ptr0;
+            {{ template.modification(score_mod, score_buf_name, score_buf_idx)|indent(12, false) }}
+        }
+
+        if ((std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) != kv_indice_list.end()) ){
+          // Apply block mask, fill unused with -inf
+          {
+              {{ template.generate_other_buffer("mask_others", -1, "len_mask_other", kernel.args) }}
+              accum_t* out_ptr{{mask_buf_idx}} = in_ptr0;
+              {{ template.modification(mask_mod, mask_buf_name, mask_buf_idx)|indent(12, false) }}
+          }
+        }
+{%- endif %}
+        token_num += cur_kvSplitSize;
+      }
+
+
+      // 2) calculate the max and exp_sum for this partition
+      auto partition_max = -std::numeric_limits<float>::infinity();
+      {{kernel.kernel_name}}_mul_reduce_max_fusion_kernel(
+          logits,
+          static_cast<accum_t>(1),
+          token_num,
+          logits,
+          partition_max);
+      if (partition_max == -std::numeric_limits<float>::infinity()) {
+          partition_max = 0;
+      }
+      max_logits_ptr[i * max_logits_strideN +
+            j * max_logits_strideH + partition_id] =
+          partition_max;
+      {{kernel.kernel_name}}_exp_reduce_sum_fusion_kernel(
+          logits,
+          token_num,
+          {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced),
+          partition_max);
+      exp_sum_ptr[i * exp_sum_strideN +
+            j * exp_sum_strideH + partition_id] = partition_max;
+
+
+      // 3) calculate the matmul(exp(logits-partition_max), value) for this
+      // partition, need to divide the global exp_sum in the final result.
+      token_num = 0;
+      bool skipped_partition = true;
+{%- if has_full_kv_block %}
+      n_idx_start = kvblock_offset;
+      n_idx_end = std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num + full_kv_indice_num);
+      if (!bs_head_independent_mod) {
+        n_idx_start = 0;
+        n_idx_end = kv_indice_num + full_kv_indice_num;
+      }
+      for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
+        auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
+{%- else %}
+      n_idx_start = kvblock_offset;
+      n_idx_end = std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num);
+      if (!bs_head_independent_mod) {
+        n_idx_start = 0;
+        n_idx_end = kv_indice_num;
+      }
+      for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
+        auto n = kv_indice_list[n_idx]*kvSplitSize;
+{%- endif %}
+        if (!bs_head_independent_mod
+            && (n < partition_id * PARTITION_SIZE
+            || n >= std::min(partition_id * PARTITION_SIZE + PARTITION_SIZE, kvSize))) {
+          continue;
+        }
+        skipped_partition = false;
+        int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
+
+        auto v_addr =
+            v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+        // Fallback Half brgemm is slower than micro gemm
+
+        if constexpr (!std::is_same_v<scalar_t, at::Half>) {
+          at::native::cpublas::brgemm(
+                cur_qSplitSize,
+                headSize_v,
+                cur_kvSplitSize,
+                cur_kvSplitSize,
+                vStrideN,
+                headSize_v,
+                token_num > 0,
+                {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+                v_addr,
+                tmp_out,
+                false);
+        } else {
+          if (token_num > 0) {
+            {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
+              {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+              v_addr,
+              tmp_out,
+              cur_qSplitSize,
+              headSize_v,
+              cur_kvSplitSize,
+              cur_kvSplitSize,
+              vStrideN,
+              headSize_v);
+          } else {
+            {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
+              {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+              v_addr,
+              tmp_out,
+              cur_qSplitSize,
+              headSize_v,
+              cur_kvSplitSize,
+              cur_kvSplitSize,
+              vStrideN,
+              headSize_v);
+          }
+        }
+        token_num += cur_kvSplitSize;
+      }
+      if (skipped_partition) {
+        {{kernel.kernel_name}}_fill_stub(tmp_out,
+            static_cast<accum_t>(0), headSize_v);
+      }
+
+      // Move to the next query
+      at::native::data_index_step(i, batchSize, j, num_head, partition_id, num_partitions);
+    }
+
+    if constexpr (!std::is_same_v<scalar_t, at::Half>) {
+      at::native::cpublas::brgemm_release();
+    }
+  });
+
+
+  // Calculate the final output
+  at::parallel_for(0, batchSize * num_head, 1, [&](int64_t begin, int64_t end) {
+    int64_t i = 0, j = 0;
+    at::native::data_index_init(begin, i, batchSize, j, num_head);
+
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
+      auto global_max = -std::numeric_limits<float>::infinity();
+      auto global_exp_sum = 0.0;
+
+      // Calculate the global max and exp_sum for this head
+      global_max = at::vec::reduce_all<float>(
+                [](Vec& x, Vec& y) { return at::vec::maximum(x, y); },
+                max_logits_ptr + i * max_logits_strideN
+                    + j * max_logits_strideH,
+                num_partitions);
+
+      // Update the partition 0 result with the global max
+      auto partition0_out_start =
+          tmp_out_ptr + i * tmp_out_strideN + j * tmp_out_strideH;
+      auto max_logit0 = max_logits_ptr
+          [i * max_logits_strideN + j * max_logits_strideH];
+      float exp_val = std::exp(max_logit0 - global_max);
+      global_exp_sum =
+          exp_sum_ptr[i * exp_sum_strideN + j * exp_sum_strideH] *
+          exp_val;
+      at::vec::map<accum_t>(
+          [exp_val](Vec x) { return x * Vec(exp_val); },
+          partition0_out_start,
+          partition0_out_start,
+          headSize_v);
+
+      // Accumulate the partition 1 to partition n result into partition 0
+      if (num_partitions > 1) {
+        for (auto partition_id = 1; partition_id < num_partitions;
+             partition_id++) {
+          auto tmp_out_start = partition0_out_start + partition_id * tmp_out_strideS;
+          auto max_logit = max_logits_ptr
+              [i * max_logits_strideN + j * max_logits_strideH +
+               partition_id];
+          auto exp_sum = exp_sum_ptr
+              [i * exp_sum_strideN + j * exp_sum_strideH +
+               partition_id];
+          exp_val = std::exp(max_logit - global_max);
+          global_exp_sum += exp_sum * exp_val;
+          at::vec::map2<accum_t>(
+              [exp_val](Vec a, Vec b) { return a + Vec(exp_val) * b; },
+              partition0_out_start,
+              partition0_out_start,
+              tmp_out_start,
+              headSize_v);
+        }
+      }
+
+      // Rescale the partition 0 result with global exp_sum
+      // Sum for full masked out rows are 0, we set them to 1
+      // in order to avoid NaNs in the output and instead set fully
+      // masked out rows to 0
+      global_exp_sum = global_exp_sum == 0 ? 1 : global_exp_sum;
+      float sum_reciprocal = 1.0 / global_exp_sum;
+      // copy the partition 0 result into output
+      at::vec::map<scalar_t>(
+          [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
+          out_data + i * oStrideB + j * oStrideH,
+          partition0_out_start,
+          headSize_v);
+
+      // Move to the next query
+      at::native::data_index_step(i, batchSize, j, num_head);
+    }
+
+  });
+}
+"""
+
 
 class CppFlexAttentionTemplate(CppTemplate):
+    """
+    CPP template based FlexAttention CPP Template.
+
+    This class supports generation of C++ code for broad attention variants,
+    with applying Flash Attention and Flash Decoding. It enables template-based
+    code synthesis according to user-defined score and mask modifications
+    and configuration settings.
+    """
+
     def __init__(
         self,
         input_nodes,
@@ -694,6 +1271,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         mask_mod,
         kv_block_size,
         q_block_size,
+        partition_size,
         has_other_buffer,
         no_full_kv_block,
         fake_buffers,
@@ -702,7 +1280,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         kernel_input_name_to_buffer,
         block_vars,
     ) -> None:
-        assert layout.dtype in [torch.float, torch.bfloat16, torch.float16]
+        if layout.dtype not in [torch.float, torch.bfloat16, torch.float16]:
+            raise AssertionError(f"unsupported layout dtype: {layout.dtype}")
         super().__init__("flex_attention", input_nodes, layout, parallel_num_threads())
         self.scale = scale
         self.score_mod = score_mod
@@ -716,7 +1295,8 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         def get_idx(buf_name):
             match = re.search(r"\d+", buf_name)
-            assert match, f"incorrect score buf name: {buf_name}"
+            if not match:
+                raise AssertionError(f"incorrect score buf name: {buf_name}")
             return match.group()
 
         self.score_buf_idx = (
@@ -725,6 +1305,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.mask_buf_idx = get_idx(self.mask_buf_name) if self.mask_buf_name else None
         self.kv_block_size = kv_block_size
         self.q_block_size = q_block_size
+        self.partition_size = partition_size
         self.has_other_buffer = has_other_buffer
         self.no_full_kv_block = no_full_kv_block
         self.other_buffer_input_offset = 2
@@ -762,7 +1343,9 @@ class CppFlexAttentionTemplate(CppTemplate):
             if self.has_other_buffer
             else None
         )
-        self.other_ptr_data = {}  # type: ignore[var-annotated]
+        self.other_ptr_data = {}
+        # Gate every AMX region on the ISA inductor will compile with.
+        self.amx_supported = isinstance(pick_vec_isa(), VecAMX)
 
     def update_kernel_args(self, kernel_args):
         kernel_args.update(
@@ -809,7 +1392,10 @@ class CppFlexAttentionTemplate(CppTemplate):
         )
 
     def modification(self, subgraph_buffer, output_name, output_idx):
-        assert isinstance(subgraph_buffer, ir.ComputedBuffer)
+        if not isinstance(subgraph_buffer, ir.ComputedBuffer):
+            raise AssertionError(
+                f"expected ir.ComputedBuffer, got {type(subgraph_buffer)}"
+            )
         subgraph_buffer_data = subgraph_buffer.data
         from ..loop_body import LoopBody
         from ..utils import sympy_index_symbol_with_prefix, SymT
@@ -872,12 +1458,13 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         from ..loop_body import MemoryUsageType
 
-        assert all(
+        if not all(
             mem.buffer_name in kernel_group.args.input_buffers
             for mem in body.memory_usage[MemoryUsageType.LOAD]
-        ), (
-            "All the buffers in the score and mask subgraph should be in kernel_group.args.input_buffers"
-        )
+        ):
+            raise AssertionError(
+                "All the buffers in the score and mask subgraph should be in kernel_group.args.input_buffers"
+            )
 
         bodies.append(body)
         var_sizes_list.append((var_sizes, ()))
@@ -921,6 +1508,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         mask_mod,
         kv_block_size,
         q_block_size,
+        partition_size,
         has_other_buffer,
         no_full_kv_block,
         fake_buffers,
@@ -946,6 +1534,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             mask_mod=mask_mod,
             kv_block_size=kv_block_size,
             q_block_size=q_block_size,
+            partition_size=partition_size,
             has_other_buffer=has_other_buffer,
             no_full_kv_block=no_full_kv_block,
             fake_buffers=fake_buffers,
@@ -960,11 +1549,37 @@ class CppFlexAttentionTemplate(CppTemplate):
     def apply_score_mod(self, score, b, h, q_idx, kv_idx):
         return self.score_mod.graph_module(score, b, h, q_idx, kv_idx).item()
 
+    def choose_flex_template(
+        self,
+        query: ir.Buffer,
+        key: ir.Buffer,
+        num_threads,
+    ):
+        # choose from FLEX_ATTENTION or FLEX_DECODING
+        FLEX_TEMPLATE = FLEX_ATTENTION_TEMPLATE
+        q_batch_size, q_num_heads, q_seq_len, _ = query.data.data.layout.size  # type: ignore[attr-defined]
+        k_seq_len = key.data.data.layout.size[2]  # type: ignore[attr-defined]
+        if all(
+            sympy.sympify(val).is_number
+            for val in [q_batch_size, q_num_heads, q_seq_len, k_seq_len, num_threads]
+        ):
+            # if static shape, FLEX_DECODING will be chosen with these conditions:
+            #  1) partition size is multiple of kv block size, so each partition has several blocks
+            #  2) decoding scenario: q seq length is 1
+            #  3) The actual k seq length (k_seq_len / q_batch_size) is large enough
+            if (
+                self.partition_size % self.kv_block_size == 0
+                and q_seq_len == 1
+                and k_seq_len / q_batch_size >= max(self.partition_size * 2, 512)
+            ):
+                FLEX_TEMPLATE = FLEX_DECODING_TEMPLATE
+        return FLEX_TEMPLATE
+
     def render(  # type: ignore[override,return]
         self,
         kernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
         if epilogue_nodes is not None and epilogue_nodes != []:
@@ -985,8 +1600,9 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
-        assert isinstance(self.output_node, ir.IRNode)
-        buf_out: ir.IRNode = TensorBox.create(self.output_node)
+        if not isinstance(self.output_node, ir.IRNode):
+            raise AssertionError(f"expected ir.IRNode, got {type(self.output_node)}")
+        buf_out = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
         options = dict(
@@ -1017,13 +1633,18 @@ class CppFlexAttentionTemplate(CppTemplate):
             mask_buf_name=self.mask_buf_name,
             score_buf_idx=self.score_buf_idx,
             mask_buf_idx=self.mask_buf_idx,
+            partition_size=self.partition_size,
+            amx_supported=self.amx_supported,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
                 stack.enter_context(
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
-            return self._template_from_string(FLEX_ATTENTION_TEMPLATE).render(**options)
+            FLEX_TEMPLATE = self.choose_flex_template(query, key, num_threads)
+            return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(
+                **options
+            )
 
     def codegen_softmax_fusion(self, kernel_name: str):
         # TODO: use inductor IR to rewrite those fusions
@@ -1036,6 +1657,14 @@ class CppFlexAttentionTemplate(CppTemplate):
         return self._template_from_string(BRGEMM_PACK_FUNCTIONS).render(
             dict(kernel_name=kernel_name)
         )
+
+    def codegen_amx_helpers(self, kernel_name: str):
+        # AMX/AVX-512 interleaving GEMM helpers
+        if not self.amx_supported:
+            return ""
+        from .cpp_flex_attention_amx import codegen_flex_attention_amx_helpers
+
+        return codegen_flex_attention_amx_helpers(kernel_name)
 
     def codegen_allocate_buffer(self, buffer_name: str, buffer_dtype, buffer_size):
         return self._template_from_string(ALLOCATE_BUFFER).render(

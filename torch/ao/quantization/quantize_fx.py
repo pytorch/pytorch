@@ -10,9 +10,9 @@ from torch.fx.graph_module import _USER_PRESERVED_ATTRIBUTES_KEY
 from .backend_config import BackendConfig, get_tensorrt_backend_config  # noqa: F401
 from .fx.convert import convert
 from .fx.custom_config import ConvertCustomConfig, FuseCustomConfig, PrepareCustomConfig
-from .fx.fuse import fuse  # noqa: F401
+from .fx.fuse import fuse
 from .fx.graph_module import ObservedGraphModule  # noqa: F401
-from .fx.prepare import prepare  # noqa: F401
+from .fx.prepare import prepare
 from .fx.tracer import QuantizationTracer, Scope, ScopeContextManager  # noqa: F401
 from .fx.utils import (  # noqa: F401
     get_custom_module_class_keys,
@@ -383,7 +383,7 @@ def prepare_fx(
         #    ...
 
         # backend_config = BackendConfig().set_backend_pattern_config(linear_pattern_config)
-        # `prepare_fx` will check that the setting requested by suer in qconfig_mapping
+        # `prepare_fx` will check that the setting requested by user in qconfig_mapping
         # is supported by the backend_config and insert observers and fake quant modules
         # in the model
         prepared_model = prepare_fx(float_model, qconfig_mapping, example_inputs)

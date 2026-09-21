@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
@@ -22,11 +21,7 @@ class PublicBindings(HeuristicInterface):
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         test_ratings = {}
-        try:
-            changed_files = query_changed_files()
-        except Exception as e:
-            warn(f"Can't query changed test files due to {e}")
-            changed_files = []
+        changed_files = query_changed_files()
 
         if any(
             file.startswith("torch/") or file in self.additional_files

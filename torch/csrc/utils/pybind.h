@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
@@ -359,6 +360,28 @@ struct type_caster<c10::complex<T>> {
   }
 };
 
+template <>
+struct type_caster<c10::Layout> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(c10::Layout, _("torch.layout"));
+
+  static handle cast(
+      c10::Layout layout,
+      return_value_policy /*unused*/,
+      handle /*parent*/) {
+    return handle(Py_NewRef(torch::getTHPLayout(layout)));
+  }
+
+  bool load(handle src, bool /*convert*/) {
+    if (!THPLayout_Check(src.ptr())) {
+      return false;
+    }
+    const auto layout = reinterpret_cast<THPLayout*>(src.ptr());
+    value = layout->layout;
+    return true;
+  }
+};
 } // namespace pybind11::detail
 
 namespace torch::impl {
@@ -375,7 +398,7 @@ namespace torch::impl {
 //
 // Attaching the GIL release logic to the holder pointer rather than the
 // actual destructor of T is helpful when T is Python-agnostic and
-// shouldn't refer to the PYthon API.
+// shouldn't refer to the Python API.
 //
 // Note there are limitations to the correctness of code that makes use of this.
 // In particular, if a shared_ptr is constructed from C++ code without this

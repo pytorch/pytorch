@@ -44,8 +44,8 @@ def validate_input_col(fn: Callable, input_col: int | tuple | list | None) -> No
         >>> assert validate_input_col(f_def, [1, 2])
 
     Notes:
-        If the function contains variable positional (`inspect.VAR_POSITIONAL`) arguments,
-        for example, f(a, *args), the validator will accept any size of input column
+        If the function contains variable positional (``inspect.VAR_POSITIONAL``) arguments,
+        for example, ``f(a, *args)``, the validator will accept any size of input column
         greater than or equal to the number of positional arguments.
         (in this case, 1).
 
@@ -133,7 +133,7 @@ def _is_local_fn(fn):
 
 def _check_unpickable_fn(fn: Callable) -> None:
     """
-    Check function is pickable or not.
+    Check function is picklable or not.
 
     If it is a lambda or local function, a UserWarning will be raised. If it's not a callable function, a TypeError will be raised.
     """
@@ -198,7 +198,6 @@ def get_file_pathnames_from_root(
         if match_masks(fname, masks):
             yield path
     else:
-        # pyrefly: ignore [bad-assignment]
         for path, dirs, files in os.walk(root, onerror=onerror):
             if abspath:
                 path = os.path.abspath(path)

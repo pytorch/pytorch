@@ -11,7 +11,6 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -85,7 +84,7 @@ std::ostream& get_jit_logging_output_stream() {
 std::string getHeader(const Node* node) {
   std::stringstream ss;
   node->print(ss, 0, {}, false, false, false, false);
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void JitLoggingConfig::parse() {
@@ -150,7 +149,7 @@ std::string jit_log_prefix(
     out_ss << prefix << line << '\n';
   }
 
-  return out_ss.str();
+  return std::move(out_ss).str();
 }
 
 std::string jit_log_prefix(
@@ -159,13 +158,13 @@ std::string jit_log_prefix(
     int l,
     const std::string& in_str) {
   std::stringstream prefix_ss;
-  prefix_ss << "[";
-  prefix_ss << level << " ";
-  prefix_ss << c10::detail::StripBasename(std::string(fn)) << ":";
+  prefix_ss << '[';
+  prefix_ss << level << ' ';
+  prefix_ss << c10::detail::StripBasename(std::string(fn)) << ':';
   prefix_ss << std::setfill('0') << std::setw(3) << l;
   prefix_ss << "] ";
 
-  return jit_log_prefix(prefix_ss.str(), in_str);
+  return jit_log_prefix(std::move(prefix_ss).str(), in_str);
 }
 
 std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {

@@ -146,6 +146,7 @@ class AutocastTestLists:
             ("softmax", pointwise0_fp16 + (0,)),
             ("log_softmax", pointwise0_fp16 + (0,)),
             ("layer_norm", pointwise0_fp16 + ((pointwise0_fp16[0].numel(),),)),
+            ("rms_norm", pointwise0_fp16 + ((pointwise0_fp16[0].numel(),),)),
             ("group_norm", mat0_fp16 + (1,)),
             ("norm", pointwise0_fp16),
             ("norm", pointwise0_fp16, {"dim": 0}),

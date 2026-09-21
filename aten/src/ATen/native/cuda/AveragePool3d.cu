@@ -220,7 +220,8 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
   int dT, int dH, int dW,
   int padT, int padH, int padW,
   bool count_include_pad,
-  int offsetZ, int divisor_override, const int gradInput_numel)
+  int offsetZ, const int64_t gradInput_numel,
+  bool uniform_divisor, accscalar_t hoisted_divide_factor)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -236,24 +237,27 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
     int tend = min(tstart + kT, gradInput.size(1) + padT);
     int hend = min(hstart + kH, gradInput.size(2) + padH);
     int wend = min(wstart + kW, gradInput.size(3) + padW);
-    int pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
+    // The clamp below bounds the scatter loop, so it stays. When the divisor is
+    // uniform across every window (see the host-side flag) it is hoisted in and
+    // we skip the per-thread pool_size / clamped-volume arithmetic.
+    accscalar_t divide_factor;
+    if (uniform_divisor) {
+      divide_factor = hoisted_divide_factor;
+    } else if (count_include_pad) {
+      divide_factor = static_cast<accscalar_t>(
+          (tend - tstart) * (hend - hstart) * (wend - wstart));
+    } else {
+      divide_factor = static_cast<accscalar_t>(
+          (min(tend, gradInput.size(1)) - max(tstart, 0)) *
+          (min(hend, gradInput.size(2)) - max(hstart, 0)) *
+          (min(wend, gradInput.size(3)) - max(wstart, 0)));
+    }
     tstart = max(tstart, 0);
     hstart = max(hstart, 0);
     wstart = max(wstart, 0);
     tend = min(tend, gradInput.size(1));
     hend = min(hend, gradInput.size(2));
     wend = min(wend, gradInput.size(3));
-
-    accscalar_t divide_factor;
-    if (divisor_override) {
-      divide_factor = static_cast<accscalar_t>(divisor_override);
-    } else {
-      if(count_include_pad) {
-        divide_factor = static_cast<accscalar_t>(pool_size);
-      } else {
-        divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
-      }
-    }
 
     scalar_t val = static_cast<scalar_t>(
       static_cast<accscalar_t>(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
@@ -263,7 +267,7 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
       {
         for (int iCol = wstart; iCol < wend; ++iCol)
         {
-          const int index = slice * gradInput.stride(0) + iFrame * gradInput.stride(1) + iRow * gradInput.stride(2) + iCol * gradInput.stride(3);
+          const int64_t index = slice * gradInput.stride(0) + iFrame * gradInput.stride(1) + iRow * gradInput.stride(2) + iCol * gradInput.stride(3);
           fastAtomicAdd(gradInput.data(), index, gradInput_numel, val, true);
         }
       }
@@ -278,7 +282,8 @@ __global__ void avg_pool3d_cuda_update_grad_input(
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
-  bool count_include_pad, int offsetZ, int divisor_override)
+  bool count_include_pad, int offsetZ,
+  bool uniform_divisor, accscalar_t hoisted_divide_factor)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -294,24 +299,27 @@ __global__ void avg_pool3d_cuda_update_grad_input(
     int tend = min(tstart + kT, gradInput.size(1) + padT);
     int hend = min(hstart + kH, gradInput.size(2) + padH);
     int wend = min(wstart + kW, gradInput.size(3) + padW);
-    int pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
+    // The clamp below bounds the scatter loop, so it stays. When the divisor is
+    // uniform across every window (see the host-side flag) it is hoisted in and
+    // we skip the per-thread pool_size / clamped-volume arithmetic.
+    accscalar_t divide_factor;
+    if (uniform_divisor) {
+      divide_factor = hoisted_divide_factor;
+    } else if (count_include_pad) {
+      divide_factor = static_cast<accscalar_t>(
+          (tend - tstart) * (hend - hstart) * (wend - wstart));
+    } else {
+      divide_factor = static_cast<accscalar_t>(
+          (min(tend, gradInput.size(1)) - max(tstart, 0)) *
+          (min(hend, gradInput.size(2)) - max(hstart, 0)) *
+          (min(wend, gradInput.size(3)) - max(wstart, 0)));
+    }
     tstart = max(tstart, 0);
     hstart = max(hstart, 0);
     wstart = max(wstart, 0);
     tend = min(tend, gradInput.size(1));
     hend = min(hend, gradInput.size(2));
     wend = min(wend, gradInput.size(3));
-
-    accscalar_t divide_factor;
-    if (divisor_override) {
-      divide_factor = static_cast<accscalar_t>(divisor_override);
-    } else {
-      if(count_include_pad) {
-        divide_factor = static_cast<accscalar_t>(pool_size);
-      } else {
-        divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
-      }
-    }
 
     scalar_t val = static_cast<scalar_t>(
       static_cast<accscalar_t>(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
@@ -359,19 +367,19 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cuda) (
 
   checkAllSameGPU(__func__, {output_arg, input_arg});
 
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
 
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
+  const int padT = c10::checked_convert<int>(padding[0], "int");
+  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
+  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
 
   // if divisor==0 then we will ignore it
   int64_t divisor = 0;
@@ -465,19 +473,19 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
   checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg});
 
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
 
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
+  const int padT = c10::checked_convert<int>(padding[0], "int");
+  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
+  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
 
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for gradOutput");
@@ -500,12 +508,14 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
   const int64_t oheight = gradOutput.size(-2);
   const int64_t owidth = gradOutput.size(-1);
 
-  /* XXX shape check behavior from TH */
-  const int64_t otime_for_shape_check = pooling_output_shape<int64_t>(itime, kT, padT, dT, 1, ceil_mode);
-  const int64_t oheight_for_shape_check = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
-  const int64_t owidth_for_chape_check = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
-
   const bool kernelsOverlap = (dT < kT) || (dH < kH) || (dW < kW);
+
+  // When the divisor is the same for every window the general backward kernels
+  // can hoist it and skip the per-thread pool_size / clamp-volume arithmetic.
+  // Floor mode guarantees each window fits inside the padded input, so with
+  // count_include_pad (or no padding, or an explicit override) it is uniform.
+  const bool uniform_divisor = divisor_override.has_value() ||
+      (!ceil_mode && (count_include_pad || (padT == 0 && padH == 0 && padW == 0)));
 
   Tensor work_grad_input = gradInput;
   Tensor work_grad_output = gradOutput.contiguous();
@@ -561,6 +571,8 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
       "avg_pool3d_backward_out_frame",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
+        const accscalar_t hoisted_divide_factor =
+            static_cast<accscalar_t>(divisor ? divisor : kT * kH * kW);
         int64_t totalZ = otime * nslices * nbatch;
         int64_t offsetZ = 0;
         dim3 block(32, 8);
@@ -579,7 +591,8 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
                   dT, dH, dW,
                   padT, padH, padW,
                   count_include_pad,
-                  offsetZ, divisor, work_grad_input.numel());
+                  offsetZ, work_grad_input.numel(),
+                  uniform_divisor, hoisted_divide_factor);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
           else {
@@ -591,7 +604,8 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
                   dT, dH, dW,
                   padT, padH, padW,
                   count_include_pad,
-                  offsetZ, divisor);
+                  offsetZ,
+                  uniform_divisor, hoisted_divide_factor);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
 

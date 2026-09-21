@@ -58,7 +58,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
@@ -115,7 +114,6 @@
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_backward_native.h>
 #include <ATen/ops/masked_select_native.h>
-#include <ATen/ops/nested_to_padded_tensor_native.h>
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/nonzero_numpy_native.h>
 #include <ATen/ops/nonzero_static_native.h>
@@ -338,7 +336,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
        << dim;
     ss << " and source slice shape: " << sourceSlicedSizes
        << " at dimension 0.";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   TORCH_CHECK_INDEX(
       source.dim() == 0 || numIndices == source.size(dim),
@@ -413,6 +411,16 @@ static void index_func_meta_impl(
       self.sizes(),
       " source.shape = ",
       source.sizes());
+  TORCH_CHECK(
+      self.device() == source.device() && self.device() == index.device(),
+      func,
+      "_(): self, index and source expected to be in the same device, "
+      "but got (self) ",
+      self.device(),
+      ", (index) ",
+      index.device(),
+      ", and (source) ",
+      source.device());
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
@@ -506,6 +514,7 @@ static void check_indices_on_cpu_or_selfdevice(
 
 TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
 (const Tensor& self, at::IOptTensorListRef indices) {
+  TORCH_CHECK_INDEX(!indices.empty(), "at least one index must be provided");
   auto materialized = indices.materialize();
 
   TORCH_CHECK_INDEX(
@@ -987,7 +996,8 @@ Tensor& _index_put_impl_(
     }
   }
   if ((self.device().type() == DeviceType::CUDA ||
-       self.device().type() == DeviceType::XPU) &&
+       self.device().type() == DeviceType::XPU ||
+       self.device().type() == DeviceType::PrivateUse1) &&
       (accumulate ||
        (globalContext().deterministicAlgorithms() && value_.numel() > 1))) {
     TORCH_CHECK(
@@ -1087,7 +1097,8 @@ TORCH_IMPL_FUNC(index_copy_out)
     result.copy_(self);
 
   // See Note [Enabling Deterministic Operations]
-  if (result.is_cuda() && globalContext().deterministicAlgorithms()) {
+  if ((result.is_cuda() || result.is_xpu()) &&
+      globalContext().deterministicAlgorithms()) {
     torch::List<std::optional<Tensor>> indices;
     indices.resize(dim + 1);
     indices.set(dim, index);
@@ -1517,7 +1528,7 @@ TORCH_IMPL_FUNC(index_reduce_cpu_out)
 // Check that indices fall within dimension array size
 // Avoid redispatch call to min/max
 template <typename IndexType>
-static void check_indexarray_range(
+[[noreturn]] static void report_index_out_of_bounds(
     const IndexType* indices,
     int64_t n,
     IndexType indexing_axis_dim) {
@@ -1529,6 +1540,22 @@ static void check_indexarray_range(
         idx,
         " axis_dim=",
         indexing_axis_dim);
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+template <typename IndexType>
+static void check_indexarray_range(
+    const IndexType* indices,
+    int64_t n,
+    IndexType indexing_axis_dim) {
+  // This version of the loop is autovectorized.
+  int oob = 0;
+  for (const auto i : c10::irange(n)) {
+    oob |= !(0 <= indices[i] && indices[i] < indexing_axis_dim);
+  }
+  if (C10_UNLIKELY(oob != 0)) {
+    report_index_out_of_bounds(indices, n, indexing_axis_dim);
   }
 }
 
@@ -1849,7 +1876,8 @@ Tensor& index_select_out_cpu_(
           ScalarType::Half,
           ScalarType::Bool,
           ScalarType::BFloat16,
-          AT_EXPAND(AT_FLOAT8_TYPES));
+          AT_EXPAND(AT_FLOAT8_TYPES),
+          AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
     }
   }
 
@@ -1892,8 +1920,6 @@ Tensor& index_fill_(
     int64_t dim,
     const Tensor& index,
     const Scalar& source) {
-  at::NoNamesGuard guard;
-
   TORCH_CHECK_INDEX(
       index.scalar_type() == ScalarType::Long,
       "index_fill_(): Expected dtype int64 for index.");
@@ -2001,7 +2027,10 @@ static bool can_use_expanded_index_path(
     return false;
   }
 #else
+// On non-FBGEMM platforms, allow fast path only if OpenMP is available
+#ifndef _OPENMP
   return false;
+#endif
 #endif
 
   if (!self.device().is_cpu()) {
@@ -2232,8 +2261,12 @@ static void scatter_impl(
       scatter_reduce_exclude_self_helper(mut_out, dim, index, op);
     }
     // _scatter_via_index_put can only handle sum and mean reduction type
+    // we don't need to go index_put route if our inputs are integral
+    // we check in the meta function that self and src dtypes match,
+    // so here we need to check just one of them
     deterministic = deterministic &&
-        (op == ReductionType::SUM || op == ReductionType::MEAN);
+        (op == ReductionType::SUM || op == ReductionType::MEAN) &&
+        !at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
   }
 
   // Scalar src should already be deterministic
@@ -2325,9 +2358,13 @@ TORCH_IMPL_FUNC(scatter_add)
 
   // See Note [Enabling Deterministic Operations]
   // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  // we don't need to go index_put route if our inputs are integral
+  // we check in the meta function that self and src dtypes match,
+  // so here we need to check just one of them
   if (globalContext().deterministicAlgorithms() &&
       (self.device().type() == DeviceType::CUDA ||
-       self.device().type() == DeviceType::XPU)) {
+       self.device().type() == DeviceType::XPU) &&
+      !at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/ true);
   } else {
     if (can_use_expanded_index_path(
@@ -2422,7 +2459,6 @@ static Tensor& masked_fill_impl_cpu(
     Tensor& self,
     const Tensor& mask,
     const Scalar& value) {
-  NoNamesGuard guard;
   TORCH_CHECK(
       mask.dtype() == ScalarType::Bool,
       "masked_fill_ only supports boolean masks, but got mask "
@@ -2454,11 +2490,7 @@ Tensor& masked_fill__cpu(
     Tensor& self,
     const Tensor& mask,
     const Scalar& value) {
-  auto maybe_outnames =
-      namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-
   masked_fill_impl_cpu(self, mask, value);
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
@@ -2466,8 +2498,6 @@ Tensor& masked_fill__cpu(
     Tensor& self,
     const Tensor& mask,
     const Tensor& value) {
-  auto maybe_outnames =
-      namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   TORCH_CHECK(
       value.dim() == 0,
       "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
@@ -2476,7 +2506,6 @@ Tensor& masked_fill__cpu(
       " dimension(s).");
 
   masked_fill_impl_cpu(self, mask, value.item());
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
@@ -2485,15 +2514,9 @@ Tensor masked_fill(
     const Tensor& mask,
     const Scalar& source) {
   Tensor result;
-  auto maybe_outnames =
-      namedinference::broadcast_to_outnames(mask, self, "masked_fill");
-  {
-    NoNamesGuard guard;
-    auto [_mask, _self] = expand_outplace(mask, self);
-    result = _self->clone(at::MemoryFormat::Contiguous);
-    result.masked_fill_(mask, source);
-  }
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  auto [_mask, _self] = expand_outplace(mask, self);
+  result = _self->clone(at::MemoryFormat::Contiguous);
+  result.masked_fill_(mask, source);
   return result;
 }
 
@@ -2502,15 +2525,9 @@ Tensor masked_fill(
     const Tensor& mask,
     const Tensor& source) {
   Tensor result;
-  auto maybe_outnames =
-      namedinference::broadcast_to_outnames(mask, self, "masked_fill");
-  {
-    NoNamesGuard guard;
-    auto [_mask, _self] = expand_outplace(mask, self);
-    result = _self->clone(at::MemoryFormat::Contiguous);
-    result.masked_fill_(mask, source);
-  }
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  auto [_mask, _self] = expand_outplace(mask, self);
+  result = _self->clone(at::MemoryFormat::Contiguous);
+  result.masked_fill_(mask, source);
   return result;
 }
 
@@ -2518,8 +2535,6 @@ static Tensor& masked_select_out_impl_cpu(
     Tensor& result,
     const Tensor& self,
     const Tensor& mask) {
-  NoNamesGuard guard;
-
   TORCH_CHECK(
       mask.scalar_type() == ScalarType::Bool,
       "masked_select: expected BoolTensor for mask");
@@ -2575,7 +2590,7 @@ static Tensor& masked_select_out_impl_cpu(
   auto mask_long =
       at::empty(shape, self.options().dtype(at::kLong)).copy_(*_mask);
   auto mask_prefix_sum = at::empty(shape, self.options().dtype(at::kLong));
-  auto mask_long_data = mask_long.data_ptr<int64_t>();
+  auto mask_long_data = mask_long.const_data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
   // TODO: Here can only use std::partial_sum for C++14,
   // use std::exclusive_scan when PyTorch upgrades to C++17, which have better
@@ -2603,7 +2618,6 @@ Tensor& masked_select_out_cpu(
     const Tensor& self,
     const Tensor& mask,
     Tensor& result) {
-  namedinference::compute_broadcast_outnames(self, mask);
   return masked_select_out_impl_cpu(result, self, mask);
 }
 
@@ -2668,6 +2682,9 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
   auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
+  // Wrap negative indices to positive (Python-style)
+  indices_broadcasted =
+      indices_broadcasted.remainder(self_broadcasted.size(dim));
   return std::make_tuple(
       std::move(self_broadcasted),
       std::move(indices_broadcasted),
@@ -2831,8 +2848,9 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims) {
   const auto num_threads = at::get_num_threads();
   DimVector thread_count_nonzero(num_threads);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
       kComplexHalf,
+      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,
@@ -2885,8 +2903,9 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   DimVector thread_count_nonzero(num_threads + 1);
 
   // Pass 1: Count nonzero element per-thread
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
       kComplexHalf,
+      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,
@@ -2922,8 +2941,9 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   auto out_accessor = result.accessor<int64_t, 2>();
 
   // Pass 2: Write indexes
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
       kComplexHalf,
+      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,

@@ -120,7 +120,7 @@ class Omniglot(data.Dataset):
 
 def find_classes(root_dir):
     retour = []
-    for root, dirs, files in os.walk(root_dir):
+    for root, _dirs, files in os.walk(root_dir):
         for f in files:
             if f.endswith("png"):
                 r = root.split("/")
@@ -171,16 +171,14 @@ class OmniglotNShot:
 
             temp = {}  # {label:img1, img2..., 20 imgs, label2: img1, img2,... in total, 1623 label}
             for img, label in self.x:
-                if label in temp.keys():
+                if label in temp:
                     temp[label].append(img)
                 else:
                     temp[label] = [img]
 
             self.x = []
-            for (
-                label,
-                imgs,
-            ) in temp.items():  # labels info deserted , each label contains 20imgs
+            # labels info deserted , each label contains 20imgs
+            for imgs in temp.values():
                 self.x.append(np.array(imgs))
 
             # as different class may have different number of imgs
@@ -209,7 +207,10 @@ class OmniglotNShot:
         self.n_way = n_way  # n way
         self.k_shot = k_shot  # k shot
         self.k_query = k_query  # k query
-        assert (k_shot + k_query) <= 20
+        if (k_shot + k_query) > 20:
+            raise AssertionError(
+                f"k_shot + k_query must be <= 20, got {k_shot + k_query}"
+            )
 
         # save pointer of current read batch in total cache
         self.indexes = {"train": 0, "test": 0}
@@ -257,9 +258,9 @@ class OmniglotNShot:
         data_cache = []
 
         # print('preload next 50 caches of batchsz of batch.')
-        for sample in range(10):  # num of episodes
+        for _ in range(10):  # num of episodes
             x_spts, y_spts, x_qrys, y_qrys = [], [], [], []
-            for i in range(self.batchsz):  # one batch means one set
+            for _ in range(self.batchsz):  # one batch means one set
                 x_spt, y_spt, x_qry, y_qry = [], [], [], []
                 selected_cls = np.random.choice(data_pack.shape[0], self.n_way, False)
 

@@ -10,12 +10,12 @@
 import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Optional, Union
+from typing import Union
 
 
 __all__ = ["EventSource", "Event", "NodeState", "RdzvEvent"]
 
-EventMetadataValue = Union[str, int, float, bool, None]
+EventMetadataValue = str | int | float | bool | None
 
 
 class EventSource(str, Enum):
@@ -95,8 +95,8 @@ class RdzvEvent:
     pid: int
     node_state: NodeState
     master_endpoint: str = ""
-    rank: Optional[int] = None
-    local_id: Optional[int] = None
+    rank: int | None = None
+    local_id: int | None = None
     error_trace: str = ""
 
     def __str__(self):

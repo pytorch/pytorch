@@ -7,7 +7,6 @@
 # LICENSE file in the root directory of this source tree.
 
 from typing import Any, cast, SupportsInt
-from unittest import TestCase
 
 from torch.distributed.elastic.rendezvous import (
     RendezvousHandler,
@@ -15,10 +14,18 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousInfo,
     RendezvousParameters,
 )
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class RendezvousParametersTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
+        super().setUp()
         self._backend = "dummy_backend"
         self._endpoint = "dummy_endpoint"
         self._run_id = "dummy_run_id"
@@ -226,7 +233,10 @@ class _DummyRendezvousHandler(RendezvousHandler):
 
 
 class RendezvousHandlerRegistryTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
+        super().setUp()
         self._params = RendezvousParameters(
             backend="dummy_backend",
             endpoint="dummy_endpoint",
@@ -287,3 +297,7 @@ class RendezvousHandlerRegistryTest(TestCase):
             self._params.backend = "dummy_backend_2"
 
             self._registry.create_handler(self._params)
+
+
+if __name__ == "__main__":
+    run_tests()

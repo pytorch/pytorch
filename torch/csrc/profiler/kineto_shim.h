@@ -62,7 +62,8 @@ struct activity_t;
 void addMetadata(
     activity_t* activity,
     const std::string& key,
-    const std::string& value);
+    const std::string& value,
+    bool quote = false);
 
 // Wraps: libkineto::CpuTraceBuffer
 struct TraceWrapper {
@@ -108,11 +109,17 @@ struct ActivityTraceWrapper {
 };
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
-void prepareTrace(
+using ActivityFilter = std::unordered_map<
+    torch::autograd::profiler::ActivityType,
+    std::unordered_set<std::string>>;
+using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
+TORCH_API void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
-    const std::string& trace_id = "");
+    const std::string& trace_id = "",
+    const ActivityFilter& activity_filter = {},
+    const ProfilerExtensionMap& profiler_extensions = {});
 
 void toggleCollectionDynamic(const bool enable);
 void startTrace();
@@ -142,6 +149,8 @@ TORCH_API void addMetadataJson(
     const std::string& value);
 
 TORCH_API void profilerStep();
+
+TORCH_API bool isKinetoStopped();
 
 } // namespace autograd::profiler
 

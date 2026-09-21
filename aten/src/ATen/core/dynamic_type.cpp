@@ -37,17 +37,18 @@ std::string DynamicType::str() const {
   }
   std::string ret = "Dynamic<";
   ret += std::to_string(static_cast<DynamicTypeBits>(tag_));
-  ret += ">";
+  ret += '>';
   if (tag_ != Tag::Class && !arguments_.elems.empty()) {
-    ret += "[";
+    ret += '[';
     for (const auto& arg : arguments_.elems) {
       if (arg.label) {
-        ret += *arg.label + ":";
+        ret += *arg.label;
+        ret += ':';
       }
       ret += arg.ty->str();
-      ret += ",";
+      ret += ',';
     }
-    ret += "]";
+    ret += ']';
   }
   return ret;
 }
@@ -226,8 +227,7 @@ TypeKind DynamicType::dynamicKind() const {
     // resolve to integers
 #undef CASE_TYPE
     default:
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
-      return TypeKind::AnyType;
+      TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(TypeKind::AnyType);
   }
 }
 
@@ -310,8 +310,7 @@ TypePtr DynamicType::fallback() const {
     case Tag::Any:
       return AnyType::get();
   }
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
-  return nullptr;
+  TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(nullptr);
 }
 
 bool DynamicType::LabeledDynamicType::isSubtypeOf(
@@ -372,8 +371,7 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(
     const Type& /*unused*/) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
-  return nullptr;
+  TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(nullptr);
 }
 
 TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(

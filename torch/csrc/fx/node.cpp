@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <structmember.h>
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <algorithm>
 
 namespace {
@@ -353,7 +352,7 @@ static PyObject* NodeBase__update_args_kwargs(
     Py_CLEAR(node->_kwargs);
     node->_kwargs = map_aggregate(args[1], visit_fn);
     Py_RETURN_NONE;
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr;
   }
 }
@@ -397,7 +396,7 @@ static PyObject* NodeBase__replace_input_with(
 
     PyObject* update_args[2] = {new_args.get(), new_kwargs.get()};
     return NodeBase__update_args_kwargs(self, update_args, 2);
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr;
   }
 }
@@ -524,7 +523,7 @@ static int NodeBase_set_sort_key(
     void* /*closure*/) {
   NodeBase* node = reinterpret_cast<NodeBase*>(self);
   if (!PyTuple_Check(value)) {
-    PyErr_SetString(PyExc_TypeError, "_sort_key must be an tuple of ints");
+    PyErr_SetString(PyExc_TypeError, "_sort_key must be a tuple of ints");
     return -1;
   }
   Py_ssize_t size = PyTuple_GET_SIZE(value);
@@ -692,8 +691,7 @@ static PyObject* NodeIter_iternext_helper(NodeIter* self) {
   }
   while (self->_cur != self->_root) {
     if (!self->_cur->_erased) {
-      Py_INCREF(self->_cur);
-      return (PyObject*)self->_cur;
+      return Py_NewRef(self->_cur);
     }
     if constexpr (reversed) {
       NodeBase* prev = (NodeBase*)Py_NewRef(self->_cur->_prev);
@@ -802,7 +800,7 @@ static PyObject* py_map_aggregate(
     // args[0]: aggregate, args[1]: callable fn
     return map_aggregate(
         args[0], [fn](PyObject* a) { return PyObject_CallOneArg(fn, a); });
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr; // error should already be set
   }
 }
@@ -824,7 +822,7 @@ static PyObject* py_map_arg(
       }
       return Py_NewRef(a);
     });
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr; // error should already be set
   }
 }

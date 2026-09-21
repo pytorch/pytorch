@@ -89,9 +89,11 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
     // Update this storage to the new copy on write context.
     storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr));
+    storage.set_materializer(&materialize_cow);
   } else if (is_cow_data_ptr(data_ptr)) {
     // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
+    TORCH_INTERNAL_ASSERT(storage.has_materializer());
     new_data_ptr = copy_data_ptr(data_ptr);
   } else {
     // Case 3) There is a context and it's not copy-on-write. Nothing
@@ -101,20 +103,22 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
 
-  return make_storage_impl(
+  auto result = make_storage_impl(
       StorageImpl::use_byte_size_t(),
       storage.sym_nbytes(),
       *std::move(new_data_ptr),
       storage.allocator(),
       storage.resizable(),
       storage.device_type());
+  result->set_materializer(&materialize_cow);
+  return result;
 }
 
-C10_API void materialize_cow_storage(StorageImpl& storage) {
+void materialize_cow(StorageImpl* storage) {
   TORCH_INTERNAL_ASSERT(
       !c10::ParallelGuard::is_enabled(),
       "Materializing a storage in the loop function of at::parallel_for is forbidden");
-  const at::DataPtr& data_ptr = storage.data_ptr();
+  const at::DataPtr& data_ptr = storage->data_ptr();
 
   auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
@@ -138,12 +142,13 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
             result));
     // We don't need to consume the result, it's just a shared lock ensuring
     // that the data will remain while we copy it.
-    new_data_ptr = storage.allocator()->clone(data_ptr.get(), storage.nbytes());
+    new_data_ptr =
+        storage->allocator()->clone(data_ptr.get(), storage->nbytes());
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
   DataPtr old_data_ptr =
-      storage.set_data_ptr_no_materialize_cow(*std::move(new_data_ptr));
+      storage->set_data_ptr_no_materialize(*std::move(new_data_ptr));
   // The refcount of the context was already decremented above. Release the
   // reference to the context so the refcount doesn't get decremented again
   old_data_ptr.release_context();

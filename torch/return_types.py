@@ -27,6 +27,7 @@ def pytree_register_structseq(cls):
         cls,
         structseq_flatten,
         structseq_unflatten,
+        serialized_type_name=f"{cls.__module__}.{cls.__qualname__}",
         flatten_with_keys_fn=structseq_flatten_with_keys,
     )
 
@@ -39,6 +40,7 @@ for name in dir(return_types):
     globals()[name] = _attr
 
     if not name.startswith("_"):
+        # pyrefly: ignore [unresolvable-dunder-all]
         __all__.append(name)
         all_return_types.append(_attr)
 

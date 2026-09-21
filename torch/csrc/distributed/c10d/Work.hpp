@@ -31,6 +31,8 @@ enum class OpType : std::uint8_t {
   _REDUCE_SCATTER_BASE = 16,
   COALESCED = 17,
   _ALLREDUCE_SPARSE = 18,
+  REDUCE_SCATTER_TENSOR_COALESCED = 19,
+  ALLGATHER_INTO_TENSOR_COALESCED = 20,
   UNKNOWN = 100,
 };
 
@@ -45,7 +47,7 @@ enum class WorkResult : std::uint8_t {
 // Converts OpType to human readable string.
 TORCH_API std::string opTypeToString(OpType opType);
 
-// Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
+// Whether or not an OP is a p2p op (SEND, RECV, RECVANYSOURCE)
 TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 
 // Please do not use Work API, it is going away, to be
@@ -73,7 +75,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // Returns exception if isSuccess() returned false.
   virtual std::exception_ptr exception() const;
 
-  // Returns source rank if this objects represents a recv-from-any.
+  // Returns source rank if this object represents a recv-from-any.
   virtual int sourceRank() const;
 
   // Returns result tensors, if applicable.
@@ -132,6 +134,13 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   virtual uint64_t getSequencenumber() const;
 
+  virtual std::chrono::milliseconds getTimeout() const;
+
+  // Opaque identity used to correlate a Work with backend completion. A
+  // backend whose completion can outlive the Work must override this with a
+  // non-reused key.
+  virtual uint64_t getCompletionKey() const;
+
   OpType retrieveOpType() const;
 
   static c10::intrusive_ptr<Work> create_from_future(
@@ -181,5 +190,8 @@ struct TORCH_API WorkInfo {
   std::chrono::time_point<std::chrono::steady_clock> timeFinished;
   std::chrono::duration<float> activeDuration;
 };
+
+TORCH_API void set_comm_profiling_name(const std::string& name);
+TORCH_API const std::string& get_comm_profiling_name();
 
 } // namespace c10d

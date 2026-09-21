@@ -570,7 +570,7 @@ void OperatorEntry::checkInvariants() const {
 
 std::string OperatorEntry::listAllDispatchKeys() const {
   std::ostringstream str;
-  str << "[";
+  str << '[';
 
   bool has_kernels = false;
   for (auto k : allDispatchKeysInFullSet()) {
@@ -584,8 +584,8 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     str << k;
     has_kernels = true;
   }
-  str << "]";
-  return str.str();
+  str << ']';
+  return std::move(str).str();
 }
 
 void OperatorEntry::reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const {
@@ -669,7 +669,7 @@ std::string OperatorEntry::dumpComputedTable() const {
           << kernel_prov.first.debug << " [" << kernel_prov.second << "]\n";
     }
   }
-  return oss.str();
+  return std::move(oss).str();
 }
 
 void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback) {
@@ -683,12 +683,12 @@ void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> c
 // This WON'T report backend fallbacks.
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
-  oss << "name: " << name_ << "\n";
+  oss << "name: " << name_ << '\n';
   if (schema_) {
-    oss << "schema: " << schema_->schema << "\n";
-    oss << "debug: " << schema_->debug << "\n";
+    oss << "schema: " << schema_->schema << '\n';
+    oss << "debug: " << schema_->debug << '\n';
     oss << "alias analysis kind: " << toString(schema_->schema.aliasAnalysis())
-        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << "\n";
+        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << '\n';
   } else {
     oss << "schema: (none)\n";
   }
@@ -715,7 +715,7 @@ std::string OperatorEntry::dumpState() const {
       print_kernel(toString(k), it->second, c10::isAliasDispatchKey(k));
     }
   }
-  return oss.str();
+  return std::move(oss).str();
 }
 
 }

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 from collections import defaultdict
 
@@ -10,6 +9,7 @@ from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.types import IntLikeType
 from torch.utils import _pytree
 
 
@@ -18,7 +18,11 @@ This is the function that runs shape inference. It will modify the input graph m
 """
 
 
-def infer_shape(gm, input_tensors):
+def infer_shape(
+    gm: torch.fx.GraphModule, input_tensors: list[torch.Tensor]
+) -> (
+    tuple[torch.fx.GraphModule, list[torch.Tensor], FakeTensorMode, IntLikeType] | None
+):
     # Prepare environments
     shape_env = ShapeEnv()
     fake_mode = FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
@@ -29,11 +33,11 @@ def infer_shape(gm, input_tensors):
         dim_count += input_tensor.dim() - 1
 
     sample = {f"s{i}": 2 for i in range(dim_count)}
-    init_symints = [
+    init_symints: list[IntLikeType] = [
         mksym(shape_env, v, LocalSource(k), DimDynamic.DYNAMIC)
         for k, v in sample.items()
     ]
-    symints = copy.deepcopy(init_symints)
+    symints: list[IntLikeType] = copy.deepcopy(init_symints)
     symbol_to_idx_dict = {f"s{i}": i for i in range(dim_count)}
     padding_constraints = defaultdict(list)  # type: ignore[var-annotated]
 
@@ -87,7 +91,9 @@ def infer_shape(gm, input_tensors):
                 allowed_try_times -= 1
 
 
-def mksym(shape_env, value, source, dynamic_dim):
+def mksym(
+    shape_env: ShapeEnv, value: int, source: LocalSource, dynamic_dim: DimDynamic
+) -> IntLikeType:
     return shape_env.create_symintnode(
         shape_env.create_symbol(
             value,

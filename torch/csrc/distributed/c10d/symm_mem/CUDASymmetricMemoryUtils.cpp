@@ -1,5 +1,4 @@
 #include <sys/socket.h>
-#include <sys/syscall.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -12,7 +11,8 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <ATen/ATen.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -28,6 +28,95 @@ bool device_has_multicast_support(int device_idx) {
 bool allow_overlapping_devices() {
   return c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES") ==
       true;
+}
+
+namespace {
+
+// Every PG exchange during rendezvous stages its payload on `device_idx`: the
+// group may only have a CUDA backend, so a CPU tensor would dispatch to a
+// backend that isn't there. The H2D/D2H copies are negligible at the sizes
+// exchanged (a few hundred bytes per rank).
+at::Tensor stage_bytes_to_device(
+    const void* data,
+    size_t nbytes,
+    int device_idx) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  void* mutable_data = const_cast<void*>(data);
+  return at::from_blob(
+             mutable_data,
+             {static_cast<int64_t>(nbytes)},
+             at::TensorOptions().dtype(at::kByte))
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      .to(c10::Device(c10::DeviceType::CUDA, device_idx));
+}
+
+} // namespace
+
+at::Tensor pg_all_gather_bytes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    const void* data,
+    size_t nbytes,
+    int device_idx) {
+  TORCH_CHECK(pg != nullptr, "pg_all_gather_bytes: null ProcessGroup");
+  const auto world_size = pg->getSize();
+  TORCH_CHECK(world_size > 0);
+  const size_t total_bytes = static_cast<size_t>(world_size) * nbytes;
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  c10::cuda::CUDAGuard guard(device_idx);
+
+  at::Tensor in_buf = stage_bytes_to_device(data, nbytes, device_idx);
+  at::Tensor out_buf = at::empty(
+      {static_cast<int64_t>(total_bytes)},
+      at::TensorOptions().dtype(at::kByte).device(in_buf.device()));
+
+  c10d::AllgatherOptions ag_opts;
+  ag_opts.asyncOp = false;
+  pg->all_gather_single(out_buf, in_buf, ag_opts);
+
+  return out_buf.cpu();
+}
+
+at::Tensor pg_broadcast_bytes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    const void* data,
+    size_t nbytes,
+    int device_idx,
+    int root) {
+  TORCH_CHECK(pg != nullptr, "pg_broadcast_bytes: null ProcessGroup");
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  c10::cuda::CUDAGuard guard(device_idx);
+
+  std::vector<at::Tensor> bufs{stage_bytes_to_device(data, nbytes, device_idx)};
+
+  c10d::BroadcastOptions bc_opts;
+  bc_opts.rootRank = root;
+  bc_opts.asyncOp = false;
+  pg->broadcast(bufs, bc_opts);
+
+  return bufs[0].cpu();
+}
+
+void pg_barrier(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    int device_idx) {
+  TORCH_CHECK(pg != nullptr, "pg_barrier: null ProcessGroup");
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  c10::cuda::CUDAGuard guard(device_idx);
+
+  c10d::BarrierOptions bar_opts;
+  // ProcessGroup::barrier stages its own dummy tensor, so pinning the device
+  // here is what keeps it on the CUDA backend, same as the exchanges above.
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  bar_opts.device = c10::Device(c10::DeviceType::CUDA, device_idx);
+  bar_opts.device_ids = {static_cast<int64_t>(device_idx)};
+  bar_opts.asyncOp = false;
+  auto work = pg->barrier(bar_opts);
+  if (work != nullptr) {
+    work->wait();
+  }
 }
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
@@ -60,6 +149,7 @@ IpcChannel::IpcChannel()
       socket_ != -1, "Failed to create socket: ", c10::utils::str_error(errno));
 
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
   TORCH_CHECK(
@@ -80,12 +170,13 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // Define destination socket address
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
   auto socket_name = get_socket_name(dst_pid);
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
 
   // Prepare data to send
   // Data being sent is "fd", the value of fd will be sent as auxiliary data
   // (control message)
-  struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
+  struct iovec io = {.iov_base = (void*)"fd", .iov_len = 2};
 
   // Prepare control message data buffer and zero it out
   // NOLINTNEXTLINE(*array*)
@@ -145,6 +236,7 @@ int IpcChannel::recv_fd() {
   // Define socket address to receive on: family AF_UNIX means unix domain
   // socket
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
   // Prepare message header
@@ -221,7 +313,7 @@ std::string IpcChannel::get_socket_name(int pid) {
   }
   std::ostringstream oss;
   oss << tmp_dir << "/symm_mem-" << pid;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 void map_block(
@@ -246,14 +338,8 @@ void map_block(
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
-  C10_HIP_CHECK(hipMemMap(
-      *ptr,
-      size,
-      0,
-      reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
-      0ULL));
-  C10_HIP_CHECK(hipMemMap(
+  C10_CUDA_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
+  C10_CUDA_CHECK(hipMemMap(
       *ptr,
       size,
       0,
@@ -265,7 +351,7 @@ void map_block(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   desc.location.id = static_cast<int>(device_idx);
   desc.flags = hipMemAccessFlagsProtReadWrite;
-  C10_HIP_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
+  C10_CUDA_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");

@@ -1,7 +1,5 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/variable.h>
@@ -11,7 +9,6 @@
 #include <c10/util/irange.h>
 
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 namespace torch::autograd {
@@ -108,7 +105,7 @@ CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
     std::unique_ptr<ViewFunc> view_fn_,
-    std::shared_ptr<Node> fn_)
+    c10::intrusive_ptr<Node> fn_)
     : base(base_var),
       view(std::move(view_)),
       view_fn(std::move(view_fn_)),
@@ -254,6 +251,7 @@ variable_list CopySlices::apply_with_saved(
     update_exec_info();
 
     std::vector<bool> needs_input_grad;
+    needs_input_grad.reserve(num_outputs());
     for (const auto i : c10::irange(num_outputs())) {
       needs_input_grad.emplace_back(task_should_compute_output(i));
     }

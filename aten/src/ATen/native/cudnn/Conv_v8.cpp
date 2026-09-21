@@ -4,15 +4,12 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/cudnn/cudnn-wrapper.h>
-
 #include <c10/macros/Macros.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <cudnn_frontend.h>
 C10_DIAGNOSTIC_POP()
 
-#include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
@@ -39,13 +36,12 @@ C10_DIAGNOSTIC_POP()
 #include <dlfcn.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
-constexpr int64_t operator"" _TiB(unsigned long long n) {
+constexpr int64_t operator""_TiB(unsigned long long n) {
   return static_cast<size_t>(n) << 40;
 }
 
@@ -350,11 +346,26 @@ struct BenchmarkCache {
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>
-    benchmark_cache;
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
-    benchmark_cache_fused;
+//
+// We also leak them due to apparent teardown segfaults observed since cuDNN
+// version 9.10+
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>*
+_get_benchmark_cache() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyWrapper>* benchmark_cache =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>();
+  return benchmark_cache;
+}
 
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>*
+_get_benchmark_cache_fused() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyFusedWrapper>* benchmark_cache_fused =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
+  return benchmark_cache_fused;
+}
 } // namespace
 
 void run_conv_plan(
@@ -552,8 +563,8 @@ auto build_opgraph_fused(
               y, 'y', key.pod.y_alignment, key.pod.params.memory_format))
           .setpwDesc(actDesc)
           .build();
-  std::array<cudnn_frontend::Operation const*, 4> ops = {
-      &conv_op, &add_op, &add_bias_op, &act_op};
+  auto ops = std::to_array<cudnn_frontend::Operation const*>(
+      {&conv_op, &add_op, &add_bias_op, &act_op});
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
                      .setHandle(handle)
                      .setOperationGraph(ops.size(), ops.data())
@@ -568,18 +579,27 @@ auto get_generator_sources(
     const bool allow_tf32,
     const cudnnBackendHeurMode_t heur_mode,
     const bool heuristic,
-    const bool fallback) {
+    const bool fallback,
+    const bool get_all_heuristic_configs = false,
+    int64_t* heuristic_config_count = nullptr) {
   // Method for engine config generator based on heuristics
   const auto heurgen_method =
-      [/*&desc,*/ &x, deterministic, allow_tf32, heur_mode](
-          cudnn_frontend::OperationGraph& opGraph)
+      [/*&desc,*/ &x,
+       deterministic,
+       allow_tf32,
+       heur_mode,
+       get_all_heuristic_configs,
+       heuristic_config_count](cudnn_frontend::OperationGraph& opGraph)
       -> cudnn_frontend::EngineConfigList {
     auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
                           .setOperationGraph(opGraph)
                           .setHeurMode(heur_mode)
                           .build();
-    auto& engine_configs =
-        heuristics.getEngineConfig(heuristics.getEngineConfigCount());
+    auto& engine_configs = heuristics.getEngineConfig(
+        get_all_heuristic_configs ? heuristics.getEngineConfigCount() : 1);
+    if (heuristic_config_count != nullptr) {
+      *heuristic_config_count = engine_configs.size();
+    }
     cudnn_frontend::EngineConfigList filtered_configs;
     filterEngineConfigs(
         engine_configs,
@@ -620,6 +640,11 @@ auto get_generator_sources(
   }
 }
 
+struct EngineConfigResult {
+  cudnn_frontend::EngineConfigList configs;
+  int64_t heuristic_config_count;
+};
+
 int64_t get_available_workspace() {
   c10::DeviceIndex device = 0;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
@@ -632,14 +657,102 @@ static nlohmann::json errata_json_handle;
 
 bool plan_errata_exception(
     const cudnnHandle_t handle,
-    const std::string& executionPlanTag) {
+    const cudnn_frontend::ExecutionPlan& plan,
+    const Tensor& x) {
+  const auto& executionPlanTag = plan.getTag();
   static bool has_json =
       cudnn_frontend::load_from_config(errata_json_handle, "");
-  if (!has_json) {
-    return false;
-  } else {
+  // rule_id is an arbitrary string, here we use the issue number if there is
+  // one
+  static auto hardcoded_errata_json_handle_188288 = nlohmann::json::parse(R"(
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "188288",
+                      "operation"           : "ConvFwd",
+                      "engine"              : 5,
+                      "cudnn_version_start" : 92301,
+                      "cudnn_version_end"   : 92400
+                    }
+                ]
+            })");
+  // cuDNN engines 58 and 63 may dispatch to a cuBLASLt kernel that performs
+  // illegal memory accesses on sm_120. Engine IDs are cuDNN-version-specific,
+  // so restrict this workaround to the affected cuDNN and GPU versions.
+#if CUBLAS_VERSION < 130601
+  static auto hardcoded_errata_json_handle_sm120 = nlohmann::json::parse(R"(
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "sm120_conv_fwd_engine_58",
+                      "operation"           : "ConvFwd",
+                      "engine"              : 58,
+                      "cudnn_version_start" : 92300,
+                      "cudnn_version_end"   : -1
+                    },
+                    { "rule_id"             : "sm120_conv_bwd_data_engine_63",
+                      "operation"           : "ConvBwdData",
+                      "engine"              : 63,
+                      "cudnn_version_start" : 92300,
+                      "cudnn_version_end"   : -1
+                    },
+                    { "rule_id"             : "sm120_conv_bwd_filter_engine_63",
+                      "operation"           : "ConvBwdFilter",
+                      "engine"              : 63,
+                      "cudnn_version_start" : 92300,
+                      "cudnn_version_end"   : -1
+                    }
+                ]
+            })");
+#endif
+  static auto hardcoded_errata_json_handle_3d = nlohmann::json::parse(R"(
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "163539",
+                      "operation"           : "ConvFwd",
+                      "engine"              : 23,
+                      "cudnn_version_start" : 90800,
+                      "cudnn_version_end"   : 91500
+                    },
+                    { "rule_id"             : "ConvBwdData",
+                      "operation"           : "ConvBwdData",
+                      "engine"              : 23,
+                      "cudnn_version_start" : 8000,
+                      "cudnn_version_end"   : -1
+                    }
+                ]
+            })");
+  if (cudnn_frontend::check_errata(
+          hardcoded_errata_json_handle_188288, executionPlanTag, handle, []() {
+            return true;
+          })) {
+    return true;
+  }
+#if CUBLAS_VERSION < 130601
+  if (cudnn_frontend::check_errata(
+          hardcoded_errata_json_handle_sm120,
+          executionPlanTag,
+          handle,
+          [&plan]() {
+            const auto plan_json =
+                nlohmann::json::parse(plan.getJsonRepresentation());
+            return plan_json.contains("engine") &&
+                plan_json["engine"].value("smVersion", -1) == 1200;
+          })) {
+    return true;
+  }
+#endif
+  if (!has_json && x.dim() > 4) {
+    return cudnn_frontend::check_errata(
+        hardcoded_errata_json_handle_3d, executionPlanTag, handle, []() {
+          return true;
+        });
+  } else if (has_json) {
     return cudnn_frontend::check_errata(
         errata_json_handle, executionPlanTag, handle, []() { return true; });
+  } else {
+    return false;
   }
 }
 
@@ -652,7 +765,7 @@ void generate_and_filter_plans(
     at::DataPtr& workspace_ptr) {
   auto initial_predicate_function =
       [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return plan_errata_exception(handle, plan.getTag());
+    return plan_errata_exception(handle, plan, x);
   };
   auto plans =
       generator.cudnnGetPlan(handle, opGraph, initial_predicate_function);
@@ -714,7 +827,14 @@ auto get_plans_from_find(
   // We don't care about getting the best ordering of algos if we're roing to
   // run all of them
   auto sources = get_generator_sources(
-      desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT, true, true);
+      desc,
+      x,
+      deterministic,
+      allow_tf32,
+      CUDNN_HEUR_MODE_INSTANT,
+      true,
+      true,
+      true);
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
@@ -769,6 +889,7 @@ auto get_plans_from_find_fused(
       allow_tf32,
       CUDNN_HEUR_MODE_INSTANT,
       true,
+      true,
       true);
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
@@ -812,20 +933,30 @@ auto get_configs_from_heuristics(
     const IntArrayRef dilation,
     const bool deterministic,
     const bool allow_tf32,
-    const bool fallback) {
+    const bool fallback,
+    const bool get_all_heuristic_configs = false) {
   auto opGraph =
       build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   opgraph_tag = opGraph.getTag();
   auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b()
       ? CUDNN_HEUR_MODE_B
       : CUDNN_HEUR_MODE_INSTANT;
+  int64_t heuristic_config_count = -1;
   auto sources = get_generator_sources(
-      desc, x, deterministic, allow_tf32, heuristic_mode, !fallback, fallback);
+      desc,
+      x,
+      deterministic,
+      allow_tf32,
+      heuristic_mode,
+      !fallback,
+      fallback,
+      get_all_heuristic_configs,
+      &heuristic_config_count);
 
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
   auto configs = generator.generate_engine_config(opGraph);
-  return configs;
+  return EngineConfigResult{std::move(configs), heuristic_config_count};
 }
 
 auto get_configs_from_heuristics_fused(
@@ -843,13 +974,15 @@ auto get_configs_from_heuristics_fused(
     const IntArrayRef dilation,
     const bool deterministic,
     const bool allow_tf32,
-    const bool fallback) {
+    const bool fallback,
+    const bool get_all_heuristic_configs = false) {
   auto opGraph = build_opgraph_fused(
       handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
   opgraph_tag = opGraph.getTag();
   auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b()
       ? CUDNN_HEUR_MODE_B
       : CUDNN_HEUR_MODE_INSTANT;
+  int64_t heuristic_config_count = -1;
   auto sources = get_generator_sources(
       CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
       x,
@@ -857,12 +990,14 @@ auto get_configs_from_heuristics_fused(
       allow_tf32,
       heuristic_mode,
       !fallback,
-      fallback);
+      fallback,
+      get_all_heuristic_configs,
+      &heuristic_config_count);
 
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
   auto configs = generator.generate_engine_config(opGraph);
-  return configs;
+  return EngineConfigResult{std::move(configs), heuristic_config_count};
 }
 
 void try_plans(
@@ -876,7 +1011,7 @@ void try_plans(
   for (auto& plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan, operation);
-      benchmark_cache.update(key, plan);
+      _get_benchmark_cache()->update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -900,7 +1035,7 @@ void try_plans_fused(
   for (auto& plan : plans) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.update(key, plan);
+      _get_benchmark_cache_fused()->update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -913,7 +1048,8 @@ void try_plans_fused(
 }
 
 bool try_configs(
-    cudnn_frontend::EngineConfigList& configs,
+    cudnn_frontend::EngineConfigList::iterator configs_begin,
+    cudnn_frontend::EngineConfigList::iterator configs_end,
     const std::string& opgraph_tag,
     const CacheKeyWrapper& key,
     const cudnnHandle_t handle,
@@ -921,17 +1057,19 @@ bool try_configs(
     const Tensor& y,
     const Tensor& w,
     const cudnnBackendDescriptorType_t operation) {
-  for (auto& config : configs) {
+  for (auto config_iter = configs_begin; config_iter != configs_end;
+       ++config_iter) {
     try {
+      auto& config = *config_iter;
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag())) {
+      if (plan_errata_exception(handle, plan, x)) {
         continue;
       }
       run_conv_plan(handle, x, y, w, plan, operation);
-      benchmark_cache.update(key, plan);
+      _get_benchmark_cache()->update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -940,6 +1078,61 @@ bool try_configs(
     }
   }
   return false;
+}
+
+bool try_configs_fused(
+    cudnn_frontend::EngineConfigList::iterator configs_begin,
+    cudnn_frontend::EngineConfigList::iterator configs_end,
+    const std::string& opgraph_tag,
+    const CacheKeyFusedWrapper& key,
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const Tensor& z,
+    const Tensor& b) {
+  for (auto config_iter = configs_begin; config_iter != configs_end;
+       ++config_iter) {
+    try {
+      auto& config = *config_iter;
+      auto plan = cudnn_frontend::ExecutionPlanBuilder()
+                      .setHandle(handle)
+                      .setEngineConfig(config, opgraph_tag)
+                      .build();
+      if (plan_errata_exception(handle, plan, x)) {
+        continue;
+      }
+      run_conv_plan_fused(handle, x, y, w, z, b, plan);
+      _get_benchmark_cache_fused()->update(key, plan);
+      return true;
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
+    }
+  }
+  return false;
+}
+
+bool try_configs(
+    cudnn_frontend::EngineConfigList& configs,
+    const std::string& opgraph_tag,
+    const CacheKeyWrapper& key,
+    const cudnnHandle_t handle,
+    const Tensor& x,
+    const Tensor& y,
+    const Tensor& w,
+    const cudnnBackendDescriptorType_t operation) {
+  return try_configs(
+      configs.begin(),
+      configs.end(),
+      opgraph_tag,
+      key,
+      handle,
+      x,
+      y,
+      w,
+      operation);
 }
 
 bool try_configs_fused(
@@ -952,25 +1145,8 @@ bool try_configs_fused(
     const Tensor& w,
     const Tensor& z,
     const Tensor& b) {
-  for (auto& config : configs) {
-    try {
-      auto plan = cudnn_frontend::ExecutionPlanBuilder()
-                      .setHandle(handle)
-                      .setEngineConfig(config, opgraph_tag)
-                      .build();
-      if (plan_errata_exception(handle, plan.getTag())) {
-        continue;
-      }
-      run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.update(key, plan);
-      return true;
-    } catch (cudnn_frontend::cudnnException&) {
-    } catch (CuDNNError&) {
-    } catch (c10::OutOfMemoryError&) {
-      std::ignore = cudaGetLastError(); // clear CUDA error
-    }
-  }
-  return false;
+  return try_configs_fused(
+      configs.begin(), configs.end(), opgraph_tag, key, handle, x, y, w, z, b);
 }
 
 void run_single_conv(
@@ -998,7 +1174,7 @@ void run_single_conv(
       deterministic,
       allow_tf32);
   // TODO: is this thread safe if cache is updated? is pointer stale?
-  auto search = benchmark_cache.find(key);
+  auto search = _get_benchmark_cache()->find(key);
   if (search) {
     try {
       run_conv_plan(handle, x, y, w, *search, operation);
@@ -1009,8 +1185,8 @@ void run_single_conv(
   }
   if (!benchmark) {
     std::string opgraph_tag; // extra data needed for errata filter
-    // heuristic configs
-    cudnn_frontend::EngineConfigList configs = get_configs_from_heuristics(
+    // top config from heuristic
+    auto engine_config_result = get_configs_from_heuristics(
         handle,
         operation,
         opgraph_tag,
@@ -1024,11 +1200,58 @@ void run_single_conv(
         deterministic,
         allow_tf32,
         false);
-    if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
-      return;
+    const bool tried_top_config = !engine_config_result.configs.empty();
+    if (tried_top_config) {
+      if (try_configs(
+              engine_config_result.configs,
+              opgraph_tag,
+              key,
+              handle,
+              x,
+              y,
+              w,
+              operation)) {
+        return;
+      }
+    }
+    if (engine_config_result.heuristic_config_count > 0) {
+      // all heuristic configs
+      engine_config_result = get_configs_from_heuristics(
+          handle,
+          operation,
+          opgraph_tag,
+          x,
+          y,
+          w,
+          key,
+          padding,
+          stride,
+          dilation,
+          deterministic,
+          allow_tf32,
+          false,
+          true);
+      auto configs_begin = engine_config_result.configs.begin();
+      // The top-config path already tried the first filtered heuristic config.
+      if (tried_top_config &&
+          configs_begin != engine_config_result.configs.end()) {
+        configs_begin += 1;
+      }
+      if (try_configs(
+              configs_begin,
+              engine_config_result.configs.end(),
+              opgraph_tag,
+              key,
+              handle,
+              x,
+              y,
+              w,
+              operation)) {
+        return;
+      }
     }
     // fallback configs
-    configs = get_configs_from_heuristics(
+    engine_config_result = get_configs_from_heuristics(
         handle,
         operation,
         opgraph_tag,
@@ -1042,7 +1265,15 @@ void run_single_conv(
         deterministic,
         allow_tf32,
         true);
-    if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
+    if (try_configs(
+            engine_config_result.configs,
+            opgraph_tag,
+            key,
+            handle,
+            x,
+            y,
+            w,
+            operation)) {
       return;
     }
     TORCH_CHECK(
@@ -1098,7 +1329,7 @@ void run_fused_conv(
       groups,
       deterministic,
       allow_tf32);
-  auto search = benchmark_cache_fused.find(key);
+  auto search = _get_benchmark_cache_fused()->find(key);
   if (search) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, *search);
@@ -1109,29 +1340,79 @@ void run_fused_conv(
   }
   if (!benchmark) {
     std::string opgraph_tag; // extra data needed for errata filter
-    // heuristic configs
-    cudnn_frontend::EngineConfigList configs =
-        get_configs_from_heuristics_fused(
-            handle,
-            opgraph_tag,
-            x,
-            y,
-            w,
-            z,
-            b,
-            alpha,
-            key,
-            padding,
-            stride,
-            dilation,
-            deterministic,
-            allow_tf32,
-            false);
-    if (try_configs_fused(configs, opgraph_tag, key, handle, x, y, w, z, b)) {
-      return;
+    // top heuristic config
+    auto engine_config_result = get_configs_from_heuristics_fused(
+        handle,
+        opgraph_tag,
+        x,
+        y,
+        w,
+        z,
+        b,
+        alpha,
+        key,
+        padding,
+        stride,
+        dilation,
+        deterministic,
+        allow_tf32,
+        false);
+    const bool tried_top_config = !engine_config_result.configs.empty();
+    if (tried_top_config) {
+      if (try_configs_fused(
+              engine_config_result.configs,
+              opgraph_tag,
+              key,
+              handle,
+              x,
+              y,
+              w,
+              z,
+              b)) {
+        return;
+      }
+    }
+    if (engine_config_result.heuristic_config_count > 0) {
+      // all heuristic configs
+      engine_config_result = get_configs_from_heuristics_fused(
+          handle,
+          opgraph_tag,
+          x,
+          y,
+          w,
+          z,
+          b,
+          alpha,
+          key,
+          padding,
+          stride,
+          dilation,
+          deterministic,
+          allow_tf32,
+          false,
+          true);
+      auto configs_begin = engine_config_result.configs.begin();
+      // The top-config path already tried the first filtered heuristic config.
+      if (tried_top_config &&
+          configs_begin != engine_config_result.configs.end()) {
+        configs_begin += 1;
+      }
+      if (try_configs_fused(
+              configs_begin,
+              engine_config_result.configs.end(),
+              opgraph_tag,
+              key,
+              handle,
+              x,
+              y,
+              w,
+              z,
+              b)) {
+        return;
+      }
     }
     // fallback configs
-    configs = get_configs_from_heuristics_fused(
+    engine_config_result = get_configs_from_heuristics_fused(
         handle,
         opgraph_tag,
         x,
@@ -1147,7 +1428,16 @@ void run_fused_conv(
         deterministic,
         allow_tf32,
         true);
-    if (try_configs_fused(configs, opgraph_tag, key, handle, x, y, w, z, b)) {
+    if (try_configs_fused(
+            engine_config_result.configs,
+            opgraph_tag,
+            key,
+            handle,
+            x,
+            y,
+            w,
+            z,
+            b)) {
       return;
     }
     TORCH_CHECK(
@@ -1185,8 +1475,8 @@ void raw_cudnn_convolution_forward_out(
   if (output.numel() == 0) {
     return;
   }
-  for (auto it = dilation.begin(); it != dilation.end(); it++) {
-    TORCH_CHECK_VALUE(*it > 0, "Expected positive dilation in convolution.");
+  for (long it : dilation) {
+    TORCH_CHECK_VALUE(it > 0, "Expected positive dilation in convolution.");
   }
   if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(
@@ -1353,7 +1643,6 @@ void raw_cudnn_convolution_add_relu_out(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED
