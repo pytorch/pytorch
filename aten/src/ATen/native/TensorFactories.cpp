@@ -1359,6 +1359,34 @@ Tensor randn(
   return result.normal_(0, 1, std::move(generator));
 }
 
+Tensor randn_meta_symint(
+    SymIntArrayRef size,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
+  auto result = at::empty_symint(size, options);
+  TORCH_CHECK(
+      at::isFloatingType(result.scalar_type()) ||
+          at::isComplexType(result.scalar_type()),
+      "expected a floating-point or complex dtype, but got dtype=",
+      result.scalar_type());
+  return result;
+}
+
+Tensor randn_meta_symint(
+    SymIntArrayRef size,
+    std::optional<Generator> /*generator*/,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
+  return randn_meta_symint(size, dtype, layout, device, pin_memory);
+}
+
 Tensor& randn_out(IntArrayRef size, Tensor& result) {
   return native::randn_out(size, std::nullopt, result);
 }

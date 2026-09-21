@@ -4823,11 +4823,13 @@
   tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: randn
+    Meta: randn_meta_symint
 
 - func: randn.generator(SymInt[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randn
+    Meta: randn_meta_symint
 
 - func: randn.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
