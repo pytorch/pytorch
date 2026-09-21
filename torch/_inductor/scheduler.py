@@ -2630,11 +2630,7 @@ class BaseSchedulerNode:
     max_order: int
     mpi_node: MemoryPlanningInfoForNode
     mutation_renames: dict[str, str]
-    name: str
     node: ir.Operation | None = None
-    buffer_names: OrderedSet[str]
-    _fusion_parent: BaseSchedulerNode | None
-    operation_names: OrderedSet[str]
     outputs: list[SchedulerBuffer]
     outputs_by_name: dict[str, SchedulerBuffer]
     override_estimated_runtime: float | None = None
@@ -2644,26 +2640,12 @@ class BaseSchedulerNode:
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
-        self._fusion_parent = None
         self.debug_device_str: Callable[[BaseSchedulerNode], list[str]] = (
             lambda *args, **kwargs: []
         )
 
-    def get_fusion_root(self) -> BaseSchedulerNode:
-        """Resolve and compress replacements created during a fusion round."""
-        node = self
-        path: list[BaseSchedulerNode] = []
-        while node._fusion_parent is not None:
-            path.append(node)
-            node = node._fusion_parent
-        for old_node in path:
-            old_node._fusion_parent = node
-        return node
-
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node = node
-        self.name = node.get_operation_name()
-        self.operation_names = OrderedSet([self.name])
         self.ancestors = OrderedSet()
         self.min_input_distance = 0
         self.max_input_distance = 0
@@ -2680,7 +2662,6 @@ class BaseSchedulerNode:
             for output in node.get_outputs()
         ]
         self.outputs_by_name = {buf.get_name(): buf for buf in self.outputs}
-        self.buffer_names = OrderedSet(self.outputs_by_name)
 
         # mutation_renames for the current node. Due to potential
         # more mutations happening later, this can be different
@@ -2794,16 +2775,11 @@ class BaseSchedulerNode:
             sizes[dep.name] = sizes.get(dep.name, 0) + (size or FALLBACK_DEP_SIZE)
         return sizes
 
-    @cache_on_self
-    def read_buffer_names(self) -> OrderedSet[str]:
-        return OrderedSet(dep.name for dep in self.read_writes.reads)
-
     def clear_read_writes_dependent_caches(self) -> None:
         self.get_coalesce_analysis.clear_cache(self)
         typing.cast(Any, self.get_tiling).clear_cache(self)
         self.read_write_deps.clear_cache(self)
         self.read_size_by_name.clear_cache(self)
-        BaseSchedulerNode.read_buffer_names.clear_cache(self)
 
     @cache_on_self
     def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
@@ -2894,16 +2870,20 @@ class BaseSchedulerNode:
         _prune_redundant_deps(self, name_to_fused_node, self.scheduler.name_to_buf)
 
     def get_name(self) -> str:
-        return self.name
+        if self.node is None:
+            raise AssertionError("expected self.node to be set")
+        return self.node.get_operation_name()
 
     def get_first_name(self) -> str:
         return self.get_name()
 
+    @cache_on_self
     def get_operation_names(self) -> OrderedSet[str]:
-        return self.operation_names
+        return OrderedSet(node.get_name() for node in self.get_nodes())
 
+    @cache_on_self
     def get_buffer_names(self) -> OrderedSet[str]:
-        return self.buffer_names
+        return OrderedSet(out.get_name() for out in self.outputs)
 
     @cache_on_self
     def can_codegen_in_low_precision(self) -> bool:
@@ -4159,16 +4139,9 @@ def init_group_node(
     group_snode.snodes = snodes
     group_snode.scheduler = scheduler
     group_snode.node = None
-    group_snode.operation_names = OrderedSet.union(
-        *[x.get_operation_names() for x in snodes]
-    )
     group_snode.ancestors = OrderedSet.union(
         *[x.ancestors for x in snodes if x.ancestors is not None]
     )
-    group_snode.outputs_by_name = {
-        buf.get_name(): buf for buf in group_snode.get_outputs()
-    }
-    group_snode.buffer_names = OrderedSet(group_snode.outputs_by_name)
 
     refresh_group_node_dependencies(group_snode)
 
@@ -4180,6 +4153,9 @@ def init_group_node(
     group_snode.max_input_distance = max(
         x.max_input_distance for x in group_snode.snodes
     )
+    group_snode.outputs_by_name = {
+        buf.get_name(): buf for buf in group_snode.get_outputs()
+    }
 
 
 class FusedSchedulerNode(BaseSchedulerNode):
@@ -4298,13 +4274,14 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def get_name(self) -> str:
-        return "_".join(self.operation_names)
+        return "_".join([x.get_name() for x in self.snodes])
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_name()
 
+    @cache_on_self
     def get_buffer_names(self) -> OrderedSet[str]:
-        return self.buffer_names
+        return OrderedSet.union(*[x.get_buffer_names() for x in self.snodes])
 
     def get_outputs(self) -> list[SchedulerBuffer]:
         result: list[SchedulerBuffer] = []
@@ -4741,27 +4718,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     has no data dependencies among them and can be executed in parallel.
     """
 
+    _buffer_names: OrderedSet[str]
     _has_strict_reduction: bool
     _is_reduction: bool
-    _read_buffer_names: OrderedSet[str]
-    _read_buffer_name_counts: dict[str, int]
+    _operation_names: OrderedSet[str]
     _template_node: ir.TemplateBuffer | None
-    _unmet_dependencies_by_name: dict[str, OrderedSet[Dep]]
 
-    def _rebuild_dependency_indexes(self) -> None:
-        self._read_buffer_name_counts = {}
-        for dep in self.read_writes.reads:
-            self._read_buffer_name_counts[dep.name] = (
-                self._read_buffer_name_counts.get(dep.name, 0) + 1
-            )
-        self._read_buffer_names = OrderedSet(self._read_buffer_name_counts)
+    def get_operation_names(self) -> OrderedSet[str]:
+        return self._operation_names
 
-        self._unmet_dependencies_by_name = {}
-        for dep in self.unmet_dependencies:
-            self._unmet_dependencies_by_name.setdefault(dep.name, OrderedSet()).add(dep)
-
-    def read_buffer_names(self) -> OrderedSet[str]:
-        return self._read_buffer_names
+    def get_buffer_names(self) -> OrderedSet[str]:
+        return self._buffer_names
 
     def has_strict_reduction(self) -> bool:
         return self._has_strict_reduction
@@ -4877,25 +4844,31 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         elif producer.is_foreach():
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
             producer_subnode = producer.get_producer_subnode_for(consumer)
-            if producer_subnode is None:
-                raise AssertionError("expected a foreach producer subnode")
-            # The old wrapper is superseded through _fusion_parent, so its aggregate
-            # containers can be transferred instead of copied at every fusion.
-            fused_nodes = producer.snodes
+            fused_nodes = []
             prev_node_1 = producer
-            prev_node_2 = FusedSchedulerNode.fuse(producer_subnode, consumer)
-            fused_nodes[producer.snodes.index(producer_subnode)] = prev_node_2
+            prev_node_2 = None
+            for node in producer.snodes:
+                if node is producer_subnode:
+                    new_node = FusedSchedulerNode.fuse(node, consumer)
+                    prev_node_2 = new_node
+                    fused_nodes.append(new_node)
+                else:
+                    fused_nodes.append(node)
 
         elif consumer.is_foreach():
             consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
             consumer_subnode = consumer.get_consumer_subnode_for(producer)
-            if consumer_subnode is None:
-                raise AssertionError("expected a foreach consumer subnode")
-            # See the ownership-transfer comment in the producer branch above.
-            fused_nodes = consumer.snodes
+            fused_nodes = []
             prev_node_1 = consumer
-            prev_node_2 = FusedSchedulerNode.fuse(producer, consumer_subnode)
-            fused_nodes[consumer.snodes.index(consumer_subnode)] = prev_node_2
+            prev_node_2 = None
+
+            for node in consumer.snodes:
+                if node is consumer_subnode:
+                    new_node = FusedSchedulerNode.fuse(producer, node)
+                    prev_node_2 = new_node
+                    fused_nodes.append(new_node)
+                else:
+                    fused_nodes.append(node)
         else:
             raise AssertionError(
                 "At least one node passed to ForeachKernelSchedulerNode.fuse should be a foreach node"
@@ -4924,6 +4897,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.name_to_node = {}
 
         if prev_node_1 is None or prev_node_2 is None:
+            self._operation_names = OrderedSet.union(
+                *[node.get_operation_names() for node in snodes]
+            )
+            self._buffer_names = OrderedSet.union(
+                *[node.get_buffer_names() for node in snodes]
+            )
             super().__init__(scheduler, snodes)
 
             for node in snodes:
@@ -4933,7 +4912,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 for name in node.get_operation_names():
                     self.name_to_node[name] = node
 
-            self._rebuild_dependency_indexes()
             self._has_strict_reduction = any(
                 node.has_strict_reduction() for node in snodes
             )
@@ -4944,102 +4922,66 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
         else:
             self.scheduler = scheduler
-            self._fusion_parent = None
             self.snodes = snodes
             self.node = None
             self.users: list[NodeUser] = []
 
-            if prev_node_1.is_foreach():
-                if not isinstance(prev_node_1, ForeachKernelSchedulerNode):
-                    raise AssertionError(
-                        "expected prev_node_1 to be a ForeachKernelSchedulerNode"
-                    )
+            if isinstance(prev_node_1, ForeachKernelSchedulerNode):
                 foreach_node, other_node = prev_node_1, prev_node_2
-            else:
-                if not isinstance(prev_node_2, ForeachKernelSchedulerNode):
-                    raise AssertionError(
-                        "expected prev_node_2 to be a ForeachKernelSchedulerNode"
-                    )
+            elif isinstance(prev_node_2, ForeachKernelSchedulerNode):
                 foreach_node, other_node = prev_node_2, prev_node_1
+            else:
+                raise AssertionError("expected a ForeachKernelSchedulerNode")
+
+            other_buffer_names = other_node.get_buffer_names()
+            self.outputs_by_name = foreach_node.outputs_by_name
+            self.outputs_by_name.update(other_node.outputs_by_name)
+            self._buffer_names = foreach_node._buffer_names
+            self._buffer_names.update(other_buffer_names)
 
             self.read_writes = foreach_node.read_writes
-            self.unmet_dependencies = foreach_node.unmet_dependencies
-            self._unmet_dependencies_by_name = foreach_node._unmet_dependencies_by_name
-            for dep in other_node.unmet_dependencies:
-                if (
-                    dep.name not in foreach_node.buffer_names
-                    and dep not in self.read_writes.writes
-                ):
-                    self.unmet_dependencies.add(dep)
-                    self._unmet_dependencies_by_name.setdefault(
-                        dep.name, OrderedSet()
-                    ).add(dep)
-            for dep in other_node.read_writes.writes:
-                self.unmet_dependencies.discard(dep)
-                deps = self._unmet_dependencies_by_name.get(dep.name)
-                if deps is not None:
-                    deps.discard(dep)
-                    if not deps:
-                        del self._unmet_dependencies_by_name[dep.name]
-            for name in other_node.buffer_names:
-                for dep in self._unmet_dependencies_by_name.pop(name, ()):
-                    self.unmet_dependencies.discard(dep)
-
             reads = self.read_writes.reads
             writes = self.read_writes.writes
             new_writes = other_node.read_writes.writes
-            self._read_buffer_names = foreach_node._read_buffer_names
-            self._read_buffer_name_counts = foreach_node._read_buffer_name_counts
-            for dep in new_writes:
-                if dep not in reads:
-                    continue
-                reads.discard(dep)
-                count = self._read_buffer_name_counts[dep.name] - 1
-                if count:
-                    self._read_buffer_name_counts[dep.name] = count
-                else:
-                    del self._read_buffer_name_counts[dep.name]
-                    self._read_buffer_names.discard(dep.name)
-            for dep in other_node.read_writes.reads:
-                if dep in writes or dep in new_writes or dep in reads:
-                    continue
-                reads.add(dep)
-                count = self._read_buffer_name_counts.get(dep.name, 0)
-                self._read_buffer_name_counts[dep.name] = count + 1
-                if count == 0:
-                    self._read_buffer_names.add(dep.name)
+            reads.difference_update(new_writes)
+            reads.update(other_node.read_writes.reads - writes - new_writes)
             writes.update(new_writes)
             self.read_writes.index_exprs.update(other_node.read_writes.index_exprs)
+            self.unmet_dependencies = (
+                OrderedSet(
+                    dep
+                    for dep in OrderedSet.union(
+                        foreach_node.unmet_dependencies, other_node.unmet_dependencies
+                    )
+                    if dep.name not in self._buffer_names
+                )
+                - writes
+            )
 
-            self.outputs_by_name = foreach_node.outputs_by_name
-            self.outputs_by_name.update(other_node.outputs_by_name)
-            self.buffer_names = foreach_node.buffer_names
-            self.buffer_names.update(other_node.buffer_names)
-
-            self.min_order = min(foreach_node.min_order, other_node.min_order)
-            self.max_order = max(foreach_node.max_order, other_node.max_order)
+            self.min_order = min([prev_node_1.min_order, prev_node_2.min_order])
+            self.max_order = max([prev_node_1.max_order, prev_node_2.max_order])
             self.min_input_distance = min(
-                foreach_node.min_input_distance, other_node.min_input_distance
+                prev_node_1.min_input_distance, prev_node_2.min_input_distance
             )
             self.max_input_distance = max(
-                foreach_node.max_input_distance, other_node.max_input_distance
+                prev_node_1.max_input_distance, prev_node_2.max_input_distance
             )
 
             self.ancestors = foreach_node.ancestors
             self.ancestors.update(other_node.ancestors)
 
-            self.operation_names = foreach_node.operation_names
-            self.operation_names.update(other_node.operation_names)
+            self._operation_names = foreach_node._operation_names
+            self._operation_names.update(other_node.get_operation_names())
 
             self.name_to_node = foreach_node.name_to_node
             for name in other_node.get_operation_names():
                 self.name_to_node[name] = other_node
 
             self.read_to_node = foreach_node.read_to_node
-            for name in other_node.buffer_names:
+            for name in other_buffer_names:
                 self.read_to_node.pop(name, None)
-            for name in other_node.read_buffer_names():
-                self.read_to_node[name] = other_node
+            for dep in other_node.read_writes.reads:
+                self.read_to_node[dep.name] = other_node
 
             self._has_strict_reduction = (
                 foreach_node._has_strict_reduction or other_node.has_strict_reduction()
@@ -5313,7 +5255,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self, name_to_fused_node: dict[str, BaseSchedulerNode]
     ) -> None:
         _prune_redundant_deps(self, name_to_fused_node, self.scheduler.name_to_buf)
-        self._rebuild_dependency_indexes()
 
         for node in self.snodes:
             node.prune_redundant_deps(name_to_fused_node)
@@ -5376,13 +5317,14 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def get_name(self) -> str:
-        return "_".join(self.operation_names)
+        return "_".join([x.get_name() for x in self.snodes])
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_name()
 
+    @cache_on_self
     def get_buffer_names(self) -> OrderedSet[str]:
-        return self.buffer_names
+        return OrderedSet.union(*[x.get_buffer_names() for x in self.snodes])
 
     def get_outputs(self) -> list[SchedulerBuffer]:
         result: list[SchedulerBuffer] = []
@@ -7880,10 +7822,7 @@ class Scheduler:
 
     def get_fused_node(self, node: BaseSchedulerNode) -> BaseSchedulerNode:
         "Look up the node in Scheduler name_to_fused_node"
-        return self.get_fused_node_by_name(node.get_first_name())
-
-    def get_fused_node_by_name(self, name: str) -> BaseSchedulerNode:
-        return self.name_to_fused_node[name].get_fusion_root()
+        return self.name_to_fused_node[node.get_first_name()]
 
     def fuse_two_nodes(
         self,
@@ -7899,13 +7838,12 @@ class Scheduler:
                 f"expected node2 device to be {device}, got {node2.get_device()}"
             )
         node3 = self.get_backend(device).fuse(node1, node2)
-        # Avoid remapping every leaf after each fusion. Candidate references
-        # resolve through these links until the map is rebuilt at round end.
-        node1._fusion_parent = node3
-        node2._fusion_parent = node3
         fused_nodes.remove(node1)
         fused_nodes.remove(node2)
         fused_nodes.add(node3)
+        self.name_to_fused_node.update(
+            dict.fromkeys(node3.get_operation_names(), node3)
+        )
 
         # Propagate stream assignment to the fused node so that subsequent
         # fusion rounds still respect stream boundaries.
@@ -8211,10 +8149,6 @@ class Scheduler:
             self._evaluate_pending_template_fusions(template_fusion_nodes, fused_nodes)
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
-        for node in nodes:
-            self.name_to_fused_node.update(
-                dict.fromkeys(node.get_operation_names(), node)
-            )
         nodes = self.topological_sort_schedule(nodes)
         return nodes
 
@@ -8837,7 +8771,7 @@ class Scheduler:
                 else:
                     # continue DFS of new ancestors introduced by the fusion
                     return bool(combined_names & node.ancestors) or any(
-                        found_path(self.get_fused_node_by_name(n))
+                        found_path(self.name_to_fused_node[n])
                         for n in node.ancestors - combined_ancestors
                     )
             return False
@@ -8850,9 +8784,7 @@ class Scheduler:
         combined_ancestors = (
             node1.ancestors._dict.keys() | node2.ancestors._dict.keys()
         ) - combined_names
-        cycle = any(
-            found_path(self.get_fused_node_by_name(n)) for n in combined_ancestors
-        )
+        cycle = any(found_path(self.name_to_fused_node[n]) for n in combined_ancestors)
         if cycle:
             WhyNoFuse(node1, node2)("will create cycle")
         return cycle
@@ -8875,13 +8807,13 @@ class Scheduler:
 
         cache = self._fusion_reuse_keys
         keys: OrderedSet[Any] = OrderedSet()
-        for name in node.read_buffer_names():
-            buf = self.name_to_buf.get(name)
+        for rd in node.read_writes.reads:
+            buf = self.name_to_buf.get(rd.name)
             if buf is None or len(buf.users) != 1 or not buf.node.has_tensor_output():
                 continue
-            key = cache.get(name)
+            key = cache.get(rd.name)
             if key is None:
-                key = cache[name] = buffer_reuse_key(buf.node)
+                key = cache[rd.name] = buffer_reuse_key(buf.node)
             keys.add(key)
         return keys
 
@@ -10536,7 +10468,7 @@ class Scheduler:
         node1_op_names = node1.get_operation_names()
         for name in remaining_deps:
             op_name = self.name_to_buf[name].defining_op_name()
-            if node1_op_names & self.get_fused_node_by_name(op_name).ancestors:
+            if node1_op_names & self.name_to_fused_node[op_name].ancestors:
                 why("intermediate nodes between node1 & node2")
                 return False
 
@@ -11076,8 +11008,6 @@ class Scheduler:
             for node in (node1, node2):
                 for dep in node.read_writes.reads:
                     producer = self.name_to_fused_node.get(dep.name)
-                    if producer is not None:
-                        producer = producer.get_fusion_root()
                     if (
                         producer is not None
                         and producer.is_template()

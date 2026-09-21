@@ -3267,9 +3267,6 @@ class _ScheduleFirstFakeNode:
     def get_operation_names(self):
         return OrderedSet([self.name])
 
-    def get_fusion_root(self):
-        return self
-
     def get_device(self):
         return self.device
 
@@ -3528,8 +3525,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         q = _ScheduleFirstFakeNode("Q", ancestors=("B",))
         fused = object.__new__(FusedSchedulerNode)
         fused.snodes = [a, b]
-        fused.operation_names = OrderedSet(["A", "B"])
-        fused._fusion_parent = None
         fused.ancestors = OrderedSet(["P"])
         nodes = [p, fused, q]
         scheduler = self._make_schedule_first_scheduler(nodes)
