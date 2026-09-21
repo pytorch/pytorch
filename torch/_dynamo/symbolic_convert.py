@@ -2433,7 +2433,7 @@ class InstructionTranslatorBase(
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
-        if not self._check_global_delete(name, variable, present, source):
+        if not self._check_global_delete(name, variable, present):
             return
         self.output.side_effects.store_global(
             variable, name, variables.DeletedVariable()
@@ -2444,7 +2444,6 @@ class InstructionTranslatorBase(
         name: str,
         item: VariableTracker,
         present: bool,
-        mutated_source: Source,
     ) -> bool:
         """Shared DELETE_GLOBAL prelude for the root and inlined handlers.
 
@@ -2474,7 +2473,7 @@ class InstructionTranslatorBase(
             # `g = 1; del g; del g`.
             self.raise_name_error(name)
         # The delete cancels that pending store and there is nothing to replay.
-        side_effects.discard_attr_mutation(item, name, mutated_source)
+        side_effects.discard_attr_mutation(item, name)
         return False
 
     def raise_name_error(self, name: str) -> NoReturn:
@@ -6633,12 +6632,21 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
             side_effects = self.output.side_effects
-            side_effects.store_attr(
-                fglobals_vt,
-                name,
-                value,
-                side_effects.global_store_mutation_kind(fglobals_vt, name, value),
+            mutation_kind = side_effects.global_store_mutation_kind(
+                fglobals_vt, name, value
             )
+            if mutation_kind is AttrMutationKind.GLOBAL_REINSERT:
+                # This store re-adds a name the trace deleted. Eager appends it
+                # at the end of the module __dict__, but overwriting the
+                # recorded delete in place would replay the store in the slot
+                # the delete left behind -- ahead of names stored after the
+                # delete, since replay follows the store_attr_mutations
+                # insertion order. Drop the entry so the store takes a fresh
+                # slot. The kind is computed first because it reads that entry.
+                del side_effects.store_attr_mutations[fglobals_vt][name]
+                del side_effects.attr_mutation_kinds[fglobals_vt][name]
+                del side_effects.mutated_sources_by_attr[(fglobals_vt, name)]
+            side_effects.store_attr(fglobals_vt, name, value, mutation_kind)
 
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
         if self.output.global_scope is self.f_globals:
@@ -6659,7 +6667,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         present = name in self.f_globals
         self._install_globals_membership_guard(name, present)
-        if not self._check_global_delete(name, fglobals_vt, present, global_source):
+        if not self._check_global_delete(name, fglobals_vt, present):
             return
         self.output.side_effects.store_attr(
             fglobals_vt,
