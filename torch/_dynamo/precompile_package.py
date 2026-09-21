@@ -79,6 +79,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import dataclasses
 import functools
 import hashlib
 import importlib.machinery
@@ -122,7 +123,7 @@ if TYPE_CHECKING:
     from .convert_frame import ConvertFrameReturn
     from .eval_frame import OptimizeContext
     from .hooks import Hooks
-    from .package import _BackendId, _DynamoCacheEntry
+    from .package import _BackendId, _DynamoCacheEntry, _DynamoCodeCacheEntry
     from .repro.after_dynamo import WrapBackendDebug
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
@@ -1173,40 +1174,117 @@ def _normalize(text: str) -> str:
 # SHAPE of the check and the slot it names; that a value told two variants apart
 # is reported as a varying slot, never by printing the value.
 #
-# A key that reads as a name is not data: L['x'], G['CFG'] and ___dict__['act']
-# are how this module spells a source, so <> is allowed in it as well -- a
+# The mask is a string CONSTANT ('<str>', '<list:3>'), so a masked check still
+# parses and masking it again is a no-op: a caller that re-renders a recorded
+# fact cannot collapse the check into one placeholder. The bare <id> and <n>
+# _normalize interpolates are the opposite case -- they run after the parse, on
+# text nothing reads back.
+_MASKED_VALUE = re.compile(r"\A<[a-z]+(?::\d+)?>\Z")
+# A subscript key is data unless what it subscripts is keyed by NAME. L, G and
+# the builtins dict Dynamo installs are how a check spells a scope, and an
+# nn.Module attribute is read through the module's own name dicts (mod.lin is
+# rendered mod._modules['lin'], see GuardBuilder's __dict__ accessors), so those
+# keys spell a source too. A user dict does not: in self.cfg['/home/me/w.pt']
+# the value IS the key, and a secret field name is identifier-shaped exactly as
+# 'lin' is, so the shape of the key cannot decide this. The BASE decides, and a
+# kept key has to be name-shaped on top of that -- <> is allowed in it because a
 # normalized global keeps its _<id>_c<n> placeholder inside the brackets.
+_NAME_KEYED_SCOPES = frozenset({"L", "G", "___dict__"})
+_NAME_KEYED_DICTS = frozenset({"__dict__", "_modules", "_parameters", "_buffers"})
 _SLOT_KEY = re.compile(r"\A[A-Za-z_][\w<>]*\Z")
 _QUOTED_KEY = re.compile(r"""\[(b?)('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\]""")
-_QUOTED_RUN = re.compile(r"""(b?)('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")""")
+# The same rule over a source NAME, where the base is text rather than a tree:
+# the identifier the bracket hangs off, or the builtins dict's own subscript.
+_NAME_KEYED_TEXT = re.compile(
+    r"(?:\A|[^\w])(?:"
+    + "|".join(sorted(_NAME_KEYED_SCOPES | _NAME_KEYED_DICTS))
+    + r")\Z"
+)
+_BUILTINS_KEYED_TEXT = re.compile(
+    re.escape(_BUILTINS_DICT_PREFIX) + r"""[\w<>]*['"]\]\Z"""
+)
 # ___check_type_id renders as "<expr>, type=<class 'int'>", which is not one
 # expression, so the annotation comes off before the parse and goes back after.
-_CHECK_ANNOTATION = re.compile(r", type=<class '[^']*'>\Z")
+# Not anchored to the end, and tolerant of a quote inside the class repr: an
+# annotation left in the body costs the whole check, not just the annotation.
+_CHECK_ANNOTATION = re.compile(r", type=<class '.*?'>")
+# What a check that does not parse is reported as. Its own text cannot go in:
+# masking needs the shape of an expression to tell a source from a value, and an
+# arbitrary __repr__ can carry a path with no quote anywhere in it.
+_UNPARSED_CHECK = "<unparsed check>"
+
+
+def _keyed_by_name(base: ast.expr) -> bool:
+    """Whether a subscript of ``base`` inside a check is keyed by a name."""
+    if isinstance(base, ast.Name):
+        return base.id in _NAME_KEYED_SCOPES
+    if isinstance(base, ast.Attribute):
+        return base.attr in _NAME_KEYED_DICTS
+    if isinstance(base, ast.Subscript):
+        key = base.slice
+        return (
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and key.value.startswith(_BUILTINS_DICT_PREFIX)
+        )
+    return False
+
+
+def _keyed_by_name_text(base: str) -> bool:
+    """The same question about the text a source name spells the base as."""
+    return bool(_NAME_KEYED_TEXT.search(base) or _BUILTINS_KEYED_TEXT.search(base))
 
 
 def _mask_keys(name: str) -> str:
     """Mask the data keys a source name interpolates (cfg['/home/me/w.pt'])."""
 
     def mask(match: re.Match[str]) -> str:
-        if not match.group(1) and _SLOT_KEY.match(match.group(2)[1:-1]):
+        key = match.group(2)[1:-1]
+        if _MASKED_VALUE.match(key):
+            # A placeholder this pass already wrote, so masking a masked name
+            # again is a no-op rather than a mask of the mask.
             return match.group(0)
-        return "[<bytes>]" if match.group(1) else "[<str>]"
+        if (
+            not match.group(1)
+            and _SLOT_KEY.match(key)
+            and _keyed_by_name_text(match.string[: match.start()])
+        ):
+            return match.group(0)
+        return "['<bytes>']" if match.group(1) else "['<str>']"
 
     return _QUOTED_KEY.sub(mask, name)
 
 
 class _MaskValues(ast.NodeTransformer):
-    """Replace the values a rendered check embeds with their type."""
+    """Replace the values a rendered check embeds with their type.
+
+    A node that is kept is mutated and returned, as ``generic_visit`` does; a
+    node that is masked is replaced by a fresh constant.
+    """
 
     def __init__(self) -> None:
         self.masked = False
 
-    def _mask(self, node: ast.expr, kind: str) -> ast.AST:
+    def _mask(self, node: ast.expr, kind: str) -> ast.expr:
         self.masked = True
-        return ast.copy_location(ast.Name(id=f"<{kind}>", ctx=ast.Load()), node)
+        return ast.copy_location(ast.Constant(value=f"<{kind}>"), node)
 
-    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+    def _visit_expr(self, node: ast.expr) -> ast.expr:
+        visited = self.visit(node)
+        if not isinstance(visited, ast.expr):
+            raise AssertionError(f"masking produced a {type(visited).__name__}")
+        return visited
+
+    def _visit_children(self, node: ast.expr) -> ast.expr:
+        self.generic_visit(node)
+        return node
+
+    def visit_Constant(self, node: ast.Constant) -> ast.expr:
         if isinstance(node.value, str):
+            if _MASKED_VALUE.match(node.value):
+                # A placeholder this pass already wrote: masking it again would
+                # report every masked value as a string.
+                return node
             return self._mask(node, "str")
         if isinstance(node.value, bytes):
             return self._mask(node, "bytes")
@@ -1214,47 +1292,76 @@ class _MaskValues(ast.NodeTransformer):
         # or a shape, and neither is a value a report can leak.
         return node
 
-    def _mask_display(self, node: ast.expr) -> ast.AST:
-        # The whole display goes, not its elements: the length of a pinned list
-        # of names is as much of the value as the names are.
-        return self._mask(node, type(node).__name__.lower())
+    def _mask_display(
+        self, node: ast.List | ast.Set | ast.Dict | ast.Tuple
+    ) -> ast.expr:
+        # The whole display goes, not its elements: the names in a pinned list
+        # of names are the value. Its LENGTH stays, so two variants pinning
+        # containers of different size still read differently; two of the same
+        # size read alike, which is what a report that prints nothing from
+        # inside them costs.
+        items = node.keys if isinstance(node, ast.Dict) else node.elts
+        return self._mask(node, f"{type(node).__name__.lower()}:{len(items)}")
 
     visit_List = visit_Set = visit_Dict = visit_Tuple = _mask_display
 
-    def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> ast.expr:
+        # One value, masked whole. What a check compares against an f-string is
+        # the joined string, so rewriting the pieces in place would report a
+        # structure the value does not have -- and not every piece is a node a
+        # placeholder can stand in for, since a format spec is an f-string too.
+        return self._mask(node, "str")
+
+    def visit_Subscript(self, node: ast.Subscript) -> ast.expr:
         key = node.slice
         if (
             isinstance(key, ast.Constant)
             and isinstance(key.value, str)
             and _SLOT_KEY.match(key.value)
+            and _keyed_by_name(node.value)
         ):
-            node.value = self.visit(node.value)  # type: ignore[assignment]
+            node.value = self._visit_expr(node.value)
             return node
-        return self.generic_visit(node)
+        return self._visit_children(node)
 
-    def visit_Call(self, node: ast.Call) -> ast.AST:
+    def visit_Call(self, node: ast.Call) -> ast.expr:
         name = node.func.id if isinstance(node.func, ast.Name) else ""
         if name in ("getattr", "hasattr") and len(node.args) > 1:
             # HASATTR renders hasattr(L['x'], 'act'): the attribute name is
-            # part of the source being read, not a value being compared.
-            node.args = [self.visit(node.args[0]), *node.args[1:]]
+            # part of the source being read, not a value being compared. That
+            # one argument only -- getattr's DEFAULT is a value like any other.
+            node.args = [
+                arg if i == 1 else self._visit_expr(arg)
+                for i, arg in enumerate(node.args)
+            ]
+            for keyword in node.keywords:
+                keyword.value = self._visit_expr(keyword.value)
             return node
-        return self.generic_visit(node)
+        return self._visit_children(node)
 
 
 def _mask_values(text: str) -> str:
-    annotation = _CHECK_ANNOTATION.search(text)
-    body = text[: annotation.start()] if annotation else text
-    tail = annotation.group(0) if annotation else ""
+    """Name what a rendered check compares by type instead of by value.
+
+    Idempotent: what it writes parses, and the placeholders survive a second
+    pass unchanged. A container is named by its type and its length alone, so
+    two variants pinning containers of the same length -- two pinned shapes,
+    two sets of marked dims -- render the same check, and what told them apart
+    has to come from ``GuardFact.value`` or from the slot; that is the price of
+    a report that prints nothing from inside a display.
+    """
+    annotations = _CHECK_ANNOTATION.findall(text)
+    body = _CHECK_ANNOTATION.sub("", text)
     try:
         tree = ast.parse(body, mode="eval")
     except SyntaxError:
-        # Not an expression: the saved-tensors-hooks guard renders prose
-        # ("... top_saved_tensors_hooks ids == (11, 12)"), so a quoted run is
-        # all there is to go on. Masking more than a value is the safe way to
-        # be wrong here.
-        masked = _QUOTED_RUN.sub(lambda m: "<bytes>" if m.group(1) else "<str>", body)
-        return masked + tail
+        # Fail closed. A rendering that is not an expression gives nothing to
+        # tell a source from a value: the saved-tensors-hooks guard renders
+        # prose, and an EQUALS_MATCH on a type pytree.register_constant admits
+        # renders that class's __repr__, which can carry a path with no quote
+        # anywhere in it for a textual pass to find. What such a check told two
+        # variants apart by is reported by GuardFact.value and by the slot.
+        return _UNPARSED_CHECK
     mask = _MaskValues()
     tree = mask.visit(tree)
     if not mask.masked:
@@ -1262,7 +1369,13 @@ def _mask_values(text: str) -> str:
         # redundant parentheses and respells a string -- so a check without a
         # literal is returned exactly as guards.py wrote it.
         return text
-    return ast.unparse(tree) + tail
+    try:
+        return ast.unparse(tree) + "".join(annotations)
+    except ValueError:
+        # Defensive. ast.unparse raises on trees this pass does not build (a
+        # non-string constant inside an f-string is one), and reporting a fact
+        # must never be the thing that breaks a capture.
+        return _UNPARSED_CHECK
 
 
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
@@ -1788,6 +1901,35 @@ _FrameKey = tuple[str, str, int]
 _SlotCheck = tuple[tuple[str, ...], str]
 
 
+@dataclasses.dataclass(frozen=True)
+class _RecordedCompile:
+    """What one guard-filter call decided, held until that compile's outcome is
+    known.
+
+    A compile that bypasses -- static-address parameters, a guard that cannot be
+    serialized -- lands no guarded code, so no artifact enforces the guards the
+    filter kept and no artifact was widened by the ones it dropped. The filter
+    runs before either is decidable, so nothing is published when it runs: the
+    facts are recorded per compile here and _confirmed_compiles keeps the ones
+    whose guarded code reached the package entry.
+
+    ``guarded_codes_before`` is the length of ``entry.guarded_codes`` when the
+    filter ran, which is what makes "this compile landed" readable off the entry
+    afterwards: the list grew.
+    """
+
+    frame: _FrameKey
+    entry: _DynamoCodeCacheEntry
+    guarded_codes_before: int
+    kept: frozenset[tuple[str, str]]
+    dropped: frozenset[tuple[str, str]]
+    risky: frozenset[tuple[str, str]]
+    # slot -> the check this compile rendered for it, in the order the guards
+    # came in; summary() takes the first rendering across compiles.
+    dropped_code: tuple[tuple[tuple[str, str], str], ...]
+    facts: frozenset[_GuardFact]
+
+
 def _entry_fn_of(fn: object) -> Callable[..., object]:
     if isinstance(fn, torch.nn.Module):
         forward = fn.forward
@@ -1811,26 +1953,27 @@ def _entry_fn_of(fn: object) -> Callable[..., object]:
     return fn  # type: ignore[return-value]
 
 
-def _leaves_backends_on_package(backend: object) -> bool:
-    """Whether a resolved backend files nothing and leaves its callables on the package.
+def _files_precompile_artifacts(backend: object) -> bool:
+    """Whether a resolved backend is one this capture takes its artifacts from.
 
-    The eager family (torch/_dynamo/backends/debugging.py) hands back the fx
-    graph itself or a wrapper that interprets it, and none of it runs
-    AOTAutograd, so nothing reaches PrecompileContext under the backend id and
-    package.cached_backends holds the only copy. Compared by identity against
-    the registry's own functions rather than against the name "eager", which is
-    one of four names for backends with that same property: keying off the
-    string drops the backends of an eager_noexcept capture and reports it as
-    having recorded nothing. aot_eager is deliberately not in the family -- it
-    runs AOTAutograd, which files a bundle like inductor does.
+    inductor is: compile_fx files its compiled code into PrecompileContext under
+    the backend id, so _take_backend_artifacts finds it there and the package's
+    copy of the callable is redundant. Every other backend -- the eager family,
+    ts, aot_eager, anything a caller registers -- hands back a Python callable
+    that package.cached_backends holds the only copy of, so the session leaves it
+    there for the render and an empty artifact dict is not a failed capture.
+    Asked of the resolved function rather than of a list of names, which
+    classifies every backend added later as inductor-like by default and drops
+    its backends.
     """
-    from torch._dynamo.backends import debugging
+    from torch._dynamo.backends.registry import lookup_backend
 
-    return backend in (
-        debugging.eager,
-        debugging.eager_noexcept,
-        debugging.eager_debug,
-        debugging.pre_dispatch_eager,
+    # A session resolves a name through the registry, so the identity compare is
+    # the live path; compiler_name covers a backend handed over as one of
+    # torch.compile's inductor wrappers, which is how such a wrapper names the
+    # compiler it runs (see eval_frame.get_compiler_fn).
+    return backend is lookup_backend("inductor") or (
+        getattr(backend, "compiler_name", None) == "inductor"
     )
 
 
@@ -1985,18 +2128,12 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
-        # slot -> the check it rendered as, for every slot dropped by any
-        # route. See PrecompileSummary.dropped_guard_code for why the slot
-        # tuple alone cannot be audited.
-        self._dropped_guard_code: dict[tuple[str, str], str] = {}
-        self._dropped_guards: set[tuple[str, str]] = set()
-        self._kept_guards: set[tuple[str, str]] = set()
-        self._risky_dropped_guards: set[tuple[str, str]] = set()
+        # One record per guard-filter call, whether or not that compile went
+        # on to land anything; summary() reports the ones that did. See
+        # _RecordedCompile.
+        self._compiles: list[_RecordedCompile] = []
         self._capture_errors: list[str] = []
         self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
-        # frame -> one fact set per compilation of it
-        self._guard_sets: dict[_FrameKey, list[frozenset[_GuardFact]]] = {}
-        self._undetermined: dict[_FrameKey, set[_GuardFact]] = {}
         self._guard_filter_fn = self._recording_filter(
             _compose_with_default(guard_filter_fn)
         )
@@ -2008,11 +2145,12 @@ class PrecompileSession:
         # ones, exactly as caching_precompile does today.
         self._package = CompilePackage(self._entry_fn)
         self._backend_artifacts: dict[_BackendId, Any] = {}
-        # Set once the backend name is resolved, in __enter__: which teardown
-        # the backends get is a property of the resolved function, not of the
-        # name (see _leaves_backends_on_package). False until then, which is
-        # what an __enter__ that failed to resolve a backend at all wants.
-        self._backends_on_package = False
+        # Set once the backend name is resolved, in __enter__: whether the
+        # compiled code is filed in PrecompileContext or left on the package is
+        # a property of the resolved function, not of the name (see
+        # _files_precompile_artifacts). False until then, which is what an
+        # __enter__ that failed to resolve a backend at all wants.
+        self._files_artifacts = False
         self._entered = False
         self._compiled: Callable[..., object] | None = None
         self._state = threading.Condition()
@@ -2045,16 +2183,13 @@ class PrecompileSession:
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
-        if (
-            backend_ids
-            and not self._backend_artifacts
-            and not self._backends_on_package
-        ):
+        if backend_ids and not self._backend_artifacts and self._files_artifacts:
             # The bytecode names backend ids but nothing was filed under any of
             # them, so the render has nothing to serve. A single id with no
             # artifact is normal (an exercised empty resume frame compiles to
-            # nothing), and an eager-family capture is exempt: its backends stay
-            # on the package (see _release) instead of being filed here.
+            # nothing), and only a backend that files its code is asked for it:
+            # every other one keeps its callables on the package (see _release)
+            # instead of having them filed here.
             self._record_capture_error(
                 PackageError(
                     "the capture recorded no artifact; the usual causes are a "
@@ -2097,10 +2232,10 @@ class PrecompileSession:
     def _release(self) -> None:
         # The compiled variants stay in the entry's ordinary Dynamo cache, as
         # they would after torch.compile; clearing them per capture needs the
-        # region-scoped cache entries that are not part of this build. The
-        # eager backends stay until the render collects them.
-        self._compiled = None
-        if not self._backends_on_package:
+        # region-scoped cache entries that are not part of this build. Only the
+        # copies _take_backend_artifacts made redundant go: a backend that files
+        # nothing leaves its callables here as the render's only source.
+        if self._files_artifacts:
             self._package.cached_backends.clear()
 
     def _call(self, *args: object, **kwargs: object) -> object:
@@ -2130,21 +2265,79 @@ class PrecompileSession:
                     self._state.notify_all()
         return result
 
+    def _drain_then_close(self) -> None:
+        """Wait for the calls in flight, then close the session either way.
+
+        The drain has to come first: a call can still be compiling against a
+        borrowed cache entry, and collecting the artifacts mutates state that
+        compile reads. The close sits in the drain's finally so an interrupt
+        raised out of wait() (a KeyboardInterrupt) still closes the session
+        instead of leaving cap() callable past the block with the optimize
+        context alive to process exit -- at the price of abandoning the calls
+        still running, which is why _close then collects nothing for them.
+        """
+        drained = False
+        try:
+            with self._state:
+                self._closing = True
+                while self._active_calls:
+                    self._state.wait()
+            drained = True
+        finally:
+            self._close(collect=drained)
+
+    def _close(self, *, collect: bool) -> None:
+        """Close the session, and collect its artifacts if the drain completed.
+
+        Publishing the flags is all that is safe with calls still in flight,
+        which is what an interrupted drain leaves behind: taking the artifacts
+        reads the package's cache entry and _release clears its backends, both of
+        which a compile still running is using. So an interrupt abandons those
+        calls -- whatever they go on to file is not collected, and the artifact
+        this capture renders does not hold their variants -- while the session
+        still closes rather than staying open to process exit.
+        """
+        with self._state:
+            # _closing marks a drain in progress, and by here it is over.
+            self._closing = False
+            entered = self._entered
+            self._entered = False
+            # The optimize context lives on the compiled callable, so dropping
+            # the callable is what releases it.
+            self._compiled = None
+            self._finished = True
+            self._state.notify_all()
+        if not (entered and collect):
+            return
+        try:
+            self._take_backend_artifacts()
+        except BaseException as teardown:
+            # Recorded, never raised: a teardown failure must not replace the
+            # exception the caller's block is already propagating, and the
+            # capture errors are what a render gates on.
+            self._record_capture_error(teardown)
+        finally:
+            self._release()
+
     def __enter__(self) -> Callable[..., object]:
-        if self._finished:
-            raise RuntimeError("PrecompileSession cannot be re-entered")
-        if self._entered:
-            raise PackageError(
-                "PrecompileSession is already active: a session runs one capture "
-                "block at a time, so serialize concurrent entries."
-            )
-        # The grad-mode/config patch is per call, in _call, not block-level:
-        # user code between calls (optimizer.step, data loading) must run in
-        # the ambient mode, not the capture's.
-        self._entered = True
+        # Under _state: the not-finished/not-entered check and the set that
+        # follows are one decision, which two concurrent entries must not both
+        # pass, and _call and _close read _entered and _compiled under it too.
+        with self._state:
+            if self._finished:
+                raise RuntimeError("PrecompileSession cannot be re-entered")
+            if self._entered:
+                raise PackageError(
+                    "PrecompileSession is already active: a session runs one capture "
+                    "block at a time, so serialize concurrent entries."
+                )
+            # The grad-mode/config patch is per call, in _call, not block-level:
+            # user code between calls (optimizer.step, data loading) must run in
+            # the ambient mode, not the capture's.
+            self._entered = True
         try:
             backend_obj = _PrecompileBackend(self._backend)
-            self._backends_on_package = _leaves_backends_on_package(
+            self._files_artifacts = _files_precompile_artifacts(
                 backend_obj._torchdynamo_orig_backend
             )
             optimize_ctx = _optimize_isolated(
@@ -2155,75 +2348,22 @@ class PrecompileSession:
                 guard_filter_fn=self._guard_filter_fn,
                 on_recompile_limit=self._record_recompile_limit,
             )
-            self._compiled = optimize_ctx(self._fn)
+            compiled = optimize_ctx(self._fn)
+            with self._state:
+                self._compiled = compiled
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
-            # the session is wedged: the block reads as still open.
-            self._entered = False
-            self._compiled = None
-            # Drain in-flight calls FIRST, before any teardown, exactly as
-            # __exit__ does: a concurrent call can still be compiling against a
-            # borrowed cache entry, and teardown mutates state it reads. The
-            # cleanup chain sits in the drain's finally so an interrupt raised
-            # out of wait() (e.g. KeyboardInterrupt) still releases the session
-            # rather than leaking it until process exit.
-            try:
-                with self._state:
-                    self._closing = True
-                    while self._active_calls:
-                        self._state.wait()
-            finally:
-                # _closing marks a drain in progress, so both teardown paths
-                # clear it once their own drain is done.
-                self._closing = False
-                try:
-                    self._take_backend_artifacts()
-                except BaseException as teardown:
-                    self._record_capture_error(teardown)
-                finally:
-                    self._release()
-                    self._finished = True
-                    with self._state:
-                        self._state.notify_all()
+            # the session is wedged: the block reads as still open. The same
+            # drain-then-close __exit__ runs, on the same terms.
+            self._drain_then_close()
             raise
         return self._call
 
     def __exit__(self, *exc: object) -> None:
         if isinstance(exc[1], BaseException):
             self._record_capture_error(exc[1])
-        try:
-            with self._state:
-                self._closing = True
-                while self._active_calls:
-                    self._state.wait()
-        finally:
-            # The teardown chain sits in the drain's finally, exactly as
-            # __enter__'s error path does: an interrupt raised out of wait()
-            # (e.g. KeyboardInterrupt) must still close the session rather than
-            # leave cap() callable past the block with the artifacts staged in
-            # PrecompileContext and the optimize context leaking to process exit.
-            with self._state:
-                # _closing marks a drain in progress, and this one is done.
-                self._closing = False
-                entered = self._entered
-                self._entered = False
-                self._compiled = None
-            if entered:
-                try:
-                    self._take_backend_artifacts()
-                except BaseException as teardown:
-                    # Recorded, never raised: a teardown failure must not
-                    # replace the exception the caller's block is already
-                    # propagating, and the capture errors are what a render
-                    # gates on.
-                    self._record_capture_error(teardown)
-                finally:
-                    self._release()
-                    self._finished = True
-                    with self._state:
-                        self._state.notify_all()
-            self._recorded_exception_keys.clear()
+        self._drain_then_close()
 
     def _recording_filter(
         self,
@@ -2253,7 +2393,6 @@ class PrecompileSession:
                 for keep, e in zip(decisions, entries)
             )
             facts: set[_GuardFact] = set()
-            undetermined: set[_GuardFact] = set()
             kept_slots: set[tuple[str, str]] = set()
             dropped_slots: set[tuple[str, str]] = set()
             risky_slots: set[tuple[str, str]] = set()
@@ -2285,9 +2424,14 @@ class PrecompileSession:
                 )
                 enforced = not unchecked and (global_state_kept if noop else keep)
                 unmodelled = entry.guard_type in _UNMODELLED_GUARD_TYPES
-                # Rendered once per entry: the fact and the dropped-code line
-                # want the same rendering, and rendering parses the check.
-                code = _render_code(entry.orig_guard.code_list)
+                # Rendered once per entry, and only where something reads the
+                # rendering: the dropped-code line and the fact of a slot the
+                # filter did not enforce. Rendering parses the check and
+                # fingerprinting reads the guarded value, per guard per compile,
+                # while the report spells an enforced guard as its slot alone.
+                code: tuple[str, ...] = (
+                    () if enforced else _render_code(entry.orig_guard.code_list)
+                )
                 if enforced:
                     kept_slots.add(slot)
                 elif unchecked:
@@ -2300,58 +2444,100 @@ class PrecompileSession:
                     dropped_slots.add(slot)
                     rendered = " ; ".join(code)
                     if rendered:
-                        # The FIRST rendering, as
-                        # PrecompileSummary.dropped_guard_code documents: one
-                        # rendering however many variants dropped the slot, so a
-                        # check that embeds its value tells the form of the check
-                        # rather than every value the slot took.
+                        # One rendering however many variants dropped the slot, so
+                        # a check that embeds its value tells the form of the check
+                        # rather than every value the slot took: the first one
+                        # here, and summary() takes the first across compiles.
                         dropped_code.setdefault(slot, rendered)
                     # Risky here means a drop the default filter would not have
                     # made, or one whose fact differed between variants, which
                     # summary() decides from the fact sets recorded below.
                     if by_default:
                         risky_slots.add(slot)
-                # Never compared, so never claimed to hold: see
-                # _UNMODELLED_GUARD_TYPES.
-                (undetermined if unmodelled else facts).add(
-                    _GuardFact(
-                        guard_type=entry.guard_type,
-                        source=slot[1],
-                        code=code,
-                        value=_value_fingerprint(entry),
-                        enforced=enforced,
+                # Never compared, so never claimed to hold, and nothing here
+                # reads such a fact: see _UNMODELLED_GUARD_TYPES.
+                if not unmodelled:
+                    facts.add(
+                        _GuardFact(
+                            guard_type=entry.guard_type,
+                            source=slot[1],
+                            code=code,
+                            value="" if enforced else _value_fingerprint(entry),
+                            enforced=enforced,
+                        )
                     )
-                )
             # One filter call is one compilation, and only the package knows
             # which frame is being compiled. Without it there is no frame to
-            # attribute the facts to, so they go unrecorded rather than into a
-            # made-up one.
+            # attribute the facts to, and no entry to tell later whether this
+            # compile landed, so they go unrecorded rather than into a made-up
+            # frame or into a list that claims an artifact enforces them.
             compiling = self._package._current_entry
-            key = None
-            if compiling is not None:
-                code = compiling.python_code
-                key = (code.co_name, code.co_filename, code.co_firstlineno)
-            # Published under the lock a reader takes, in one step, because this
-            # runs on whatever thread is compiling.
+            if compiling is None:
+                return decisions
+            frame_code = compiling.python_code
+            key = (
+                frame_code.co_name,
+                frame_code.co_filename,
+                frame_code.co_firstlineno,
+            )
+            # Recorded under the lock a reader takes, in one step, because this
+            # runs on whatever thread is compiling. Recorded per FRAME: entry.name
+            # is frame-local, so the same slot name in two frames is two slots,
+            # and one fact set for both would read a rebind that never happened.
+            # Nothing is merged into the report here -- whether this compile
+            # enforces anything is not decided yet, see _RecordedCompile.
             with self._state:
-                self._kept_guards |= kept_slots
-                self._dropped_guards |= dropped_slots
-                self._risky_dropped_guards |= risky_slots
-                for slot, rendered in dropped_code.items():
-                    self._dropped_guard_code.setdefault(slot, rendered)
-                # One object per distinct fact, so a recompiled frame repeating
-                # nearly all of its guards costs facts rather than variants.
-                facts = {pool.setdefault(f, f) for f in facts}
-                undetermined = {pool.setdefault(f, f) for f in undetermined}
-                if key is not None:
-                    # Recorded per FRAME: entry.name is frame-local, so the same
-                    # slot name in two frames is two slots, and one fact set for
-                    # both would read a rebind that never happened.
-                    self._guard_sets.setdefault(key, []).append(frozenset(facts))
-                    self._undetermined.setdefault(key, set()).update(undetermined)
+                self._compiles.append(
+                    _RecordedCompile(
+                        frame=key,
+                        entry=compiling,
+                        guarded_codes_before=len(compiling.guarded_codes),
+                        kept=frozenset(kept_slots),
+                        dropped=frozenset(dropped_slots),
+                        risky=frozenset(risky_slots),
+                        dropped_code=tuple(dropped_code.items()),
+                        # One object per distinct fact, so a recompiled frame
+                        # repeating nearly all of its guards costs facts rather
+                        # than variants.
+                        facts=frozenset(pool.setdefault(f, f) for f in facts),
+                    )
+                )
             return decisions
 
         return filter_fn
+
+    def _confirmed_compiles(self) -> list[_RecordedCompile]:
+        """The recorded compiles whose guarded code reached the package entry.
+
+        A bypassed compile is dropped whole: its kept guards enforce nothing, its
+        dropped guards widened nothing, and its facts are not a variant of the
+        artifact. Keyed by (entry, guarded_codes_before) with the last record
+        winning, because a bypass and a later compile of the same frame both see
+        the same list length and only the later one is evidence that guarded code
+        landed. Call under _state.
+        """
+        latest: dict[tuple[int, int], _RecordedCompile] = {}
+        for compiled in self._compiles:
+            # The entry is unhashable (a mutable dataclass), and identity is what
+            # is wanted anyway: one live object per frame of this capture.
+            latest[(id(compiled.entry), compiled.guarded_codes_before)] = compiled
+        return [
+            compiled
+            for compiled in latest.values()
+            if len(compiled.entry.guarded_codes) > compiled.guarded_codes_before
+        ]
+
+    def _confirmed_facts(self) -> dict[_FrameKey, list[frozenset[_GuardFact]]]:
+        """frame -> one fact set per confirmed compile of it.
+
+        What a reader of the recorded guards consumes, the report included: the
+        variants the artifact actually carries, in the order they compiled. Call
+        under _state.
+        """
+        confirmed: dict[_FrameKey, list[frozenset[_GuardFact]]] = {}
+        for compiled in self._confirmed_compiles():
+            confirmed.setdefault(compiled.frame, []).append(compiled.facts)
+        return confirmed
 
     def _value_varying_slots(
         self, key: _FrameKey | None = None
@@ -2365,11 +2551,12 @@ class PrecompileSession:
         a whole variant's set of facts for it, as there, so one variant holding
         several (a HASATTR per attribute name on one parent source) is not
         variation. Over every frame when key is None, which is what summary()
-        reports: a slot that varied in the frame that owns it varied. Call under
-        _state.
+        reports: a slot that varied in the frame that owns it varied. Compares
+        the confirmed fact sets, so a compile that bypassed cannot make a slot
+        vary. Call under _state.
         """
         varying: set[tuple[str, str]] = set()
-        for frame, variants in self._guard_sets.items():
+        for frame, variants in self._confirmed_facts().items():
             if key not in (None, frame):
                 continue
             seen: dict[tuple[str, str], set[frozenset[_SlotCheck]]] = {}
@@ -2401,10 +2588,12 @@ class PrecompileSession:
         that fills it is not part of this build, so ``complete`` cannot see a
         frame that hit the limit: read it as "complete apart from that".
         """
-        # Snapshotted under the lock because a compile on another thread records
-        # into the sets below, and a reader wants one consistent view. The
-        # slots are already normalized, so every list here spells one slot the
-        # same way and risky_dropped_guards really is a subset of dropped_guards.
+        # Aggregated under the lock because a compile on another thread records
+        # into _compiles, and a reader wants one consistent view. Only the
+        # compiles whose guarded code landed are counted, so a bypassed compile
+        # is in neither list: see _confirmed_compiles. The slots are already
+        # normalized, so every list here spells one slot the same way and
+        # risky_dropped_guards really is a subset of dropped_guards.
         with self._state:
             if self._active_call_threads.get(threading.get_ident()):
                 raise RuntimeError(
@@ -2414,8 +2603,18 @@ class PrecompileSession:
                 )
             while self._active_calls:
                 self._state.wait()
-            dropped = set(self._dropped_guards)
-            kept = set(self._kept_guards)
+            dropped: set[tuple[str, str]] = set()
+            kept: set[tuple[str, str]] = set()
+            risky_by_filter: set[tuple[str, str]] = set()
+            dropped_code: dict[tuple[str, str], str] = {}
+            for compiled in self._confirmed_compiles():
+                kept |= compiled.kept
+                dropped |= compiled.dropped
+                risky_by_filter |= compiled.risky
+                for slot, rendered in compiled.dropped_code:
+                    # The FIRST rendering, as
+                    # PrecompileSummary.dropped_guard_code documents.
+                    dropped_code.setdefault(slot, rendered)
             # Two routes, per risky_dropped_guards: a drop the default filter
             # would not have made, and a drop whose value told the variants
             # apart. Merely being absent from one variant is neither -- that
@@ -2423,12 +2622,9 @@ class PrecompileSession:
             # Intersected with dropped because a fact of a slot nothing checks
             # varies like any other, and risky_dropped_guards is a subset of
             # dropped_guards.
-            risky = self._risky_dropped_guards | (self._value_varying_slots() & dropped)
-            dropped_code = dict(self._dropped_guard_code)
+            risky = risky_by_filter | (self._value_varying_slots() & dropped)
             capture_errors = list(self._capture_errors)
-            guard_sets = {
-                frame: list(variants) for frame, variants in self._guard_sets.items()
-            }
+            guard_sets = self._confirmed_facts()
             # Under the lock the drain above left held, so no call can start
             # between the two and reach a compile while the entry is read.
             entry = self._package.cache_entry()
