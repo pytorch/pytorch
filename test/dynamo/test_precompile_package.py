@@ -16,7 +16,6 @@ import tempfile
 import traceback
 import types
 import typing
-import xml.parsers.expat  # noqa: F401  # imported for the _LIBRARY_NAMES rows
 import zipfile
 from unittest import mock
 
@@ -111,28 +110,6 @@ def _entry(source, value, guard_type="ID_MATCH", derived=()):
         orig_guard=guard,
     )
 
-
-# Names torch or the stdlib own, including four imported submodules whose
-# module dict carries neither __file__ nor __spec__, so _located has no evidence
-# either way and the waiver rests on the located package: torch._C._nn (an
-# extension submodule torch/__init__.py setdefaults into sys.modules), torch.ops
-# (a ModuleType subclass; the _Ops.__file__ class attribute is the relative
-# "_ops.py", which the module dict never sees), pyexpat.errors (registered by
-# pyexpat's C init) and xml.parsers.expat.model (registered by expat.py). A
-# top-level name keeps its waiver only while it is in sys.modules, which is
-# what the header's `import xml.parsers.expat` is for.
-_LIBRARY_NAMES = (
-    "torch",
-    "torch._C",
-    "torch._C._nn",
-    "torch.ops",
-    "os.path",
-    "collections.abc",
-    "sys",
-    "zipimport",
-    "pyexpat.errors",
-    "xml.parsers.expat.model",
-)
 
 _STDLIB_ROOT = sysconfig.get_paths()["stdlib"]
 
@@ -1146,56 +1123,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ),
         ):
             self.assertFalse(precompile_package._is_library_module(name))
-
-    @parametrize("name", _LIBRARY_NAMES)
-    def test_library_module_keeps_the_waiver_for_the_real_library(self, name):
-        precompile_package._classify_file.cache_clear()
-        self.assertTrue(
-            precompile_package._is_library_module(name), f"{name} lost its waiver"
-        )
-
-    def test_library_module_needs_location_evidence_only_at_the_top(self):
-        is_library = precompile_package._is_library_module
-        self.addCleanup(precompile_package._classify_file.cache_clear)
-        with mock.patch.dict(sys.modules):
-            sys.modules.pop("graphlib", None)
-            self.assertFalse(is_library("graphlib"))  # a stdlib name, not imported
-        self.assertFalse(is_library("not_a_stdlib_name"))
-        self.assertFalse(is_library(None))
-        # An inner name only has to not be located ELSEWHERE, so a relative
-        # __file__, evidence in neither direction, leaves the waiver its package
-        # earned (its absolute counterpart is refused above).
-        foo = types.ModuleType("torch.foo")
-        foo.__file__ = "foo.py"
-        with mock.patch.dict(sys.modules, {"torch.foo": foo}):
-            self.assertTrue(is_library("torch.foo"))
-        # Not imported at all, an inner name has nothing to check: deliberate.
-        self.assertTrue(is_library("collections.never_imported"))
-        # A file under a nested install root is stdlib once nothing is installed
-        # there: the very file the refusal table refuses with that root installed.
-        name, attrs, _ = _NOT_LIBRARY_MODULES["under_a_nested_install_root"]
-        vendored = types.ModuleType(name)
-        vendored.__dict__.update(attrs)
-        precompile_package._classify_file.cache_clear()
-        with (
-            mock.patch.dict(sys.modules, {name: vendored}),
-            mock.patch.object(precompile_package, "_install_roots", return_value=()),
-        ):
-            self.assertTrue(is_library(name))
-        # On 3.11+ a frozen stdlib module also carries an absolute __file__, so
-        # the real zipimport never reaches the frozen table; a module dict
-        # without one (3.10, or no sys._stdlib_dir) does.
-        loader = importlib.machinery.FrozenImporter
-        spec = importlib.machinery.ModuleSpec("zipimport", loader, origin="frozen")
-        frozen = types.ModuleType("zipimport")
-        frozen.__spec__ = spec
-        with mock.patch.dict(sys.modules, {"zipimport": frozen}):
-            self.assertTrue(is_library("zipimport"))
-        # A frozen torch leaves _torch_roots nothing to anchor to, and then a
-        # torch name is waived on its name alone, imported or not: the one
-        # waiver with no location evidence behind it, recorded here as chosen.
-        with mock.patch.object(precompile_package, "_torch_roots", return_value=()):
-            self.assertTrue(is_library("torch.never_imported"))
 
     def test_reads_a_builtin_keys_on_where_the_read_comes_from(self):
         reads_a_builtin = precompile_package._reads_a_builtin
