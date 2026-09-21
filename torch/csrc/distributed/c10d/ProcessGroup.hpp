@@ -945,13 +945,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     deviceTypeToBackendType_[deviceType] = backendType;
     deviceTypes_.insert(deviceType);
     // if the backendType is already set then reuse it for this device
-    if (backendTypeToBackend_.find(backendType) !=
-        backendTypeToBackend_.end()) {
-      auto existingBackend = backendTypeToBackend_.at(backendType);
+    if (auto it = backendTypeToBackend_.find(backendType);
+        it != backendTypeToBackend_.end()) {
+      const auto& existingBackend = it->second;
       deviceTypeToBackend_[deviceType] = existingBackend;
-      TORCH_CHECK(
-          existingBackend->getBoundDeviceId() ==
-          (*backend)->getBoundDeviceId());
+      // Python's binding defaults backend to None; skip the check when absent.
+      if (backend.has_value()) {
+        TORCH_CHECK(
+            existingBackend->getBoundDeviceId() ==
+            (*backend)->getBoundDeviceId());
+      }
     } else {
       // check if backend has value
       if (backend.has_value()) {

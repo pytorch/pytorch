@@ -230,3 +230,33 @@ HeaderOnlyGenericPackedTensorAccessor
 # C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
 # time that have no effect to runtime. Therefore, these macros are not
 # tested under test/.
+
+# torch/headeronly/util/MathConstants.h
+e
+euler
+frac_1_pi
+frac_1_sqrt_pi
+frac_sqrt_2
+frac_sqrt_3
+golden_ratio
+ln_10
+ln_2
+log_10_e
+log_2_e
+pi
+sqrt_2
+sqrt_3
+
+# torch/headeronly/util/copysign.h
+copysign
+
+# torch/headeronly/util/Load.h
+load
+
+# torch/headeronly/util/BFloat16-math.h
+is_reduced_floating_point_v
+is_reduced_floating_point
+
+# torch/headeronly/util/irange.h
+integer_range
+irange
