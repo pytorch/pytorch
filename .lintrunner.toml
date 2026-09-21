@@ -617,10 +617,6 @@ exclude_patterns = [
     # std::runtime_error is caught by name in distributed/rpc to drive an
     # overload-fallback retry - converting it disables the fallback silently.
     'torch/csrc/jit/python/**',
-    # 33 findings, mostly the interpreter and the static runtime.
-    'torch/csrc/jit/runtime/**',
-    # 19 findings across the optimisation passes.
-    'torch/csrc/jit/passes/**',
 ]
 command = [
     'python3',
