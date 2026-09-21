@@ -392,8 +392,8 @@ class Benchmarker:
         with torch.cuda.graph(
             cuda_graph, stream=stream, capture_error_mode="thread_local"
         ):
-            clear_grads()
             for _ in range(n_iters):
+                clear_grads()
                 _callable()
 
         torch.cuda.current_stream().wait_stream(stream)
