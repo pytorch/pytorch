@@ -1065,6 +1065,25 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(out.cpu(), torch.full((1_000_000,), 4.0))
         self.assertEqual(filler.cpu(), torch.full((1_000_000,), 5.0))
 
+    def test_command_encoder_outside_stream_queue(self):
+        # See https://github.com/pytorch/pytorch/issues/197805
+        import torch.utils.cpp_extension
+        ext = torch.utils.cpp_extension.load_inline(
+            name="mps_command_encoder_outside_stream_queue",
+            cpp_sources="""
+#include <ATen/mps/MPSStream.h>
+
+void command_encoder_outside_stream_queue() {
+  at::mps::getCurrentMPSStream()->commandEncoder();
+}
+""",
+            functions=["command_encoder_outside_stream_queue"],
+        )
+        with self.assertRaisesRegex(RuntimeError, "must be called from a block running on the stream's queue"):
+            ext.command_encoder_outside_stream_queue()
+        # The check fires before the encoder is created, so the stream stays usable
+        self.assertEqual(torch.arange(4, device="mps").cpu(), torch.arange(4))
+
     # Test that `MPSAllocator::waitForEvents` waits on all cross-stream events
     # that were created with `MPSAllocator::recordStream`, not just the most
     # recent one.
