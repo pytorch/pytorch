@@ -58,9 +58,11 @@ class TestKernelOptimizationAccelerator(TestCase):
     def compare_gradients(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_grad = {key: param.grad for key, param in module.named_parameters()}
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
-        self.assertTrue(self.compare_dict_tensors(ref_grad, res_grad, rtol, atol=atol))
+        self.assertTrue(
+            self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
+        )
 
-    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton")
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or mps")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "einsum_to_pointwise_pass": {},
