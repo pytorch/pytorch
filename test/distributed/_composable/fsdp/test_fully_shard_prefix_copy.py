@@ -199,9 +199,7 @@ class TestPrefixCopy(TestCase):
             rtol=0,
         )
         self.assertEqual([output._version for output in outputs], versions)
-        use_prefix_copy = not use_reorder and (
-            "shard1" in layouts or "singleton_prefix" in layouts
-        )
+        use_prefix_copy = not use_reorder
         prefix_op = torch.ops.fsdp._split_with_sizes_copy_with_prefixes_.default
         self.assertEqual(counter.counts[prefix_op], int(use_prefix_copy))
         self.assertEqual(
@@ -477,8 +475,9 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(output, expected, atol=0, rtol=0)
 
     @parametrize("operation", ["split", "chunk"])
-    def test_functionalize(self, device, operation):
-        tensor = make_tensor((2, 8, 3), device=device, dtype=torch.float32)
+    @parametrize("prefix_count", [1, 2])
+    def test_functionalize(self, device, operation, prefix_count):
+        tensor = make_tensor((prefix_count, 8, 3), device=device, dtype=torch.float32)
         packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
         expected = tensor if operation == "split" else packed
         output = torch.empty_like(expected)
@@ -486,7 +485,7 @@ class TestPrefixCopy(TestCase):
         def copy(destination):
             if operation == "split":
                 torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
-                    [destination], packed, [tensor.numel() // 4], [2], 4
+                    [destination], packed, [tensor.numel() // 4], [prefix_count], 4
                 )
             else:
                 torch.ops.fsdp._chunk_cat_with_prefixes_(destination, [tensor], [1], 4)

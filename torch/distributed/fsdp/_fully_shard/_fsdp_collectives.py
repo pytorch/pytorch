@@ -437,14 +437,12 @@ def _default_all_gather_output_fn(
 
     Supported nonzero-dimension shards copy directly into the final outputs.
     Extensions and post-forward shards use temporary outputs and reassembly.
-    Groups without prefix copies use the original copy operator.
     """
     all_gather_output = all_gather_result.all_gather_output
     device = all_gather_output.device
     copy_outputs: list[torch.Tensor] = []
     num_prefixes: list[int] = []
     reorder_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
-    use_prefix_copy = False
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         all_gather_result.param_all_gather_input_numels,
         all_gather_result.param_all_gather_input_dtypes,
@@ -456,44 +454,30 @@ def _default_all_gather_output_fn(
         fsdp_param.alloc_all_gather_outputs()
         outputs = fsdp_param.all_gather_outputs
         shard_dim = fsdp_param.fsdp_placement.dim
-        if shard_dim == 0:
-            copy_outputs.extend(outputs)
-            num_prefixes.extend([1] * len(outputs))
-            continue
-
-        num_leading_elements = math.prod(
-            fsdp_param.padded_sharded_param_size[:shard_dim]
-        )
-        if (
-            fsdp_param.sharded_state == ShardedState.SHARDED
-            and num_leading_elements > 0
-            and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
-        ):
-            copy_outputs.extend(outputs)
-            num_prefixes.extend([num_leading_elements] * len(outputs))
-            use_prefix_copy = True
-            continue
-
-        # Extension and post-forward shard layouts may require a separate reorder.
-        outputs = [torch.empty_like(t) for t in outputs]
-        copy_outputs.extend(outputs)
-        num_prefixes.extend([1] * len(outputs))
-        reorder_infos.append((fsdp_param, outputs))
-    if use_prefix_copy:
-        non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
-        with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
-            torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
-                copy_outputs,
-                all_gather_output,
-                all_gather_result.all_gather_input_split_sizes,
-                num_prefixes,
-                world_size,
+        prefix_count = 1
+        if shard_dim != 0:
+            num_leading_elements = math.prod(
+                fsdp_param.padded_sharded_param_size[:shard_dim]
             )
-    else:
-        _copy_all_gather_outputs(
+            if (
+                fsdp_param.sharded_state == ShardedState.SHARDED
+                and num_leading_elements > 0
+                and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+            ):
+                prefix_count = num_leading_elements
+            else:
+                # Extension and post-forward layouts may require a separate reorder.
+                outputs = [torch.empty_like(t) for t in outputs]
+                reorder_infos.append((fsdp_param, outputs))
+        copy_outputs.extend(outputs)
+        num_prefixes.extend([prefix_count] * len(outputs))
+    non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
+    with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
+        torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
+            copy_outputs,
             all_gather_output,
             all_gather_result.all_gather_input_split_sizes,
-            copy_outputs,
+            num_prefixes,
             world_size,
         )
     _reassemble_all_gather_outputs(reorder_infos, world_size)

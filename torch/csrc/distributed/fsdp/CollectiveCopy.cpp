@@ -8,6 +8,8 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
+#include <utility>
+
 namespace c10d::fsdp {
 
 void check_split_with_sizes_copy_inputs(
@@ -66,6 +68,15 @@ void split_with_sizes_copy_with_prefixes(
   std::vector<at::Tensor> outputs;
   for (const auto i : c10::irange(out.size())) {
     const auto size = split_sizes[i] / num_prefixes[i];
+    if (num_prefixes[i] == 1) {
+      auto output = out[i].view({num_chunks, -1});
+      if (input.scalar_type() == at::kByte) {
+        output = output.view(at::kByte);
+      }
+      sizes.push_back(size);
+      outputs.push_back(std::move(output));
+      continue;
+    }
     auto output = out[i].view({-1});
     if (input.scalar_type() == at::kByte) {
       output = output.view(at::kByte);
