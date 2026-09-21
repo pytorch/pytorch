@@ -2799,6 +2799,57 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         x = torch.rand(3, 4)
         self.assertEqual(gm(x), (x + float("inf"), x + float("nan")))
 
+    def test_pow_negative_literal_base_codegen(self):
+        def pow_graph(base):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            graph.output(graph.call_function(operator.pow, (base, x)))
+            return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        for base in (-2, -2.0, -1, -0.0):
+            gm = pow_graph(base)
+            self.assertIn(f"({base!r}) ** x", gm.code)
+            self.assertNotIn(f"{base!r} **", gm.code)
+            for exp in (2, 3):
+                ref = operator.pow(base, exp)
+                got = gm(exp)
+                self.assertEqual(got, ref)
+                self.assertEqual(torch.fx.Interpreter(gm).run(exp), got)
+                self.assertEqual(math.copysign(1.0, got), math.copysign(1.0, ref))
+
+        gm = pow_graph(-2)
+        exponents = torch.tensor([2, 3])
+        self.assertEqual(gm(exponents), operator.pow(-2, exponents))
+        self.assertEqual(torch.fx.Interpreter(gm).run(exponents), gm(exponents))
+
+        gm = pow_graph(2)
+        self.assertIn("pow_1 = 2 ** x", gm.code)
+        self.assertNotIn("(2) **", gm.code)
+        self.assertEqual(gm(3), 8)
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output(graph.call_function(operator.pow, (x, -2)))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertIn("x ** -2", gm.code)
+        self.assertEqual(gm(4), 4 ** -2)
+        self.assertEqual(torch.fx.Interpreter(gm).run(4), gm(4))
+
+        graph = torch.fx.Graph()
+        values = graph.placeholder("x")
+        n = graph.placeholder("n")
+        sign = graph.call_function(operator.pow, (-1, n))
+        graph.output(graph.call_function(operator.mul, (values, sign)))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertIn("(-1) ** n", gm.code)
+        for length in (2, 3, 4):
+            ref = torch.ones(length) * operator.pow(-1, length)
+            self.assertEqual(gm(torch.ones(length), length), ref)
+            self.assertEqual(
+                torch.fx.Interpreter(gm).run(torch.ones(length), length),
+                gm(torch.ones(length), length),
+            )
+
     def test_deepcopy_recursion_depth(self):
         depth = sys.getrecursionlimit() + 20
 
