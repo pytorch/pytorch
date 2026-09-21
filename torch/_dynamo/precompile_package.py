@@ -148,6 +148,7 @@ from .source import (
     GlobalSource,
     LocalSource,
 )
+from .types import FrameAction
 
 
 if TYPE_CHECKING:
@@ -296,18 +297,6 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
 
 
 log = logging.getLogger(__name__)
-
-
-# Not a public surface -- see the module docstring. This exists so `from ...
-# import *` in a debugging session pulls the entry points rather than every
-# private helper, and so linters do not flag them as unused.
-__all__ = [
-    "default_guard_filter_fn",
-    "FrameInvariants",
-    "PrecompileSession",
-    "PrecompileSummary",
-    "precompile_capture",
-]
 
 
 def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
@@ -1884,6 +1873,29 @@ def _entry_fn_of(fn: object) -> Callable[..., object]:
     return fn  # type: ignore[return-value]
 
 
+def _leaves_backends_on_package(backend: object) -> bool:
+    """Whether a resolved backend files nothing and leaves its callables on the package.
+
+    The eager family (torch/_dynamo/backends/debugging.py) hands back the fx
+    graph itself or a wrapper that interprets it, and none of it runs
+    AOTAutograd, so nothing reaches PrecompileContext under the backend id and
+    package.cached_backends holds the only copy. Compared by identity against
+    the registry's own functions rather than against the name "eager", which is
+    one of four names for backends with that same property: keying off the
+    string drops the backends of an eager_noexcept capture and reports it as
+    having recorded nothing. aot_eager is deliberately not in the family -- it
+    runs AOTAutograd, which files a bundle like inductor does.
+    """
+    from torch._dynamo.backends import debugging
+
+    return backend in (
+        debugging.eager,
+        debugging.eager_noexcept,
+        debugging.eager_debug,
+        debugging.pre_dispatch_eager,
+    )
+
+
 def _identify_graph(gm: torch.fx.GraphModule) -> str:
     """Name a graph well enough to find it, from inside a backend.
 
@@ -1964,6 +1976,48 @@ class _PrecompileBackend:
         return None if getter is None else getter()
 
 
+class _ReportLimitConvertFrame(_AllowEmptyGraphsConvertFrame):
+    """The package's frame converter, reporting a recompile-limit hit.
+
+    Hitting the cap truncates the capture: Dynamo refuses the variant, runs the
+    frame eagerly from then on, and says so only in a log warning, so a caller
+    would get an artifact with fewer variants than they exercised and no sign of
+    it. The converter's return value is the one in-process signal --
+    convert_frame._compile puts a RUN_ONLY strategy on the Unsupported it
+    raises for the cap, and nothing else in Dynamo sets FrameAction.RUN_ONLY --
+    so a RUN_ONLY return here means the cap was hit. Reported, never raised:
+    the calls keep running, as the limit's contract says.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        # Optional because the base class's package-less DDP clone rebuilds this
+        # type positionally; a session's converter always carries a package, so
+        # it takes the refusing clone instead.
+        on_recompile_limit: Callable[[], None] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._on_recompile_limit = on_recompile_limit
+
+    def __call__(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: CacheEntry | None,
+        hooks: Hooks,
+        frame_state: dict[str, int | FrameStateSizeEntry],
+        skip: int = 0,
+    ) -> ConvertFrameReturn:
+        result = super().__call__(frame, cache_entry, hooks, frame_state, skip=skip + 1)
+        if (
+            self._on_recompile_limit is not None
+            and result.frame_exec_strategy.cur_action == FrameAction.RUN_ONLY
+        ):
+            self._on_recompile_limit()
+        return result
+
+
 def _optimize_isolated(
     backend: _PrecompileBackend,
     package: CompilePackage,
@@ -1971,6 +2025,7 @@ def _optimize_isolated(
     recompile_limit: int,
     dynamic: bool | None,
     guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None,
+    on_recompile_limit: Callable[[], None],
 ) -> OptimizeContext:
     from .eval_frame import OptimizeContext
 
@@ -1991,15 +2046,16 @@ def _optimize_isolated(
     if not isinstance(converter, ConvertFrame):
         raise AssertionError(f"expected a ConvertFrame, got {type(converter)}")
     # Swap the wrapper's converter for the package's own, which patches
-    # allow_empty_graphs around every frame it compiles and refuses a
-    # DDPOptimizer frame by name. Rebuilt from the converter optimize() made so
-    # the backend, hooks and limit stay the ones it derived.
+    # allow_empty_graphs around every frame it compiles, refuses a DDPOptimizer
+    # frame by name and reports a recompile-limit hit. Rebuilt from the converter
+    # optimize() made so the backend, hooks and limit stay the ones it derived.
     optimize_ctx.callback = CatchErrorsWrapper(
-        _AllowEmptyGraphsConvertFrame(
+        _ReportLimitConvertFrame(
             converter._torchdynamo_orig_backend,
             converter._hooks,
             package=package,
             recompile_limit=converter._recompile_limit,
+            on_recompile_limit=on_recompile_limit,
         ),
         callback.hooks,
     )
@@ -2128,8 +2184,12 @@ class PrecompileSession:
         # ones, exactly as caching_precompile does today.
         self._package = CompilePackage(self._entry_fn)
         self._backend_artifacts: dict[_BackendId, Any] = {}
+        # Set once the backend name is resolved, in __enter__: which teardown
+        # the backends get is a property of the resolved function, not of the
+        # name (see _leaves_backends_on_package). False until then, which is
+        # what an __enter__ that failed to resolve a backend at all wants.
+        self._backends_on_package = False
         self._entered = False
-        self._optimized: Callable[..., object] | None = None
         self._compiled: Callable[..., object] | None = None
         self._state = threading.Condition()
         self._active_calls = 0
@@ -2161,12 +2221,16 @@ class PrecompileSession:
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
-        if backend_ids and not self._backend_artifacts and self._backend != "eager":
+        if (
+            backend_ids
+            and not self._backend_artifacts
+            and not self._backends_on_package
+        ):
             # The bytecode names backend ids but nothing was filed under any of
             # them, so the render has nothing to serve. A single id with no
             # artifact is normal (an exercised empty resume frame compiles to
-            # nothing), and an eager capture is exempt: its backends stay on the
-            # package (see _release) instead of being filed here.
+            # nothing), and an eager-family capture is exempt: its backends stay
+            # on the package (see _release) instead of being filed here.
             self._record_capture_error(
                 PackageError(
                     "the capture recorded no artifact; the usual causes are a "
@@ -2176,6 +2240,22 @@ class PrecompileSession:
                     "and a backend that files nothing"
                 )
             )
+
+    def _record_recompile_limit(self) -> None:
+        # Deduplicated like every other capture error, so a cap hit once per
+        # frame and per call records one entry naming both limits rather than
+        # one per refused variant.
+        self._record_capture_error(
+            PackageError(
+                "the capture hit a recompile limit, so it holds fewer variants "
+                "than the calls exercised: Dynamo caps a code object at "
+                f"recompile_limit={self._recompile_limit} and at "
+                "torch._dynamo.config.accumulated_recompile_limit"
+                f"={torch._dynamo.config.accumulated_recompile_limit} counted "
+                "across every isolated region on it, whichever it reaches "
+                "first, and runs the frame eagerly from then on"
+            )
+        )
 
     def _record_capture_error(self, error: BaseException) -> None:
         message = str(error)
@@ -2195,8 +2275,8 @@ class PrecompileSession:
         # they would after torch.compile; clearing them per capture needs the
         # region-scoped cache entries that are not part of this build. The
         # eager backends stay until the render collects them.
-        self._optimized = None
-        if self._backend != "eager":
+        self._compiled = None
+        if not self._backends_on_package:
             self._package.cached_backends.clear()
 
     def _call(self, *args: object, **kwargs: object) -> object:
@@ -2239,17 +2319,19 @@ class PrecompileSession:
         # the ambient mode, not the capture's.
         self._entered = True
         try:
-            if self._optimized is None:
-                backend_obj = _PrecompileBackend(self._backend)
-                optimize_ctx = _optimize_isolated(
-                    backend_obj,
-                    self._package,
-                    recompile_limit=self._recompile_limit,
-                    dynamic=self._dynamic,
-                    guard_filter_fn=self._guard_filter_fn,
-                )
-                self._optimized = optimize_ctx(self._fn)
-            self._compiled = self._optimized
+            backend_obj = _PrecompileBackend(self._backend)
+            self._backends_on_package = _leaves_backends_on_package(
+                backend_obj._torchdynamo_orig_backend
+            )
+            optimize_ctx = _optimize_isolated(
+                backend_obj,
+                self._package,
+                recompile_limit=self._recompile_limit,
+                dynamic=self._dynamic,
+                guard_filter_fn=self._guard_filter_fn,
+                on_recompile_limit=self._record_recompile_limit,
+            )
+            self._compiled = optimize_ctx(self._fn)
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
@@ -2286,38 +2368,41 @@ class PrecompileSession:
     def __exit__(self, *exc: object) -> None:
         if isinstance(exc[1], BaseException):
             self._record_capture_error(exc[1])
-        with self._state:
-            self._closing = True
-            try:
+        try:
+            with self._state:
+                self._closing = True
                 while self._active_calls:
                     self._state.wait()
-            except BaseException:
-                # An interrupted drain leaves the session open, so _closing goes
-                # back to False here and in __enter__'s error path alike.
+        finally:
+            # The teardown chain sits in the drain's finally, exactly as
+            # __enter__'s error path does: an interrupt raised out of wait()
+            # (e.g. KeyboardInterrupt) must still close the session rather than
+            # leave cap() callable past the block with the artifacts staged in
+            # PrecompileContext and the optimize context leaking to process exit.
+            with self._state:
+                # _closing marks a drain in progress, and this one is done.
                 self._closing = False
-                self._state.notify_all()
-                raise
-            self._closing = False
-            # The drain is what makes the last compile's outcome readable, so the
-            # recorded variants are final from here on.
-            self._settle_pending()
-            entered = self._entered
-            self._entered = False
-            self._compiled = None
-        if entered:
-            try:
-                self._take_backend_artifacts()
-            except BaseException as teardown:
-                # Recorded, never raised: a teardown failure must not replace
-                # the exception the caller's block is already propagating, and
-                # the capture errors are what a render gates on.
-                self._record_capture_error(teardown)
-            finally:
-                self._release()
-                self._finished = True
-                with self._state:
-                    self._state.notify_all()
-        self._recorded_exception_keys.clear()
+                # The drain is what makes the last compile's outcome readable,
+                # so the recorded variants are final from here on.
+                self._settle_pending()
+                entered = self._entered
+                self._entered = False
+                self._compiled = None
+            if entered:
+                try:
+                    self._take_backend_artifacts()
+                except BaseException as teardown:
+                    # Recorded, never raised: a teardown failure must not
+                    # replace the exception the caller's block is already
+                    # propagating, and the capture errors are what a render
+                    # gates on.
+                    self._record_capture_error(teardown)
+                finally:
+                    self._release()
+                    self._finished = True
+                    with self._state:
+                        self._state.notify_all()
+            self._recorded_exception_keys.clear()
         if self._invariants_path is None:
             return
         if exc[0] is None:
@@ -2809,12 +2894,16 @@ def precompile_capture(
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
 
-    ``recompile_limit`` defaults well above Dynamo's usual 8 because a
-    precompile deliberately wants one compiled variant per condition, whereas
-    the normal limit exists to catch runaway recompilation. Nothing raises the
-    ambient ``accumulated_recompile_limit`` (256), which Dynamo checks first and
-    counts across every isolated region on the code object, so that ceiling --
-    not this argument -- is the effective cap above 256 variants.
+    ``recompile_limit`` raises Dynamo's usual 8 because a precompile
+    deliberately wants one compiled variant per condition, whereas the normal
+    limit exists to catch runaway recompilation. Nothing raises the ambient
+    ``accumulated_recompile_limit`` (256), which Dynamo checks first and counts
+    across every isolated region on the code object, so it is the ceiling
+    whatever is passed here, and the default is that ceiling rather than a raise
+    above it. Reaching either cap does not refuse the call -- Dynamo runs the
+    frame eagerly from then on -- and the capture records the truncation as a
+    capture error, so an artifact holding fewer variants than were exercised
+    says so.
 
     The capture is caller-driven: enter the session to get a callable, invoke it
     exactly as you would ``fn`` inside the ``with`` body, and the calls fold into
