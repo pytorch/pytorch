@@ -1942,6 +1942,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _offending_value_path(state, lock),
         )
 
+    def test_unpicklable_value_outside_both_scopes_is_named(self):
+        # What gets pickled is `state`; the two scopes are a handful of objects
+        # off it. A real capture failed on a lock held by a compiler internal
+        # reachable from the guards, not from either scope, so preserving the
+        # scopes perfectly still found nothing. The walk has to start where the
+        # pickler starts.
+        from torch._dynamo.guards import _offending_value_path
+        from torch._guards import Guard, GuardsSet
+
+        class _Node:  # hashable, unlike SimpleNamespace, so a set can hold it
+            pass
+
+        internal = _Node()
+        internal.lock = threading.RLock()
+        graph = types.SimpleNamespace(local_scope={"x": _Node()}, global_scope={})
+        # The real shape: a GuardsSet over an OrderedSet of slotted Guard
+        # dataclasses whose create_fn is a partial -- a list, then slots, then
+        # partial arguments, none of which a __dict__ walk sees.
+        graph._guards = GuardsSet()
+        guard = Guard(LocalSource("x"), functools.partial(lambda *a: None, internal))
+        graph._guards.inner.add(guard)
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "list(state.output_graph._guards.inner)[0].create_fn.args[0].lock",
+            _offending_value_path(state, internal.lock),
+        )
+        # Reachable both ways: the short, readable scope path still wins, so
+        # rooting at state does not make the common report worse.
+        shared = threading.RLock()
+        graph.local_scope["x"].it = shared
+        guard.guard_types = [shared]
+        self.assertIn("local_scope['x'].it", _offending_value_path(state, shared))
+        # A module in the state pickles by name, so the walk does not enter it.
+        graph.local_scope["mod"] = threading
+        self.assertEqual(_offending_value_path(state, threading.RLock), "")
+
     def test_offending_value_path_is_found_by_identity(self):
         from torch._dynamo.guards import _offending_value_path
 
@@ -2017,6 +2053,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             PackageError, r"mid-iteration\n  reached via: local_scope\['bad'\]$"
         ):
             pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_a_deep_scope_value_is_named_despite_a_wide_state(self):
+        # The scopes get a budget of their own: a wide container directly on
+        # the state used to consume the shared pool before a deep scope value
+        # was reached, and the report came back empty.
+        from torch._dynamo.guards import _offending_value_path
+
+        holder = types.SimpleNamespace(
+            a=types.SimpleNamespace(b=types.SimpleNamespace(lock=threading.Lock()))
+        )
+        graph = types.SimpleNamespace(local_scope={"h": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph, big=[0] * 30000)
+        self.assertEqual(
+            _offending_value_path(state, holder.a.b.lock),
+            "\n  reached via: local_scope['h'].a.b.lock",
+        )
+
+    def test_a_guards_only_value_is_named_despite_a_wide_scope(self):
+        # The converse: pass two must not be charged for the scope dicts pass
+        # one already covered, or a wide scope starves the guards subtree.
+        from torch._dynamo.guards import _offending_value_path
+        from torch._guards import Guard, GuardsSet
+
+        class _Node:
+            pass
+
+        internal = _Node()
+        internal.lock = threading.RLock()
+        graph = types.SimpleNamespace(
+            local_scope={f"k{i}": i for i in range(30000)}, global_scope={}
+        )
+        graph._guards = GuardsSet()
+        guard = Guard(LocalSource("x"), functools.partial(lambda *a: None, internal))
+        graph._guards.inner.add(guard)
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn("._guards", _offending_value_path(state, internal.lock))
 
     def test_offending_value_path_never_masks_the_real_error(self):
         # It is a diagnostic appended to an error already being raised, so any
