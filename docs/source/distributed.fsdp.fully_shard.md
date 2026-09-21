@@ -209,29 +209,3 @@ The frontend API is `fully_shard` that can be called on a `module`:
 .. autoclass:: DataParallelMeshDims
     :members:
 ```
-
-## Experimental APIs
-
-```{eval-rst}
-.. automodule:: torch.distributed.fsdp.experimental
-```
-
-FSDP uses optimized copies for supported `Shard(1)` and higher-dimension shards
-by default. To copy through intermediate buffers, register either or both
-callbacks after applying `fully_shard`. Each direction can be selected
-independently, and groups may also contain `Shard(0)` parameters:
-
-```python
-from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_intermediate_copy,
-    reduce_scatter_input_fn_with_intermediate_copy,
-)
-
-model.set_all_gather_output_fn(all_gather_output_fn_with_intermediate_copy)
-model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_intermediate_copy)
-```
-
-```{eval-rst}
-.. autofunction:: torch.distributed.fsdp.experimental.all_gather_output_fn_with_intermediate_copy
-.. autofunction:: torch.distributed.fsdp.experimental.reduce_scatter_input_fn_with_intermediate_copy
-```
