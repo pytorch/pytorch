@@ -131,9 +131,10 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
 def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype) -> None:
     precision = torch.backends.cuda.matmul.fp32_precision
     if precision == "none":
-        precision = (
-            "ieee" if torch.get_float32_matmul_precision() == "highest" else "tf32"
-        )
+        # Unset at every level of the per-backend hierarchy; the legacy
+        # default is "highest". Do not fall back to the legacy getter,
+        # which throws under mixed legacy/new API state.
+        precision = "ieee"
     if dtype == torch.float32 and precision == "bfx9":
         # See Note [BF16x9 precision] in torch/_inductor/utils.py.
         warning_once(

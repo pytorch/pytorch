@@ -368,8 +368,8 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
-            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
-            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass.operators
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass.operators
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
@@ -423,6 +423,8 @@ class TestPublicBindings(TestCase):
             # aren't available in CPU-only CI. Registrations are no-ops when the
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
+                "torch._native.cutedsl.",
+                "torch._native.ops.reductions.traits",
                 "torch._native.ops.foreach_mm.",
                 "torch._native.ops.polar.",
                 "torch._native.ops.reductions.inner_tree_kernel",
