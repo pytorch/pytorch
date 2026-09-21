@@ -2273,10 +2273,9 @@ not that the remote application consumed or acknowledged the data. Asyncio calle
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
 until close, and tensors must not be resized or have their storage replaced.
 
-NIXL submits transfers directly and returns native-handle-backed Work objects;
-there is no Python executor or hidden event-loop thread. ``wait`` polls native
-completion synchronously. ``wait_all``, ``read_async``, and ``write_async`` poll
-cooperatively with asyncio. Each live transfer owns a distinct request handle.
+NIXL transfers return Work objects that retain their request handles until
+completion. ``wait_all``, ``read_async``, and ``write_async`` await Work futures.
+The NIXL adapter resolves those futures by checking native transfer status. Each live transfer owns a distinct request handle.
 Independent requests may overlap; explicitly wait before issuing dependent or
 overlapping reads/writes. Completion ordering is not implicit.
 
@@ -2291,7 +2290,8 @@ exposed memory; close only drains locally submitted operations.
 ``NIXLTransport.close_async`` awaits pending transfers before native cleanup.
 A timed-out or cancelled close rejects new work and retains resources; retry
 close to finish cleanup. Forgotten pending work may retain resources indefinitely:
-there is no background Python reaper. Polling ``is_completed`` also drives cleanup.
+call ``wait``, ``wait_all``, or ``close`` to complete cleanup.
+Checking ``is_completed`` also releases completed requests.
 For pending NIXL work, ``get_future`` requires a running asyncio loop; the loop
 must remain running to drive that future. Completed work needs no event loop.
 
