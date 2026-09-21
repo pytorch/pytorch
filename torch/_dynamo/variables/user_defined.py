@@ -1258,6 +1258,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 hints=graph_break_hints.SUPPORTABLE,
             )
 
+        # Unbound C method call on a builtin iterator type: the pure-Python
+        # Lib/operator.py::length_hint resolves `type(obj).__length_hint__` and
+        # calls it with the instance.  The class VT has no per-type method table,
+        # while the instance VT owns the slot implementation.
+        #
+        # `Base.method(instance)` runs Base's C slot, so only an instance whose
+        # type is exactly that class may reach here: obj.call_method resolves
+        # from type(obj) and would run a subclass override instead.
+        if name == "__length_hint__" and args:
+            descriptor = inspect.getattr_static(self.value, name, None)
+            if (
+                isinstance(descriptor, types.MethodDescriptorType)
+                and descriptor.__objclass__ is self.value
+            ):
+                try:
+                    obj_type = args[0].python_type()
+                except NotImplementedError:
+                    obj_type = None
+                if obj_type is self.value:
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
         # Dispatch dunder methods defined on the metaclass (e.g., EnumType.__contains__).
         # In Python, `x in Color` calls `type(Color).__contains__(Color, x)`.
         metaclass = type(self.value)
@@ -1641,7 +1662,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
-            from .lists import ListVariable
+            from .lists import ListVariable, SizeVariable
+
+            if (
+                self.value is torch.Tensor
+                and len(args) == 1
+                and isinstance(args[0], SizeVariable)
+                and "size" not in kwargs
+            ):
+                # FX normalizes torch.Size to tuple; keep the size overload explicit.
+                kwargs = {**kwargs, "size": args[0]}
+                args = []
 
             if (
                 np
@@ -1855,6 +1886,12 @@ def call_random_fn(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     from .builder import VariableBuilder
+
+    random_obj = getattr(fn, "__self__", None)
+    if random_obj in tx.output.side_effects:
+        random_var = tx.output.side_effects[random_obj]
+        if isinstance(random_var, variables.RandomVariable):
+            return random_var.call_method(tx, fn.__name__, args, kwargs)
 
     args = [x.as_python_constant() for x in args]
     kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
@@ -3059,6 +3096,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         name: VariableTracker,
         value: VariableTracker,
     ) -> VariableTracker:
+        from ..side_effects import SideEffects
+
         name_str = ""
         try:
             name_str = name.as_python_constant()
@@ -3070,9 +3109,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 hints=["Ensure that the name is a string."],
             )
         if not tx.output.side_effects.is_attribute_mutation(self):
-            raise AssertionError(
-                "Attempted setattr on a user-defined object that does not have "
-                "an AttributeMutation mutation_type"
+            if (
+                self.source is not None
+                and SideEffects.cls_supports_mutation_side_effects(type(self.value))
+            ):
+                unimplemented(
+                    gb_type="Attribute mutation on a sourced but untracked user-defined object",
+                    context=f"object={self}, name={name_str}, value={value}",
+                    explanation="Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                    log_warning=True,
+                )
+            unimplemented(
+                gb_type="Attribute mutation on an untracked user-defined object",
+                context=f"object={self}, name={name_str}, value={value}",
+                explanation=(
+                    "Dynamo cannot safely apply this attribute mutation because "
+                    "the object is not tracked for mutation."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
 
         if (

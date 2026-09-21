@@ -22,8 +22,6 @@ from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
-    get_scaling_options,
-    get_tile_size,
     mm_template,
     persistent_mm_template,
     persistent_tdm_mm_template,
@@ -3615,10 +3613,7 @@ class CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic(
 class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
     ScaledTMAConfigMixin, CUDAConfigHeuristic
 ):
-    """
-    Scaled TMA template heuristic for CUDA:
-        main loop scaling variants (BlockWise1x128, BlockWise1x32, BlockWise1x16, BlockWise128x128)
-    """
+    """Scaled TMA configurations for 128-element main-loop scale blocks."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -3634,14 +3629,9 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         """
         Generate main loop scaling kernel inputs.
         """
-        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
-        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
-
-        scale_option_a, scale_option_b = get_scaling_options(
-            mat_a, mat_b, scale_a_size, scale_b_size
-        )
-        tile_size_a = get_tile_size(scale_option_a)
-        tile_size_b = get_tile_size(scale_option_b)
+        # Both main-loop recipes scale 128 elements along K. Inferring them
+        # again from shapes misclassifies single-K-block inputs as rowwise.
+        tile_size_a = tile_size_b = 128
 
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3652,8 +3642,8 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
             # Add scaling-specific options for main loop scaling variants
 
             # Inductor templates require compile-time constants passed in as tl.constexpr values.
-            # In cases in which the block size (BLOCK_*) is smaller than the tile size (128, 32, 16),
-            # scales must be broadcasted to BLOCK_* (rather than to a tile_sizextile_size chunk).
+            # When BLOCK_* is smaller than 128, broadcast scales to BLOCK_*
+            # rather than to a full 128x128 tile.
 
             template_kwargs["TILE_SIZE_A"] = tile_size_a
             template_kwargs["TILE_SIZE_B"] = tile_size_b
