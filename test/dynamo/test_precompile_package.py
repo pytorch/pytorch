@@ -1718,41 +1718,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(verdicts["__nested_frame_values"])
         self.assertFalse(any(verdicts["__nested_frame_values"].values()))
 
-    def test_module_namespaces_trust_only_bindings_config_cannot_repoint(self):
-        mypkg = types.ModuleType("mypkg")
-        layers = types.ModuleType("mypkg.layers")
-        impl_b = types.ModuleType("mypkg.impl_b")
-        deep = types.ModuleType("mypkg.impl_b.deep")
-        entries = [
-            _entry(GlobalSource("mypkg"), mypkg),  # import mypkg
-            _entry(AttrSource(GlobalSource("mypkg"), "layers"), layers),  # import mypkg.layers
-            _entry(AttrSource(GlobalSource("mypkg"), "impl"), impl_b),  # from . import impl_b as impl
-            _entry(GlobalSource("impl"), impl_b),  # import mypkg.impl_b as impl
-            _entry(AttrSource(GlobalSource("impl"), "deep"), deep),  # name owned by the parent, but the parent is untrusted
-            _entry(AttrSource(GlobalSource("other"), "sub"), layers),  # parent never guarded
-            _entry(GlobalSource("F"), F),  # import torch.nn.functional as F
-            _entry(AttrSource(GlobalSource("torch"), "_dynamo"), torch._dynamo),  # library, parent or not
-            _entry(GlobalSource("__import_mypkg_dot_layers"), layers),  # Dynamo's alias for an inlined function's globals
-            _entry(AttrSource(GlobalSource("__import_torch"), "Tensor"), torch.Tensor),  # alias without a module-valued guard
-            _entry(GlobalSource("config"), torch._dynamo.config),
-            _entry(AttrSource(GlobalSource("__import_torch_dot__dynamo_dot_config"), "verbose"), False),  # from torch._dynamo.config import verbose, inlined: recovered from the alias, still a config module
-        ]  # fmt: skip
-        with mock.patch.dict(sys.modules, {"mypkg.layers": layers}):
-            namespaces = precompile_package._module_namespaces(entries)
-        self.assertEqual(
-            set(namespaces),
-            {
-                "G['mypkg']",
-                "G['mypkg'].layers",
-                "G['F']",
-                "G['torch']._dynamo",
-                "G['__import_mypkg_dot_layers']",
-                "G['__import_torch']",
-            },
-        )
-        self.assertIs(namespaces["G['__import_torch']"], torch)
-        self.assertIs(namespaces["G['mypkg'].layers"], layers)
-
 
 instantiate_parametrized_tests(TestPrecompilePackage)
 

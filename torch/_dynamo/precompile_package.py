@@ -34,18 +34,9 @@ import sysconfig
 import types
 from typing import TYPE_CHECKING
 
-from torch._guards import ChainedSource
-from torch.utils._config_module import ConfigModule
-
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .guards import CheckFunctionManager
-from .source import (
-    AttrSource,
-    DictGetItemSource,
-    GetItemSource,
-    GlobalSource,
-    LocalSource,
-)
+from .source import DictGetItemSource, GetItemSource, GlobalSource, LocalSource
 
 
 if TYPE_CHECKING:
@@ -129,10 +120,6 @@ def _owning_module(value: object) -> str | None:
         return value.__name__
     owner = getattr(value, "__module__", None)
     return owner if isinstance(owner, str) else None
-
-
-def _source_root(source: Source) -> Source:
-    return source.get_base() if isinstance(source, ChainedSource) else source
 
 
 # The list of Dynamo-generated resume functions every generated resume function
@@ -625,89 +612,6 @@ def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
         return None
     tail = global_name[len(_IMPORT_ALIAS_PREFIX) :]
     return sys.modules.get(tail.replace("_dot_", "."))
-
-
-def _module_namespaces(
-    entries: Sequence[GuardFilterEntry],
-) -> dict[str, types.ModuleType]:
-    """
-    Sources holding a module whose binding config cannot repoint, mapped to the
-    module itself. Dynamo guards every module it walks through, so the path
-    down to ``F.gelu`` is guarded module by module, which is what lets an
-    attribute read be recognised as coming off a namespace rather than off an
-    object a config could have swapped. The module comes back with the name
-    because whether a read off a namespace is safe depends on which module it
-    is -- see ``_is_risky_drop``.
-
-    TRUSTED is the load-bearing half and is deliberately narrow. A module is
-    that if torch or the stdlib owns it, if it is bound under its own name --
-    ``import mypkg``, and the ``__import_x`` alias Dynamo installs to reach an
-    inlined function's own globals -- or if it is an attribute of a trusted
-    module under a name that module already owns: its own ``__name__`` (a plain
-    ``import own_sub`` inside the parent) or the parent's plus the attribute
-    (``from . import sub``, and ``import mypkg.layers``, which Dynamo guards as
-    ``G['mypkg'].layers``). An ALIASED user module is none of those:
-    ``if flag: import impl_b as impl`` picks what ``impl.op`` resolves to per
-    machine, and so does the same alias spelled ``from . import impl_b as
-    impl`` in a package __init__. Inheriting the parent's trust without
-    checking the name is what let that shape through before.
-
-    Library ownership is trusted under ANY binding, ``import torch.nn.functional
-    as F`` included; the price, taken deliberately because flagging ``F`` would
-    flag every model, is that an alias config picks between two torch modules
-    is waived too (see ``_is_risky_drop``'s KNOWN GAP). A config module is the
-    one namespace whose bindings config chooses by definition, so it is never
-    trusted, whoever owns it and however it is reached (a recovered
-    ``__import_x`` alias included). Keys are source names, and the consumer
-    looks a read's ``source.base.name`` up exactly, never by prefix.
-    """
-    modules = {
-        e.orig_guard.originating_source.name: (e.orig_guard.originating_source, e.value)
-        for e in entries
-        if isinstance(e.value, types.ModuleType)
-        and isinstance(_source_root(e.orig_guard.originating_source), GlobalSource)
-    }
-    # Dynamo guards the attributes it reads off an import alias but never the
-    # bare alias, so a real model produces G['__import_torch'].Tensor with no
-    # module-valued entry for G['__import_torch'] to anchor it. The alias name
-    # encodes its module, so recover it rather than treating torch.Tensor as a
-    # config-swappable slot.
-    for e in entries:
-        root = _source_root(e.orig_guard.originating_source)
-        if isinstance(root, GlobalSource) and root.name not in modules:
-            aliased = _dynamo_alias_module(root.global_name)
-            if aliased is not None:
-                modules[root.name] = (root, aliased)
-    trusted: dict[str, bool] = {}
-
-    def is_trusted(name: str) -> bool:
-        if name in trusted:
-            return trusted[name]
-        found = modules.get(name)
-        ok = False
-        if found is not None:
-            source, module = found
-            if isinstance(module, ConfigModule):
-                ok = False
-            elif _is_library_module(module.__name__):
-                ok = True
-            elif isinstance(source, GlobalSource):
-                ok = (
-                    source.global_name == module.__name__
-                    or _dynamo_alias_module(source.global_name) is module
-                )
-            elif isinstance(source, AttrSource):
-                outer = modules.get(source.base.name)
-                ok = (
-                    outer is not None
-                    and is_trusted(source.base.name)
-                    and module.__name__
-                    in (source.member, f"{outer[1].__name__}.{source.member}")
-                )
-        trusted[name] = ok
-        return ok
-
-    return {name: module for name, (_, module) in modules.items() if is_trusted(name)}
 
 
 def _reads_a_builtin(source: Source, value: object) -> bool:
