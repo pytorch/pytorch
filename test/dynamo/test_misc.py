@@ -115,6 +115,10 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
 
 
+if IS_FBCODE:
+    from caffe2.test.dynamo import _pybind11_enum_test
+
+
 pytree_modules = {
     "python": python_pytree,
 }
@@ -251,20 +255,38 @@ class MiscTests(torch._inductor.test_case.TestCase):
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
 
-    def test_pybind11_enum_conversion(self):
-        # ProfilerState stands in for any py::enum_: like an enum from a
-        # user-built extension it is a pybind11_object whose __int__/__index__
-        # are pybind11 instancemethods, which is what used to recurse forever.
-        E = torch._C._profiler.ProfilerState
-        e = E.Disabled
+    @torch.testing._internal.common_utils.scoped_load_inline
+    def test_pybind11_enum_conversion(self, load_inline):
+        if IS_FBCODE:
+            # fbcode's Python runtime lacks the shared libs load_inline needs, so
+            # we use the Buck-prebuilt fixture instead of the load_inline argument.
+            mod = _pybind11_enum_test
+        else:
+            cpp_source = """
+            #include <torch/extension.h>
+
+            enum class E { A = 0, B = 1 };
+
+            PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+                py::enum_<E>(m, "E")
+                    .value("A", E::A)
+                    .value("B", E::B);
+            }
+            """
+            mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+        e = mod.E.A
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
         )
         self.assertEqual(
             torch.compile(lambda x: float(x), backend="eager", fullgraph=True)(e), 0.0
         )
-        index_fn = torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)
-        self.assertEqual(index_fn(E.CPU), 20)
+        self.assertEqual(
+            torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
+                mod.E.B
+            ),
+            20,
+        )
 
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
