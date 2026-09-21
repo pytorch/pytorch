@@ -225,9 +225,13 @@ it.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import logging
+import os
+import stat
+import uuid
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
@@ -421,6 +425,23 @@ def _reject_unsupported_marks(user_flat: list[object]) -> None:
                 "precompile cannot honor (it produces a single artifact, not per-value "
                 "specializations). Remove specialize_on."
             )
+
+
+def _unbacked_guard_error(e: BaseException) -> PrecompileError:
+    """The capture-time error for a guard on a mark_unbacked dim, shared by the capture paths.
+
+    A mark_unbacked dim is captured as an unbacked symint (no hint), so a computation that
+    needs to guard on / specialize its size (a shape-dependent branch, a reshape that pins
+    it) cannot be captured. Unbacked dims cannot be guarded, so rather than bake a
+    silently-wrong artifact, fail here.
+    """
+    return PrecompileError(
+        "precompile: fn needs to guard on a dim marked with mark_unbacked "
+        "(it branches on or specializes that size), which is not allowed for "
+        "an unbacked dynamic dim. Do not mark that dim (capture it static), "
+        "or restructure fn to avoid the size-dependent operation. Underlying: "
+        f"{(str(e).splitlines() or [''])[0]}"
+    )
 
 
 def _read_unbacked_marks(user_flat: list[object]) -> list[dict[int, _MarkSpec]]:
@@ -970,17 +991,7 @@ def _capture(
                     tracing_mode=tracing_mode,
                 )(flat_args)
             except GuardOnDataDependentSymNode as e:
-                # A mark_unbacked dim was captured as an unbacked symint (no hint), but
-                # the computation needs to guard on / specialize its size (e.g. a
-                # shape-dependent branch or a reshape that pins it). Unbacked dims cannot
-                # be guarded, so rather than bake a silently-wrong artifact, fail here.
-                raise PrecompileError(
-                    "precompile: fn needs to guard on a dim marked with mark_unbacked "
-                    "(it branches on or specializes that size), which is not allowed for "
-                    "an unbacked dynamic dim. Do not mark that dim (capture it static), "
-                    "or restructure fn to avoid the size-dependent operation. Underlying: "
-                    f"{str(e).splitlines()[0]}"
-                ) from e
+                raise _unbacked_guard_error(e) from e
     finally:
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
@@ -1181,33 +1192,20 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     executing it (exec'ing the inlined Inductor output would JIT the kernels, the
     very work the cache exists to skip).
 
-    python_code is the single source of truth: ``_build_metadata_section`` emits the
-    constants below as top-level literal assignments, so an AST walk + literal_eval
-    recovers them safely. The cache then only needs to carry the compiled artifact.
+    python_code is the single source of truth: the metadata builders emit the constants
+    below as top-level literal assignments, so an AST walk + literal_eval recovers them
+    safely. The cache then only needs to carry the compiled artifact.
+
+    The required set follows TRACER: absent (artifacts predating the dynamo tracer) or
+    anything but "dynamo" means the make_fx set the inlined driver reads. A dynamo
+    artifact instead carries the multi-graph driver's blobs (_FRAMES and _BACKENDS, or
+    _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once SERVING_MODE is "installed"), the
+    readable frame report beside them and the two versions that lock them,
+    _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION for the
+    pickled guard state.
     """
     import ast
 
-    wanted = {
-        "BACKEND",
-        "MODULE_POSITIONS",
-        "NUM_POSITIONAL_ARGS",
-        "PARAM_NAMES",
-        "BUFFER_NAMES",
-        "PARAM_SHAPES",
-        "BUFFER_SHAPES",
-        "PARAM_DTYPES",
-        "BUFFER_DTYPES",
-        "PARAM_DEVICES",
-        "BUFFER_DEVICES",
-        "GRAD_PARAM_INDICES",
-        "IN_SPEC",
-        "OUT_SPEC",
-        "USER_INPUT_SHAPES",
-        "USER_INPUT_DTYPES",
-        "USER_INPUT_DEVICES",
-        "USER_INPUT_BOUNDS",
-    }
-    found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -1215,31 +1213,95 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "python_code is not valid Python; it does not look like a "
             "torch.compiler.precompile artifact."
         ) from e
+    # The last top-level assignment to a name wins, as it would under exec, so the
+    # set selection below and the reported values read the same assignment.
+    assigns: dict[str, ast.expr] = {}
     for node in tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            continue
-        if target.id in wanted:
-            found[target.id] = ast.literal_eval(node.value)
-        else:
-            # Not a metadata name we consume (the driver section emits only
-            # function defs today, but a future artifact revision could add a
-            # driver-internal top-level assignment). Skipped by design, but log
-            # it at debug so a malformed / renamed artifact is diagnosable
-            # rather than silently dropped.
-            log.debug(
-                "precompile: ignoring unrecognized top-level assignment %r while "
-                "parsing artifact calling-convention metadata",
-                target.id,
-            )
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            assigns[node.targets[0].id] = node.value
+
+    def literal(name: str) -> object:
+        try:
+            return ast.literal_eval(assigns[name])
+        except (ValueError, TypeError) as e:
+            raise PrecompileError(
+                f"python_code {name!r} calling-convention metadata is malformed; "
+                "it must be a Python literal."
+            ) from e
+
+    tracer = literal("TRACER") if "TRACER" in assigns else None
+    if tracer == "dynamo":
+        wanted = {
+            "BACKEND",
+            "FN_NAME",
+            "FRAMES",
+            "DROPPED_GUARDS",
+            "RISKY_DROPPED_GUARDS",
+            "WONT_GENERALIZE",
+            "_FRAMES",
+            "_BACKENDS",
+            "_DYNAMO_PYTHON_VERSION",
+            "_ENTRY_BINDING",
+            "TORCH_VERSION",
+        }
+        mode = literal("SERVING_MODE") if "SERVING_MODE" in assigns else None
+        if mode == "installed":
+            wanted -= {"_FRAMES", "_BACKENDS"}
+            wanted |= {"_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL"}
+    else:
+        wanted = {
+            "BACKEND",
+            "MODULE_POSITIONS",
+            "NUM_POSITIONAL_ARGS",
+            "PARAM_NAMES",
+            "BUFFER_NAMES",
+            "PARAM_SHAPES",
+            "BUFFER_SHAPES",
+            "PARAM_DTYPES",
+            "BUFFER_DTYPES",
+            "PARAM_DEVICES",
+            "BUFFER_DEVICES",
+            "GRAD_PARAM_INDICES",
+            "IN_SPEC",
+            "OUT_SPEC",
+            "USER_INPUT_SHAPES",
+            "USER_INPUT_DTYPES",
+            "USER_INPUT_DEVICES",
+            "USER_INPUT_BOUNDS",
+        }
+    # Parsed when present but never required, so older artifacts load unchanged:
+    # TRACER and SERVING_MODE already selected the required set above, and
+    # the guard-audit sections come back as data.
+    optional = {
+        "TRACER",
+        "SERVING_MODE",
+        "POLICY_DROPPED_GUARDS",
+        "DROPPED_GUARD_CODE",
+    }
+    found = {name: literal(name) for name in assigns if name in wanted | optional}
+    for name in assigns.keys() - wanted - optional - {"forward"}:
+        # Not a metadata name we consume (``forward = ...`` is the multi-graph
+        # driver's own binding, emitted later in this stack). Skipped by design,
+        # but log it at debug so a malformed / renamed artifact is diagnosable
+        # rather than silently dropped.
+        log.debug(
+            "precompile: ignoring unrecognized top-level assignment %r while "
+            "parsing artifact calling-convention metadata",
+            name,
+        )
     missing = wanted - found.keys()
     if missing:
         raise PrecompileError(
             f"python_code is missing calling-convention metadata {sorted(missing)}; "
             "it does not look like a torch.compiler.precompile artifact."
         )
+    # Artifacts predating the installed serving mode carry no SERVING_MODE, and
+    # they were all standalone.
+    found.setdefault("SERVING_MODE", "standalone")
     return found
 
 
@@ -1680,6 +1742,275 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
+
+
+# The os.link failures that mean "this filesystem does not do hard links" (a
+# FAT/exFAT mount, a container overlay, a cross-device target), as opposed to one
+# about the path itself, which must not be papered over with a move. EPERM is in the
+# set only for a source the CALLER owns (the ownership test at its use site).
+_NO_HARD_LINK_ERRNOS = frozenset(
+    {errno.EPERM, errno.EOPNOTSUPP, errno.EMLINK, errno.EXDEV}
+)
+
+
+def _same_inode(
+    path: str | os.PathLike[str], other: str | os.PathLike[str] | os.stat_result
+) -> bool:
+    """True when ``path`` resolves now to ``other`` (a path or a recorded stat).
+
+    False whenever either st_ino is 0: an inode number identifies a file only if it is
+    non-zero (a FAT/exFAT mount, CIFS mounted noserverino, Windows without
+    FILE_ID_INFO), and every name the writer compares lives in one directory, so
+    st_dev alone would call two DIFFERENT files the same one. Unknown identity must
+    never read as "same file".
+    """
+    try:
+        st = other if isinstance(other, os.stat_result) else os.stat(other)
+        here = os.stat(path)
+        if not st.st_ino or not here.st_ino:
+            return False
+        return os.path.samestat(here, st)
+    except OSError:
+        return False
+
+
+def _unlink_quietly(path: str | os.PathLike[str]) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _write_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    python_code: str,
+    cache: bytes,
+) -> None:
+    """Write the matched (python_code, cache) pair, creating parent directories.
+
+    Each half is written beside its target and renamed into place, so neither named file
+    is ever truncated or half-written. The two renames are not one atomic step: the
+    previous source is hard-linked to a backup first and put back if the second rename
+    raises, so a Python exception (a full disk, a permission error) leaves the previous
+    pair intact. Without hard links the previous source is MOVED aside instead, so an
+    interrupt before the undo's probes have run leaves the artifact NAME empty with that
+    source only in the ``.bak``, unreported and one rename from recovered. Which undo
+    runs, and whether it is reported, is read off the DISK, not from flags (the comment
+    on the undo has the reasoning). Process death between the renames is not covered, nor
+    a reader or a second writer racing them: that can leave one source beside the other's
+    cache, which ``load`` refuses on the cache's sha256, and can cost the previous source.
+    Nor is a SYMLINKED artifact name: ``os.link`` follows it, so the backup holds the
+    link's target while ``os.replace`` replaces the link itself, and an undo therefore
+    restores a regular file where the symlink stood.
+    The parent directory is fsync'd after, best effort.
+    """
+    written = []
+    new_stats: list[os.stat_result] = []
+    try:
+        for path, payload in ((artifact_path, python_code), (cache_path, cache)):
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # A unique name per writer: two captures targeting one path must not share a
+            # scratch file. Beside the target, so the rename stays on one filesystem.
+            tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            written.append((tmp, path))
+            # The temp is CREATED with the mode of the file its rename replaces: chmod'ing
+            # it down only after the write would publish the whole new payload at the umask
+            # mode, in a directory the caller chose. Permission bits only: setuid/setgid on a
+            # new inode owned by the WRITING user name a different principal. O_BINARY:
+            # os.open on Windows translates the newlines code_hash covers.
+            try:
+                mode: int | None = stat.S_IMODE(os.stat(path).st_mode) & 0o777
+            except OSError:
+                mode = None
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+            perm = 0o666 if mode is None else mode
+            # opener=, not a bare os.open: an fd is unowned until open() wraps it.
+            with open(tmp, "wb", opener=lambda p, _: os.open(p, flags, perm)) as f:
+                f.write(payload.encode() if isinstance(payload, str) else payload)
+                f.flush()
+                os.fsync(f.fileno())
+            if mode is not None:
+                # O_CREAT's mode is umask-masked, so the exact bits need this too; best
+                # effort, a filesystem that drops modes must not fail the write.
+                try:
+                    os.chmod(tmp, mode)
+                except OSError:
+                    pass
+            # Name the bytes about to be renamed in by inode, for the undo below.
+            new_stats.append(os.stat(tmp))
+    except BaseException:
+        for tmp, _ in written:
+            _unlink_quietly(tmp)
+        raise
+    (artifact_tmp, _), (cache_tmp, _) = written
+    backup = f"{os.fspath(artifact_path)}.{os.getpid()}.{uuid.uuid4().hex}.bak"
+    try:
+        # A hard link, not a move: the named path must resolve to the previous or the new
+        # source at every instant.
+        try:
+            os.link(artifact_path, backup)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            # No hard links here: fall back to moving aside, only for the errnos that mean
+            # unsupported and only for a regular file (os.link on a DIRECTORY also fails EPERM).
+            if e.errno not in _NO_HARD_LINK_ERRNOS or not os.path.isfile(artifact_path):
+                raise
+            # EPERM is also what fs.protected_hardlinks=1 (a Linux default) raises for a
+            # source the caller does not OWN, and chattr +i for one it cannot write -- on a
+            # filesystem that does have hard links. Moving such a file out from under its
+            # name is what the fallback must not do to someone else's artifact, so on POSIX
+            # that errno means "no hard links" only for a source the caller owns.
+            if (
+                e.errno == errno.EPERM
+                and hasattr(os, "geteuid")
+                and os.stat(artifact_path).st_uid != os.geteuid()
+            ):
+                raise
+            os.replace(artifact_path, backup)
+        os.replace(artifact_tmp, artifact_path)
+        os.replace(cache_tmp, cache_path)
+        # Any backup taken above is superseded; inside the try, so an interrupt here is handled.
+        _unlink_quietly(backup)
+    except BaseException:
+        # Put the previous source back (or remove the new one on a first write) so the named
+        # files stay loadable, best effort; then drop every temp and re-raise. Every predicate
+        # that CHOOSES the undo is read off the DISK, never from a flag set after its own
+        # syscall, and ``probed`` says all four reads RAN: an interrupt among them leaves the
+        # rest half-set, so neither the report nor the drop below may consult one. ``kept``:
+        # the backup name carries this call's pid and a uuid, so its existing is this call's.
+        # ``complete`` (both names are this call's temps) means written even though this block
+        # ran; ``aside`` (a backup with the artifact NAME gone) is the move-aside fallback
+        # holding the previous source's only copy; ``landed`` says the FIRST rename happened.
+        # ``undone`` says the undo RETURNED, the finally's unlink safe under it.
+        complete = kept = landed = aside = probed = undone = False
+        try:
+            # Where st_ino is 0 no inode read can say whose source a name holds, so the
+            # temps stand in for the renames: os.replace CONSUMED the one it renamed, so a
+            # temp that is GONE is its rename having run. Only consulted there, since a
+            # temp says nothing about a SECOND writer repointing the name afterwards, which
+            # is what the inode read sees and what the restore below must not overwrite.
+            # Per HALF: the two names are independent arguments, so one can be on a
+            # filesystem with inodes and the other not.
+            blind_artifact = not new_stats[0].st_ino
+            blind_cache = not new_stats[1].st_ino
+            landed = _same_inode(artifact_path, new_stats[0]) or (
+                blind_artifact and not os.path.lexists(artifact_tmp)
+            )
+            complete = landed and (
+                _same_inode(cache_path, new_stats[1])
+                or (blind_cache and not os.path.lexists(cache_tmp))
+            )
+            kept = os.path.lexists(backup)
+            aside = kept and not os.path.lexists(artifact_path)
+            probed = True
+            try:
+                if complete or not (landed or kept):
+                    undone = True
+                elif kept and (landed or aside):
+                    os.replace(backup, artifact_path)
+                    undone = True
+                elif kept:
+                    # The artifact name is neither this call's new source nor gone, so it
+                    # cannot tell the previous source still under the hard link (a failed FIRST
+                    # rename) from one a second WRITER repointed here. Neither wants a restore:
+                    # the first already IS the previous pair, the second a THIRD, older source.
+                    undone = True
+                elif landed:
+                    # A first write, so there is no previous pair to restore: drop the new
+                    # source rather than leave it named with no cache beside it. An unlink, not
+                    # a rename: a rename needs a directory entry, which ENOSPC just exhausted.
+                    os.unlink(artifact_path)
+                    undone = True
+            except OSError:
+                pass
+        finally:
+            # Keyed on that same on-disk outcome: a report NAMES a file, so it fires only
+            # while that file is there and ``probed`` says the reads that chose it ran.
+            named = backup if kept else artifact_path
+            if probed:
+                drop_backup = kept
+            else:
+                # An interrupt among the reads never set ``kept``, so the drop reads the
+                # name itself and fires only while it resolves to the backup's inode.
+                drop_backup = _same_inode(artifact_path, backup)
+            if probed and not undone and os.path.lexists(named):
+                if kept:
+                    # Reached from both shapes the undo's rename serves, so the wording
+                    # names only what holds in both: the .bak, and the one rename back.
+                    log.warning(
+                        "precompile could not put the previous artifact back at %s; that "
+                        "previous source is kept at %s, and the pair does not load until "
+                        "that file is moved back over the first path (the cache at %s is "
+                        "the one that matches it).",
+                        os.fspath(artifact_path),
+                        backup,
+                        os.fspath(cache_path),
+                    )
+                else:
+                    log.warning(
+                        "precompile wrote the artifact at %s and then failed to write "
+                        "its cache at %s, and could not remove the artifact again; no "
+                        "cache beside it matches that file, so the pair does not load.",
+                        os.fspath(artifact_path),
+                        os.fspath(cache_path),
+                    )
+            elif drop_backup:
+                # Reached only where the named pair came out loadable, so the backup is not a
+                # copy anyone still needs: an undo rename consumed it, or nothing needed undoing
+                # because the previous source is still under its own name (a failed FIRST rename).
+                _unlink_quietly(backup)
+            for tmp, _ in written:
+                _unlink_quietly(tmp)
+        raise
+    parents = {os.path.dirname(os.fspath(path)) or "." for _, path in written}
+    # Durably record the renames: without an fsync of the containing directory a crash
+    # just after os.replace returns can still lose the new entry and resurrect the old.
+    for parent in parents:
+        try:
+            fd = os.open(parent, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            # Best effort like the os.open above, close included: by here both renames have
+            # returned, so an error out of either would fail an already loadable pair.
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _read_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+) -> tuple[str, bytes]:
+    r"""Read back a pair written by :func:`_write_artifact`.
+
+    Bytes, then decoded: the exact inverse of the byte-mode write, so a ``\r`` in
+    python_code survives the round trip instead of being translated to ``\n`` by a
+    text-mode read and failing the cache's code_hash. An ``OSError`` from either open (a
+    missing half, a path the filesystem cannot open) or a ``UnicodeDecodeError`` from the
+    decode (a readable file that is not the source half -- transposed arguments, say) is
+    a ``PrecompileError`` naming both paths, with the original as its ``__cause__``.
+    """
+    try:
+        with open(artifact_path, "rb") as f:
+            python_code = f.read().decode()
+        with open(cache_path, "rb") as f:
+            cache = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise PrecompileError(
+            f"precompile could not read the artifact pair (artifact_path="
+            f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
+        ) from e
+    return python_code, cache
 
 
 class _PrecompileApi:
