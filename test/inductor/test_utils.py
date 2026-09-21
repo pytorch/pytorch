@@ -913,6 +913,48 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.shape, (16, 32))
         self.assertTrue(t.is_cuda)
 
+    def test_ensure_nv_universal_gemm_available_fail_closed_on_import_error(self):
+        """ensure_nv_universal_gemm_available should fail closed (return False)
+        when cutlass.operators is locatable but fails to import or register FP4.
+        See https://github.com/pytorch/pytorch/issues/197463
+        """
+        from unittest.mock import MagicMock, patch
+
+        ensure_nv_universal_gemm_available.cache_clear()
+        try:
+            with (
+                patch("importlib.util.find_spec", return_value=MagicMock()),
+                patch(
+                    "torch._inductor.utils._ensure_fp4_dtype_registered",
+                    side_effect=ImportError("cannot import name 'operators' from 'cutlass'"),
+                ),
+            ):
+                self.assertFalse(ensure_nv_universal_gemm_available())
+        finally:
+            ensure_nv_universal_gemm_available.cache_clear()
+
+    def test_ensure_nv_universal_gemm_available_missing_spec(self):
+        from unittest.mock import patch
+
+        ensure_nv_universal_gemm_available.cache_clear()
+        try:
+            with patch("importlib.util.find_spec", return_value=None):
+                self.assertFalse(ensure_nv_universal_gemm_available())
+            with patch("importlib.util.find_spec", side_effect=ImportError):
+                self.assertFalse(ensure_nv_universal_gemm_available())
+            with patch("importlib.util.find_spec", side_effect=ValueError):
+                self.assertFalse(ensure_nv_universal_gemm_available())
+        finally:
+            ensure_nv_universal_gemm_available.cache_clear()
+
+    def test_use_nv_universal_gemm_template_non_cuda(self):
+        from unittest.mock import MagicMock
+        from torch._inductor.utils import use_nv_universal_gemm_template
+
+        layout = MagicMock()
+        layout.device.type = "cpu"
+        self.assertFalse(use_nv_universal_gemm_template(layout))
+
 
 class TestTritonTypeMapping(TestCase):
     """Tests for acc_type() dtype conversions."""

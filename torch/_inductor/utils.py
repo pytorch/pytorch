@@ -2823,12 +2823,12 @@ def ensure_nv_universal_gemm_available() -> bool:
     cutlass.operators in the same interpreter to retry the import.
     """
     try:
-        available = importlib.util.find_spec("cutlass.operators") is not None
-    except (ImportError, ValueError):
-        return False
-    if available:
+        if importlib.util.find_spec("cutlass.operators") is None:
+            return False
         _ensure_fp4_dtype_registered()
-    return available
+    except (ImportError, ValueError, AttributeError):
+        return False
+    return True
 
 
 def _ensure_fp4_dtype_registered():
@@ -3025,13 +3025,10 @@ def use_nv_universal_gemm_template(
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
     """
-    if not ensure_cute_available():
+    if layout.device.type != "cuda" or torch.version.hip:
         return False
 
-    if not ensure_nv_universal_gemm_available():
-        return False
-
-    if not _use_autotune_backend("NVGEMM"):
+    if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
     from .virtualized import V
@@ -3039,10 +3036,13 @@ def use_nv_universal_gemm_template(
     if V.aot_compilation:
         return False
 
-    if layout.device.type != "cuda" or torch.version.hip:
+    if not _use_autotune_backend("NVGEMM"):
         return False
 
-    if not (config.max_autotune or config.max_autotune_gemm):
+    if not ensure_cute_available():
+        return False
+
+    if not ensure_nv_universal_gemm_available():
         return False
 
     # cutlass.operators 0.2 cannot handle symbolic shapes because it hashes
