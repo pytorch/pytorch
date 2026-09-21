@@ -9398,6 +9398,9 @@ def activate_meta():
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
                 "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
+                "aten::arange",  # use the symint-aware C++ meta kernel (arange_meta)
+                "aten::arange.start",
+                "aten::arange.start_step",
             }
         ):
             pass
