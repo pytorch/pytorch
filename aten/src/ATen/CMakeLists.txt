@@ -183,6 +183,7 @@ file(GLOB native_cuda_cu CONFIGURE_DEPENDS "native/cuda/*.cu")
 file(GLOB native_cuda_cpp CONFIGURE_DEPENDS "native/cuda/*.cpp")
 file(GLOB native_cuda_h CONFIGURE_DEPENDS "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp CONFIGURE_DEPENDS "native/cuda/linalg/*.cpp")
+file(GLOB native_cuda_linalg_cu CONFIGURE_DEPENDS "native/cuda/linalg/*.cu")
 file(GLOB native_hip_h CONFIGURE_DEPENDS "native/hip/*.h" "native/hip/*.cuh" "native/hip/bgemm_kernels/*.h")
 file(GLOB native_cudnn_cpp CONFIGURE_DEPENDS "native/cudnn/*.cpp")
 file(GLOB native_sparse_cuda_cu CONFIGURE_DEPENDS "native/sparse/cuda/*.cu")
@@ -366,6 +367,12 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
     FLASHATTENTION_DISABLE_SOFTCAP
     UNFUSE_FMA
   )
+
+  if(MSVC)
+    target_compile_definitions(flash_attention PRIVATE _USE_MATH_DEFINES)
+    target_compile_options(flash_attention PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/permissive>)
+  endif()
 
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -609,9 +616,9 @@ if(USE_CUDA)
     ${native_sparse_cuda_cpp}
     ${native_transformers_cuda_cpp}
   )
-  set(ATen_CUDA_LINALG_SRCS ${native_cuda_linalg_cpp})
+  set(ATen_CUDA_LINALG_SRCS ${native_cuda_linalg_cpp} ${native_cuda_linalg_cu})
   if(NOT BUILD_LAZY_CUDA_LINALG)
-    list(APPEND ATen_CUDA_CU_SRCS ${native_cuda_linalg_cpp})
+    list(APPEND ATen_CUDA_CU_SRCS ${native_cuda_linalg_cpp} ${native_cuda_linalg_cu})
   endif()
   if(CAFFE2_USE_CUDNN)
     list(APPEND ATen_CUDA_CPP_SRCS ${cudnn_cpp})
