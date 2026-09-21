@@ -1230,45 +1230,6 @@ class _GenericHolder(Generic[_T]):
         self.cfg = {"a": 1}
 
 
-@dataclasses.dataclass(frozen=True)
-class _KeyCfg:
-    # Hashable by name, compared by every field: a plain object that ends up as
-    # a dict key and is therefore compared by value at run time.
-    name: str
-    tags: list
-
-    def __hash__(self):
-        return hash(self.name)
-
-
-@dataclasses.dataclass(frozen=True)
-class _SubCfg:
-    scale: float
-    tags: list
-
-    def __hash__(self):
-        return hash(self.scale)
-
-
-@dataclasses.dataclass(frozen=True)
-class _KeyWithSub:
-    name: str
-    sub: _SubCfg
-
-    def __hash__(self):
-        return hash(self.name)
-
-
-class _NetWithTags(torch.nn.Module):
-    def __init__(self, tags):
-        super().__init__()
-        self.tags = tags
-        self.scale = 2.0
-
-    def forward(self, x):
-        return x * self.scale
-
-
 class _OuterHolder:
     def __init__(self):
         self.inner = _HolderWithGenerator()
@@ -1289,6 +1250,33 @@ pytree.register_constant(_ConstantCfg)
 
 def _by_name_fn(x):
     return x
+
+
+class _Forwarder:
+    # Attribute lookup that reads an unguarded-looking sibling: __getattr__
+    # goes through _inner, which no guard names directly.
+    def __init__(self, inner):
+        self._inner = inner
+        self.it = (i for i in range(3))
+
+    def __getattr__(self, name):
+        # Raises for a hollow instance, as any picklable forwarder must: pickle
+        # itself probes __setstate__ on cls.__new__(cls) before BUILD.
+        if "_inner" not in self.__dict__:
+            raise AttributeError(name)
+        return getattr(self._inner, name)
+
+
+class _Totals:
+    # A property computed from two plain fields the guard never names as such.
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+        self.it = (i for i in range(3))
+
+    @property
+    def total(self):
+        return self.a + self.b
 
 
 class _PipelineWithSetstate:
@@ -1342,11 +1330,28 @@ class _WithReduce:
 
 
 class _CopyregRegistered:
+    # Registered in copyreg.dispatch_table by the tests that use it, never at import.
     def __init__(self):
         self.a = 1
 
 
-copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+class _NewNeedsArg:
+    # Reduces to newobj plus __dict__ like a plain class, but cls.__new__(cls)
+    # at load has no argument to pass.
+    def __new__(cls, a):
+        self = super().__new__(cls)
+        self.a = a
+        return self
+
+
+class _RaisingMeta(type):
+    def __getattr__(cls, name):
+        raise RuntimeError(name)
+
+
+class _WithRaisingMeta(metaclass=_RaisingMeta):
+    def __init__(self):
+        self.a = 1
 
 
 class _TupleSub(tuple):
@@ -1366,6 +1371,45 @@ class _RebuiltFromNewargs:
 
     def __getnewargs__(self):
         return (self.a,)
+
+
+@dataclasses.dataclass(frozen=True)
+class _KeyCfg:
+    # Hashable by name, compared by every field: a plain object that ends up as
+    # a dict key and is therefore compared by value at run time.
+    name: str
+    tags: list
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubCfg:
+    scale: float
+    tags: list
+
+    def __hash__(self):
+        return hash(self.scale)
+
+
+@dataclasses.dataclass(frozen=True)
+class _KeyWithSub:
+    name: str
+    sub: _SubCfg
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+class _NetWithTags(torch.nn.Module):
+    def __init__(self, tags):
+        super().__init__()
+        self.tags = tags
+        self.scale = 2.0
+
+    def forward(self, x):
+        return x * self.scale
 
 
 class _ModuleWithGenerators(torch.nn.Module):
@@ -1695,16 +1739,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out.it, _Missing)
         self.assertEqual(out.cfg, {"a": 1})
 
-    def test_a_by_name_function_does_not_register_its_dict_values(self):
+    def test_a_by_name_function_is_not_rebuilt_from_a_pruned_dict(self):
         # A guarded module-level function is saved by reference, so its __dict__
-        # never travels; registering its values would only prune a shared object
-        # somewhere else in the state.
+        # never travels: the reducer declines it (pickle then writes the global)
+        # rather than rebuilding it from a filtered copy of its attributes.
         _by_name_fn.cache = {"k": 1}
         pickler = GuardsStatePickler(
             {id(_by_name_fn): _by_name_fn}, {}, {}, {}, io.BytesIO()
         )
-        pickler.dump({"f": _by_name_fn})
-        self.assertNotIn(id(_by_name_fn.cache), pickler.missing_values)
+        self.assertIs(pickler.reducer_override(_by_name_fn), NotImplemented)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(_by_name_fn): _by_name_fn}, {}, {}, {}, buf).dump(
+            {"f": _by_name_fn}
+        )
+        self.assertIs(load_guards_state(buf.getvalue())["f"], _by_name_fn)
 
     def test_guarded_object_with_a_custom_setstate_is_pickled_whole(self):
         # Attribute pruning assumes the default pickle protocol; a __setstate__
@@ -4188,6 +4236,32 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIsInstance(state.local_scope["h"].it, _Missing)
         self.assertEqual(state.local_scope["h"].cfg, {"a": 1})
 
+    def test_a_forwarding_getattr_keeps_the_attribute_it_reads_through(self):
+        # nn.Module needs _NN_MODULE_STATE_ATTRS because its __getattr__ reads
+        # dicts no guard names; a user __getattr__ has no such list, and relies
+        # on Dynamo inlining it so the intermediate access gets its own source.
+        def fn(w, x):
+            return x * w.scale
+
+        w, x = _Forwarder(_HolderWithGenerator()), torch.randn(2)
+        w._inner.scale = 2.0
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, w, x)
+        self._test_check_fn(ref, loaded, {"w": w, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertIsInstance(state.local_scope["w"].it, _Missing)
+        self.assertEqual(state.local_scope["w"].scale, 2.0)
+
+    def test_a_property_keeps_the_fields_it_is_computed_from(self):
+        def fn(t, x):
+            return x * t.total
+
+        t, x = _Totals(1.0, 2.0), torch.randn(2)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, t, x)
+        self._test_check_fn(ref, loaded, {"t": t, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertIsInstance(state.local_scope["t"].it, _Missing)
+        self.assertEqual(state.local_scope["t"].total, 3.0)
+
     def test_a_guarded_dict_key_travels_whole_and_its_guards_still_pass(self):
         # A non-const dict key is compared by value at run time through the key
         # manager, a door that does not go through GuardBuilder.EQUALS_MATCH;
@@ -4210,7 +4284,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # The predicate the attribute pruner will gate on: an object round-trips
         # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
         # registration and no state outside __dict__ (slots, container items,
-        # var-sized or C layout) is involved. One refusal fixture per conjunct.
+        # var-sized or C layout) is involved. One refusal fixture per conjunct,
+        # and a metaclass whose __getattr__ raises RuntimeError reads as False
+        # rather than failing the dump.
+        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
         self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
         self.assertTrue(_pickles_by_default(_GenericHolder()))
         for obj in (
@@ -4220,6 +4298,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             _WithNewargsEx(1),
             _WithReduce(),
             _CopyregRegistered(),
+            _NewNeedsArg(1),
+            _WithRaisingMeta(),
             _SlottedHolder(),
             _PureSlots(),
             _AttrDict(a=1),
@@ -4241,7 +4321,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Soundness, not a list of known holes: whenever the predicate says an
         # object is rebuilt as cls.__new__ plus __dict__, pickle's own reduce of
         # that object at every protocol from 2 up must be exactly that (newobj, no items, state is
-        # the instance dict), for a zoo of shapes it was never written against.
+        # the instance dict), and pickle itself must rebuild the type from that
+        # reduce, for a zoo of shapes it was never written against.
+        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
         import array
         import collections
         import decimal
@@ -4279,6 +4362,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             _WithGetstate(),
             _WithReduce(),
             _CopyregRegistered(),
+            _NewNeedsArg(1),
+            _WithRaisingMeta(),
             types.SimpleNamespace(a=1),
             Point(1, 2),
             collections.OrderedDict(a=1),
@@ -4307,11 +4392,26 @@ class TestGuardSerialization(TestGuardSerializationBase):
                     self.assertTrue(
                         dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
                     )
-        # And the predicate is not vacuous: the plain shapes are admitted (so is
-        # WeakValueDictionary, a pure-Python class whose state is its dict).
+                    # The load side through pickle itself, NEWOBJ then BUILD, on
+                    # a hollow instance so an unpicklable field (a live
+                    # generator) cannot stop the dump: cls.__new__(cls) must
+                    # take no argument and the dict must be the whole state.
+                    fn, args, state = obj.__reduce_ex__(protocol)[:3]
+                    hollow = pickle.loads(pickle.dumps(fn(*args), protocol))
+                    self.assertIs(type(hollow), type(obj))
+                    vars(hollow).update(state or {})
+                    self.assertEqual(vars(hollow), vars(obj))
+        # And the predicate is not vacuous: the plain shapes are admitted, and
+        # so is WeakValueDictionary, a pure-Python class whose state is its dict.
         admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
         self.assertLessEqual(
-            {"_HolderWithGenerator", "_GenericHolder", "_OuterHolder", "_KeyCfg"},
+            {
+                "_HolderWithGenerator",
+                "_GenericHolder",
+                "_OuterHolder",
+                "_KeyCfg",
+                "WeakValueDictionary",
+            },
             admitted,
         )
         self.assertNotIn("SimpleNamespace", admitted)  # a C type: layout differs
