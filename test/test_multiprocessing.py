@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
 load_tests = load_tests  # noqa: PLW0127
 
 TEST_REPEATS = 30
-HAS_SHM_FILES = os.path.isdir("/dev/shm")
+HAS_SHM_FILES = os.path.isdir("/dev/shm") and not sys.platform.startswith("freebsd")
 MAX_WAITING_TIME_IN_SECONDS = 30
 
 TEST_CUDA_IPC = (
