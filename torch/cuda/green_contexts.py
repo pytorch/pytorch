@@ -20,6 +20,8 @@ from torch.cuda._utils import (
 __all__ = [
     "GreenContext",
     "SMPartition",
+    "get_num_locality_domains",
+    "is_localization_supported",
 ]
 
 _STREAMS_PER_GREEN_CONTEXT_POOL = 32
@@ -68,6 +70,57 @@ def _ensure_workqueue_supported() -> None:
     _ensure_driver_version(
         13010, "CUDA user mode driver too old to use workqueue configuration!"
     )
+
+
+def _ensure_locality_supported() -> None:
+    message = "Locality domains require CUDA driver and cuda.bindings 13.4+"
+    _ensure_driver_version(13040, message)
+    _ensure_cuda_bindings_version(13040, message)
+
+
+def get_num_locality_domains(device_id: int | None = None) -> int:
+    r"""Return the device's locality-domain count reported by CUDA.
+
+    Requires CUDA driver and bindings 13.4+. Initializes the CUDA driver.
+    This query does not create a context when ``device_id`` is specified.
+    Unsupported software and failed driver queries raise an error.
+
+    Args:
+        device_id (int, optional): Device index. When ``None``, uses the current
+            PyTorch device, initializing PyTorch CUDA state if necessary.
+    """
+    _ensure_supported()
+    _ensure_locality_supported()
+    if device_id is None:
+        device_id = torch.cuda.current_device()
+    _check_cuda_bindings(_drv.cuInit(0))  # pyrefly: ignore [missing-attribute]
+    # pyrefly: ignore [missing-attribute]
+    device = _check_cuda_bindings(_drv.cuDeviceGet(device_id))
+    return _check_cuda_bindings(
+        _drv.cuDeviceGetAttribute(  # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore [missing-attribute]
+            _drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_COUNT,
+            device,
+        )
+    )
+
+
+def is_localization_supported(device_id: int | None = None) -> bool:
+    r"""Return whether the software supports localization on a multi-domain GPU.
+
+    Returns ``False`` when the required software is unavailable or the device
+    has at most one locality domain. Otherwise queries CUDA as described in
+    :func:`get_num_locality_domains`; invalid devices and query failures raise.
+
+    Args:
+        device_id (int, optional): Device index. Default: current PyTorch device.
+    """
+    try:
+        _ensure_supported()
+        _ensure_locality_supported()
+    except RuntimeError:
+        return False
+    return get_num_locality_domains(device_id) > 1
 
 
 def _parse_workqueue_scope(workqueue_scope: str | None) -> int | None:
@@ -147,6 +200,22 @@ class SMPartition:
         r"""The co-scheduled SM alignment reported by CUDA for this resource."""
         return self._resource.sm.smCoscheduledAlignment
 
+    @property
+    def locality_domain_id(self) -> int | None:
+        r"""The locality domain reported by CUDA, or ``None`` if unspecified.
+
+        Requires CUDA driver and bindings 13.4+. This reads the resource's
+        metadata rather than inferring a domain from the requested split.
+        """
+        _ensure_locality_supported()
+        flag = (
+            # pyrefly: ignore [missing-attribute]
+            _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_LOCALITY_DOMAIN_ID
+        )
+        if self._resource.sm.flags & flag:
+            return self._resource.sm.localityDomainId
+        return None
+
     def split(
         self,
         *,
@@ -154,6 +223,7 @@ class SMPartition:
         coscheduled_sm_count: int | Sequence[int] = 0,
         preferred_coscheduled_sm_count: int | Sequence[int] = 0,
         backfill: bool | Sequence[bool] = False,
+        locality_domain_ids: int | None | Sequence[int | None] = None,
     ) -> tuple[tuple[SMPartition, ...], SMPartition | None]:
         r"""Split this resource into disjoint groups and an optional remainder.
 
@@ -171,8 +241,12 @@ class SMPartition:
                 Preferred larger grouping size, when CUDA can combine groups.
                 Zero selects the CUDA default. Default: ``0``.
             backfill (bool or sequence of bool, optional): Allow CUDA to fill
-                groups with SMs outside complete co-scheduled groupings.
+                groups with SMs outside the co-scheduling or locality constraints.
                 Default: ``False``.
+            locality_domain_ids (int, None, or sequence of int or None, optional):
+                Select SMs from these locality domains during splitting. ``None``
+                leaves locality unconstrained. Requires CUDA driver and bindings
+                13.4+ when any domain is specified. Default: ``None``.
 
         Scalar options apply to every group; sequences must match ``num_sms``.
         Returns ``(partitions, remainder)``, with ``None`` for an empty remainder.
@@ -208,6 +282,16 @@ class SMPartition:
             preferred_coscheduled_sm_count, n, "preferred_coscheduled_sm_count"
         )
         backfills = _split_values(backfill, n, "backfill")
+        domains = _split_values(locality_domain_ids, n, "locality_domain_ids")
+        if any(domain is not None for domain in domains):
+            _ensure_locality_supported()
+        for domain in domains:
+            if domain is not None and (
+                not isinstance(domain, int) or isinstance(domain, bool) or domain < 0
+            ):
+                raise ValueError(
+                    "locality_domain_ids entries must be nonnegative integers or None"
+                )
         for name, values in (
             ("num_sms", counts),
             ("coscheduled_sm_count", co_counts),
@@ -231,6 +315,12 @@ class SMPartition:
                     # pyrefly: ignore [missing-attribute]
                     _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_BACKFILL
                 )
+            if domains[index] is not None:
+                param.flags |= (
+                    # pyrefly: ignore [missing-attribute]
+                    _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_LOCALITY_DOMAIN_ID
+                )
+                param.localityDomainId = domains[index]
             params.append(param)
         resources, remainder = _check_cuda_bindings(
             # pyrefly: ignore [missing-attribute]
@@ -445,6 +535,7 @@ class GreenContext:
         coscheduled_sm_count: int | Sequence[int] = 0,
         preferred_coscheduled_sm_count: int | Sequence[int] = 0,
         backfill: bool | Sequence[bool] = False,
+        locality_domain_ids: int | None | Sequence[int | None] = None,
         workqueue_scope: str | None = None,
         workqueue_concurrency_limit: int | None = None,
         device_id: int | None = None,
@@ -467,6 +558,7 @@ class GreenContext:
             coscheduled_sm_count=coscheduled_sm_count,
             preferred_coscheduled_sm_count=preferred_coscheduled_sm_count,
             backfill=backfill,
+            locality_domain_ids=locality_domain_ids,
         )
         return tuple(
             GreenContext(
@@ -504,6 +596,14 @@ class GreenContext:
     def sm_count(self) -> int:
         r"""The actual number of SMs available to this context."""
         return self.sm_partition.sm_count
+
+    @property
+    def locality_domain_id(self) -> int | None:
+        r"""The locality domain reported by CUDA for this context, if specified.
+
+        Requires CUDA driver and bindings 13.4+.
+        """
+        return self.sm_partition.locality_domain_id
 
     @staticmethod
     def create(

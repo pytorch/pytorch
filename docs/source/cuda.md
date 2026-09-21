@@ -481,6 +481,39 @@ created through the existing `num_sms` constructor. Independent constructor
 calls do not guarantee disjoint SMs. A context's `sm_partition` property returns
 a resource that can be subdivided and keeps its originating context alive.
 
+Locality domains describe hardware topology. With CUDA driver and bindings
+13.4+, add locality constraints when splitting a resource:
+
+```python
+from torch.cuda.green_contexts import get_num_locality_domains
+
+n = get_num_locality_domains(device_id=0)
+contexts = GreenContext.split(
+    num_sms=(0,) * n,
+    coscheduled_sm_count=2,
+    locality_domain_ids=tuple(range(n)),
+    device_id=0,
+)
+```
+
+Here, zero SM counts discover the available SMs in each domain. Some device SMs
+may be outside all locality domains and remain unassigned. A domain can contain
+multiple partitions; its ID can also constrain subdivision through an existing
+context's queried SM resource, as shown above. Use `None` for a group with no
+locality constraint. Workqueue settings can be combined with either kind of split.
+
+`backfill=True` permits CUDA to fill a group with SMs outside its co-scheduling
+or locality constraints. It preserves the separation between sibling partitions.
+The `locality_domain_id` property on partitions and contexts reads CUDA's
+reported metadata and returns `None` if CUDA does not specify a domain.
+
+`get_num_locality_domains` queries CUDA directly and raises if the required
+software is unavailable or the query fails. `is_localization_supported` returns
+false for unsupported software or devices with at most one domain; device query
+errors still propagate. These functions initialize the CUDA driver. Supplying
+an explicit device index avoids initializing PyTorch CUDA state or creating a
+primary context just to perform the query.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
 ```
@@ -492,6 +525,8 @@ a resource that can be subdivided and keeps its originating context alive.
 
     GreenContext
     SMPartition
+    get_num_locality_domains
+    is_localization_supported
 ```
 
 
