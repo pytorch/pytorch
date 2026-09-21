@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, skipIfRocmVersionAtLeast, TemporaryFileName,
+    getRocmVersion, TemporaryFileName,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -791,24 +791,6 @@ if __name__ == "__main__":
 
 
 instantiate_parametrized_tests(TestPeriodicDecorator)
-
-
-# Trivial tests that give the periodic-strict workflow a passing CPU and GPU
-# test to gate on; deliberately breaking one exercises its auto-revert.
-class TestPeriodicCanary(TestCase):
-    @periodic
-    @onlyCPU
-    def test_cpu_canary(self, device):
-        self.assertEqual(torch.arange(4, device=device).sum().item(), 6)
-
-    @periodic
-    @onlyCUDA
-    def test_gpu_canary(self, device):
-        x = torch.ones(4, 4, device=device)
-        self.assertEqual(x @ x, torch.full((4, 4), 4.0, device=device))
-
-
-instantiate_device_type_tests(TestPeriodicCanary, globals(), only_for=("cpu", "cuda"))
 
 
 class TestEnvironmentDefFlag(TestCase):
@@ -2850,6 +2832,8 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.flydsl.intrinsics",  # depends on flydsl
+                           "torch._native.cutedsl",  # depends on cutlass
+                           "torch._native.ops.reductions.traits",  # depends on cutlass
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
@@ -2910,17 +2894,14 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
         self.assertEqual(out.strip(), "True")
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_no_warning_on_import(self) -> None:
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_not_import_sympy(self) -> None:
         out = self._check_python_output("import torch;import sys;print('sympy' not in sys.modules)")
         self.assertEqual(out.strip(), "True",
@@ -2932,12 +2913,10 @@ class TestImports(TestCase):
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_not_import_triton(self) -> None:
         out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
         self.assertEqual(out.strip(), "True")
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global

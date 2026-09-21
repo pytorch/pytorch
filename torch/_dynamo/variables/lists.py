@@ -525,7 +525,12 @@ class BaseListVariable(VariableTracker):
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
         from .dicts import ConstDictVariable
-        from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
+        from .sets import (
+            DictKeySetVariable,
+            FrozensetVariable,
+            OrderedSetVariable,
+            SetVariable,
+        )
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
@@ -535,7 +540,13 @@ class BaseListVariable(VariableTracker):
             self.items.extend(unpack_iterable(tx, args[0]))
         elif isinstance(
             args[0],
-            (ConstDictVariable, SetVariable, FrozensetVariable, DictKeySetVariable),
+            (
+                ConstDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                DictKeySetVariable,
+                OrderedSetVariable,
+            ),
         ):
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
@@ -584,17 +595,23 @@ class BaseListVariable(VariableTracker):
             return None
         check_positional(tx, "pop", len(args), 0, 1)
 
+        # Clinic converts the index before the body, so a bad index raises ahead
+        # of the empty-list check.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h#L163-L174
+        idx = -1
+        if args:
+            idx = pylong_as_ssize_t(tx, pynumber_index(tx, args[0]))
+
         if len(self.items) == 0:
             raise_observed_exception(IndexError, tx, args=["pop from empty list"])
 
-        if len(args) != 0:
-            idx = args[0].as_python_constant()
-            if idx >= len(self.items):
-                raise_observed_exception(
-                    IndexError, tx, args=["pop index out of range"]
-                )
+        if idx < 0:
+            idx += len(self.items)
+        if not 0 <= idx < len(self.items):
+            raise_observed_exception(IndexError, tx, args=["pop index out of range"])
+
         tx.output.side_effects.mutation(self)
-        return self.items.pop(*[a.as_python_constant() for a in args])
+        return self.items.pop(idx)
 
     def list_clear(
         self,
@@ -1445,15 +1462,18 @@ class DequeVariable(BaseListVariable):
     @staticmethod
     def validate_maxlen(
         tx: "InstructionTranslatorBase", maxlen: VariableTracker
-    ) -> None:
-        # deque_init: maxlenobj != Py_None is run through PyLong_AsSsize_t
-        # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1729-L1736
+    ) -> VariableTracker:
+        # deque_init: maxlenobj != Py_None is run through PyLong_AsSsize_t, and
+        # the deque keeps that ssize_t, not the object it was handed.
+        # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1729-L1738
         if isinstance(maxlen, ConstantVariable) and maxlen.value is None:
-            return
-        if pylong_as_ssize_t(tx, maxlen) < 0:
+            return maxlen
+        val = pylong_as_ssize_t(tx, maxlen)
+        if val < 0:
             raise_observed_exception(
                 ValueError, tx, args=["maxlen must be non-negative"]
             )
+        return ConstantVariable.create(val)
 
     def __init__(
         self,
@@ -1899,7 +1919,7 @@ class DequeVariable(BaseListVariable):
         )
         if len(args) > 2 or kwargs:
             raise_args_mismatch(tx, "__init__")
-        self.validate_maxlen(tx, new_maxlen)
+        new_maxlen = self.validate_maxlen(tx, new_maxlen)
         tx.output.side_effects.mutation(self)
         self.state += 1
         self.maxlen = new_maxlen
@@ -2484,6 +2504,23 @@ class BaseListIteratorVariable(IteratorVariable):
         self.is_exhausted = True
         return list(self.items[self.index :])
 
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # listiter_len/tupleiter_len: items left, floored at 0; an exhausted
+        # iterator permanently reports 0.
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/listobject.c#L4100-L4108
+        #
+        # A forward iterator aliases the source list and so sees its mutations.
+        # `list_reversed` copies the items instead, so a shrink of the source
+        # below the current index is not reflected here.
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.items) - self.index, 0))
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
         codegen.add_push_null(
@@ -2497,6 +2534,8 @@ class BaseListIteratorVariable(IteratorVariable):
         codegen.foreach(remaining_items)
         codegen.append_output(create_build_tuple(len(remaining_items)))
         codegen.extend_output(create_call_function(1, False))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
 
 class ListIteratorVariable(BaseListIteratorVariable):
@@ -2539,6 +2578,10 @@ class DequeIteratorVariable(BaseListIteratorVariable):
 
     def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
         if self.source_deque.state != self.saved_state:
+            # dequeiter_next zeroes the counter before raising, so
+            # __length_hint__ reports 0 afterwards.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1936-L1941
+            self.is_exhausted = True
             raise_observed_exception(
                 RuntimeError, tx, args=["deque mutated during iteration"]
             )
@@ -2575,6 +2618,10 @@ class DequeReverseIteratorVariable(BaseListIteratorVariable):
 
     def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
         if self.source_deque.state != self.saved_state:
+            # dequereviter_next zeroes the counter before raising, so
+            # __length_hint__ reports 0 afterwards.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2085-L2090
+            self.is_exhausted = True
             raise_observed_exception(
                 RuntimeError, tx, args=["deque mutated during iteration"]
             )
