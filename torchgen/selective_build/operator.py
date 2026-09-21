@@ -148,7 +148,7 @@ def combine_operators(
     lhs: SelectiveBuildOperator, rhs: SelectiveBuildOperator
 ) -> SelectiveBuildOperator:
     if str(lhs.name) != str(rhs.name):
-        raise Exception(  # noqa: TRY002
+        raise ValueError(
             f"Expected both arguments to have the same name, but got '{str(lhs.name)}' and '{str(rhs.name)}' instead"
         )
 
