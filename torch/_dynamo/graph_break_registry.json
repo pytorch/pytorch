@@ -3817,6 +3817,26 @@
       ]
     }
   ],
+  "GB1350": [
+    {
+      "Gb_type": "length_hint with a non-constant result",
+      "Context": "length_hint {obj} returned {hint}",
+      "Explanation": "Dynamo cannot verify the type and range of a non-constant __length_hint__ result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0507": [
+    {
+      "Gb_type": "length_hint with a non-constant default",
+      "Context": "length_hint default {args[1]}",
+      "Explanation": "Dynamo cannot convert a non-constant default to an integer index.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6890": [
     {
       "Gb_type": "Missing hash_impl override",

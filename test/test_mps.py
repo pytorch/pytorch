@@ -5675,6 +5675,25 @@ class TestMPS(TestCaseMPS):
         helper([8, 4, 5, 7, 6], 'mean')
         helper([1, 1, 32, 32], 'mean')
 
+    def test_bce_loss_empty(self):
+        # A zero-sized input has no Metal buffer to bind, which used to trip the
+        # "Placeholder tensor is empty!" assert instead of returning CPU's answer.
+        for shape in [(4, 0), (0,), (0, 3), (2, 0, 3)]:
+            for reduction in ['none', 'sum', 'mean']:
+                loss = torch.nn.BCELoss(reduction=reduction)
+                inputCPU = torch.zeros(shape, requires_grad=True)
+                inputMPS = torch.zeros(shape, device='mps', requires_grad=True)
+                targetCPU = torch.zeros(shape)
+                targetMPS = torch.zeros(shape, device='mps')
+
+                outputCPU = loss(inputCPU, targetCPU)
+                outputMPS = loss(inputMPS, targetMPS)
+                self.assertEqual(outputCPU, outputMPS, equal_nan=True)
+
+                outputCPU.sum().backward()
+                outputMPS.sum().backward()
+                self.assertEqual(inputCPU.grad, inputMPS.grad)
+
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5, device='mps')
         input = torch.ones(5, device='mps')
@@ -8028,6 +8047,25 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(input_cast_cpu, input.to(dtype=dst_dtype))
         helper(torch.half, torch.float)
         helper(torch.float, torch.half)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/197715
+    # A dtype-converting copy casts on the GPU straight into the CPU buffer, so a
+    # destination dtype Metal cannot represent must raise rather than be left unwritten.
+    @parametrize("dst_dtype", [torch.double, torch.cdouble, torch.float8_e5m2])
+    @parametrize("non_blocking", [False, True])
+    def test_cast_mps_to_cpu_unsupported_dtype_raises(self, dst_dtype, non_blocking):
+        input_cpu = torch.arange(1, 9, dtype=torch.float)
+        input_mps = input_cpu.to("mps")
+
+        with self.assertRaisesRegex(RuntimeError, "Undefined type"):
+            input_mps.to("cpu", dst_dtype, non_blocking=non_blocking)
+        with self.assertRaisesRegex(RuntimeError, "Undefined type"):
+            torch.empty(8, dtype=dst_dtype).copy_(input_mps, non_blocking=non_blocking)
+
+        # Casting on the CPU stays the supported route, and the source is untouched
+        expected = input_cpu.to(dst_dtype)
+        self.assertEqual(input_mps.cpu().to(dst_dtype).view(torch.uint8), expected.view(torch.uint8))
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
 
     # Regression test for https://github.com/pytorch/pytorch/issues/189563
     @parametrize("src_dtype,dst_dtype", [
