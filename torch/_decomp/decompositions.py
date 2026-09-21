@@ -1270,6 +1270,13 @@ def logit_backward(
 @aten.dropout.default.py_impl(DispatchKey.Autograd)
 def dropout(input: Tensor, p: float, train: bool | None):
     if train and p != 0:
+        if input.is_complex():
+            # native_dropout's autograd node rejects complex outputs; inline the
+            # real-valued mask math so grad flows through the (complex-safe) mul.
+            if p == 1:
+                return torch.zeros_like(input)
+            bool_mask = torch.rand_like(input.real) > p
+            return bool_mask * input * (1.0 / (1.0 - p))
         return aten.native_dropout(input, p, train)[0]
     else:
         return input
@@ -1643,7 +1650,9 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # This is relying on TensorIterator's behavior that it takes higher precedence on the stride of first input.
     # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
     # This implementation is not ideal, and we should revisit this when we have a better solution.
-    return out + beta * self
+    # `expand_as` mirrors the expand_size() that addmm_out_cpu applies to `self`:
+    # `input` broadcasts *to* the mm result shape, it does not widen it.
+    return out + beta * self.expand_as(out)
 
 
 @register_decomposition([aten.addmm.dtype, aten.addmm.dtype_out])
@@ -1659,7 +1668,7 @@ def addmm_dtype(
     out = alpha * torch.mm(mat1, mat2, out_dtype=out_dtype)
     if beta == 0:
         return out
-    return out + beta * self.to(out_dtype)
+    return out + beta * self.to(out_dtype).expand_as(out)
 
 
 @register_decomposition(aten._addmm_activation)
@@ -1691,8 +1700,12 @@ def _addmv_impl(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: i
     if beta == 0:
         return out
     if out.numel() == 0:  # handle empty matrix
+        # Left as-is: for an empty result eager keeps `self`'s own size rather
+        # than expanding, e.g. addmv(ones(1), empty(0, 0), empty(0)) -> shape 1.
         return beta * self
-    return out + beta * self
+    # Same constraint as addmm: addmv_impl_cpu expands `self` to the mv result
+    # shape, so `self` broadcasts *to* it rather than widening it.
+    return out + beta * self.expand_as(out)
 
 
 @register_decomposition(aten.addmv)
@@ -1777,7 +1790,22 @@ def native_group_norm_backward(
             + torch.mul(input.reshape(N, group, cpg, HxW), c2)
             + c3
         )
-        d_input = d_input.reshape(input.shape).to(input.dtype)
+        supports_memory_format = input.device.type in (
+            "cpu",
+            "cuda",
+            "meta",
+            torch._C._get_privateuse1_backend_name(),
+        )
+        memory_format = (
+            utils.suggest_memory_format(input)
+            if supports_memory_format
+            else torch.contiguous_format
+        )
+        d_input = (
+            d_input.reshape(input.shape)
+            .to(input.dtype)
+            .contiguous(memory_format=memory_format)
+        )
     if output_mask[1]:
         d_gamma = (
             (
@@ -2744,6 +2772,38 @@ def native_batch_norm_backward_out(
     return grad_input
 
 
+@aten.miopen_batch_norm.default.py_impl(DispatchKey.Autograd)
+@register_decomposition(aten.miopen_batch_norm)
+def miopen_batch_norm(
+    input: Tensor,
+    weight: Tensor,
+    bias: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    training: bool,
+    exponential_average_factor: float,
+    epsilon: float,
+) -> tuple[Tensor, Tensor, Tensor]:
+    a, b, c = aten.native_batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        exponential_average_factor,
+        epsilon,
+    )
+
+    if training:
+        return (a, b, c)
+    return (
+        a,
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
+    )
+
+
 @register_decomposition(aten.miopen_batch_norm_backward)
 @out_wrapper("out0", "out1", "out2")
 def miopen_batch_norm_backward(
@@ -3348,7 +3408,7 @@ def index_add_(
 
 
 @register_decomposition(aten.index_add)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_add(
     x: TensorLike,
     dim: int,
@@ -3453,7 +3513,7 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 
 
 @register_decomposition(aten.index_copy)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=False)
 
