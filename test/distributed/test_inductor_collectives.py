@@ -33,7 +33,9 @@ from torch._inductor.fx_passes.bucketing import (
     _ALL_DTYPES,
     _compute_foreach_groups,
     _insert_fn_trace_before_node,
+    _match_dim0_padded_cat,
     _pre_bucket_all_gather,
+    _pre_bucket_reduce_scatter,
     _trace as bucketing_trace,
     _unpack_bucketed_all_gather_output,
     all_gather_merge_fn_to_trace_custom_ops,
@@ -41,6 +43,7 @@ from torch._inductor.fx_passes.bucketing import (
     is_all_reduce_tensor,
     is_all_to_all_tensor,
     is_reduce_scatter_tensor,
+    merge_reduce_scatter_bucket,
     reduce_scatter_merge_fn_to_trace_custom_ops,
 )
 from torch._inductor.memory import SNodeMemory
@@ -53,6 +56,7 @@ from torch._inductor.scheduler import (
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch._subclasses import FakeTensorMode
 from torch.distributed.distributed_c10d import GroupMember
+from torch.distributed.tensor.placement_types import Shard
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -412,6 +416,257 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
         self.assertTrue(any("(u0//4)" in shape for shape in symbolic_shapes))
 
+    def test_pre_bucket_reduce_scatter_chunk_cat_handles_uneven_and_empty(self):
+        group_size = 4
+        inputs = [
+            torch.arange(20, dtype=torch.float32).reshape(5, 4),
+            torch.arange(12, dtype=torch.float32).reshape(6, 2),
+            torch.empty(0, 3),
+        ]
+
+        rank_chunks = []
+        for rank in range(group_size):
+            chunks = []
+            for value in inputs:
+                if value.numel() == 0:
+                    continue
+                chunk_size = (value.shape[0] + group_size - 1) // group_size
+                chunk = value.narrow(
+                    0,
+                    min(rank * chunk_size, value.shape[0]),
+                    max(
+                        0,
+                        min(chunk_size, value.shape[0] - rank * chunk_size),
+                    ),
+                ).flatten()
+                chunks.append(
+                    torch.nn.functional.pad(
+                        chunk,
+                        (0, chunk_size * value[0].numel() - chunk.numel()),
+                    )
+                )
+            rank_chunks.append(torch.cat(chunks))
+        expected = torch.cat(rank_chunks)
+
+        actual = _pre_bucket_reduce_scatter(
+            inputs,
+            group_size,
+            list(range(len(inputs))),
+        )
+
+        self.assertEqual(actual, expected)
+        packed_second_input = torch.nn.functional.pad(inputs[1], (0, 0, 0, 2))
+        self.assertEqual(
+            _pre_bucket_reduce_scatter(
+                [inputs[0], packed_second_input, inputs[2]],
+                group_size,
+                [0],
+            ),
+            expected,
+        )
+        self.assertEqual(
+            _pre_bucket_reduce_scatter(
+                [torch.empty(0, 3), torch.empty(4, 0)],
+                group_size,
+                [0, 1],
+            ).numel(),
+            0,
+        )
+
+    def test_pre_bucket_reduce_scatter_preserves_packed_symbolic_numel(self):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        with fake_mode:
+            symbolic_size = fake_mode.shape_env.create_unbacked_symint()
+            logical_input = torch.empty(5, 4)
+            packed_input = torch.empty(symbolic_size, 3)
+            output = _pre_bucket_reduce_scatter(
+                [logical_input, packed_input],
+                2,
+                [0],
+            )
+
+        self.assertEqual(
+            output.shape[0].node.expr,
+            24 + 3 * symbolic_size.node.expr,
+        )
+
+    def test_match_dim0_padded_cat(self):
+        def padded_input(value):
+            chunks, _ = Shard(0)._split_tensor(
+                value,
+                4,
+                with_padding=True,
+                contiguous=True,
+            )
+            return torch.cat(chunks, dim=-2)
+
+        def add_reduce_scatter_consumer(gm, cat):
+            output = next(node for node in gm.graph.nodes if node.op == "output")
+            with gm.graph.inserting_before(output):
+                reduce_scatter = gm.graph.call_function(
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    args=(cat, "sum", 4, "0"),
+                )
+            output.args = (reduce_scatter,)
+            return reduce_scatter
+
+        gm = make_fx(padded_input)(torch.empty(5, 4, device="meta"))
+        cat = next(
+            node for node in gm.graph.nodes if node.target == torch.ops.aten.cat.default
+        )
+        reduce_scatter = add_reduce_scatter_consumer(gm, cat)
+
+        match = _match_dim0_padded_cat(cat, 4)
+
+        self.assertIsNotNone(match)
+        src, packing_nodes = match
+        self.assertEqual(src.op, "placeholder")
+        self.assertIn(cat, packing_nodes)
+
+        split = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.split.Tensor
+        )
+        split.args = (*split.args, -2)
+        self.assertIsNotNone(_match_dim0_padded_cat(cat, 4))
+
+        cat.args = (cat.args[0], -4)
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+        cat.args = (cat.args[0], -2)
+
+        pad = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.constant_pad_nd.default
+        )
+        original_args = pad.args
+        original_kwargs = pad.kwargs
+        pad.args = pad.args[:2]
+        pad.kwargs = {"value": 1}
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+        pad.args = original_args
+        pad.kwargs = original_kwargs
+
+        with gm.graph.inserting_before(reduce_scatter):
+            source_fanout = gm.graph.call_function(
+                torch.ops.aten.neg.default,
+                args=(src,),
+            )
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+        gm.graph.erase_node(source_fanout)
+
+        with gm.graph.inserting_before(reduce_scatter):
+            cat_fanout = gm.graph.call_function(
+                torch.ops.aten.neg.default,
+                args=(cat,),
+            )
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+        gm.graph.erase_node(cat_fanout)
+
+        cat_inputs = list(cat.args[0])
+        cat_inputs[0], cat_inputs[1] = cat_inputs[1], cat_inputs[0]
+        cat.args = (cat_inputs,)
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+
+    def test_match_dim0_padded_cat_rejects_symbolic_shapes(self):
+        def padded_input(value):
+            chunks, _ = Shard(0)._split_tensor(
+                value,
+                4,
+                with_padding=True,
+                contiguous=True,
+            )
+            return torch.cat(chunks, dim=0)
+
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        with fake_mode:
+            symbolic_size = fake_mode.shape_env.create_unbacked_symint()
+            value = torch.empty(symbolic_size, 4)
+
+        gm = make_fx(padded_input)(value)
+        cat = next(
+            node
+            for node in reversed(tuple(gm.graph.nodes))
+            if node.target == torch.ops.aten.cat.default
+        )
+
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4))
+
+    def test_reduce_scatter_bucket_fuses_dim0_padded_cat(self):
+        def padded_input(value):
+            chunks, _ = Shard(0)._split_tensor(
+                value,
+                4,
+                with_padding=True,
+                contiguous=True,
+            )
+            return torch.cat(chunks, dim=0)
+
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(5, 4)
+            y = torch.empty(7, 2)
+            z = torch.empty(8, 3)
+        gm = make_fx(lambda x, y, z: (padded_input(x), padded_input(y), z))(x, y, z)
+        graph = gm.graph
+        output = next(node for node in graph.nodes if node.op == "output")
+        packed_inputs = output.args[0]
+        waits = []
+        reduce_scatters = []
+        with graph.inserting_before(output):
+            for packed_input in packed_inputs:
+                reduce_scatter = graph.call_function(
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    args=(packed_input, "sum", 4, "0"),
+                )
+                output_shape = (packed_input.meta["val"].shape[0] // 4,) + tuple(
+                    packed_input.meta["val"].shape[1:]
+                )
+                reduce_scatter.meta["val"] = packed_input.meta["val"].new_empty(
+                    output_shape
+                )
+                wait = graph.call_function(
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    args=(reduce_scatter,),
+                )
+                wait.meta["val"] = reduce_scatter.meta["val"]
+                reduce_scatters.append(reduce_scatter)
+                waits.append(wait)
+        output.args = (tuple(waits),)
+
+        _, replacements = merge_reduce_scatter_bucket(
+            graph,
+            reduce_scatters,
+            mode="custom_ops",
+        )
+        graph.lint()
+
+        pre_bucket = next(
+            node
+            for node in graph.nodes
+            if node.target == torch.ops.bucketing._pre_bucket_reduce_scatter.default
+        )
+        self.assertEqual(
+            [node.op for node in pre_bucket.args[0]],
+            ["placeholder", "placeholder", "placeholder"],
+        )
+        targets = {node.target for node in graph.nodes}
+        self.assertNotIn(torch.ops.aten.split.Tensor, targets)
+        self.assertNotIn(torch.ops.aten.constant_pad_nd.default, targets)
+        self.assertNotIn(torch.ops.aten.new_zeros.default, targets)
+        self.assertNotIn(torch.ops.aten.cat.default, targets)
+        self.assertEqual(
+            [replacements[wait].meta["val"].shape for wait in waits],
+            [torch.Size((2, 4)), torch.Size((2, 2)), torch.Size((2, 3))],
+        )
+
     def test_replacement_updates_layout_dependent_user_metadata(self):
         graph = torch.fx.Graph()
         base = graph.placeholder("base")
@@ -546,7 +801,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             example = functools.partial(
                 example,
                 **self.get_world_trs(),
@@ -584,7 +841,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             matmul_cat_col = functools.partial(
                 matmul_cat_col,
                 **self.get_world_trs(),
@@ -623,7 +882,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             "triton.cudagraph_trees": True,
         }
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             compiled_func = torch.compile(
                 func, backend="inductor", fullgraph=True, options=options, dynamic=None
             )
@@ -647,7 +908,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         # failed its "not tracked as outputs" pool check. The gathered buffer is
         # an intermediate here (consumed by + 1), so the leak is not masked by
         # being a graph output.
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             group_name = (
                 torch.distributed.distributed_c10d._get_default_group().group_name
             )
@@ -699,7 +962,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             eager_func = functools.partial(
                 eager_func,
                 **self.get_world_trs(),
@@ -738,7 +1003,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inductor_func = functools.partial(
                 inductor_func,
                 **self.get_world_trs(),
@@ -780,7 +1047,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             # will not match eager.
             return y * y
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             x = torch.ones(12800, 12800, device=self.device) + self.rank
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
@@ -851,7 +1120,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             e = d + ar
             return (e,)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inputs = torch.ones(4, 4, device=self.device) + self.rank
             compiled = torch.compile(func)
             out = compiled(inputs, **self.get_world_trs())
@@ -866,7 +1137,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 tensor, src_dst_pairs, ranks, tag
             )
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inputs = (
                 # rank0: [0., 1.], rank1: [2., 3.]
                 torch.arange(2, dtype=torch.float32, device=self.device)
@@ -901,7 +1174,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 out = torch.cat(torch.chunk(res, world_size, dim=0), dim=last_dim)
                 return out
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             model = Model().to(self.device)
             model_compiled = torch.compile(model)
             inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
@@ -917,7 +1192,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch.distributed.all_gather(tensor_list, tensor)
             return tensor_list
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             func_compiled = torch.compile(func)
             inp = torch.tensor(self.rank, dtype=torch.long, device=self.device)
             out = func_compiled(inp, self.world_size)
@@ -931,7 +1208,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch.distributed.reduce_scatter(output, inputs)
             return output
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inputs = [
                 torch.ones(4, 4, device=self.device) * (self.rank + i)
                 for i in range(self.world_size)
@@ -959,7 +1238,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             model = Model().to(self.device)
             model_compiled = torch.compile(model)
             inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
@@ -986,7 +1267,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             example = functools.partial(
                 example,
                 **self.get_world_trs(),
@@ -1013,7 +1296,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             example = functools.partial(
                 example,
                 **self.get_world_trs(),
@@ -1053,7 +1338,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return out
 
         with (
-            _dynamo_dist_per_rank_init(self.rank, self.world_size),
+            _dynamo_dist_per_rank_init(
+                self.rank, self.world_size, rdvz_file=self.file_name
+            ),
             torch._dynamo.config.patch(
                 dynamic_shapes=True,
                 capture_dynamic_output_shape_ops=True,
@@ -1213,7 +1500,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return torch.ops.custom_ns.foo(a2a)
 
         with (
-            _dynamo_dist_per_rank_init(self.rank, self.world_size),
+            _dynamo_dist_per_rank_init(
+                self.rank, self.world_size, rdvz_file=self.file_name
+            ),
             torch._dynamo.config.patch(
                 dynamic_shapes=True,
                 capture_dynamic_output_shape_ops=True,
@@ -1298,7 +1587,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             out = a2a / a2a.sum(dim=0)
             return out
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             inputs = (
                 torch.ones(self.world_size, self.world_size, device=self.device)
                 * (self.rank + 1),
@@ -1330,7 +1621,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         # recompile on the tensor-class guard: the two produce an equivalent
         # graph (the runtime wrapper unwraps ACT). See
         # VariableBuilder.wrap_tensor / UnwrapCollectiveTensorSource.
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.reset()
             cnt = CompileCounter()
 
@@ -1368,7 +1661,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         # across the ACT/Tensor alternation and not recompile on the class change.
         # Uses a real collective because grad flows through the all-gather autograd,
         # not through a directly-constructed ACT wrapper.
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.reset()
             cnt = CompileCounter()
 

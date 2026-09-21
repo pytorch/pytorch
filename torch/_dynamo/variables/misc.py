@@ -84,7 +84,11 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import NestedUserFunctionVariable, UserFunctionVariable
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -351,7 +355,12 @@ class SuperVariable(VariableTracker):
             return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source
+                variables.UserFunctionVariable(
+                    inner_fn.__func__,
+                    source=source and AttrSource(source, "__func__"),
+                ),
+                self.objvar,
+                source=source,
             ).call_function(tx, args, kwargs)
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
@@ -549,6 +558,10 @@ class ComptimeVariable(VariableTracker):
         fn = args[0]
         if isinstance(fn, UserFunctionVariable):
             fn.get_function()(ComptimeContext(tx))
+        elif isinstance(fn, UserMethodVariable):
+            # Bind the receiver: get_function() is the plain function, so
+            # calling it would pass the ComptimeContext as `self`.
+            fn.guard_as_python_constant()(ComptimeContext(tx))
         elif isinstance(fn, NestedUserFunctionVariable):
             # We have to manually bind the freevars ourselves
             code = fn.get_code()
@@ -601,6 +614,53 @@ class CellVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.CellType
+
+    def _current_contents(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        """Cell contents, or None if the cell is empty (PyCell_GET == NULL).
+
+        An empty cell is represented by the DeletedVariable marker, both for a
+        cell that was never assigned (pre_existing_contents) and for one
+        emptied by `del` (the pending cell_contents mutation).
+        """
+        side_effects = tx.output.side_effects
+        if side_effects.has_pending_mutation_of_attr(self, "cell_contents"):
+            contents = side_effects.load_attr(
+                self, "cell_contents", deleted_ok=True, check=False
+            )
+        else:
+            contents = self.pre_existing_contents
+        if contents is None or isinstance(contents, DeletedVariable):
+            return None
+        return contents
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        """
+        cell_richcompare: cells compare by contents, and an empty cell sorts
+        before any non-empty cell. Non-cells are not handled.
+        https://github.com/python/cpython/blob/v3.13.0/Objects/cellobject.c#L82-L100
+        """
+
+        from .object_protocol import generic_richcompare
+
+        if not isinstance(other, CellVariable):
+            return ConstantVariable.create(NotImplemented)
+
+        self_contents = self._current_contents(tx)
+        other_contents = other._current_contents(tx)
+        if self_contents is not None and other_contents is not None:
+            return generic_richcompare(tx, self_contents, other_contents, op)
+
+        # Py_RETURN_RICHCOMPARE(b == NULL, a == NULL, op)
+        return generic_richcompare(
+            tx,
+            ConstantVariable.create(other_contents is None),
+            ConstantVariable.create(self_contents is None),
+            op,
+        )
 
 
 class NewGlobalVariable(VariableTracker):
@@ -807,7 +867,9 @@ class AutogradFunctionVariable(VariableTracker):
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
-                fn.__func__,
+                variables.UserFunctionVariable(
+                    fn.__func__, source=source and AttrSource(source, "__func__")
+                ),
                 variables.UserDefinedClassVariable(self.fn_cls),
                 source=source,
             ).call_function(tx, args, kwargs)
@@ -1036,7 +1098,9 @@ class AutogradFunctionVariable(VariableTracker):
                 install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
                 install_guard(func_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                 return variables.UserMethodVariable(
-                    obj.__func__, self, source_fn=func_source, source=source
+                    variables.UserFunctionVariable(obj.__func__, source=func_source),
+                    self,
+                    source=source,
                 ).call_function(tx, args, kwargs)
 
         self._unsupported_method(name)
