@@ -7039,12 +7039,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # generate xmask if it's not constant
                 if not has_constant_xmask:
                     entry = self.range_trees[0]
-                    if entry.prefix != "x":
-                        raise AssertionError(
-                            f"expected entry prefix 'x', got {entry.prefix!r}"
-                        )
-                    x = entry.prefix
-                    self.body.writeline(f"{x}mask = {entry.name} < {x}numel")
+                    self.body.writeline(f"xmask = {entry.name} < xnumel")
                 self.body.splice(self.indexing_code)
                 self.body.writelines(
                     [
