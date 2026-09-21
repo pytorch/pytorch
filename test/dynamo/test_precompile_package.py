@@ -7,6 +7,7 @@ import enum
 import functools
 import importlib.machinery
 import importlib.util
+import itertools
 import os
 import re
 import site
@@ -1758,6 +1759,65 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         self.assertIs(namespaces["G['__import_torch']"], torch)
         self.assertIs(namespaces["G['mypkg'].layers"], layers)
+
+    def test_guard_policy_classification_is_total(self):
+        # A guard type in no set is KEPT, so a drop policy can only ever
+        # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
+        # what makes the never-drop claim enforceable:
+        # a guard type added to GuardBuilder fails here until someone triages
+        # it into exactly one of the four sets.
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.precompile_package import (
+            _IDENTITY_GUARD_TYPES,
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _NOOP_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _UNMODELLED_GUARD_TYPES,
+        )
+
+        # dir() rather than vars(): a guard method added on GuardBuilderBase or
+        # a future mixin is a GuardBuilder guard type too.
+        guard_types = {
+            name
+            for name in dir(GuardBuilder)
+            if name.isupper() and callable(getattr(GuardBuilder, name))
+        }
+        sets = {
+            "_SHAPE_BEARING_GUARD_TYPES": _SHAPE_BEARING_GUARD_TYPES,
+            "_UNMODELLED_GUARD_TYPES": _UNMODELLED_GUARD_TYPES,
+            "_INVARIANT_DROPPABLE_GUARD_TYPES": _INVARIANT_DROPPABLE_GUARD_TYPES,
+            "_NOOP_GUARD_TYPES": _NOOP_GUARD_TYPES,
+        }
+        classified: frozenset[str] = frozenset().union(*sets.values())
+        self.assertEqual(
+            sorted(guard_types - classified),
+            [],
+            "unclassified GuardBuilder guard type(s): add each to exactly one "
+            "policy set in torch/_dynamo/precompile_package.py (KEPT until then)",
+        )
+        self.assertEqual(
+            sorted(classified - guard_types),
+            [],
+            "phantom entries: no GuardBuilder method by these names",
+        )
+        for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
+            self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
+        # The identity guards the default filter drops are droppable by
+        # construction; a literal rewrite of the set must not lose that.
+        self.assertTrue(_IDENTITY_GUARD_TYPES <= _INVARIANT_DROPPABLE_GUARD_TYPES)
+
+    def test_noop_guard_type_follows_the_hook_guard_config(self):
+        # EMPTY_NN_MODULE_HOOKS_DICT emits nothing under the default config and
+        # a SEQUENCE_LENGTH on the hook dicts otherwise, so whether a report may
+        # treat it as a marker depends on the config the frame compiled under.
+        from torch._dynamo.precompile_package import _is_noop_guard_type
+
+        self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
+        self.assertFalse(_is_noop_guard_type("TENSOR_MATCH"))
+        self.assertTrue(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
+        with torch._dynamo.config.patch(skip_nnmodule_hook_guards=False):
+            self.assertFalse(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
+            self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)
