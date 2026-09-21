@@ -886,6 +886,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_stream_serialization_barrier_two_streams(self) -> None:
         """Alternate barriers across two streams with a rank-0 GPU-side delay.
         Without the guard the two barrier kernels can be resident at once and
@@ -924,6 +925,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_stream_serialization_put_wait_two_streams(self) -> None:
         """put_signal/wait_signal across two streams in a ring pattern.
         Without the guard the stream-B wait can consume the stream-A round's
@@ -965,6 +967,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_stream_serialization_waits_on_pad_kernel_only(self) -> None:
         """Stream A runs a barrier and then a long sleep. Stream B runs a
         barrier. The guard must order B's barrier after A's barrier kernel
@@ -1008,6 +1011,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_stream_serialization_concurrent_threads(self) -> None:
         """Two host threads issue barriers at the same time on separate
         streams. The per-(group, device) mutex serializes the launches, and
@@ -1081,6 +1085,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @requires_cuda_python_bindings
     @parametrize("same_group", [True, False])
     def test_stream_serialization_graph_dependency(self, same_group: bool) -> None:
@@ -1153,6 +1158,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_stream_serialization_one_shot_all_reduce(self) -> None:
         """one_shot_all_reduce across two streams with a GPU-side delay.
         Exercises the GroupStreamGuard placement in
@@ -1193,6 +1199,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_stream_serialization_cuda_graph_capture(self) -> None:
         """A barrier captured in a CUDA graph replays correctly. Inside a
         capture the guard's event record and wait become graph nodes."""
@@ -1229,6 +1236,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_stream_serialization_capture_without_replay(self) -> None:
         """A barrier captured into a graph that is never replayed must not
         affect later eager barriers. Its completion event is a node of that
@@ -1270,6 +1278,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_stream_serialization_cuda_graph_forked_streams(self) -> None:
         """Two streams forked inside one capture both issue barriers on the
         same channel. The guard's record/wait become graph edges, so the two
