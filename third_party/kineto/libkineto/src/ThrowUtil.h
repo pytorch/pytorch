@@ -21,5 +21,6 @@
 // expression -- a string literal, a std::string, a concatenation, or a
 // fmt::format(...) call -- carries over unchanged and the thrown type is
 // preserved. Callers keep whatever headers those arguments require.
-#define KINETO_THROW(ExceptionType, ...) \
-  throw ExceptionType(__VA_ARGS__) // @allow-raw-throw
+#define KINETO_THROW(ExceptionType, ...)                           \
+  /* @allow-raw-throw: every Kineto throw funnels through here. */ \
+  throw ExceptionType(__VA_ARGS__)

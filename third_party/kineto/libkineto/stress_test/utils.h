@@ -30,19 +30,20 @@ inline void checkCudaStatus(cudaError_t status, int lineNumber = -1) {
   }
 }
 
-#define CUDA_CHECK(EXPR)                            \
-  do {                                              \
-    const cudaError_t err = EXPR;                   \
-    if (err == cudaSuccess) {                       \
-      break;                                        \
-    }                                               \
-    std::string error_message;                      \
-    error_message.append(__FILE__);                 \
-    error_message.append(":");                      \
-    error_message.append(std::to_string(__LINE__)); \
-    error_message.append(" CUDA error: ");          \
-    error_message.append(cudaGetErrorString(err));  \
-    throw std::runtime_error(error_message);        \
+#define CUDA_CHECK(EXPR)                                        \
+  do {                                                          \
+    const cudaError_t err = EXPR;                               \
+    if (err == cudaSuccess) {                                   \
+      break;                                                    \
+    }                                                           \
+    std::string error_message;                                  \
+    error_message.append(__FILE__);                             \
+    error_message.append(":");                                  \
+    error_message.append(std::to_string(__LINE__));             \
+    error_message.append(" CUDA error: ");                      \
+    error_message.append(cudaGetErrorString(err));              \
+    /* @allow-raw-throw: libkineto does not build this file. */ \
+    throw std::runtime_error(error_message);                    \
   } while (0)
 
 #define CUDA_KERNEL_LAUNCH_CHECK() CUDA_CHECK(cudaGetLastError())
