@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import builtins
-import importlib.util
 import math
 import os
 import sys
@@ -41,6 +40,7 @@ from torch._inductor.utils import (
     _gpu_types,
     _infer_scale_swizzle_impl,
     device_need_guard,
+    ensure_nv_universal_gemm_available,
     get_device_dram_gbps,
     get_device_tflops,
     get_gpu_dram_gbps,
@@ -874,22 +874,25 @@ class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
     @unittest.skipIf(
-        not torch.cuda.is_available()
-        or importlib.util.find_spec("cutlass_api") is None,
-        "requires CUDA and cutlass_api",
+        not (torch.cuda.is_available() and ensure_nv_universal_gemm_available()),
+        "requires CUDA and cutlass.operators",
     )
     def test_ensure_fp4_dtype_registered(self):
-        """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
+        """_ensure_fp4_dtype_registered should map torch FP4 to cutlass.Float4E2M1FN."""
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
         _ensure_fp4_dtype_registered()
         import cutlass
-        import cutlass_api.utils
+        import cutlass.operators.utils.dtype
 
-        result = cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        result = cutlass.operators.utils.dtype.cutlass_type_from_torch_type(
+            torch.float4_e2m1fn_x2
+        )
         self.assertEqual(result, cutlass.Float4E2M1FN)
 
-        result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
+        result_fp32 = cutlass.operators.utils.dtype.cutlass_type_from_torch_type(
+            torch.float32
+        )
         self.assertEqual(result_fp32, cutlass.Float32)
 
     def test_rand_strided_fp4(self):
