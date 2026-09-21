@@ -164,15 +164,19 @@ REGISTER_SCALED_MM_WITH_OUT_T(half);
 REGISTER_SCALED_MM_WITH_OUT_T(bfloat);
 REGISTER_SCALED_MM_WITH_OUT_T(float8_e4m3fn);
 
-// Reuses the fp8 exponent bits as half exponent bits, so the result is the
-// value divided by scaled_mm_decode_scale.
+
 inline float4 scaled_mm_decode_scaled(uint bytes) {
+  // mask the sign bit
   const uint magnitude = bytes & 0x7f7f7f7f;
-  // The per-byte carry marks 0x7f encodings as half NaNs.
-  const uint payload = magnitude | ((magnitude + 0x01010101) & 0x80808080);
+  const uint nan_mask = 0x80808080;
+  const uint nan_flags = (magnitude + 0x01010101) & nan_mask;
+  // payload to detect nans here, all nans will be 11111111
+  // this is done this way because 0 1111 111 and 1 1111 111 are both Nans in fp8
+  const uint payload = magnitude | nan_flags;
+  // Reusing E4M3FN exponent bits avoids per-value bias adjustment. FP16's
+  // bias is 15 instead of 7, so the decoded value is x * 2^(7 - 15) = x / 256.
   const uint low = ((payload & 0x00ff00ff) << 7) | ((bytes & 0x00800080) << 8);
   const uint high = ((payload & 0xff00ff00) >> 1) | (bytes & 0x80008000);
-  // Convert to float before any arithmetic so half subnormals are preserved.
   const float2 lo = float2(as_type<half2>(low));
   const float2 hi = float2(as_type<half2>(high));
   return float4(lo.x, hi.x, lo.y, hi.y);
