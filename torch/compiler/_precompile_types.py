@@ -40,7 +40,10 @@ class GuardFact:
             scrubbed by the producer and the values the check embeds masked by
             type, e.g. ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``
             and ``("L['self'].prompt == '<str>'",)``; empty when the guard
-            renders none. A guard that pins a string pins it BY VALUE, so the
+            renders none, and empty as well when the producer declined to render
+            it: a report spells a guard it records as ``enforced`` by that flag
+            and its slot, so a producer may leave both ``code`` and ``value``
+            empty for one. A guard that pins a string pins it BY VALUE, so the
             check guards.py renders carries the string itself, and these reports
             are written to a file to be committed and diffed: what a check
             compares is named by type, and that it differed between variants is
@@ -50,21 +53,26 @@ class GuardFact:
             of the same length render one check and only the slot says they
             differed, and a rendering that is not a Python expression at all
             becomes ``"<unparsed check>"``, since nothing can be masked in a
-            shape the producer cannot read. The attribute name a ``hasattr``
+            shape the producer cannot read -- which makes two such checks on one
+            slot read alike, a digest of the text being a fingerprint of what the
+            masking exists to hide. The attribute name a ``hasattr``
             reads stays, as does a key that names a scope or an nn.Module
             attribute (``L['x']``, ``self._modules['lin']``); every other
-            subscript key is masked, its shape notwithstanding.
+            subscript key is masked, its shape notwithstanding, since the check
+            is parsed rather than pattern-matched.
         value: A rendered fragment for what the check compares that its code does
             not show: the ``check_tensor`` line for a tensor guard (python type,
             dispatch keys, dtype, size and stride), ``"is <callable>"`` for an
             identity guard -- module, qualname and definition site of the object,
             never the data bound to it -- the flags a global-state guard
             snapshots, and a digest of the saved-tensors hooks. Empty when the
-            code says it all. Unlike ``code`` this is not masked, and does not
-            need to be: every shape it takes is metadata, a name or a digest
-            derived from the guarded object rather than a literal the guard
-            pinned, and it is what still tells two variants apart once ``code``
-            has masked what they compared.
+            code says it all, and empty for an enforced guard whose producer
+            omitted it, as ``code`` above says. Unlike ``code`` this is not
+            masked, and does not need to be: every shape it takes is metadata, a
+            name or a digest derived from the guarded object rather than a literal
+            the guard pinned, and for a guard a capture DROPPED it is what still
+            tells two variants apart once ``code`` has masked what they
+            compared.
         enforced: Whether the artifact still checks this guard (it was serialized).
     """
 
