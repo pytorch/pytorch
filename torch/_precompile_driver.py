@@ -201,10 +201,7 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    # The casts the capture ran under are baked into the graph, which still
-    # re-dispatches here, so ambient autocast must not cast a second time. Like
-    # the no_grad, this pins autocast off regardless of capture or serve state.
-    with _torch._C._DisableAutocast(), _torch.no_grad():
+    with _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -315,11 +312,7 @@ def _inductor_forward(*args):
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
     try:
-        # A fallback op re-dispatches through its autocast-registered overload
-        # (e.g. aten.addbmm.default on CPU), so ambient autocast must not cast
-        # a second time over the casts the capture baked into the kernels.
-        with _torch._C._DisableAutocast():
-            out = list(call([*pb, *user_flat]))
+        out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
         # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
         # mismatch, or a size mismatch on an unbacked dim the static check above cannot
