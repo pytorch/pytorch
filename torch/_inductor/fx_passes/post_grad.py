@@ -255,10 +255,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
-        if config.reuse_dtype_conversions:
-            GraphTransformObserver(gm, "reuse_dtype_conversions").apply_graph_pass(
-                reuse_dtype_conversions
-            )
+        GraphTransformObserver(gm, "reuse_dtype_conversions").apply_graph_pass(
+            reuse_dtype_conversions
+        )
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
                 gm, "partitioned_scatter_optimization"
@@ -1557,7 +1556,7 @@ def reuse_dtype_conversions(graph: torch.fx.Graph) -> None:
         pending = [source]
         while pending:
             unused = pending.pop()
-            if unused.op != "call_function" or unused.users:
+            if unused.op != "call_function" or unused.users or unused.is_impure():
                 continue
             pending.extend(unused.all_input_nodes)
             graph.erase_node(unused)

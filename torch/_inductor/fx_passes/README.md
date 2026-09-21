@@ -56,6 +56,9 @@ if graph.find_nodes(op="call_function", target=aten.set_.default):
 
 Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
 
+## When an operation can be deleted
+Before deleting an FX node, a pass must verify that it has no users and that `Node.is_impure()` returns false. A node with no users may still have observable side effects, such as modifying storage or advancing RNG state.
+
 ## Topological order of nodes
 FX passes must NOT assume that the current graph-list order is topological. Earlier passes may leave dependencies out of list order, and passes are not generally required to restore topological order after each rewrite.
 
