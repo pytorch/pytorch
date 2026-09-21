@@ -351,7 +351,7 @@ class FSDPState(_State):
     def _post_partial_forward(self, output: Any) -> Any:
         with _spmd_no_typecheck():
             for fsdp_param_group in self._fsdp_param_groups:
-                fsdp_param_group._register_cpu_grad_owners()
+                fsdp_param_group._register_grad_owners()
         return self._cast_output_dtype(output)
 
     def _cast_forward_inputs(

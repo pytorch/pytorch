@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import inspect
 import itertools
 from collections.abc import Callable, Sequence
@@ -8,7 +9,10 @@ from typing import Any, cast, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
+
     from ._fsdp_api import DataParallelMeshDims
+    from ._fsdp_param_group import FSDPParamGroup
 
 import torch
 import torch.distributed as dist
@@ -42,7 +46,9 @@ from ._fsdp_common import (
     HSDPMeshInfo,
     resolve_shard_placement,
     ShardPlacementFnResult,
+    TrainingState,
 )
+from ._fsdp_grad import FSDPGrad
 
 
 _orig_param_uid_counter = itertools.count()
@@ -213,6 +219,7 @@ class FSDPParam:
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
     unsharded_grad_dtype: torch.dtype
+    param_group: "FSDPParamGroup"
 
     def __init__(
         self,
@@ -236,6 +243,9 @@ class FSDPParam:
         self.grad_offload_event: torch.Event | None = None
         self._sharded_grad_dtype_initialized = False
         self._grad_is_partial = False
+        self._pending_gradient: FSDPGrad | None = None
+        self._partial_grad: DTensor | None = None
+        self._grad_owner_hook: RemovableHandle | None = None
         self._pending_grad_reduce_op = "avg"
         self._pending_grad_divide_factor: float | None = None
         self._pending_grad_spec: DTensorSpec | None = None
@@ -972,7 +982,11 @@ class FSDPParam:
         )
 
     def to_sharded(self) -> None:
-        self.publish_unsharded_grad()
+        if not (
+            self.param_group._training_state == TrainingState.POST_BACKWARD
+            and self.param_group.reduce_grads
+        ):
+            self.publish_unsharded_grad()
         self._setattr_on_modules(self.sharded_param)
         self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
@@ -1032,6 +1046,10 @@ class FSDPParam:
             # Preserve user changes to requires_grad while weights stay unsharded.
             set_requires_grad_if_needed(self._unsharded_param, self.sharded_param)
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
+        if self._unsharded_param.requires_grad and self._grad_owner_hook is None:
+            self._grad_owner_hook = self._unsharded_param.register_hook(
+                self._before_accumulate_grad
+            )
         self._setattr_on_modules(self._unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
@@ -1093,229 +1111,141 @@ class FSDPParam:
         )
         return _from_local_no_grad(tensor, post_forward_sharding_spec)
 
+    def _before_accumulate_grad(self, grad: torch.Tensor) -> torch.Tensor:
+        if self._grad_is_partial and not self.offload_to_cpu:
+            self.restore_unsharded_grad()
+        return grad
+
+    def _reduced_replacement(self, grad: torch.Tensor) -> DTensor:
+        if not isinstance(grad, DTensor):
+            raise TypeError(
+                "FSDP gradients must be DTensors or component-backed FSDPGrad tensors"
+            )
+        if grad.device_mesh != self._sharding_spec.mesh:
+            raise ValueError(
+                "Replacing a pending gradient with a DTensor on a different mesh is not supported"
+            )
+        if any(isinstance(p, Partial) for p in grad.placements):
+            raise ValueError(
+                "Pending replacements require an FSDPGrad with explicit components"
+            )
+        reduced = grad.redistribute(placements=self._sharding_spec.placements)
+        # Accumulating into a shard must not mutate an aliased replicated gradient.
+        if reduced._spec != grad._spec and torch._C._overlaps(
+            reduced._local_tensor, grad._local_tensor
+        ):
+            reduced = cast(DTensor, reduced.clone())
+        return reduced
+
     @torch.no_grad()
     def publish_unsharded_grad(
         self, reduce_op: str | None = None, divide_factor: float | None = None
     ) -> None:
-        """Expose an unreduced gradient on the registered sharded parameter.
-
-        Only this parameter owns the gradient while it is published, so clearing
-        its ``.grad`` also clears accumulation. The full weight allocation may
-        remain live when resharding after backward is disabled.
-        """
-        unsharded_param = getattr(self, "_unsharded_param", None)
-        grad_is_pending = self._grad_is_partial
-        pending_grad_to_accumulate = None
-        if self._grad_is_partial:
-            grad = self.sharded_param.grad
-            if grad is not None:
-                if not isinstance(grad, DTensor):
-                    raise AssertionError("Expected a DTensor for the pending gradient")
-                if grad._spec is not self._pending_grad_spec:
-                    grad = self._redistribute_pending_grad(grad)
-            if (
-                self.offload_to_cpu
-                and unsharded_param is not None
-                and unsharded_param.grad is not None
-            ):
-                # Keep the public CPU gradient authoritative between no-sync
-                # backwards; transfer only the new contribution from the GPU.
-                pending_grad_to_accumulate = grad
-                grad = unsharded_param.grad
-                grad_is_pending = False
-        else:
-            grad = unsharded_param.grad if unsharded_param is not None else None
-        if grad is None:
-            if self._grad_is_partial:
-                self.sharded_param.grad_dtype = self.sharded_grad_dtype
-            return
-        if isinstance(grad, AsyncCollectiveTensor):
-            grad = grad.wait()
+        """Publish components without inserting reduced history into autograd."""
+        leaf = getattr(self, "_unsharded_param", None)
+        incoming = leaf.grad if leaf is not None else None
+        current = self.sharded_param.grad
+        pending = current if isinstance(current, FSDPGrad) else None
+        if self._grad_is_partial and pending is None:
+            self._partial_grad = None
+            self._pending_gradient = None
+            self._grad_is_partial = False
+            if current is not None:
+                current = self._reduced_replacement(current)
         if reduce_op is not None:
+            if pending is not None and (
+                reduce_op != self._pending_grad_reduce_op
+                or divide_factor != self._pending_grad_divide_factor
+            ):
+                raise RuntimeError(
+                    "Synchronize or clear pending gradients before changing their reduction policy"
+                )
             self._pending_grad_reduce_op = reduce_op
             self._pending_grad_divide_factor = divide_factor
-        if (
-            not self._grad_is_partial
-            and self.sharded_param.grad is not None
-            and grad.dtype == torch.float16
-        ):
-            # Embedding an already-reduced shard rescales it by the shard count,
-            # which can overflow fp16 before the reduction's pre-division.
-            raise NotImplementedError(
-                "Call zero_grad(set_to_none=True) before starting unsynchronized "
-                "fp16 accumulation with an existing reduced gradient."
-            )
-        if (
-            not self._grad_is_partial
-            and self.sharded_param.grad is not None
-            and self._unsharded_dtensor_spec is not None
-            and not self.is_spmd_types
-        ):
-            target_placements = self._unsharded_dtensor_spec.placements
-            if isinstance(grad, DTensor):
+        unreduced = pending.unreduced if pending is not None else None
+        reduced = pending.reduced if pending is not None else current
+        if reduced is not None:
+            reduced = self._reduced_replacement(reduced)
+        partial = pending.partial if pending is not None else self._partial_grad
+        if incoming is not None:
+            if isinstance(incoming, AsyncCollectiveTensor):
+                incoming = incoming.wait()
+            placements = list(self._spmd_placements)
+            if isinstance(incoming, DTensor):
+                local = incoming._local_tensor
                 if self.mesh_info.is_spmd_mesh:
-                    target_placements = tuple(
-                        grad.placements[dim]
-                        if dim in self._dp_dim_indices
-                        else placement
-                        for dim, placement in enumerate(target_placements)
-                    )
-                if grad.placements != target_placements:
-                    grad = grad.redistribute(placements=target_placements)
-
-        placements = list(self._spmd_placements)
-        if isinstance(grad, DTensor):
-            local_grad = grad._local_tensor
-            if grad_is_pending or self.mesh_info.is_spmd_mesh:
-                placements = list(grad.placements)
+                    placements = list(incoming.placements)
+                else:
+                    placements[self.mesh_info.mesh.ndim :] = incoming.placements
+                self._pending_unsharded_grad_spec = incoming._spec
             else:
-                placements[self.mesh_info.mesh.ndim :] = grad.placements
-        else:
-            local_grad = grad
-            if self.is_spmd_types:
-                placements = list(self._spmd_grad_placements)
-        dp_dims = (
-            self._dp_dim_indices
-            if self.mesh_info.is_spmd_mesh
-            else range(self.mesh_info.mesh.ndim)
-        )
-        for dim in dp_dims:
-            placements[dim] = Partial(self._pending_grad_reduce_op)
-        if pending_grad_to_accumulate is not None:
-            # Match any non-DP layout before offloading the new contribution.
-            new_grad = self._redistribute_pending_grad(
-                _from_local_no_grad(
-                    local_grad,
-                    DTensorSpec(
-                        self._spmd_mesh,
-                        tuple(placements),
-                        tensor_meta=TensorMeta(
-                            self.sharded_param.size(),
-                            self.sharded_param.stride(),
-                            local_grad.dtype,
-                        ),
+                local = incoming
+                self._pending_unsharded_grad_spec = None
+                if self.is_spmd_types:
+                    placements = list(self._spmd_grad_placements)
+            dp_dims = (
+                self._dp_dim_indices
+                if self.mesh_info.is_spmd_mesh
+                else range(self.mesh_info.mesh.ndim)
+            )
+            for dim in dp_dims:
+                placements[dim] = Partial(self._pending_grad_reduce_op)
+            local = local.to(device=self.sharded_param.device)
+            new_grad = _from_local_no_grad(
+                local,
+                DTensorSpec(
+                    self._spmd_mesh,
+                    tuple(placements),
+                    tensor_meta=TensorMeta(
+                        self.sharded_param.size(),
+                        self.sharded_param.stride(),
+                        local.dtype,
                     ),
-                )
-            )
-            local_grad = pending_grad_to_accumulate._local_tensor.to(
-                device=self.sharded_param.device
-            )
-            local_grad.add_(new_grad._local_tensor.to(device=local_grad.device))
-            placements = list(pending_grad_to_accumulate.placements)
-        local_grad = local_grad.to(device=self.sharded_param.device)
-        if not self._grad_is_partial and self.sharded_param.grad is not None:
-            sharded_grad = self.sharded_param.grad
-            if not isinstance(sharded_grad, DTensor):
-                raise AssertionError("Expected a DTensor for the sharded gradient")
-            sharded_grad_data = (
-                self._redistribute_reduced_grad(sharded_grad, grad)
-                if self.is_spmd_types
-                else sharded_grad._local_tensor
-            )
-            shard_size, shard_rank = (
-                (self.mesh_info.shard_mesh_size, self.mesh_info.shard_mesh_rank)
-                if isinstance(self.mesh_info, FSDPMeshInfo)
-                else (1, 0)
-            )
-            replicate_size = (
-                self.mesh_info.replicate_mesh_size
-                if isinstance(self.mesh_info, DDPMeshInfo)
-                else 1
-            )
-            factor = self._pending_grad_divide_factor
-            if factor is None:
-                factor = (
-                    shard_size * replicate_size
-                    if self._pending_grad_reduce_op == "avg"
-                    else 1
-                )
-            # Each replica embeds its already-reduced shard once. Undo the
-            # upcoming reduction's division without counting replicas twice.
-            local_shard = _chunk_with_empty(
-                local_grad, shard_size, dim=self.fsdp_placement.dim
-            )[shard_rank]
-            if local_shard.numel():
-                local_shard.add_(sharded_grad_data, alpha=factor / replicate_size)
-        pending_grad = _from_local_no_grad(
-            local_grad,
-            DTensorSpec(
-                self._spmd_mesh,
-                tuple(placements),
-                tensor_meta=TensorMeta(
-                    self.sharded_param.size(),
-                    self.sharded_param.stride(),
-                    local_grad.dtype,
                 ),
-            ),
-        )
-        self.sharded_param.grad = None
-        self.sharded_param.grad_dtype = pending_grad.dtype
-        self.sharded_param.grad = pending_grad
-        self._pending_grad_spec = pending_grad._spec
-        if not grad_is_pending:
-            if pending_grad_to_accumulate is None:
-                self._pending_unsharded_grad_spec = (
-                    grad._spec if isinstance(grad, DTensor) else None
-                )
-            if unsharded_param is None:
-                raise AssertionError("Expected an unsharded gradient owner")
-            unsharded_param.grad = None
-        self._grad_is_partial = True
-        self._setattr_on_modules(self.sharded_param)
-
-    def _redistribute_reduced_grad(
-        self, sharded_grad: DTensor, grad: torch.Tensor
-    ) -> torch.Tensor:
-        mesh_names = self._spmd_mesh.mesh_dim_names
-        sharded_names = sharded_grad.device_mesh.mesh_dim_names
-        if mesh_names is None or sharded_names is None:
-            raise AssertionError("Expected named meshes for spmd_types gradients")
-        grad_placements = {
-            name: self._spmd_grad_placements[dim]
-            for dim, name in enumerate(mesh_names)
-            if dim not in self._dp_dim_indices
-        }
-        placements = tuple(
-            grad_placements.get(name, placement)
-            for name, placement in zip(sharded_names, sharded_grad.placements)
-        )
-        if placements == sharded_grad.placements:
-            return sharded_grad._local_tensor
-        # Preserve the actual DP shard spec, including flattened DP axes.
-        sharded_grad = cast(
-            DTensor,
-            sharded_grad.to(
-                device=grad.device,
-                dtype=torch.promote_types(sharded_grad.dtype, grad.dtype),
-            ),
-        )
-        source_spec = sharded_grad._spec
-        replicated_spec = replace(
-            source_spec,
-            placements=tuple(
-                Replicate() if source != target else source
-                for source, target in zip(source_spec.placements, placements)
-            ),
-        )
-        local_grad = redistribute_local_tensor(
-            sharded_grad._local_tensor, source_spec, replicated_spec
-        )
-        # Replicate -> Partial partitions the old value so reduction counts
-        # it once, while retaining the incoming gradient's non-DP layout.
-        local_grad = redistribute_local_tensor(
-            local_grad, replicated_spec, replace(source_spec, placements=placements)
-        )
-        return local_grad.to(device=self.sharded_param.device)
-
-    def _redistribute_pending_grad(self, grad: DTensor) -> DTensor:
-        if grad._spec == self._pending_grad_spec:
-            return grad
-        grad = self._normalize_pending_grad(grad)
-        if self._pending_unsharded_grad_spec is not None:
-            self._pending_unsharded_grad_spec = replace(
-                self._pending_unsharded_grad_spec, tensor_meta=grad._spec.tensor_meta
             )
-        return grad
+            if unreduced is None:
+                unreduced = new_grad
+            else:
+                self._pending_grad_spec = unreduced._spec
+                new_grad = self._normalize_pending_grad(new_grad)
+                unreduced._local_tensor.add_(new_grad._local_tensor)
+            if leaf is None:
+                raise AssertionError("Expected the autograd gradient owner")
+            leaf.grad = None
+        if unreduced is None and partial is None:
+            self.sharded_param.grad = reduced
+            self._grad_is_partial = False
+            self._pending_gradient = None
+            if reduced is not None:
+                self._setattr_on_modules(self.sharded_param)
+            return
+        dtype = self.sharded_grad_dtype or (
+            reduced.dtype if reduced is not None else self.unsharded_grad_dtype
+        )
+        spec = replace(
+            self._sharding_spec,
+            tensor_meta=TensorMeta(
+                self.sharded_param.size(),
+                self.sharded_param.stride(),
+                dtype,
+            ),
+        )
+        materialize = functools.partial(
+            self.param_group.materialize_grad,
+            self,
+            divide_factor=self.param_group.gradient_divide_factor,
+            force_sum=self.param_group.force_sum_reduction_for_comms,
+            preview_allowed=(self.param_group._all_reduce_hook is None),
+            owner_spec=self._sharding_spec,
+            owner_device=self.sharded_param.device,
+        )
+        public = FSDPGrad(reduced, unreduced, partial, spec, materialize)
+        self.sharded_param.grad = public
+        self._pending_gradient = public
+        self._pending_grad_spec = unreduced._spec if unreduced is not None else None
+        self._grad_is_partial = True
+        self._partial_grad = partial
+        self._setattr_on_modules(self.sharded_param)
 
     def _normalize_pending_grad(self, grad: DTensor) -> DTensor:
         target_spec = self._pending_grad_spec
@@ -1364,39 +1294,42 @@ class FSDPParam:
 
     @torch.no_grad()
     def restore_unsharded_grad(self) -> None:
-        """Return the published gradient to the leaf used by autograd."""
+        """Restore only the native-dtype component to the autograd leaf."""
         if not self._grad_is_partial:
             return
-        grad = self.sharded_param.grad
-        if grad is not None:
-            if not isinstance(grad, DTensor):
-                raise AssertionError("Expected a DTensor for the pending gradient")
-            if grad._spec is not self._pending_grad_spec:
-                grad = self._redistribute_pending_grad(grad)
-            local_grad = grad._local_tensor.to(device=self._unsharded_param.device)
-            unsharded_grad = (
-                _from_local_no_grad(local_grad, self._pending_unsharded_grad_spec)
-                if self._pending_unsharded_grad_spec is not None
-                else local_grad
-            )
-            if self.is_spmd_types:
-                spmd.assert_type(
-                    unsharded_grad,
-                    {
-                        axis: axis_type.backward_type()
-                        for axis, axis_type in self._spmd_restore_type.items()
-                    },
-                    partition_spec=self._spmd_partition_spec,
+        public = self.sharded_param.grad
+        reduced = None
+        if isinstance(public, FSDPGrad):
+            reduced = public.reduced
+            self._partial_grad = public.partial
+            grad = public.unreduced
+            if grad is not None:
+                local = grad._local_tensor.to(device=self._unsharded_param.device)
+                unsharded_grad = (
+                    _from_local_no_grad(local, self._pending_unsharded_grad_spec)
+                    if self._pending_unsharded_grad_spec is not None
+                    else local
                 )
-            if self._unsharded_param.grad is None:
-                self._unsharded_param.grad = unsharded_grad
-            else:
-                # Synchronization may be enabled after pre-backward, or a
-                # partial group may not have run its pre-backward hook.
-                self._unsharded_param.grad.add_(unsharded_grad)
-        self.sharded_param.grad = None
-        self.sharded_param.grad_dtype = self.sharded_grad_dtype
+                if self.is_spmd_types:
+                    spmd.assert_type(
+                        unsharded_grad,
+                        {
+                            axis: axis_type.backward_type()
+                            for axis, axis_type in self._spmd_restore_type.items()
+                        },
+                        partition_spec=self._spmd_partition_spec,
+                    )
+                if self._unsharded_param.grad is None:
+                    self._unsharded_param.grad = unsharded_grad
+                else:
+                    self._unsharded_param.grad.add_(unsharded_grad)
+        else:
+            self._partial_grad = None
+            if public is not None:
+                reduced = self._reduced_replacement(public)
+        self.sharded_param.grad = reduced
         self._grad_is_partial = False
+        self._pending_gradient = None
         self._pending_grad_spec = None
         self._pending_unsharded_grad_spec = None
         if self.sharded_state == ShardedState.UNSHARDED:
@@ -1522,51 +1455,18 @@ class FSDPParam:
         if not self._grad_is_partial:
             param = getattr(self, "_unsharded_param", None)
             return param.grad if param is not None else None
-        grad = self.sharded_param.grad
-        if grad is None:
+        public = self.sharded_param.grad
+        if not isinstance(public, FSDPGrad) or public.unreduced is None:
             return None
-        if not isinstance(grad, DTensor):
-            raise AssertionError("Expected a DTensor for the pending gradient")
-        if grad._spec is not self._pending_grad_spec:
-            if normalize:
-                grad = self._normalize_pending_grad(grad)
-            else:
-                source_spec = grad._spec
-                target_spec = self._pending_grad_spec
-                if target_spec is None:
-                    raise AssertionError("Expected a saved pending gradient spec")
-                if source_spec.mesh != target_spec.mesh:
-                    raise ValueError(
-                        "Replacing a pending gradient with a DTensor on a different "
-                        "mesh is not supported"
-                    )
-                if source_spec.tensor_meta is None or target_spec.tensor_meta is None:
-                    raise AssertionError("Expected pending gradient tensor metadata")
-                if source_spec.tensor_meta.dtype != target_spec.tensor_meta.dtype:
-                    raise ValueError(
-                        "Replacement pending gradient must preserve its dtype"
-                    )
-                if (
-                    source_spec.placements != target_spec.placements
-                    or source_spec.shard_order != target_spec.shard_order
-                ):
-                    raise RuntimeError(
-                        "Reading unsharded_accumulated_grad requires redistribution "
-                        "after a gradient layout change. Read sharded_param.grad for "
-                        "the current layout, or use unsharded_accumulated_grad_data "
-                        "on all participating ranks to normalize it."
-                    )
-        local_grad = grad._local_tensor
-        if normalize:
-            local_grad = local_grad.to(device=self.device)
-        if self._pending_unsharded_grad_spec is None:
-            return local_grad
-        return _from_local_no_grad(
-            local_grad,
-            replace(
-                self._pending_unsharded_grad_spec, tensor_meta=grad._spec.tensor_meta
-            ),
+        grad = public.unreduced
+        local = (
+            grad._local_tensor.to(device=self.device)
+            if normalize
+            else grad._local_tensor
         )
+        if self._pending_unsharded_grad_spec is None:
+            return local
+        return _from_local_no_grad(local, self._pending_unsharded_grad_spec)
 
     @property
     @torch.no_grad()
@@ -1664,7 +1564,9 @@ class FSDPParam:
             )
 
     def check_gradient_conversion(
-        self, converted_dtype: Callable[[torch.Tensor], torch.dtype]
+        self,
+        converted_dtype: Callable[[torch.Tensor], torch.dtype],
+        converted_device: Callable[[torch.Tensor], torch.device] | None = None,
     ) -> None:
         param = self.sharded_param
         has_override = self._has_sharded_grad_dtype_override
@@ -1675,6 +1577,22 @@ class FSDPParam:
         for owner in (param, unsharded_param):
             if owner is None or owner.grad is None:
                 continue
+            if isinstance(owner.grad, FSDPGrad):
+                for component in (
+                    owner.grad.reduced,
+                    owner.grad.unreduced,
+                    owner.grad.partial,
+                ):
+                    if component is not None and (
+                        converted_dtype(component) != component.dtype
+                        or (
+                            converted_device is not None
+                            and converted_device(component) != component.device
+                        )
+                    ):
+                        raise RuntimeError(
+                            "FSDP module conversion is incompatible with a pending gradient. Call model.zero_grad(set_to_none=True) before converting the module."
+                        )
             target_dtype = converted_dtype(param)
             target_grad_dtype = converted_dtype(owner.grad)
             if owner is unsharded_param or self._grad_is_partial:

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import logging
+from dataclasses import replace
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -16,11 +18,14 @@ from torch.distributed.fsdp._common_utils import (
     collect_grad_tensors,
     replace_grad_tensors,
 )
+from torch.distributed.tensor import DTensor, Partial
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -37,6 +42,8 @@ from ._fsdp_collectives import (
 from ._fsdp_common import (
     _disable_functorch_if_active,
     _dynamo_disable,
+    _from_local_no_grad,
+    _get_dim0_padded_size,
     DataParallelMeshInfo,
     DDPMeshInfo,
     FSDPMeshInfo,
@@ -45,11 +52,14 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
     TrainingState,
 )
+from ._fsdp_grad import FSDPGrad
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -181,6 +191,8 @@ class FSDPParamGroup:
             )
             for param, module_info in zip(params, param_module_infos)
         ]
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.param_group = self
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
@@ -205,10 +217,12 @@ class FSDPParamGroup:
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
         # specify it, possibly at construction time before lazy init
-        self._all_reduce_hook_stream: torch.cuda.Stream | None = None
+        self._all_reduce_hook_stream: torch.Stream | None = None
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
+        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
+        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -467,8 +481,11 @@ class FSDPParamGroup:
                 tensor = fsdp_param.all_gather_outputs[0]
                 alloc_storage(tensor)
 
-                # find alternative way to check if tensor.is_inference
-                with torch.autograd._unsafe_preserve_version_counter(tensor):
+                with (
+                    torch.autograd._unsafe_preserve_version_counter(tensor)
+                    if not tensor.is_inference()
+                    else contextlib.nullcontext()
+                ):
                     tensor.copy_(all_gather_input)
 
         else:
@@ -477,6 +494,7 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
+                    all_gather_output_fn=self._all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -546,6 +564,14 @@ class FSDPParamGroup:
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
         self._partial_reduce_output = None
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.sharded_param.grad = None
+            leaf = getattr(fsdp_param, "_unsharded_param", None)
+            if leaf is not None:
+                leaf.grad = None
+            fsdp_param._partial_grad = None
+            fsdp_param._pending_gradient = None
+            fsdp_param._grad_is_partial = False
         self._post_forward_indices.clear()
         self._training_state = TrainingState.IDLE
         self._to_sharded()
@@ -583,21 +609,14 @@ class FSDPParamGroup:
             if not is_bw():
                 self.reshard()
                 self._record_post_forward()
-                self._register_cpu_grad_owners()
+                self._register_grad_owners()
             self._training_state = TrainingState.IDLE
             return output
 
-    def _register_cpu_grad_owners(self) -> None:
-        if (
-            isinstance(self.offload_policy, CPUOffloadPolicy)
-            and self.is_unsharded
-            and not is_bw()
-        ):
-            # Expose CPU accumulation to zero_grad() after forward, including
-            # partial group forwards that retain the compute weights.
+    def _register_grad_owners(self) -> None:
+        if self.is_unsharded and not is_bw():
             for fsdp_param in self.fsdp_params:
-                if fsdp_param._grad_is_partial:
-                    fsdp_param._setattr_on_modules(fsdp_param.sharded_param)
+                fsdp_param.publish_unsharded_grad()
 
     def _record_post_forward(self) -> None:
         # Since a group has one pre-backward unshard for each forward call
@@ -666,6 +685,9 @@ class FSDPParamGroup:
                         fsdp_params_with_grad.append(fsdp_param)
                         unsharded_grads.append(fsdp_param.unsharded_grad_data)
                         fsdp_param.unsharded_param.grad = None
+                    elif fsdp_param._partial_grad is not None:
+                        fsdp_params_with_grad.append(fsdp_param)
+                        unsharded_grads.append(fsdp_param.unsharded_zero_grad_data)
                     elif (
                         self.reduce_scatter_unused_params
                         and fsdp_param.unsharded_param.requires_grad
@@ -707,7 +729,7 @@ class FSDPParamGroup:
                     if isinstance(self.mesh_info, DDPMeshInfo)
                     else None
                 )
-                all_reduce_stream: torch.cuda.Stream
+                all_reduce_stream: torch.Stream
                 if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                     # this means the native HSDP is not enabled,
                     # but user may want to have a custom HSDP setup
@@ -720,6 +742,14 @@ class FSDPParamGroup:
                     all_reduce_stream = self.comm_ctx.all_reduce_stream
 
                 self._wait_for_post_backward()
+                partial_sizes = self._partial_sizes(
+                    fsdp_params_with_grad, unsharded_grads
+                )
+                partial_input = self._pack_partial_grads(
+                    fsdp_params_with_grad, partial_sizes
+                )
+                if partial_input is not None and self.device.type != "cpu":
+                    partial_input.record_stream(self.comm_ctx.reduce_scatter_stream)
                 (
                     reduce_scatter_input,
                     reduce_scatter_event,
@@ -750,10 +780,16 @@ class FSDPParamGroup:
                     ),
                     all_reduce_stream,
                     self.all_reduce_grads,
-                    self._partial_reduce_output,
+                    partial_input,
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
+                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
                 )
+                if self._partial_reduce_output is not None:
+                    self._publish_partial_grads(fsdp_params_with_grad, partial_sizes)
+                else:
+                    for fsdp_param in fsdp_params_with_grad:
+                        fsdp_param._partial_grad = None
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
                 )
@@ -825,6 +861,221 @@ class FSDPParamGroup:
                 work.wait()
             self._all_gather_result = None
         self._post_forward_indices.clear()
+
+    def _partial_sizes(
+        self, params: list[FSDPParam], grads: list[torch.Tensor]
+    ) -> list[int]:
+        world_size = (
+            self.mesh_info.shard_mesh_size
+            if isinstance(self.mesh_info, FSDPMeshInfo)
+            else 1
+        )
+        sizes = []
+        for param, grad in zip(params, grads):
+            shape = list(grad.size())
+            if param.fsdp_placement.dim != 0:
+                shape[0] *= world_size
+                shape[param.fsdp_placement.dim] //= world_size
+            sizes.append(
+                _get_dim0_padded_size(torch.Size(shape), world_size).numel()
+                // world_size
+            )
+        return sizes
+
+    def _pack_partial_grads(
+        self, params: list[FSDPParam], sizes: list[int]
+    ) -> torch.Tensor | None:
+        if not any(param._partial_grad is not None for param in params):
+            return None
+        buffer = torch.zeros(
+            sum(sizes),
+            dtype=self._reduce_dtype or params[0].unsharded_grad_dtype,
+            device=self.device,
+        )
+        offset = 0
+        for param, size in zip(params, sizes):
+            if param._partial_grad is not None:
+                data = param._partial_grad._local_tensor
+                buffer.narrow(0, offset, data.numel()).copy_(data.reshape(-1))
+            offset += size
+        return buffer
+
+    def _publish_partial_grads(self, params: list[FSDPParam], sizes: list[int]) -> None:
+        if self._partial_reduce_output is None:
+            return
+        if self._post_reduce_event is not None:
+            self.device_handle.current_stream().wait_event(self._post_reduce_event)
+        offset = 0
+        for param, size in zip(params, sizes):
+            data = self._partial_reduce_output.narrow(
+                0, offset, param.sharded_size.numel()
+            ).view(param.sharded_size)
+            data = data.to(device=param.sharded_param.device)
+            partial = param.to_sharded_dtensor(data)
+            placements = list(partial.placements)
+            if self.mesh_info.is_spmd_mesh:
+                dp_dims = self.mesh_info.dp_mesh_dims
+                if dp_dims is None:
+                    raise AssertionError("Expected SPMD mesh dimensions")
+                rep_names = dp_dims.replicate_names
+                names = partial.device_mesh.mesh_dim_names
+                rep_dims = [
+                    i for i, name in enumerate(names or ()) if name in rep_names
+                ]
+                if not rep_dims:
+                    rep_dims = [self.mesh_info.replicate_mesh_dim]
+            else:
+                rep_dims = [self.mesh_info.replicate_mesh_dim]
+            for dim in rep_dims:
+                if dim is not None:
+                    placements[dim] = Partial(
+                        "avg"
+                        if self.gradient_divide_factor is None
+                        and not self.force_sum_reduction_for_comms
+                        and data.dtype in (torch.float32, torch.bfloat16)
+                        else "sum"
+                    )
+            param._partial_grad = _from_local_no_grad(
+                data, replace(partial._spec, placements=tuple(placements))
+            )
+            param.publish_unsharded_grad(
+                "avg" if self.gradient_divide_factor is None else "sum",
+                self.gradient_divide_factor,
+            )
+            offset += size
+
+    @torch.no_grad()
+    def materialize_grad(
+        self,
+        param: FSDPParam,
+        grad: FSDPGrad,
+        *,
+        divide_factor: float | None,
+        force_sum: bool,
+        preview_allowed: bool,
+        owner_spec: DTensorSpec,
+        owner_device: torch.device,
+    ) -> DTensor:
+        if (
+            param._sharding_spec != owner_spec
+            or param.sharded_param.device != owner_device
+        ):
+            raise RuntimeError(
+                "The gradient owner was converted. Materialize saved pending gradients before converting the module."
+            )
+        if (
+            not preview_allowed
+            or type(self._reduce_scatter_comm) is not DefaultReduceScatter
+            or self._prepare_reduce_scatter_inputs
+            is not _default_reduce_scatter_input_fn
+        ):
+            raise RuntimeError(
+                "Custom gradient communication requires synchronize_gradients() before materialization"
+            )
+        self._wait_for_post_backward()
+        shadow = copy.copy(param)
+        shadow.sharded_param = nn.Parameter(
+            torch.empty_like(param.sharded_param), requires_grad=False
+        )
+        shadow.sharded_param.grad_dtype = param.sharded_grad_dtype
+        shadow.pin_memory = False
+        if grad.reduced is not None:
+            shadow.sharded_param.grad = shadow.to_sharded_dtensor(
+                grad.reduced._local_tensor.clone(memory_format=torch.contiguous_format)
+            )
+        if grad.unreduced is not None:
+            pending = grad.unreduced
+            data = pending._local_tensor.to(device=self.device).clone()
+            native = _from_local_no_grad(data, pending._spec)
+            dp_dims = (
+                param._dp_dim_indices
+                if param.mesh_info.is_spmd_mesh
+                else range(param.mesh_info.mesh.ndim)
+            )
+            placements = tuple(
+                native.placements[i] if i in dp_dims else placement
+                for i, placement in enumerate(param._spmd_placements)
+            )
+            if native.placements != placements:
+                native = native.redistribute(placements=placements)
+            data = native._local_tensor
+        else:
+            data = torch.zeros(
+                param._orig_size, dtype=param.unsharded_grad_dtype, device=self.device
+            )
+        shadow._partial_grad = grad.partial
+        partial = self._pack_partial_grads(
+            [shadow], self._partial_sizes([shadow], [data])
+        )
+        stream = self.device_handle.current_stream()
+        foreach_reduce(
+            [shadow],
+            [data],
+            self._reduce_scatter_process_group
+            if isinstance(self.mesh_info, FSDPMeshInfo)
+            else None,
+            stream,
+            DefaultReduceScatter(),
+            self._orig_dtype,
+            self._reduce_dtype,
+            self.device,
+            divide_factor,
+            self._all_reduce_process_group
+            if isinstance(self.mesh_info, DDPMeshInfo)
+            else None,
+            stream,
+            True,
+            partial,
+            None,
+            force_sum,
+        )
+        result = shadow.sharded_param.grad
+        if not isinstance(result, DTensor):
+            raise AssertionError("Expected a reduced gradient snapshot")
+        return result
+
+    def check_pending_reduction_policy(self) -> None:
+        for param in self.fsdp_params:
+            leaf = getattr(param, "_unsharded_param", None)
+            if param._grad_is_partial and param.sharded_param.grad is None:
+                param._partial_grad = None
+                param._pending_gradient = None
+                param._pending_grad_spec = None
+                param._pending_unsharded_grad_spec = None
+                param._grad_is_partial = False
+            if (
+                isinstance(param.sharded_param.grad, FSDPGrad)
+                or param._partial_grad is not None
+                or (leaf is not None and leaf.grad is not None)
+            ):
+                raise RuntimeError(
+                    "Synchronize or clear pending gradients before changing their reduction policy"
+                )
+
+    @torch.no_grad()
+    def synchronize_gradients(self) -> None:
+        # A standalone backward through part of a grouped module may finish
+        # without the root final callback resetting POST_BACKWARD to IDLE.
+        if is_bw() or self._training_state not in (
+            TrainingState.IDLE,
+            TrainingState.POST_BACKWARD,
+        ):
+            raise RuntimeError(
+                "synchronize_gradients() must be called outside forward and backward"
+            )
+        reduce_grads, all_reduce_grads = self.reduce_grads, self.all_reduce_grads
+        try:
+            self.reduce_grads = self.all_reduce_grads = True
+            self.post_backward()
+            self._wait_for_post_backward()
+            # CPU optimizers need the offloaded gradients before this returns.
+            for fsdp_param in self.fsdp_params:
+                if fsdp_param.grad_offload_event is not None:
+                    fsdp_param.grad_offload_event.synchronize()
+                    fsdp_param.grad_offload_event = None
+        finally:
+            self.reduce_grads, self.all_reduce_grads = reduce_grads, all_reduce_grads
+            self._training_state = TrainingState.IDLE
 
     def _wait_for_post_backward(self):
         if self._post_reduce_event is not None:
