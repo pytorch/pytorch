@@ -1035,7 +1035,8 @@ class CompilePackage:
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
-        # For debugging/testing purpose only.
+        # For debugging/testing purposes, and read by the precompile capture
+        # session to find the backend ids a pruned no-op graph left unfiled.
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
