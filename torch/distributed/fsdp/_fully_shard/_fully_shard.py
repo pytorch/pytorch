@@ -678,7 +678,7 @@ class FSDPModule:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_all_gather_output_fn(self, fn: Callable, *, recurse: bool = True) -> None:
-        """Set the function that copies a parameter group's all-gather outputs.
+        r"""Set the function that copies a parameter group's all-gather outputs.
 
         .. warning::
             This API is experimental. The callback signature and supported FSDP
@@ -711,24 +711,30 @@ class FSDPModule:
     def set_reduce_scatter_input_fn(
         self, fn: Callable, *, recurse: bool = True
     ) -> None:
-        """Set the function that prepares reduce-scatter inputs.
+        r"""Set the function that prepares reduce-scatter inputs.
 
         .. warning::
             This API is experimental. The callback signature and supported FSDP
             internals may change without backward compatibility.
 
         The function takes ``(fsdp_params, unsharded_grads, world_size)``
-        and returns a sequence of padded unsharded ``torch.Size`` values, one per
-        entry in ``fsdp_params`` in the same order. ``world_size`` is the
-        reduce-scatter group size, or 1 when no reduce-scatter is needed.
+        and returns a :class:`torch.distributed.fsdp.experimental.ReduceScatterInput`.
+        Its ``padded_unsharded_sizes`` contains one ``torch.Size`` per entry in
+        ``fsdp_params`` in the same order. ``world_size`` is the reduce-scatter
+        group size, or 1 when no reduce-scatter is needed.
         Only parameters participating in this reduction are passed.
         The function prepares copy inputs by modifying ``unsharded_grads`` in
         place and may replace or expand its entries. These inputs must preserve
-        dtype and device and be ready for dim-0 ``chunk_cat``. FSDP keeps them
-        alive through copy submission, then clears the same list.
-        The function runs on the current compute stream; FSDP owns collective
-        buffer allocation, the native copy, and communication. All-gather
-        copy-out is unaffected.
+        dtype and device. After allocating the collective buffer, FSDP calls
+        ``copy_in(unsharded_grads, output, world_size)`` on the returned result.
+        This callable owns packing, padding, and conversion to the reduction
+        dtype. It fills the flat contiguous output in rank-major order and
+        returns ``None``. Metadata needed only for copying can be bound to the
+        callable without changing the preparation result's fields.
+        Preparation and copying run on the current compute stream. FSDP releases
+        the result and clears the same gradient list after copy submission, then
+        handles stream synchronization and communication. All-gather copy-out
+        is unaffected.
 
         Args:
             fn (Callable): Function that prepares reduce-scatter inputs.
