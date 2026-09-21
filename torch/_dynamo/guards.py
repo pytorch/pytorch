@@ -21,6 +21,7 @@ import ast
 import builtins
 import collections
 import contextlib
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -4274,6 +4275,56 @@ def _instance_dict(obj: Any) -> dict[str, Any] | None:
     except AttributeError:
         return None
     return d if isinstance(d, dict) else None
+
+
+# The instance size of a class whose state is exactly its __dict__ (on 3.12+ the
+# dict and weakref slots are managed, so this equals object's; earlier they add
+# two pointers), the reference _pickles_by_default compares against.
+_PLAIN_INSTANCE_SIZE = type("_PlainInstance", (), {}).__basicsize__
+
+
+def _pickles_by_default(obj: Any) -> bool:
+    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``
+    (judged from the type's own hooks; the copyreg dispatch table is not consulted).
+
+    Attribute pruning is only sound for that protocol. A custom __reduce_ex__
+    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
+    __getnewargs__(_ex) reads attributes no guard named and gets the sentinel
+    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned).
+    State outside __dict__ is caught by layout rather than by hook: a class with
+    __slots__, a dict or list subclass (whose items ride the reduce tuple, not
+    __dict__) and a C extension type with an instance dict all have a larger
+    instance size than a plain Python class, and a copyreg registration means
+    someone declared the default protocol wrong for the type. The explicit
+    __slots__ scan covers 3.10 and 3.11, where ``("a", "__dict__")`` has the
+    plain size; an EMPTY __slots__ (abc.ABC, typing.Generic, Protocol) adds no
+    state and does not count.
+    """
+    cls = type(obj)
+    return (
+        cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
+        and not any(vars(c).get("__slots__") for c in cls.__mro__)
+        and cls not in copyreg.dispatch_table
+        and cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
+        and not hasattr(cls, "__setstate__")
+        and not hasattr(cls, "__getnewargs__")
+        and not hasattr(cls, "__getnewargs_ex__")
+    )
+
+
+def _is_torch_type(cls: type) -> bool:
+    """Whether ``cls`` or any base of it is torch's own: top-level package
+    ``torch``, which also covers a module named exactly ``torch``. Types from
+    other packages (torch_xla, torchrec) are user state to the pruner. This is
+    deliberately over-broad: a user Dataset or Optimizer subclass is pickled
+    whole too, and pruning only the names no torch base declares is the
+    follow-up that would cover those."""
+    return any(
+        str(getattr(c, "__module__", "")).partition(".")[0] == "torch"
+        for c in cls.__mro__
+    )
 
 
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
