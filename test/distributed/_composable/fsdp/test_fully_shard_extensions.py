@@ -315,8 +315,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
         inp = torch.arange(48, device=device_type).float().view_as(expected) / 32
         if invalid_payload:
             with self.assertRaisesRegex(
-                (RuntimeError, ValueError),
-                "invalid for input of size|same number of elements",
+                RuntimeError, "Shard.*all-gather output must have.*elements"
             ):
                 model(inp)
             return
