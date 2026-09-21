@@ -610,13 +610,6 @@ exclude_patterns = [
     # torch.jit.script, and Static Runtime and mkldnn_rewrite.cpp link it
     # regardless of that. 294 findings, so it gets its own PR.
     'torch/csrc/jit/tensorexpr/**',
-    # 64 findings. Also holds two files whose conversion changes the
-    # Python-visible exception type, so they belong to the behaviour-change PR
-    # rather than this burn-down: python/init.cpp (2 std::exception) and
-    # python/pybind.h (2 std::logic_error). And pybind_utils.cpp's
-    # std::runtime_error is caught by name in distributed/rpc to drive an
-    # overload-fallback retry - converting it disables the fallback silently.
-    'torch/csrc/jit/python/**',
 ]
 command = [
     'python3',
