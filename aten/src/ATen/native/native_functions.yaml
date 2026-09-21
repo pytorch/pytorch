@@ -6581,6 +6581,7 @@
     # NB: Although this composite mutates on the inside, it is
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: zeros_like
+    Meta: zeros_like
   autogen: zeros_like.out
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor

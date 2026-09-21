@@ -3442,6 +3442,7 @@ class FakeTensorMode(TorchDispatchMode):
         aten.as_strided.default,
         aten.as_strided_.default,
         aten.zeros.default,
+        aten.zeros_like.default,
         aten.detach.default,
         aten.view_as_real.default,
         aten.view_as_complex.default,
