@@ -1243,6 +1243,34 @@ class _KeyCfg:
         return hash(self.name)
 
 
+@dataclasses.dataclass(frozen=True)
+class _SubCfg:
+    scale: float
+    tags: list
+
+    def __hash__(self):
+        return hash(self.scale)
+
+
+@dataclasses.dataclass(frozen=True)
+class _KeyWithSub:
+    name: str
+    sub: _SubCfg
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+class _NetWithTags(torch.nn.Module):
+    def __init__(self, tags):
+        super().__init__()
+        self.tags = tags
+        self.scale = 2.0
+
+    def forward(self, x):
+        return x * self.scale
+
+
 class _OuterHolder:
     def __init__(self):
         self.inner = _HolderWithGenerator()
@@ -4301,6 +4329,43 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"d": d, "x": x}, True)
         state = load_guards_state(self._cached_guards_state).output_graph
         self.assertEqual(next(iter(state.local_scope["d"])).tags, ["t"])
+
+    def test_a_dict_key_field_shared_with_a_module_attribute_stays_real(self):
+        # The module path registers its unguarded list by id, and persistent_id
+        # would substitute that list inside the key's own state; the key is
+        # compared by value, so its fields are protected transitively.
+        # The module comes first in the scope so it is reduced, and registers
+        # the list, before the key is reached.
+        def fn(m, d, x):
+            for v in d.values():
+                x = x + v
+            return m(x)
+
+        shared = ["t"]
+        m, d, x = _NetWithTags(shared), {_KeyCfg("a", shared): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, m, d, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).tags, ["t"])
+
+    def test_a_nested_field_of_a_dict_key_is_not_pruned(self):
+        # A guard that reads through a field of the key puts that field in the
+        # guard tree as its own receiver; the key's by-value comparison reads
+        # the field's fields too, so the gate must leave it whole.
+        def fn(d, x):
+            for k in d:
+                x = x + k.sub.scale
+            return x
+
+        d, x = {_KeyWithSub("a", _SubCfg(2.0, ["t"])): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, d, x
+        )
+        self._test_check_fn(ref, loaded, {"d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).sub.tags, ["t"])
 
     def test_grad_mode(self):
         def fn(x):
