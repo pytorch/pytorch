@@ -41,6 +41,10 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import ChainedSource, Guard
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 def _user_op(x):
@@ -105,6 +109,38 @@ def _entry(source, value, guard_type="ID_MATCH", derived=()):
         is_global=get_global_source_name(source) is not None,
         orig_guard=guard,
     )
+
+
+_STDLIB_ROOT = sysconfig.get_paths()["stdlib"]
+
+# Rows: module name, its module dict, the _install_roots to judge under (None
+# keeps the real ones). Every shape a name can take while resolving somewhere
+# other than the library, each refused by the check its label names; the
+# refusals that need no location (not a stdlib name, not imported, None) sit
+# with the waiver rows in the next commit's tests. graphlib, queue, code and
+# distutils are all stdlib names a third party ships, and purelib NESTS inside
+# stdlib (conda) or platstdlib (venv), so a __file__ prefix check waived every
+# shadow; the stdlib dir itself is never a pip target, so no torch root holds
+# the torch rows (site-packages/torch IS one wherever purelib nests under stdlib).
+_NOT_LIBRARY_MODULES = {
+    # With no install root known, only _INSTALL_DIR_NAMES catches this one.
+    "under_an_install_dir": ("graphlib", {"__file__": os.path.join(_STDLIB_ROOT, "site-packages", "graphlib", "__init__.py")}, ()),
+    # No site-packages component: only the _install_roots exclusion catches this one.
+    "under_a_nested_install_root": ("graphlib", {"__file__": os.path.join(_STDLIB_ROOT, "vendored", "graphlib", "__init__.py")}, (precompile_package._norm(os.path.join(_STDLIB_ROOT, "vendored")),)),
+    "no_file_no_spec": ("graphlib", {}, None),
+    # Evidence in neither direction, and a top-level name needs some. The test
+    # judges this row from _STDLIB_ROOT, where the real graphlib.py sits, so an
+    # ungated resolve against the cwd would land on stdlib and waive the row.
+    "relative_file": ("graphlib", {"__file__": "graphlib.py"}, None),
+    "torch_outside_the_torch_roots": ("torch", {"__file__": os.path.join(_STDLIB_ROOT, "torch", "__init__.py")}, None),
+    # The ancestor loop: a located torch does not vouch for this one.
+    "torch_submodule_outside_the_torch_roots": ("torch.foo", {"__file__": os.path.join(_STDLIB_ROOT, "torch", "foo.py")}, None),
+    # The inittab is keyed on the full dotted name, not its top component.
+    "dotted_name_under_a_built_in_top": ("sys.sub", {"__spec__": importlib.machinery.ModuleSpec("sys.sub", importlib.machinery.BuiltinImporter, origin="built-in")}, None),
+    # A frozen spec vouches only for a name the frozen table has.
+    "frozen_spec_under_a_non_frozen_name": ("graphlib", {"__spec__": importlib.machinery.ModuleSpec("graphlib", importlib.machinery.FrozenImporter, origin="frozen")}, None),
+    "shadowed_descendant_of_a_located_parent": ("collections.abc", {"__file__": os.path.join(_STDLIB_ROOT, "site-packages", "abc.py")}, None),
+}  # fmt: skip
 
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
@@ -1069,6 +1105,31 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             embedded.__loader__ = builtin
             self.assertIs(located(embedded, "torch._C", False), True)
 
+    @parametrize("shape", sorted(_NOT_LIBRARY_MODULES))
+    def test_library_module_requires_the_name_to_resolve_to_the_library(self, shape):
+        name, attrs, install_roots = _NOT_LIBRARY_MODULES[shape]
+        module = types.ModuleType(name)
+        module.__dict__.update(attrs)
+        if install_roots is None:
+            install_roots = precompile_package._install_roots()
+        if shape == "relative_file":
+            self.addCleanup(os.chdir, os.getcwd())
+            os.chdir(_STDLIB_ROOT)
+        # The verdict is cached per __file__ while _install_roots is patched per
+        # row, so a verdict another test left for a row's file would be read back
+        # under the wrong roots; the torch roots must be read off the real torch
+        # before a row replaces sys.modules['torch'].
+        self.addCleanup(precompile_package._classify_file.cache_clear)
+        precompile_package._classify_file.cache_clear()
+        precompile_package._torch_roots()
+        with (
+            mock.patch.dict(sys.modules, {name: module}),
+            mock.patch.object(
+                precompile_package, "_install_roots", return_value=install_roots
+            ),
+        ):
+            self.assertFalse(precompile_package._is_library_module(name))
+
     def test_reads_a_builtin_keys_on_where_the_read_comes_from(self):
         reads_a_builtin = precompile_package._reads_a_builtin
         self.assertTrue(reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, "len"), len))
@@ -1589,6 +1650,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(verdicts["__nested_resume_fns"][past])
         self.assertTrue(verdicts["__nested_frame_values"])
         self.assertFalse(any(verdicts["__nested_frame_values"].values()))
+
+
+instantiate_parametrized_tests(TestPrecompilePackage)
 
 
 if __name__ == "__main__":
