@@ -319,10 +319,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
         local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
         inp = torch.arange(48, device=device_type).float().view_as(expected) / 32
         if invalid_payload:
-            with self.assertRaisesRegex(
-                (RuntimeError, ValueError),
-                "invalid for input of size|same number of elements",
-            ):
+            with self.assertRaisesRegex(ValueError, "same number of elements"):
                 model(inp)
             return
         for _ in range(2):

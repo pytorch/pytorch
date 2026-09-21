@@ -17,7 +17,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_extensions import (
     _get_all_gather_output_layout,
     _normalize_all_gather_inputs,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_intermediate_copy,
     AllGatherInput,
@@ -316,6 +316,47 @@ class TestPrefixCopy(TestCase):
         )
         num_reorders = sum(kind in reorder_layouts for kind in layouts)
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], num_reorders)
+
+    @parametrize("shard_dim", [1, 2])
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_all_gather_cached_byte_input(self, device, dtype, shard_dim):
+        world_size = 2
+        expected = make_tensor((2, 4, 8), device=device, dtype=dtype)
+        shards = expected.chunk(world_size, dim=shard_dim)
+        inputs = [shard.contiguous().view(torch.uint8).flatten() for shard in shards]
+        param = Mock(
+            all_gather_outputs=[],
+            all_gather_copy_layouts=[
+                _get_all_gather_output_layout(shards[0].size(), shard_dim, world_size)
+            ],
+        )
+        param.init_all_gather_outputs = FSDPParam.init_all_gather_outputs.__get__(param)
+        param.alloc_all_gather_outputs = FSDPParam.alloc_all_gather_outputs.__get__(
+            param
+        )
+        param.init_all_gather_outputs(
+            [shards[0].numel()], [dtype], world_size, expected.device
+        )
+        (output,) = param.all_gather_outputs
+        version = output._version
+        result = AllGatherResult(
+            torch.cat(inputs),
+            None,
+            None,
+            [[torch.uint8]],
+            [[inputs[0].numel()]],
+            [inputs[0].numel()],
+        )
+        with torch.no_grad(), _OpCounter() as counter:
+            _default_all_gather_output_fn([param], result, world_size)
+        self.assertIs(param.all_gather_outputs[0], output)
+        self.assertEqual(output.dtype, dtype)
+        self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
+        self.assertEqual(output._version, version)
+        self.assertEqual(
+            counter.counts[torch.ops.fsdp._all_gather_copy_out_.default], 1
+        )
+        self.assertEqual(counter.counts[torch.ops.aten.cat.out], 0)
 
     @parametrize("num_chunks", [1, 4])
     @parametrize("num_prefixes", [1, 128])
