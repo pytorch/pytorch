@@ -104,6 +104,7 @@ def is_gemm_config_worth_tuning(
     m: int, n: int, k: int, gemm_config: dict[str, int | bool]
 ) -> bool:
     """Restrict large GEMMs to the largest M/N tile with eight-wave HTI."""
+    # This pruning was validated against AITER for BF16/FP16.
     if not config.flydsl_enable_autotuning or min(m, n, k) < 4096:
         return True
     return (

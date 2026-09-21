@@ -1615,16 +1615,22 @@ def tuned_scaled_mm_v2(
                     aten__scaled_mm_v2.bind(
                         mxfp_nodes,
                         mxfp_layout,
-                        recipe_a=ScalingType.BlockWise1x32.value,
-                        recipe_b=ScalingType.BlockWise1x32.value,
+                        recipe_a=recipe_a[0],
+                        recipe_b=recipe_b[0],
                         out_dtype=out_dtype,
-                        use_fast_accum=False,
+                        use_fast_accum=use_fast_accum,
                     ),
                 )
             logical_k = k * (2 if mxfp_format == "mxfp4" else 1)
             counters["aten_mm_info"][
                 f"aten._scaled_mm_v2.default_{m}_{n}_{logical_k}"
             ] += 1
+            log.info(
+                "Tuned FlyDSL MXFP scaled_mm: m=%s, n=%s, k=%s",
+                m,
+                n,
+                logical_k,
+            )
             node, _ = autotune_select_algorithm(
                 "scaled_mm",
                 mxfp_choices,

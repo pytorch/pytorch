@@ -1299,6 +1299,7 @@ class TestFlyDSLMXFPMetadata(TestCase):
             param.ldg_x_threads * param.async_load_bytes,
             128 if mxfp_format == "mxfp4" else 256,
         )
+        self.assertEqual(param.mma_k, 128)
         for shape, transposed, expected, unaligned in (
             *(
                 ((80, 112, 384), t, True, None)
@@ -1537,6 +1538,8 @@ class TestFlyDSLMXFPDevice(TestCase):
         self.assertEqual(
             "async_compile.flydsl" in "\n".join(code), mxfp_format is not None
         )
+        if mxfp_format is not None:
+            self.assertIn("_precompile", "\n".join(code))
 
 
 instantiate_device_type_tests(TestFlyDSLMXFPDevice, globals(), only_for="cuda")
