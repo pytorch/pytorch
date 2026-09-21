@@ -2627,7 +2627,479 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIsNone(PrecompileContext.serialize_artifact_by_key("k"))
 
 
+class _SessionStep(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        y = self.lin(x)
+        if y.shape[0] > 2:
+            y = y * 2
+        return torch.relu(y)
+
+
+def _session_breaks(x):
+    y = x * 2
+    torch._dynamo.graph_break()
+    return y + 3
+
+
+def _session_raises(x, boom):
+    if boom:
+        raise ValueError("boom")
+    return x + 1
+
+
+class TestPrecompileSession(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _session(self, fn, **kwargs):
+        from torch._dynamo.precompile_package import precompile_capture
+
+        kwargs.setdefault("backend", "eager")
+        kwargs.setdefault("dynamic", False)
+        return precompile_capture(fn, **kwargs)
+
+    def _guard_entries(self, fn, *args):
+        """Real GuardFilterEntry objects, recorded off a live capture."""
+        recorded = []
+
+        def record(entries):
+            recorded.append(list(entries))
+            return [True] * len(entries)
+
+        session = self._session(fn, guard_filter_fn=record)
+        with session as cap:
+            cap(*args)
+        self.assertTrue(recorded)
+        return max(recorded, key=len)
+
+    def test_compose_with_default_can_only_narrow_what_the_default_keeps(self):
+        from torch._dynamo.precompile_package import (
+            _compose_with_default,
+            default_guard_filter_fn,
+        )
+
+        entries = self._guard_entries(_SessionStep(), torch.randn(3, 4))
+        base = default_guard_filter_fn(entries)
+        self.assertIn(True, base)
+        keep_all = _compose_with_default(lambda e: [True] * len(e))
+        self.assertEqual(list(keep_all(entries)), list(base))
+        keep_none = _compose_with_default(lambda e: [False] * len(e))
+        self.assertEqual(list(keep_none(entries)), [False] * len(entries))
+        # A custom filter cannot re-admit what the default dropped.
+        dropped = [i for i, kept in enumerate(base) if not kept]
+        self.assertTrue(dropped)
+        widened = _compose_with_default(lambda e: [True] * len(e))(entries)
+        self.assertFalse(any(widened[i] for i in dropped))
+
+    def test_compose_with_default_refuses_a_wrong_length_decision_list(self):
+        from torch._dynamo.precompile_package import _compose_with_default
+
+        entries = self._guard_entries(_SessionStep(), torch.randn(3, 4))
+        composed = _compose_with_default(lambda e: [True])
+        with self.assertRaisesRegex(ValueError, "must return one per entry"):
+            composed(entries)
+
+    @parametrize("training", (False, True))
+    def test_training_lowers_the_backward_eagerly_inside_the_block(self, training):
+        import torch._functorch.config as functorch_config
+
+        observed = []
+
+        def spy(entries):
+            observed.append(functorch_config.force_non_lazy_backward_lowering)
+            return [True] * len(entries)
+
+        session = self._session(
+            _SessionStep(), backend="inductor", training=training, guard_filter_fn=spy
+        )
+        with session as cap:
+            cap(torch.randn(3, 4))
+        self.assertTrue(observed)
+        self.assertEqual(set(observed), {training})
+        # The outcome, not just the flag: a lazy backward leaves the bundle
+        # unwritten until the first .backward() call, so a capture that never
+        # makes one files no artifact and records that it did not. The message
+        # lists the plausible causes rather than diagnosing one, so this pins
+        # the fact of the error, not a diagnosis.
+        self.assertEqual(bool(session._backend_artifacts), training)
+        if training:
+            self.assertEqual(session._capture_errors, [])
+        else:
+            (recorded,) = session._capture_errors
+            self.assertIn("recorded no artifact", recorded)
+            self.assertIn("the usual causes are", recorded)
+        self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
+
+    def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        def reads_one_symbolic_size(x):
+            x.size(0)
+            return None
+
+        # Dynamic shapes put a sym_size_int node in the graph, so the frame is
+        # compiled; pruning then empties it and output_graph substitutes
+        # noop_graph_call, filing nothing under the id the bytecode names.
+        session = self._session(reads_one_symbolic_size, dynamic=True)
+        with session as cap:
+            self.assertIsNone(cap(torch.randn(3, 4)))
+            # Read inside the block: the id's artifact is the no-op, so _release
+            # drops the package's own copy of it on the way out.
+            (inside,) = session._package.cache_entry().backend_ids
+            self.assertIs(session._package.cached_backends[inside], noop_graph_call)
+        (backend_id,) = session._package.cache_entry().backend_ids
+        self.assertEqual(session._package.cached_backends, {})
+        artifact = session._backend_artifacts[backend_id]
+        self.assertIsInstance(artifact, EagerCacheArtifact)
+        self.assertIs(artifact.content, noop_graph_call)
+
+    def test_each_call_folds_into_the_entry_as_a_guarded_variant(self):
+        model = _SessionStep()
+        session = self._session(model)
+        with session as cap:
+            for rows in (2, 3, 4):
+                x = torch.randn(rows, 4)
+                self.assertEqual(cap(x), model(x))
+        entry = session._package.cache_entry()
+        self.assertEqual(entry.fn_name, "_SessionStep.forward")
+        self.assertEqual(len(entry.codes), 1)
+        self.assertEqual(len(entry.codes[0].guarded_codes), 3)
+        self.assertFalse(entry.codes[0].bypassed)
+
+    def test_a_graph_break_records_the_resume_frame(self):
+        session = self._session(_session_breaks)
+        with session as cap:
+            self.assertEqual(cap(torch.ones(3)), torch.ones(3) * 2 + 3)
+        entry = session._package.cache_entry()
+        self.assertEqual(len(entry.codes), 2)
+        self.assertTrue(any(c.install_to_global for c in entry.codes))
+        self.assertEqual(len(entry.backend_ids), 2)
+
+    def test_recompile_limit_caps_the_variants_but_not_the_calls(self):
+        model = _SessionStep()
+        session = self._session(model, recompile_limit=2)
+        with session as cap:
+            for rows in (2, 3, 4, 5):
+                x = torch.randn(rows, 4)
+                self.assertEqual(cap(x), model(x))
+        entry = session._package.cache_entry()
+        self.assertEqual(len(entry.codes[0].guarded_codes), 2)
+        # The cap truncates the capture, so the session says so: the calls it
+        # refused to compile are variants the artifact does not hold.
+        (recorded,) = session._capture_errors
+        self.assertIn("hit a recompile limit", recorded)
+        self.assertIn("recompile_limit=2", recorded)
+
+    def test_session_is_one_shot_and_refuses_reentry(self):
+        from torch._dynamo.exc import PackageError
+
+        session = self._session(_session_breaks)
+        with session as cap:
+            with self.assertRaisesRegex(PackageError, "already active"):
+                session.__enter__()
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "not active"):
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
+            session.__enter__()
+
+    def test_an_interrupted_drain_still_closes_the_session(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        # The drain is the only place __exit__ blocks. An interrupt out of it
+        # must propagate and still close the session -- otherwise cap() stays
+        # callable past the block and the optimize context leaks to process
+        # exit -- while claiming nothing on behalf of the calls it abandons,
+        # which may still be compiling against the package.
+        self.addCleanup(PrecompileContext.clear)
+        session = self._session(_session_breaks, backend="inductor")
+
+        def interrupted(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            with session as cap:
+                cap(torch.ones(3))
+                # One call left in flight is what makes __exit__ wait at all.
+                session._active_calls += 1
+                session._state.wait = interrupted
+        # Closed, and the optimize context released with it: _compiled is the
+        # only thing holding that context.
+        self.assertTrue(session._finished)
+        self.assertFalse(session._entered)
+        self.assertFalse(session._closing)
+        self.assertIsNone(session._compiled)
+        with self.assertRaisesRegex(RuntimeError, "not active"):
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
+            session.__enter__()
+        # Nothing claimed: the artifacts of the abandoned call stay staged in
+        # PrecompileContext and its backends stay on the package, rather than
+        # being taken and cleared under a compile that is still running.
+        backend_ids = session._package.cache_entry().backend_ids
+        self.assertTrue(backend_ids)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(set(session._package.cached_backends), set(backend_ids))
+        for backend_id in backend_ids:
+            staged = PrecompileContext.serialize_artifact_by_key(backend_id)
+            self.assertIsNotNone(staged)
+
+    def test_entering_with_an_unknown_backend_closes_the_session(self):
+        from torch._dynamo.exc import InvalidBackend
+
+        # __enter__ raising before it resolved a backend is the one path that
+        # reaches teardown with nothing compiled: it still has to close the
+        # session and collect nothing, on a package whose cache entry holds no
+        # backend id at all.
+        session = self._session(_session_breaks, backend="no_such_backend")
+        with self.assertRaises(InvalidBackend):
+            with session:
+                self.fail("the block must not run")
+        self.assertTrue(session._finished)
+        self.assertFalse(session._entered)
+        self.assertIsNone(session._compiled)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        self.assertFalse(session._package.cache_entry().backend_ids)
+        (recorded,) = session._capture_errors
+        self.assertIn("InvalidBackend", recorded)
+
+    def test_an_error_inside_the_block_is_recorded_once_and_propagates(self):
+        session = self._session(_session_raises)
+        with session as cap:
+            self.assertEqual(cap(torch.ones(2), False), torch.ones(2) + 1)
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, "boom"):
+                    cap(torch.ones(2), True)
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+
+    def test_recording_an_error_runs_under_the_session_lock(self):
+        # The once-only dedup is a check-then-add on shared state, so it has to
+        # hold _state. Proven positively rather than by a window: the session's
+        # lock announces every acquire, so a recording thread that reached the
+        # lock says so, and one that never takes it never does.
+        reached = threading.Event()
+
+        class AnnouncingLock:
+            # A complete Condition lock, not just acquire/release: Condition
+            # probes for these three private hooks and otherwise installs
+            # plain-Lock defaults, whose _is_owned reports a reentrant lock the
+            # caller already holds as unowned and makes wait()/notify() raise.
+            def __init__(self):
+                self._lock = threading.RLock()
+
+            def acquire(self, blocking=True, timeout=-1):
+                reached.set()
+                return self._lock.acquire(blocking, timeout)
+
+            def release(self):
+                self._lock.release()
+
+            def __enter__(self):
+                return self.acquire()
+
+            def __exit__(self, *exc):
+                self.release()
+
+            def _is_owned(self):
+                return self._lock._is_owned()
+
+            def _release_save(self):
+                return self._lock._release_save()
+
+            def _acquire_restore(self, state):
+                self._lock._acquire_restore(state)
+
+        session = self._session(_session_raises)
+        session._state = threading.Condition(AnnouncingLock())
+        done = threading.Event()
+
+        def record():
+            session._record_capture_error(ValueError("boom"))
+            done.set()
+
+        with session._state:
+            # The substitute is a valid Condition lock, not just acquire and
+            # release: notify_all is what the plain-Lock default _is_owned would
+            # refuse on a reentrant lock this thread is holding.
+            session._state.notify_all()
+            reached.clear()
+            worker = threading.Thread(target=record)
+            worker.start()
+            self.assertTrue(reached.wait(10))
+            self.assertFalse(done.is_set())
+            self.assertEqual(session._capture_errors, [])
+        worker.join(60)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+        session._record_capture_error(ValueError("boom"))
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+
+    def test_eager_backends_survive_exit_for_the_render(self):
+        # eager files nothing under the backend ids, and its callables are the
+        # one shape a render serializes off the package (a bound
+        # GraphModule.forward), so they are kept and that is not a failed
+        # capture.
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            reduces_to_graph_source,
+        )
+
+        session = self._session(_session_breaks)
+        with session as cap:
+            cap(torch.ones(3))
+        entry = session._package.cache_entry()
+        self.assertTrue(entry.backend_ids)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
+        for backend_id, backend in session._package.cached_backends.items():
+            self.assertTrue(reduces_to_graph_source(backend))
+            # The premise of keeping them: the artifact a render builds off the
+            # package callable really does serialize.
+            artifact = EagerCacheArtifact(key=backend_id, content=backend)
+            self.assertIsNotNone(pickle.loads(pickle.dumps(artifact)).content)
+        self.assertEqual(session._capture_errors, [])
+
+    @parametrize("backend", ("eager_noexcept", "ts"))
+    def test_a_backend_that_files_nothing_unrenderable_records_an_error(self, backend):
+        # Neither files anything under the backend ids, and neither hands back
+        # something a render can serialize off the package -- eager_noexcept
+        # returns a local closure, ts a RecursiveScriptModule -- so the capture
+        # is short those graphs and says so, naming the ids, rather than silently
+        # keeping objects the render would choke on.
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            reduces_to_graph_source,
+        )
+
+        session = self._session(_session_breaks, backend=backend)
+        with session as cap:
+            cap(torch.ones(3))
+            # The premise, asserted rather than assumed, and before _release
+            # drops the callables: neither shape is the one a render serializes,
+            # and an artifact built on either fails to pickle at all.
+            self.assertTrue(session._package.cached_backends)
+            for backend_id, held in session._package.cached_backends.items():
+                self.assertFalse(reduces_to_graph_source(held))
+                with self.assertRaises(Exception):
+                    pickle.dumps(EagerCacheArtifact(key=backend_id, content=held))
+        entry = session._package.cache_entry()
+        self.assertTrue(entry.backend_ids)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        (recorded,) = session._capture_errors
+        self.assertIn("recorded no artifact for backend id(s)", recorded)
+        for backend_id in entry.backend_ids:
+            self.assertIn(backend_id, recorded)
+        self.assertIn(f"the callable backend '{backend}' left", recorded)
+
+    def test_eager_is_classified_by_the_shape_it_returns_not_by_its_name(self):
+        # force_autograd_cache makes the eager backend hand back a
+        # GraphModuleSerializableCallable instead of a bound GraphModule.forward
+        # (backends/debugging.py), which EagerCacheArtifact.__reduce__ can only
+        # plain-pickle, lossily. The name is still "eager", so a decision taken
+        # by name would keep those callables and report a complete capture.
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.precompile_context import reduces_to_graph_source
+
+        session = self._session(_session_breaks)
+        with functorch_config.patch(force_autograd_cache=True):
+            with session as cap:
+                cap(torch.ones(3))
+                held = list(session._package.cached_backends.values())
+                self.assertTrue(held)
+                for backend in held:
+                    self.assertFalse(reduces_to_graph_source(backend))
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        (recorded,) = session._capture_errors
+        self.assertIn("recorded no artifact for backend id(s)", recorded)
+
+    def test_a_partly_unfiled_capture_names_only_the_ids_that_filed_nothing(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        session = self._session(_session_breaks, backend="inductor")
+        with session as cap:
+            cap(torch.ones(3))
+            first, second = session._package.cache_entry().backend_ids
+            # The staging area is process-global, so an id's artifact can be gone
+            # before this session collects. That id filed nothing as far as the
+            # collection can tell, while its sibling still has an artifact: the
+            # error has to name the one and not the other.
+            self.assertIsNotNone(PrecompileContext.take_artifact(first))
+        self.assertEqual(list(session._backend_artifacts), [second])
+        (recorded,) = session._capture_errors
+        self.assertIn(first, recorded)
+        self.assertNotIn(second, recorded)
+
+    def test_the_unfiled_error_is_recorded_once_across_two_collections(self):
+        # A render collects mid-block and exit collects again, by which time the
+        # capture has compiled more graphs, so the message names more ids. One
+        # condition, so one entry: the dedup keys on the condition, not on the
+        # wording.
+        session = self._session(_session_breaks, backend="ts")
+        with session as cap:
+            cap(torch.ones(3))
+            session._take_backend_artifacts()
+            (mid_block,) = session._capture_errors
+            early = list(session._package.cache_entry().backend_ids)
+            cap(torch.ones(4))
+        entry = session._package.cache_entry()
+        self.assertGreater(len(entry.backend_ids), len(early))
+        (recorded,) = session._capture_errors
+        self.assertEqual(recorded, mid_block)
+        for backend_id in early:
+            self.assertIn(backend_id, mid_block)
+        # The wording did move on, which is what the dedup had to survive.
+        late = [b for b in entry.backend_ids if b not in early]
+        self.assertTrue(late)
+        for backend_id in late:
+            self.assertNotIn(backend_id, recorded)
+
+    def test_inductor_artifacts_are_taken_from_the_precompile_context(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        session = self._session(_session_breaks, backend="inductor")
+        with session as cap:
+            cap(torch.ones(3))
+            # A render inside the block collects, exactly as save() does, and
+            # exit collects again. take_artifact hands each artifact out once,
+            # so the second pass has to read the ids it already holds as
+            # collected rather than as ids that filed nothing. Single-threaded,
+            # which is the contract _take_backend_artifacts states: no call is in
+            # flight here.
+            session._take_backend_artifacts()
+            mid_block = dict(session._backend_artifacts)
+            self.assertTrue(mid_block)
+        entry = session._package.cache_entry()
+        self.assertEqual(session._backend_artifacts, mid_block)
+        self.assertEqual(set(session._backend_artifacts), set(entry.backend_ids))
+        for backend_id in entry.backend_ids:
+            self.assertIsNone(PrecompileContext.serialize_artifact_by_key(backend_id))
+        self.assertEqual(session._package.cached_backends, {})
+        self.assertEqual(session._capture_errors, [])
+
+    def test_entry_fn_of_resolves_modules_and_refuses_the_rest(self):
+        from torch._dynamo.precompile_package import _entry_fn_of
+
+        model = _SessionStep()
+        self.assertIs(_entry_fn_of(model).__func__, _SessionStep.forward)
+        self.assertIs(_entry_fn_of(model).__self__, model)
+        self.assertIs(_entry_fn_of(_session_breaks), _session_breaks)
+        with self.assertRaisesRegex(TypeError, "has no __code__"):
+            _entry_fn_of(functools.partial(_session_breaks))
+        with self.assertRaisesRegex(TypeError, "expected a callable"):
+            _entry_fn_of(3)
+
+
 instantiate_parametrized_tests(TestPrecompilePackage)
+instantiate_parametrized_tests(TestPrecompileSession)
 
 
 if __name__ == "__main__":
