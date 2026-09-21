@@ -71,6 +71,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '10.0'
+      max-jobs: "8"
       python-version: "3.12"
       compiler: gcc13
       cuda-version: "13.2"
