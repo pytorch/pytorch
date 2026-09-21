@@ -592,6 +592,10 @@ exclude_patterns = [
     # Vendored: raw throws are upstream's call, not ours.
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
+    # Headers vendored into Kineto from facebookincubator/dynolog by
+    # libkineto/third_party/dynolog_headers/vendor_dynolog.sh, which overwrites
+    # them wholesale on the next re-vendor, so an edit here would not survive.
+    'third_party/kineto/libkineto/third_party/**',
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
     'c10/util/order_preserving_flat_hash_map.h',
@@ -909,6 +913,11 @@ include_patterns = [
 # therefore are permitted to use logging
 exclude_patterns = [
     'tools/**',
+    # Vendored, and lints itself with its own copy of this config: Kineto's
+    # lintrunner adapters are copied verbatim from tools/linter above and are
+    # scripts for the same reason, and its own third_party/ carries upstream
+    # tooling (nlohmann/json's serve_header.py) that is not ours to change.
+    'third_party/kineto/**',
     'test/**',
     'benchmarks/**',
     'torch/distributed/run.py',
