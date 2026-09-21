@@ -16453,7 +16453,7 @@ class TestConsistency(TestCaseMPS):
         # MPS uses float32 intermediates for these ops, so the CPU reference
         # must also run in float32 to avoid comparing against less-precise
         # native half-precision CPU results.
-        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d"] or (
+        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d", "_segment_reduce"] or (
             op.name == "nn.functional.pad" and op.variant_test_name in ["reflect", "replicate", "replicate_negative"]
         )
         if use_float_ref and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
@@ -17159,6 +17159,66 @@ class TestComplex(TestCase):
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce,zero", [("sum", False), ("mean", False), ("prod", False), ("prod", True)])
+    @parametrize("inner", [1, 8])
+    @parametrize("mode", ["lengths", "offsets"])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_segment_reduce_accumulation(self, device, dtype, reduce, zero, inner, mode, index_dtype):
+        value = 1 + torch.finfo(dtype).eps if reduce == "prod" else 1.
+        data = torch.full((4096, inner), value, dtype=dtype, device=device)
+        if zero:
+            data[0] = 0
+        data.requires_grad_()
+        values = [4096] if mode == "lengths" else [0, 4096]
+        metadata = torch.tensor(values, dtype=index_dtype, device=device)
+        actual = torch.segment_reduce(data, reduce, **{mode: metadata})
+        reference = data.detach().cpu().double().requires_grad_()
+        expected = getattr(reference, reduce)(0, keepdim=True)
+        self.assertEqual(actual, expected.to(device=device, dtype=dtype))
+        expected.sum().backward()
+        actual.sum().backward()
+        self.assertEqual(data.grad, reference.grad.to(device=device, dtype=dtype))
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("mode", ["lengths", "offsets"])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("size,grad,expected", [(2, 10., 1000.), (3, 1., 10000.)])
+    def test_segment_reduce_prod_backward_overflow(self, device, dtype, mode, index_dtype, size, grad, expected):
+        data = torch.full((size,), 100., dtype=dtype, device=device, requires_grad=True)
+        values = [size] if mode == "lengths" else [0, size]
+        metadata = torch.tensor(values, dtype=index_dtype, device=device)
+        output = torch.segment_reduce(data, "prod", **{mode: metadata})
+        output.backward(torch.full_like(output, grad))
+        self.assertEqual(data.grad, torch.full_like(data, expected))
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("values,expected", [
+        ([0., 2., 3.], [6., 0., 0.]),
+        ([2., 0., 3.], [0., 6., 0.]),
+        ([2., 3., 0.], [0., 0., 6.]),
+        ([0., 0., 3.], [0., 0., 0.]),
+        ([float("nan"), 2., 3.], [6., float("nan"), float("nan")]),
+        ([2., float("nan"), 3.], [float("nan"), 6., float("nan")]),
+        ([2., 3., float("nan")], [float("nan"), float("nan"), 6.]),
+        ([float("nan"), float("nan"), 3.], [float("nan")] * 3),
+        ([0., float("nan"), 3.], [float("nan"), 0., float("nan")]),
+        ([0., float("inf"), 3.], [float("inf"), float("nan"), float("nan")]),
+        ([0., 0., float("inf")], [float("nan")] * 3),
+    ])
+    @parametrize("initial", [None, 0., 2.])
+    @parametrize("mode", ["lengths", "offsets"])
+    @parametrize("inner", [1, 8])
+    def test_segment_reduce_prod_backward_special_values(self, device, dtype, values, expected, initial, mode, inner):
+        data = torch.tensor(values, dtype=dtype, device=device).unsqueeze(1).repeat(1, inner).requires_grad_()
+        metadata = torch.tensor([3] if mode == "lengths" else [0, 3], device=device)
+        result = torch.segment_reduce(data, "prod", **{mode: metadata}, initial=initial)
+        result.sum().backward()
+        expected = torch.tensor(expected, dtype=dtype, device=device).unsqueeze(1).expand_as(data)
+        if initial is not None:
+            expected = expected * initial
+        self.assertEqual(data.grad, expected)
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
