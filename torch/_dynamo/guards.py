@@ -21,6 +21,7 @@ import ast
 import builtins
 import collections
 import contextlib
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -4249,6 +4250,67 @@ def _is_shared_constant(value: Any) -> bool:
     return FunctionPicklerBase._is_literal(value)
 
 
+def _instance_dict(obj: Any) -> dict[str, Any] | None:
+    """obj.__dict__ via object.__getattribute__: a user __getattr__ or
+    __getattribute__ never runs (a type-level __dict__ property still does, and
+    only its AttributeError is absorbed); None when there is no instance dict."""
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
+# The instance size of a class whose state is exactly its __dict__ (on 3.12+ the
+# dict and weakref slots are managed, so this equals object's; earlier they add
+# two pointers), the reference _pickles_by_default compares against.
+_PLAIN_INSTANCE_SIZE = type("_PlainInstance", (), {}).__basicsize__
+
+
+def _pickles_by_default(obj: Any) -> bool:
+    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``
+    (judged from the type's own hooks; the copyreg dispatch table is not consulted).
+
+    Attribute pruning is only sound for that protocol. A custom __reduce_ex__
+    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
+    __getnewargs__(_ex) reads attributes no guard named and gets the sentinel
+    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned).
+    State outside __dict__ is caught by layout rather than by hook: a class with
+    __slots__, a dict or list subclass (whose items ride the reduce tuple, not
+    __dict__) and a C extension type with an instance dict all have a larger
+    instance size than a plain Python class, and a copyreg registration means
+    someone declared the default protocol wrong for the type. The explicit
+    __slots__ scan covers 3.10 and 3.11, where ``("a", "__dict__")`` has the
+    plain size; an EMPTY __slots__ (abc.ABC, typing.Generic, Protocol) adds no
+    state and does not count.
+    """
+    cls = type(obj)
+    return (
+        cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
+        and not any(vars(c).get("__slots__") for c in cls.__mro__)
+        and cls not in copyreg.dispatch_table
+        and cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
+        and not hasattr(cls, "__setstate__")
+        and not hasattr(cls, "__getnewargs__")
+        and not hasattr(cls, "__getnewargs_ex__")
+    )
+
+
+def _is_torch_type(cls: type) -> bool:
+    """Whether ``cls`` or any base of it is torch's own: top-level package
+    ``torch``, which also covers a module named exactly ``torch``. Types from
+    other packages (torch_xla, torchrec) are user state to the pruner. This is
+    deliberately over-broad: a user Dataset or Optimizer subclass is pickled
+    whole too, and pruning only the names no torch base declares is the
+    follow-up that would cover those."""
+    return any(
+        str(getattr(c, "__module__", "")).partition(".")[0] == "torch"
+        for c in cls.__mro__
+    )
+
+
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
 # breaks the module itself: __getattr__ indexes the three dicts for every name
 # outside __dict__, and __setattr__/__delattr__ index all four on any
@@ -4874,6 +4936,31 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and _instance_dict(obj) is not None
+            and not inspect.isfunction(obj)
+            and type(obj).__qualname__ == type(obj).__name__
+            and not _is_torch_type(type(obj))
+            and _pickles_by_default(obj)
+            and not pytree.is_constant_class(type(obj))
+            and not is_opaque_constant_type(type(obj))
+            and id(obj) not in self._verbatim_elements
+        ):
+            # Any object the guard tree reached, not only an nn.Module, so one
+            # unguarded attribute several levels down (a live generator, a
+            # process group) no longer takes the frame with it. LAST, so every
+            # specific reducer above gets first refusal (a by-name function
+            # never gets here: its __dict__ does not travel). Rebuilt from a
+            # filtered copy of its own __dict__ rather than by registering the
+            # values globally, so the sentinel never reaches another receiver
+            # that shares one of them and reads it back at load. USER objects
+            # only: torch's structural types (a DTensorSpec rebuilds itself from
+            # fields no guard names) and pytree-registered or opaque constants
+            # (EQUALS_MATCH compares the object by value at run time) travel
+            # whole, and a local class falls through to the loud refusal below.
+            return type(obj).__new__, (type(obj),), self._pruned_state(obj)
+
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4908,29 +4995,50 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
-        """Mark every ``__dict__`` value nothing guards as prunable.
+    def _keeps_attribute(self, obj: Any, name: str, attr: Any) -> bool:
+        """Whether a guarded object's ``__dict__`` entry travels as is.
 
-        Reaching a module through the guard tree does not mean its whole state
+        Reaching an object through the guard tree does not mean its whole state
         is needed, only the attributes a guard actually reads. The rest becomes
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
-        What the module itself reads back at load stays: the containers in
-        _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that the
-        module's __setstate__ is nn.Module's, since any other may read anything.
+        What the object itself reads back at load stays: for a module, the
+        containers in _NN_MODULE_STATE_ATTRS. Callables stay too, as they always
+        did for modules (hooks, forward references), so a partial or C callable
+        closing over unpicklable state still fails the dump loudly.
+        """
+        if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+            return True
+        if isinstance(obj, torch.nn.Module) and name in _NN_MODULE_STATE_ATTRS:
+            return True
+        if id(attr) in self.guard_tree_values or callable(attr):
+            return True
+        return _is_shared_constant(attr)
+
+    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+        """Register every module attribute nothing guards as prunable.
+
+        Registration is global and by id, so the attribute is the sentinel
+        wherever else the same object appears. Precondition: the caller has
+        checked that the module's __setstate__ is nn.Module's (DDP qualifies
+        because _unpickle_ddp_module rebuilds it through nn.Module.__setstate__).
         """
         for name, attr in obj.__dict__.items():
-            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                continue
-            if name in _NN_MODULE_STATE_ATTRS:
-                continue
-            if id(attr) in self.guard_tree_values:
-                continue
-            if callable(attr):
-                continue
-            if _is_shared_constant(attr):
-                continue
-            self.missing_values[id(attr)] = attr
+            if not self._keeps_attribute(obj, name, attr):
+                self.missing_values[id(attr)] = attr
+
+    def _pruned_state(self, obj: Any) -> dict[str, Any]:
+        """The state a guarded user object is rebuilt from: its ``__dict__`` with
+        every unguarded attribute replaced by the sentinel. Scoped to this one
+        receiver, so a value it shares with an object that is pickled whole (one
+        with its own __setstate__, say) stays real where that object reads it
+        back at load."""
+        return {
+            name: attr
+            if self._keeps_attribute(obj, name, attr)
+            else self._missing("unguarded attribute")
+            for name, attr in (_instance_dict(obj) or {}).items()
+        }
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
