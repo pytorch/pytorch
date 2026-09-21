@@ -1474,6 +1474,7 @@ def reuse_dtype_conversions(graph: torch.fx.Graph) -> None:
         if not (
             isinstance(source_val, torch.Tensor)
             and isinstance(conversion_val, torch.Tensor)
+            and is_gpu(source_val.device.type)
             and source_storage is not None
             and conversion_storage is not None
         ):

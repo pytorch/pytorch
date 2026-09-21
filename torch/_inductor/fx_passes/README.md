@@ -2,12 +2,7 @@
 ## Fake Tensor metadata on node
 Each FX node has metadata on it, and in particular, stores a faketensor representing the metadata of that node `node.meta['val']`. This FakeTensor has properties like 1. shape, 2. stride, and 3. aliasing information. However, various passes may change the faketensor values, and so we need to maintain consistency.
 
-Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning. Passes do not need to run `FakeTensorUpdater` before each metadata read.
-
-## Operator arguments
-For dispatcher-traced `OpOverload` nodes in AOT-produced graphs, supplied schema arguments are recorded in schema order in `node.args`, regardless of whether the original Python call used positional or keyword arguments. Schema arguments do not appear in `node.kwargs`, so passes may index `node.args` according to the operator schema.
-
-Passes that manually construct `OpOverload` nodes with `Graph.call_function`, including custom passes, must preserve this convention. This invariant does not apply to arbitrary Python functions or higher-order operators used as `call_function` targets.
+Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning.
 
 ## Alias analysis
 Passes should determine tensor aliasing from FakeTensor storage identity rather than operator schema alias annotations. Two tensor nodes with the same non-`None` storage ID alias. A `None` storage ID means aliasing is unknown and must not be used to establish an alias relationship.
