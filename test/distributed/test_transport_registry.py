@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
+import threading
 from datetime import timedelta
 from typing import Any, cast
 from unittest.mock import patch
@@ -295,6 +296,75 @@ class TestTransportWork(TestCase):
         with _TestTransport() as transport:
             with self.assertRaisesRegex(NotImplementedError, "async close"):
                 asyncio.run(transport.close_async())
+
+    def test_future_only_work_does_not_poll(self):
+        future = torch.futures.Future()
+
+        class FutureOnlyWork(torch.distributed.Work):
+            def get_future(self):
+                return future
+
+            def is_completed(self):
+                raise AssertionError("must use the completion future")
+
+            def wait(self, *args):
+                raise AssertionError("must not block on Work.wait")
+
+        async def run():
+            task = asyncio.create_task(wait_all([FutureOnlyWork()]))
+            await asyncio.sleep(0)
+            thread = threading.Thread(target=lambda: future.set_result([]))
+            thread.start()
+            try:
+                await asyncio.wait_for(task, 1)
+            finally:
+                thread.join(5)
+
+        asyncio.run(run())
+
+    def test_c10d_future_wrapped_work(self):
+        future = torch.futures.Future()
+        work = torch._C._distributed_c10d._create_work_from_future(future)
+
+        async def run():
+            asyncio.get_running_loop().call_soon(future.set_result, [])
+            await wait_all([work], timeout=1)
+
+        asyncio.run(run())
+
+    def test_completed_future_zero_timeout(self):
+        asyncio.run(wait_all([_ManualWork(done=True)], timeout=0))
+        with self.assertRaisesRegex(RuntimeError, "failed"):
+            asyncio.run(
+                wait_all(
+                    [_ManualWork(done=True, error=RuntimeError("failed"))], timeout=0
+                )
+            )
+
+    def test_cancelled_waiter_does_not_cancel_shared_future(self):
+        future = torch.futures.Future()
+        work = torch._C._distributed_c10d._create_work_from_future(future)
+
+        async def run():
+            first = asyncio.create_task(wait_all([work]))
+            second = asyncio.create_task(wait_all([work]))
+            await asyncio.sleep(0)
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            self.assertFalse(future.done())
+            future.set_result([])
+            await asyncio.wait_for(second, 1)
+
+        asyncio.run(run())
+
+    def test_future_completion_after_loop_closes(self):
+        future = torch.futures.Future()
+        work = torch._C._distributed_c10d._create_work_from_future(future)
+        with self.assertRaises(TimeoutError):
+            asyncio.run(wait_all([work], timeout=0.001))
+        future.set_result([])
+        asyncio.run(wait_all([work], timeout=0))
 
     def test_empty_batch(self):
         asyncio.run(wait_all([]))
