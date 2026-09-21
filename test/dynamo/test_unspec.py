@@ -21,8 +21,8 @@ from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
 from torch._dynamo.variables.functions import _TIME_FUNCTION_NAMES
 from torch._inductor.utils import fresh_cache
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,

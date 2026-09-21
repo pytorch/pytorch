@@ -47,8 +47,6 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     TEST_CUDNN_VERSION,
     tf32_on_and_off,
     with_tf32_off,
@@ -61,6 +59,10 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     tol,
     toleranceOverride,
+)
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
