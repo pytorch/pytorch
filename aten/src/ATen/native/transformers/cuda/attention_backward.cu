@@ -656,7 +656,8 @@ _efficient_attention_backward(
     const auto lse_batch_size =
         cu_seqlens_q.has_value() ? cu_seqlens_q->size(0) - 1 : B;
     at::Tensor softmax_lse = logsumexp.view({lse_batch_size * nH, max_seqlen_q});
-    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_input_aotensor;
+    using sdp::aotriton_adapter::mk_output_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
@@ -665,23 +666,27 @@ _efficient_attention_backward(
     const auto aotriton_philox_offset =
         use_dropout ? philox_offset : at::zeros({}, at::dtype(at::kLong));
     using aotriton::v3::flash::CausalType;
-    using aotriton::v3::flash::VarlenType;
     using aotriton::v3::flash::WindowValue;
+#if AOTRITON_VARLEN_BITS_API
+    using sdp::aotriton_adapter::mk_varlen_bits_packed;
+#else
+    using aotriton::v3::flash::VarlenType;
+#endif
     aotriton::v3::flash::attn_bwd_params params;
-    params.Q = mk_aotensor(q_t, "q");
-    params.K = mk_aotensor(k_t, "k");
-    params.V = mk_aotensor(v_t, "v");
-    params.B = bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4;
+    params.Q = mk_input_aotensor(q_t, "q");
+    params.K = mk_input_aotensor(k_t, "k");
+    params.V = mk_input_aotensor(v_t, "v");
+    params.B = bias.has_value() ? mk_input_aotensor(bias.value(), "bias") : empty_t4;
     params.Sm_scale = softmax_scale;
-    params.Out = mk_aotensor(out_t, "out");
-    params.DO = mk_aotensor(dout_t, "dout");
-    params.DK = mk_aotensor(dk_t, "dk");
-    params.DV = mk_aotensor(dv_t, "dv");
-    params.DQ = mk_aotensor(dq_t, "dq");
-    params.DB = bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4;
-    params.L = mk_aotensor<2>(softmax_lse, "L");
-    params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
-    params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
+    params.Out = mk_input_aotensor(out_t, "out");
+    params.DO = mk_input_aotensor(dout_t, "dout");
+    params.DK = mk_output_aotensor(dk_t, "dk");
+    params.DV = mk_output_aotensor(dv_t, "dv");
+    params.DQ = mk_output_aotensor(dq_t, "dq");
+    params.DB = bias_requires_grad ? mk_output_aotensor(grad_bias, "db") : empty_t4;
+    params.L = mk_input_aotensor<2>(softmax_lse, "L");
+    params.Max_seqlen_q = max_seqlen_q;        // Unused if seqinfo_q0 is empty
+    params.Max_seqlen_k = max_seqlen_k;        // Unused if seqinfo_k0 is empty
     params.dropout_p = float(dropout_p);
     params.philox_seed_ptr = mk_aoscalartensor(aotriton_philox_seed);
     params.philox_offset1 = mk_aoscalartensor(aotriton_philox_offset);
@@ -701,13 +706,21 @@ _efficient_attention_backward(
     LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
     params.D = mklazy_empty_like<2>(&lazy_delta);
     params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
+#if AOTRITON_VARLEN_BITS_API
+    if (cu_seqlens_q.has_value()) {
+      params.varlen_bits = mk_varlen_bits_packed();
+      params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q.value(), "seqinfo_q0");
+      params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k.value(), "seqinfo_k0");
+    }
+#else
     if (cu_seqlens_q.has_value()) {
       params.varlen_type = VarlenType::CompactVarlen;
-      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q");
-      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k");
+      params.cu_seqlens_q = mk_input_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q");
+      params.cu_seqlens_k = mk_input_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k");
     } else {
       params.varlen_type = VarlenType::None;
     }
+#endif
     aotriton::v3::flash::attn_options opts;
     opts.deterministic = deterministic;
     AT_CUDA_CHECK(aotriton::v3::flash::attn_bwd(
