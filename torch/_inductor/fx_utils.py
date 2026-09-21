@@ -833,21 +833,12 @@ def _same_size_stride_and_storage_offset(
 ) -> bool:
     """Check size and requested layout metadata without adding guards."""
 
-    def same_value(lhs_value, rhs_value) -> bool:
-        return statically_known_true(sym_eq(lhs_value, rhs_value))
-
-    def same_sequence(lhs_values, rhs_values) -> bool:
-        return len(lhs_values) == len(rhs_values) and all(
-            same_value(lhs_value, rhs_value)
-            for lhs_value, rhs_value in zip(lhs_values, rhs_values)
-        )
-
     return (
-        same_sequence(lhs.size(), rhs.size())
-        and (skip_strides or same_sequence(lhs.stride(), rhs.stride()))
+        statically_known_true(sym_eq(lhs.size(), rhs.size()))
+        and (skip_strides or statically_known_true(sym_eq(lhs.stride(), rhs.stride())))
         and (
             skip_storage_offset
-            or same_value(lhs.storage_offset(), rhs.storage_offset())
+            or statically_known_true(sym_eq(lhs.storage_offset(), rhs.storage_offset()))
         )
     )
 
