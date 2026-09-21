@@ -39,6 +39,7 @@ permissions:
 jobs:
   # See job-filter.yml for rules on adding job filter conditions
   job-filter:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: job-filter
     uses: ./.github/workflows/job-filter.yml
