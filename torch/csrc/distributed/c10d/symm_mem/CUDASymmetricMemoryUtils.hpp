@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -195,7 +196,8 @@ class StoreExchange {
   // while the entry lives, so a live store can never reuse it.
   size_t next_seq_id(const c10::intrusive_ptr<c10d::Store>& store) {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = seq_ids_.find(store.get());
+    const auto key = reinterpret_cast<std::uintptr_t>(store.get());
+    auto it = seq_ids_.find(key);
     if (it == seq_ids_.end()) {
       // Prune on a miss only: the map grows just when a new group appears,
       // so the scan tracks group creation, not rendezvous frequency.
@@ -203,8 +205,7 @@ class StoreExchange {
           seq_ids_, [](const auto& kv) { return kv.second.ref.expired(); });
       it = seq_ids_
                .emplace(
-                   store.get(),
-                   Entry{c10::weak_intrusive_ptr<c10d::Store>(store), 0})
+                   key, Entry{c10::weak_intrusive_ptr<c10d::Store>(store), 0})
                .first;
     }
     return it->second.seq_id++;
@@ -217,7 +218,9 @@ class StoreExchange {
 
   const std::string store_prefix_;
   std::mutex mutex_;
-  std::unordered_map<c10d::Store*, Entry> seq_ids_;
+  // The key is the store's address as an integer: an identity token, never
+  // dereferenced. Entry::ref pins the allocation so it cannot be reissued.
+  std::unordered_map<std::uintptr_t, Entry> seq_ids_;
 };
 
 // Returns a pointer of virtual address that is mapped to the physical memory
