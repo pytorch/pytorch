@@ -1288,7 +1288,17 @@ static ConvBackend _select_conv_backend(
   if (params.is_depthwise(input, weight)) {
     if (params.use_cudnn_depthwise(input, weight)) {
       return ConvBackend::Cudnn;
-    } else if (params.use_miopen(input, weight, bias_sizes_opt.has_value())) {
+    } else if (
+        params.use_miopen(input, weight, bias_sizes_opt.has_value()) &&
+        // depthwise_kernel="native" selects the native kernel over MIOpen too,
+        // with the same two exemptions use_cudnn_depthwise() keeps on CUDA: the
+        // native kernel handles neither 64-bit non-splittable nor channels-last
+        // inputs (the latter only when MIOpen is asked to suggest NHWC).
+        !(at::globalContext().cudnnDepthwiseKernel() ==
+              at::CuDNNDepthwiseKernel::NATIVE &&
+          canUse32BitIndexMath(input) && canUse32BitIndexMath(weight) &&
+          miopen_conv_suggest_memory_format(input, weight) ==
+              at::MemoryFormat::Contiguous)) {
       return ConvBackend::MiopenDepthwise;
     } else {
       if (input.ndimension() == 4) {

@@ -4325,7 +4325,6 @@ class TestConvolutionNNCUDA(NNTestCase):
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
     @skipCUDAIfNoCudnn
-    @skipCUDAIfRocm
     @dtypes(torch.half)
     def test_Conv2d_depthwise_kernel_flag(self, device, dtype):
         channels = 32
@@ -4344,8 +4343,11 @@ class TestConvolutionNNCUDA(NNTestCase):
             ):
                 results[mode] = conv(x).detach().clone()
 
-        self.assertEqual(results["cudnn"], results["native"], atol=1e-3, rtol=1e-3)
-        self.assertEqual(results["auto"], results["native"], atol=1e-3, rtol=1e-3)
+        # On ROCm "cudnn" and "auto" select MIOpen, which runs fp16 depthwise 3x3 through a
+        # Winograd solver whose output is off by about two fp16 steps; "native" is exact.
+        atol = 1e-2 if TEST_WITH_ROCM else 1e-3
+        self.assertEqual(results["cudnn"], results["native"], atol=atol, rtol=1e-3)
+        self.assertEqual(results["auto"], results["native"], atol=atol, rtol=1e-3)
 
     @dtypes(torch.half, torch.float, torch.cfloat)
     def test_conv_cudnn_nhwc(self, device, dtype):
