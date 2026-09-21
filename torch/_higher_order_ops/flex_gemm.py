@@ -10,7 +10,6 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.utils import (
-    autograd_not_implemented,
     potential_input_alias_or_mutation,
     reenter_make_fx,
     register_fake,
@@ -39,12 +38,15 @@ FLEX_GEMM_OP_SPECS = {
     torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1),
     torch.ops.aten.baddbmm.default: FlexGemmOpSpec("baddbmm", 1, 2, bias_index=0),
     torch.ops.aten._scaled_mm_v2.default: FlexGemmOpSpec("scaled_mm", 0, 1),
+    torch.ops.aten._grouped_mm.default: FlexGemmOpSpec("grouped_mm", 0, 1),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
     torch.addmm: torch.ops.aten.addmm.default,
     torch.bmm: torch.ops.aten.bmm.default,
     torch.baddbmm: torch.ops.aten.baddbmm.default,
+    torch.nn.functional.grouped_mm: torch.ops.aten._grouped_mm.default,
+    torch._grouped_mm: torch.ops.aten._grouped_mm.default,
 }
 _SUPPORTED_BACKENDS = {"NVGEMM", "QUACK", "TRITON"}
 
@@ -524,6 +526,53 @@ def flex_gemm_scaled_mm(
     )
 
 
+def flex_gemm_grouped_mm(
+    gemm_op: torch._ops.OpOverload,
+    gemm_args: tuple[Any, ...],
+    epilogue_fn: Callable[[Any], Any],
+    gemm_kwargs: dict[str, Any],
+    kernel_options: dict[str, Any],
+) -> Any:
+    """Normalize variable-length-M grouped GEMM: 2-D A, 3-D B, ``offs`` as a tensor operand.
+
+    ``offs`` moves from ``gemm_kwargs`` into the HOP's tensor operands so Dynamo
+    and the body graph carry it as a tensor rather than a constant.
+    """
+    if len(gemm_args) != 2:
+        raise RuntimeError(
+            "FlexGEMM grouped_mm expects gemm_args=(mat_a, mat_b) and "
+            "gemm_kwargs={'offs': offs}"
+        )
+    mat_a, mat_b = gemm_args
+    options = dict(gemm_kwargs)
+    offs = options.pop("offs", None)
+    if options.pop("bias", None) is not None:
+        raise NotImplementedError("FlexGEMM grouped_mm bias is not supported yet")
+    if options.pop("out_dtype", None) is not None:
+        raise NotImplementedError("FlexGEMM grouped_mm out_dtype is not supported yet")
+    if options:
+        raise RuntimeError(
+            f"unsupported FlexGEMM grouped_mm options: {sorted(options)}"
+        )
+    if (
+        not isinstance(offs, torch.Tensor)
+        or not isinstance(mat_a, torch.Tensor)
+        or not isinstance(mat_b, torch.Tensor)
+        or mat_a.ndim != 2
+        or mat_b.ndim != 3
+    ):
+        raise NotImplementedError(
+            "FlexGEMM grouped_mm supports only the variable-length-M form: 2-D A "
+            "[total_m, K], 3-D B [E, K, N] and an int32 offs tensor; 3-D A, the "
+            "2-D/2-D weight-gradient form and offs=None are not supported"
+        )
+
+    def body_fn(*args: Any) -> Any:
+        return epilogue_fn(gemm_op(*args))
+
+    return flex_gemm_hop(gemm_op, body_fn, (mat_a, mat_b, offs), {}, kernel_options)
+
+
 def flex_gemm(
     gemm_op: Callable[..., Any],
     gemm_args: tuple[Any, ...],
@@ -544,10 +593,23 @@ def flex_gemm(
             "FlexGEMM direct aten._scaled_mm_v2 calls are unsupported; "
             "use torch.nn.functional.scaled_mm"
         )
+    if gemm_op in (
+        torch._scaled_grouped_mm,
+        torch.ops.aten._scaled_grouped_mm,
+        torch.ops.aten._scaled_grouped_mm.default,
+    ):
+        raise NotImplementedError(
+            "FlexGEMM scaled grouped GEMMs are not supported yet; "
+            "only bf16 torch.nn.functional.grouped_mm with offs is supported"
+        )
     if gemm_op is torch.nn.functional.scaled_mm:
         return flex_gemm_scaled_mm(gemm_args, epilogue_fn, gemm_kwargs, kernel_options)
 
     gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
+    if gemm_op is torch.ops.aten._grouped_mm.default:
+        return flex_gemm_grouped_mm(
+            gemm_op, gemm_args, epilogue_fn, gemm_kwargs, kernel_options
+        )
 
     def body_fn(*args: Any) -> Any:
         # Keep the traced body positional-only; the HOP carries gemm_kwargs for lowering.
@@ -561,9 +623,56 @@ def flex_gemm_dense(gemm_op, body_fn, args, kwargs, kernel_options):
     return body_fn(*args)
 
 
-flex_gemm_hop.py_autograd_impl(
-    autograd_not_implemented(flex_gemm_hop, deferred_error=True)
-)
+@torch.library.custom_op("flex_gemm::autograd_not_implemented", mutates_args=())
+def flex_gemm_autograd_not_implemented(
+    grad: torch.Tensor, like: torch.Tensor
+) -> torch.Tensor:
+    raise NotImplementedError(
+        "Autograd not implemented for flex_gemm; wrap the call in a "
+        "torch.autograd.Function with an explicit backward"
+    )
+
+
+@flex_gemm_autograd_not_implemented.register_fake
+def _flex_gemm_autograd_not_implemented_fake(
+    grad: torch.Tensor, like: torch.Tensor
+) -> torch.Tensor:
+    return torch.empty_like(like)
+
+
+class FlexGemmNoAutograd(torch.autograd.Function):
+    """Attach the HOP outputs to the differentiable inputs; backward raises when run.
+
+    ``autograd_not_implemented(deferred_error=True)`` detaches the outputs, so under
+    AOTAutograd the inputs look unused and compiled backward silently yields None
+    grads. Raising directly in ``backward`` would fail at trace time instead, so the
+    raise goes through a custom op (fake impl succeeds) that consumes the incoming
+    gradient, which also keeps the partitioner from hoisting it into the forward.
+    """
+
+    @staticmethod
+    def forward(ctx, result, *grad_args):
+        ctx.save_for_backward(*grad_args)
+        return result
+
+    @staticmethod
+    def backward(ctx, *grads):
+        return None, *(
+            flex_gemm_autograd_not_implemented(grads[0], like)
+            for like in ctx.saved_tensors
+        )
+
+
+@flex_gemm_hop.py_autograd_impl
+def flex_gemm_autograd(gemm_op, body_fn, args, kwargs, kernel_options):
+    with torch._C._AutoDispatchBelowAutograd():
+        result = flex_gemm_hop(gemm_op, body_fn, args, kwargs, kernel_options)
+    grad_args = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
+    if not torch.is_grad_enabled() or not grad_args:
+        return result
+    flat_result, spec = pytree.tree_flatten(result)
+    outputs = FlexGemmNoAutograd.apply(tuple(flat_result), *grad_args)
+    return pytree.tree_unflatten(outputs, spec)
 
 
 @register_fake(flex_gemm_hop)

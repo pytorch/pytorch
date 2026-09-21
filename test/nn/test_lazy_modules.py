@@ -860,7 +860,7 @@ class TestLazyModulesDevice(NNTestCase):
         self.assertEqual(module.test_param.device.type, device.split(":")[0])
 
 
-instantiate_device_type_tests(TestLazyModulesDevice, globals())
+instantiate_device_type_tests(TestLazyModulesDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
