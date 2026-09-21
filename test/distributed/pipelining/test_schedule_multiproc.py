@@ -460,17 +460,18 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize(
-        "ScheduleClass",
+        "ScheduleClass,reuse_recv_buffers",
         [
-            ScheduleGPipe,
-            Schedule1F1B,
-            ScheduleInterleaved1F1B,
-            ScheduleLoopedBFS,
-            ScheduleInterleavedZeroBubble,
+            (ScheduleGPipe, False),
+            (Schedule1F1B, False),
+            (ScheduleInterleaved1F1B, False),
+            (ScheduleInterleaved1F1B, True),
+            (ScheduleLoopedBFS, False),
+            (ScheduleInterleavedZeroBubble, False),
         ],
     )
     @skip_if_lt_x_gpu(4)
-    def test_eval_inference_mode(self, ScheduleClass):
+    def test_eval_inference_mode(self, ScheduleClass, reuse_recv_buffers):
         num_microbatches = 4
         if ScheduleClass in [
             ScheduleInterleaved1F1B,
@@ -489,7 +490,11 @@ class ScheduleTest(MultiProcContinuousTest):
                 self.config, mod, stages_per_rank, n_stages
             )
             schedule = ScheduleClass(
-                stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+                stages,
+                num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+                reuse_recv_buffers=reuse_recv_buffers,
             )
         else:
             # Single-stage schedules
@@ -499,6 +504,8 @@ class ScheduleTest(MultiProcContinuousTest):
             stage, stage_module, _ = create_single_stage_pipeline(
                 self.config, mod, x, num_microbatches
             )
+            # Normalize both branches for the shared pool inspection below.
+            stages = [stage]
             stage_modules = [stage_module]
             schedule = ScheduleClass(
                 stage, num_microbatches, loss_fn=loss_fn, scale_grads=False
@@ -508,14 +515,35 @@ class ScheduleTest(MultiProcContinuousTest):
         zero_gradients(stage_modules)
         losses = []
 
-        if self.rank == 0:
-            # Support with and without no_grad()
-            with torch.no_grad():
+        def run_training_step():
+            zero_gradients(stage_modules)
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                schedule.step(target=target, losses=[])
+            else:
+                schedule.step()
+
+        def recv_pool_ptrs():
+            return tuple(
+                tuple(
+                    tuple(
+                        buffer.data_ptr() if buffer is not None else None
+                        for buffer in slot
+                    )
+                    for slot in pool._buffers
+                )
+                for stage in stages
+                for pool in (stage._fwd_recv_pool, stage._bwd_recv_pool)
+            )
+
+        with torch.inference_mode():
+            if self.rank == 0:
                 schedule.eval(x)
-        elif self.rank == self.world_size - 1:
-            schedule.eval(target=target, losses=losses)
-        else:
-            schedule.eval()
+            elif self.rank == self.world_size - 1:
+                schedule.eval(target=target, losses=losses)
+            else:
+                schedule.eval()
 
         # Check that gradients were NOT computed during eval
         grad_computed_eval = any(
@@ -532,6 +560,27 @@ class ScheduleTest(MultiProcContinuousTest):
         # Verify that losses are still computed during eval
         if self.rank == self.world_size - 1:
             self.assertTrue(len(losses) > 0, "Losses should be computed during eval()")
+
+        if reuse_recv_buffers:
+            eval_ptrs = recv_pool_ptrs()
+            eval_pools_drained = all(
+                not pool._owners
+                for stage in stages
+                for pool in (stage._fwd_recv_pool, stage._bwd_recv_pool)
+            )
+            run_training_step()
+            resumed_train_ptrs = recv_pool_ptrs()
+            dist.barrier(device_ids=[self.rank])
+
+            self.assertTrue(eval_pools_drained)
+            for stage in stages:
+                if not stage.is_first:
+                    self.assertEqual(
+                        stage._fwd_recv_pool.num_slots,
+                        num_microbatches,
+                    )
+            for expected, actual in zip(eval_ptrs, resumed_train_ptrs, strict=True):
+                self.assertEqual(actual[: len(expected)], expected)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -819,21 +868,32 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize(
-        "ScheduleClass",
+        "ScheduleClass,reuse_recv_buffers,defer_pp_recv",
         [
-            ScheduleInterleaved1F1B,
-            ScheduleLoopedBFS,
-            ScheduleInterleavedZeroBubble,
+            (ScheduleInterleaved1F1B, False, False),
+            (ScheduleInterleaved1F1B, True, False),
+            (ScheduleInterleaved1F1B, True, True),
+            (ScheduleLoopedBFS, False, False),
+            (ScheduleInterleavedZeroBubble, False, False),
+            (ScheduleInterleavedZeroBubble, True, False),
         ],
     )
     @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_interleaved(self, ScheduleClass, pre_split):
+    def test_grad_with_manual_interleaved(
+        self, ScheduleClass, reuse_recv_buffers, defer_pp_recv, pre_split
+    ):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
             self.config, n_layers=n_stages
         )
+        if reuse_recv_buffers:
+            # A final identity layer returns its pooled input directly. This
+            # catches output corruption if that receive slot is reused before
+            # the schedule merges the returned microbatches.
+            mod.layers[-1] = torch.nn.Identity()
+            ref_mod.layers[-1] = torch.nn.Identity()
 
         # Run reference
         ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
@@ -852,13 +912,19 @@ class ScheduleTest(MultiProcContinuousTest):
 
         # Create schedule
         schedule = ScheduleClass(
-            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+            reuse_recv_buffers=reuse_recv_buffers,
+            defer_pp_recv=defer_pp_recv,
         )
 
         # Run pipeline with tensor leak checking
         out = None
         losses = []
         with check_leaked_tensors() as garbage_tensors:
+            recv_pool_ptrs = None
             for _ in range(2):
                 zero_gradients(stage_modules)
                 if self.rank == 0:
@@ -882,6 +948,19 @@ class ScheduleTest(MultiProcContinuousTest):
                         num_microbatches,
                         pre_split=pre_split,
                     )
+                if reuse_recv_buffers:
+                    current_ptrs = tuple(
+                        buffer.data_ptr()
+                        for stage in stages
+                        for pool in (stage._fwd_recv_pool, stage._bwd_recv_pool)
+                        for slot in pool._buffers
+                        for buffer in slot
+                        if buffer is not None
+                    )
+                    if recv_pool_ptrs is None:
+                        recv_pool_ptrs = current_ptrs
+                    else:
+                        self.assertEqual(current_ptrs, recv_pool_ptrs)
 
         self.assertEqual(
             len(garbage_tensors),
@@ -1125,16 +1204,27 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize(
-        "schedule_class",
-        [ScheduleZBVZeroBubble, ScheduleDualPipeV],
+        "schedule_class,reuse_recv_buffers",
+        [
+            (ScheduleZBVZeroBubble, False),
+            (ScheduleDualPipeV, False),
+            (ScheduleDualPipeV, True),
+        ],
     )
     @skip_if_lt_x_gpu(4)
-    def test_v_shape_schedules(self, schedule_class):
+    def test_v_shape_schedules(self, schedule_class, reuse_recv_buffers):
         n_stages = 8
         rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
             self.config, n_layers=n_stages
         )
+        if reuse_recv_buffers:
+            # Exercise both local escape boundaries at the V turn: stage 3's
+            # forward and stage 4's backward return aliases of their inputs.
+            mod.layers[3] = torch.nn.Identity()
+            mod.layers[4] = torch.nn.Identity()
+            ref_mod.layers[3] = torch.nn.Identity()
+            ref_mod.layers[4] = torch.nn.Identity()
 
         # Run reference
         ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
@@ -1147,7 +1237,11 @@ class ScheduleTest(MultiProcContinuousTest):
         )
 
         schedule = schedule_class(
-            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
 
         # Run pipeline - special case where first and last stage are on rank 0
