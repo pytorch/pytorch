@@ -1572,10 +1572,9 @@ def _capture(
         captured_grad_param_indices = grad_param_indices
         return [*result_flat, *grad_flat]
 
-    # The trace runs in the ambient grad mode, which the entry point sets: the
-    # transitional callable alias keeps grad enabled around it, as it always did, while
-    # capture() lets ``training=`` select it (grad on for a backward in ``fn``, off for an
-    # inference capture) -- so a capture can reach here with grad OFF.
+    # The trace runs in the ambient grad mode, which ``training=`` selects (grad on
+    # for a backward in ``fn``, off for an inference capture) -- so a capture can
+    # reach here with grad OFF.
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
     # ``fake_mode`` is the DYNAMIC (symbolic) fake mode -- set only on the unbacked path,
@@ -2882,11 +2881,11 @@ def _runnable_from_pair(
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
-    The shared core of :func:`load` (which reads the pair off disk first), the
-    transitional ``_PrecompileApi.load`` and the capture-time self-load in
-    :class:`_MakeFxCapture`, so ``who`` names the entry point the caller actually called
-    rather than one of the other two. ``_trusted`` is set only for that self-load, where
-    the source was just produced in-process, to suppress the exec warning.
+    The shared core of :func:`load` (which reads the pair off disk first) and the
+    capture-time self-load in :class:`_MakeFxCapture`, so ``who`` names the entry
+    point the caller actually called rather than the other. ``_trusted`` is set only for
+    that self-load, where the source was just produced in-process, to suppress the
+    exec warning.
     """
     # Unpickling the cache references classes in AOTAutograd's runtime; import
     # dynamo first so that import completes in a non-circular order (otherwise
@@ -3095,10 +3094,6 @@ def capture(
     )
 
 
-# This ``load`` takes two PATHS and is the public one; the transitional
-# ``_PrecompileApi.load`` at the bottom of this file (reachable as
-# torch.compiler._precompile_callable.load) still takes the in-memory (python_code, cache)
-# pair -- same name, same arity.
 def load(
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
@@ -3167,89 +3162,3 @@ for _f in (capture, load):
 
 
 del _f
-
-
-# The callable API this module's public surface replaces, kept reachable as the
-# transitional ``torch.compiler._precompile_callable`` pending its removal. Private,
-# undocumented, in no ``__all__``.
-class _PrecompileApi:
-    """The retired callable API, reachable as ``torch.compiler._precompile_callable``.
-
-    This WAS ``torch.compiler.precompile``: calling it precompiled a computation to an
-    in-memory ``(python_code, cache)`` pair, and ``.load`` read that pair back. The public
-    name is now the ``torch.compiler.precompile`` MODULE (:func:`capture` / :func:`load`),
-    which is the only spelling documented anywhere.
-    """
-
-    # Reported under the namespace the alias is reachable from.
-    __module__ = "torch.compiler"
-
-    PrecompileError = PrecompileError
-
-    def __reduce__(self) -> str:
-        # A process-wide singleton carrying no per-call state: pickle/deepcopy round-trip
-        # to the SAME object rather than failing on a bound-method-bearing instance. The
-        # name resolves against ``__module__`` above.
-        return "_precompile_callable"
-
-    def __repr__(self) -> str:
-        return "torch.compiler._precompile_callable"
-
-    def __call__(
-        self,
-        fn: Callable[..., object],
-        *example_inputs: object,
-        backend: str = "inductor",
-        tracer: str = "make_fx",
-        decompositions: dict | None = None,
-    ) -> tuple[str, bytes]:
-        """Precompile ``fn`` against ``example_inputs`` to an in-memory pair (retired).
-
-        ``backend`` is ``"inductor"`` (default) or ``"eager"``, ``tracer`` is the STRING
-        ``"make_fx"``, and ``decompositions`` is forwarded to ``make_fx``. The trace runs
-        under ``torch.enable_grad()`` whatever the ambient mode, as it always did here.
-        The contract is Note [precompile programming model] in this module; the surface
-        that replaces this one is :func:`capture`, which takes the grad mode as
-        ``training=`` rather than forcing it, and writes the pair to files.
-        """
-        torch._C._log_api_usage_once("torch.compiler._precompile_callable")
-        if backend not in ("inductor", "eager"):
-            raise ValueError(
-                f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
-            )
-        if tracer not in ("make_fx", "dynamo"):
-            raise ValueError(
-                f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
-            )
-        # PrecompiledModule renders the make_fx capture only, so the string tracer this
-        # entry point takes is refused here rather than inside it.
-        if tracer != "make_fx":
-            raise NotImplementedError(
-                f"precompile tracer={tracer!r} is not implemented yet; use "
-                "tracer='make_fx' (the default)."
-            )
-        compiled = PrecompiledModule(fn, backend=backend, decompositions=decompositions)
-        with torch.enable_grad():
-            compiled._compile(example_inputs)
-        # Build the (expensive) python_code ONCE and thread it into to_cache_bytes, so
-        # code_hash is sha256 over exactly the bytes returned (a matched pair loads).
-        python_code = compiled.to_python_code()
-        return python_code, compiled.to_cache_bytes(python_code)
-
-    def load(self, python_code: str, cache: bytes) -> Callable[..., object]:
-        """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
-
-        The retired loader: it takes the pair :meth:`__call__` returned, where the public
-        :func:`load` takes the two paths a capture wrote. Both go through the same core,
-        so the integrity checks, the failures and the calling convention are
-        :func:`load`'s, minus the file reads it does first.
-        """
-        torch._C._log_api_usage_once("torch.compiler._precompile_callable.load")
-        return _runnable_from_pair(
-            python_code, cache, who="torch.compiler._precompile_callable.load"
-        )
-
-
-# No __name__/__qualname__/__doc__ fixups: nothing documents the alias, so no Sphinx
-# anchor or help() page depends on them the way the public callable's did.
-_precompile_callable = _PrecompileApi()
