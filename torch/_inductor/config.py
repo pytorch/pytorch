@@ -588,6 +588,17 @@ autotune_cudagraph_benchmarking: bool = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
 )
 
+# Number of calls of the benchmarked callable captured into each CUDA graph by
+# benchmark_gpu_with_cuda_graph; the replay time is divided by this count so the
+# graph launch and inter-kernel gaps are amortized. With 1 (the default) each
+# timed sample is a full graph launch, which for microsecond kernels exceeds the
+# kernel time and hides the differences between autotune choices. Counts above
+# 1 trade cold-cache fidelity for launch-overhead rejection: the L2 flush in
+# benchmark_gpu runs once per replay, so only the first captured call is cold.
+autotune_cudagraph_benchmarking_iters: int = int(
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING_ITERS", "1")
+)
+
 
 # Modifies the number of autotuning choices displayed, set to None for all
 def _autotune_num_choices_displayed_default() -> int | None:
@@ -1088,11 +1099,23 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
-# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# "strict_pointwise" requests eager-compatible pointwise math, and
+# "strict_reduction" requests eager INNER_TREE order for reductions.
+# "strict" requests both. Strict modes may reduce performance.
+# TODO: Route pointwise and reduction consumers through their respective modes.
 # pyrefly: ignore [bad-assignment]
-numerics: Literal["default", "strict"] = os.environ.get(
-    "TORCHINDUCTOR_NUMERICS", "default"
-)  # type: ignore[assignment]
+numerics: Literal["default", "strict_pointwise", "strict_reduction", "strict"] = Config(
+    default=os.environ.get("TORCHINDUCTOR_NUMERICS", "default"),
+    implies={
+        mode: {
+            "eager_numerics.disable_ftz": True,
+            "eager_numerics.division_rounding": True,
+            "emulate_precision_casts": True,
+        }
+        for mode in ("strict_pointwise", "strict")
+    },
+)
+
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -2109,6 +2132,18 @@ class triton:
     # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
+
+    # Cudagraph-managed input pointer-change count at which the configured
+    # action is applied for a parent/function edge. "copy" copies eligible
+    # inputs into stable replay buffers; "skip" runs that edge eagerly.
+    cudagraph_managed_input_rerecord_limit = 5
+    cudagraph_managed_input_rerecord_action: Literal["copy", "skip"] = "copy"
+
+    # If set, allocate this many GiB in the cudagraph memory pool when the
+    # pool is created (once per device). The upfront allocation reserves one
+    # large contiguous segment for later recordings to carve up, rather than
+    # growing the pool a segment at a time, which reduces fragmentation.
+    cudagraph_initial_mempool_allocation_gb: float | None = None
 
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
