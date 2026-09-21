@@ -112,13 +112,21 @@ class TestPrefixCopy(TestCase):
             "mixed",
             "extension",
             "post_forward",
+            "post_forward_nonzero",
             "zero_prefix",
             "mixed_fallback",
         ],
     )
     def test_all_gather_output(self, device, use_reorder, layout):
+        self._test_all_gather_output(device, use_reorder, layout)
+
+    def test_all_gather_empty_output(self, device):
+        self._test_all_gather_output(device, False, "all_empty")
+
+    def _test_all_gather_output(self, device, use_reorder, layout):
         world_size = 4
         layouts = {
+            "all_empty": ("zero_prefix",),
             "mixed": ("shard0", "shard1"),
             "zero_prefix": ("zero_prefix", "shard0"),
             "mixed_fallback": ("shard1", "extension", "post_forward", "zero_prefix"),
@@ -130,16 +138,21 @@ class TestPrefixCopy(TestCase):
                 "shard0": (12, 5),
                 "singleton_prefix": (1, 12, 5),
                 "post_forward": (16, 5),
+                "post_forward_nonzero": (16, 8),
                 "zero_prefix": (0, 12, 5),
             }.get(kind, (2, 12, 5))
             dtype = torch.bfloat16 if layout == "mixed" and dim == 1 else torch.float32
             tensor = make_tensor(shape, device=device, dtype=dtype)
-            rank_shards = tensor.chunk(world_size, dim=dim)
-            shard_size = list(rank_shards[0].size())
-            state = ShardedState.SHARDED
-            if kind == "post_forward":
+            is_post_forward = kind in ("post_forward", "post_forward_nonzero")
+            if is_post_forward:
+                rank_shards = tensor.flatten().chunk(world_size)
+                shard_size = list(tensor.size())
+                shard_size[dim] //= world_size * 2
                 state = ShardedState.SHARDED_POST_FORWARD
-                shard_size[dim] //= 2
+            else:
+                rank_shards = tensor.chunk(world_size, dim=dim)
+                shard_size = list(rank_shards[0].size())
+                state = ShardedState.SHARDED
             output = tensor.new_empty(tensor.numel())
             params.append(
                 Mock(
@@ -152,7 +165,7 @@ class TestPrefixCopy(TestCase):
                         else rank_shards[0]
                     ),
                     _sharded_post_forward_param_data=(
-                        rank_shards[0].flatten() if kind == "post_forward" else None
+                        rank_shards[0] if is_post_forward else None
                     ),
                     all_gather_outputs=[output],
                 )
@@ -206,12 +219,12 @@ class TestPrefixCopy(TestCase):
             counter.counts[torch.ops.fsdp.split_with_sizes_copy.default],
             int(not use_prefix_copy),
         )
-        fallback_layouts = ("extension", "zero_prefix")
-        num_reorders = (
-            sum(param.fsdp_placement.dim != 0 for param in params)
+        reorder_layouts = (
+            ("shard1", "singleton_prefix", "extension")
             if use_reorder
-            else sum(kind in fallback_layouts for kind in layouts)
+            else ("extension",)
         )
+        num_reorders = sum(kind in reorder_layouts for kind in layouts)
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], num_reorders)
 
     @parametrize("num_chunks", [1, 4])

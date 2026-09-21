@@ -407,6 +407,21 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_single_group,
         )
 
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_train_parity_post_forward_shard_largest_dim(self):
+        self.run_subtests(
+            {
+                "lin_shapes": [[(32, 16), (16, 8)]],
+                "use_shard_placement_fn": [True],
+                "reshard_after_forward": [2],
+                "copy_fns": [
+                    (None, None),
+                    (all_gather_output_fn_with_reorder, None),
+                ],
+            },
+            self._test_train_parity_single_group,
+        )
+
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_custom_reduce_scatter_copy_in(self):
         torch.manual_seed(42)
@@ -478,6 +493,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         use_shard_placement_fn: bool,
         bias: bool = True,
         copy_fns: tuple[Callable | None, Callable | None] = (None, None),
+        reshard_after_forward: bool | int | None = None,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -493,7 +509,11 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             return Shard(param.shape.index(max(param.shape)))
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
-        fully_shard(model, shard_placement_fn=shard_placement_fn)
+        fully_shard(
+            model,
+            shard_placement_fn=shard_placement_fn,
+            reshard_after_forward=reshard_after_forward,
+        )
         if copy_fns[0] is not None:
             model.set_all_gather_output_fn(copy_fns[0])
         if copy_fns[1] is not None:

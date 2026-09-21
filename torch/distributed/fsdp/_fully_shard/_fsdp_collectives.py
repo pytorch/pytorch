@@ -436,7 +436,8 @@ def _default_all_gather_output_fn(
     r"""Copy all-gather outputs into their final layout.
 
     Supported nonzero-dimension shards copy directly into the final outputs.
-    Extensions and post-forward shards use temporary outputs and reassembly.
+    Nonzero-dimension extensions use temporary outputs and reassembly.
+    Empty outputs and flat post-forward shards copy directly.
     """
     all_gather_output = all_gather_result.all_gather_output
     device = all_gather_output.device
@@ -455,20 +456,18 @@ def _default_all_gather_output_fn(
         outputs = fsdp_param.all_gather_outputs
         shard_dim = fsdp_param.fsdp_placement.dim
         prefix_count = 1
-        if shard_dim != 0:
-            num_leading_elements = math.prod(
-                fsdp_param.padded_sharded_param_size[:shard_dim]
-            )
-            if (
-                fsdp_param.sharded_state == ShardedState.SHARDED
-                and num_leading_elements > 0
-                and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
-            ):
-                prefix_count = num_leading_elements
-            else:
-                # Extension and post-forward layouts may require a separate reorder.
+        if (
+            shard_dim != 0
+            and fsdp_param.sharded_state == ShardedState.SHARDED
+            and any(all_gather_input_numels)
+        ):
+            if hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather"):
                 outputs = [torch.empty_like(t) for t in outputs]
                 reorder_infos.append((fsdp_param, outputs))
+            else:
+                prefix_count = math.prod(
+                    fsdp_param.padded_sharded_param_size[:shard_dim]
+                )
         copy_outputs.extend(outputs)
         num_prefixes.extend([prefix_count] * len(outputs))
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
@@ -541,13 +540,7 @@ def _reassemble_all_gather_outputs(
             for param_all_gather_output, target_all_gather_output in zip(
                 param_all_gather_outputs, fsdp_param.all_gather_outputs
             ):
-                padded_sharded_size = (
-                    fsdp_param.padded_sharded_param_size
-                    if fsdp_param.sharded_state == ShardedState.SHARDED
-                    else cast(
-                        torch.Tensor, fsdp_param._sharded_post_forward_param_data
-                    ).size()
-                )
+                padded_sharded_size = fsdp_param.padded_sharded_param_size
                 pre_param_size = list(padded_sharded_size)
                 pre_param_size[0] *= world_size
                 chunks = torch.chunk(

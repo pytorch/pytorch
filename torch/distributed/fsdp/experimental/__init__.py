@@ -25,7 +25,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import _get_dim0_padded_size
-from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
+from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 
 
 __all__ = [
@@ -44,8 +44,8 @@ def all_gather_output_fn_with_reorder(
 ) -> None:
     r"""Use the original all-gather copy followed by nonzero-dimension reassembly.
 
-    Nonzero-dimension shards copy through temporary outputs. Shard(0) copies
-    directly to the final outputs. Register with
+    Nonempty nonzero-dimension shards copy through temporary outputs.
+    Shard(0), empty outputs, and flat post-forward shards copy directly. Register with
     :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`, which
     documents the callback contract.
     """
@@ -71,7 +71,11 @@ def all_gather_output_fn_with_reorder(
         )
         fsdp_param.alloc_all_gather_outputs()
         param_all_gather_outputs = fsdp_param.all_gather_outputs
-        if fsdp_param.fsdp_placement.dim != 0:
+        if (
+            fsdp_param.fsdp_placement.dim != 0
+            and fsdp_param.sharded_state == ShardedState.SHARDED
+            and any(all_gather_input_numels)
+        ):
             param_all_gather_outputs = [
                 torch.empty_like(t) for t in param_all_gather_outputs
             ]
