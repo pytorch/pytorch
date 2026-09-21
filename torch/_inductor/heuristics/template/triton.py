@@ -2937,7 +2937,12 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             # TMA needs the contiguous dim last. Use the same inner-dim rule as
             # can_use_tma, which already accepted these operands -- deriving it
             # separately here is how a [1, K] operand ended up transposed.
-            stride = node.layout.stride
+            # Resolve symbols the way can_use_tma does: tma_inner_dim compares
+            # against 1, and an unhinted backed symbol never compares equal.
+            stride = [
+                V.graph.sizevars.replace_backed_symbols_with_hints(st)
+                for st in node.layout.stride
+            ]
             inner = tma_inner_dim(stride)
             if inner is None:
                 raise AssertionError(
@@ -3652,6 +3657,12 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
 
             template_kwargs["TILE_SIZE_A"] = tile_size_a
             template_kwargs["TILE_SIZE_B"] = tile_size_b
+
+            # Scaling the operands promotes them to fp32, where tl.dot defaults to
+            # tf32 and drops most of the fp8 mantissa. Quoted because template
+            # kwargs render verbatim. This heuristic is CUDA-and-not-ROCm only, so
+            # tf32x3 is always available.
+            template_kwargs["DOT_PRECISION"] = '"tf32x3"'
 
             template_kwargs["MIN_BLOCK_TILE_AM"] = min(
                 template_kwargs["BLOCK_M"], tile_size_a

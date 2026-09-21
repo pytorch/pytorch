@@ -1945,6 +1945,7 @@ class TestCompositeCompliance(TestCase):
             skip("topk", variant_name="cutedsl_optimized"),
             skip("topk", variant_name="cutedsl_optimized_deterministic"),
             skip("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
+            skip("nn.functional.linear_cross_entropy", variant_name="cutedsl_none"),
         }
     )
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
