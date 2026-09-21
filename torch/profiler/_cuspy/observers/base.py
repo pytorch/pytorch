@@ -246,18 +246,17 @@ class CuspyObserver:
         return self._obs is not None
 
     def _register_graph_destroy_hooks(self) -> None:
-        """Register a graph-destroy hook per installed graph-node resolver. Each hook
-        purges its backing store (the annotation module registry, or this observer's own
-        dependency map) and clears its resolver cache (cache_clear is global per resolver
-        -- it drops every graph's cached lookups, not just the destroyed graph's --
+        r"""Register a graph-destroy hook per installed graph-node resolver. Each hook
+        purges any observer-owned backing store and clears its resolver cache (cache_clear
+        is global per resolver -- it drops every graph's cached lookups, not just the
+        destroyed graph's --
         acceptable on the infrequent destroy path and what bounds cache growth over a
         long run). Hooks capture only the cache wrapper + purge fn (never self, so they
         cannot pin this observer -- the dependency purge closes over the map dict, not the
         observer); the destroy fan-out also swallows any error they raise
-        (finalizer-safe, since a destroy may fire from a GC/finalizer thread). The lane
-        resolver is externally backed (nothing to purge), so its hook only clears the
-        cache."""
-        from torch.cuda._graph_annotations import remove_kernel_annotations
+        (finalizer-safe, since a destroy may fire from a GC/finalizer thread). The graph
+        owns annotation-registry cleanup, and the lane resolver is externally backed,
+        so those hooks only clear their caches."""
         from torch.cuda.graphs import register_graph_destroy_hook
 
         handles = self._destroy_hook_handles
@@ -282,7 +281,7 @@ class CuspyObserver:
             handles.append(register_graph_destroy_hook(hook))
 
         if self._annotation_resolver_cached is not None:
-            add(self._annotation_resolver_cached, remove_kernel_annotations)
+            add(self._annotation_resolver_cached, None)
         if self._dependency_resolver_cached is not None:
             add(self._dependency_resolver_cached, purge_deps)
         if self._lane_resolver_cached is not None:

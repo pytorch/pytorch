@@ -212,6 +212,40 @@ Because annotations live in a process-global registry keyed by ids that
 match the profiler's, the pickle of ``dict(get_kernel_annotations())``
 can equally be saved next to a trace and joined offline.
 
+To capture Python launch stacks as well, set
+``annotation_config={"record_py_stacks": True}`` with ``enable_annotations=True``.
+This uses CUPTI node-creation callbacks and requires `cupti-python`, Cuspy able
+to subscribe, and single-threaded autograd. Like ``backend="cupti"``, it takes
+a CUPTI subscription even without a profiler, so a later Kineto profiler cannot
+initialize GPU profiling; use Cuspy for profiling in the same process.
+Stacks are captured for all annotatable nodes. They contain live user frames on the
+launching thread; C++ autograd nodes do not recover their forward Python stacks.
+
+```python
+from torch.cuda.graph_annotations import dump_kernel_py_stacks
+
+g = torch.cuda.CUDAGraph()
+with (
+    torch.autograd.grad_mode.set_multithreading_enabled(False),
+    torch.cuda.graph(
+        g, enable_annotations=True, annotation_config={"record_py_stacks": True}
+    ),
+):
+    y = x @ x.t()
+dump_kernel_py_stacks("graph_stacks.json.gz")
+```
+
+Stacks stay outside the annotation registry and profiler traces. Read them with
+{func}`~torch.cuda.graph_annotations.get_kernel_py_stacks` or save them separately
+with {func}`~torch.cuda.graph_annotations.dump_kernel_py_stacks`. The gzip-compressed JSON file
+maps decimal node-id strings to newline-separated ``filename:line:function``
+frames, innermost first. Keys follow ``annotation_config["key_by"]`` just like
+other annotations: ``"exec"`` remaps on each instantiation, while ``"source"``
+retains capture ids (and requires CUPTI and driver 13.4). ``"auto"`` selects source
+ids when supported and exec ids otherwise. Nodes without source
+ids also get exec aliases. Dump after instantiation and before resetting or
+destroying the graph, which removes its entries.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.graph_annotations
 ```
@@ -224,6 +258,8 @@ can equally be saved next to a trace and joined offline.
     is_available
     mark_kernels
     get_kernel_annotations
+    get_kernel_py_stacks
+    dump_kernel_py_stacks
     clear_kernel_annotations
 ```
 

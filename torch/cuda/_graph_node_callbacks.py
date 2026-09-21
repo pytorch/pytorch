@@ -23,6 +23,7 @@ cost a traceback per node).
 
 from __future__ import annotations
 
+import sys
 import warnings
 from logging import getLogger
 from typing import Any
@@ -34,6 +35,18 @@ logger = getLogger(__name__)
 # The handler token from Cuspy. Carries the (domain, cbid) it was registered for, so
 # it is also what arm/disarm address the callback by; kept so disarm can unregister it.
 _handler: Any = None
+_record_py_stacks: bool = False
+_stack_cache: dict[tuple[tuple[str, int, str], ...], str] = {}
+_noise_cache: dict[str, bool] = {}
+_STACK_NOISE = (
+    "/torch/",
+    "/cuda/bindings/",
+    "/cupti/",
+    "/triton/runtime/",
+    "/triton/backends/",
+    "/importlib/",
+    "<frozen",
+)
 
 # Nodes dropped during the armed capture for belonging to a child-graph or conditional
 # body. Counted rather than warned about on the spot: warnings.warn can be configured to
@@ -41,8 +54,41 @@ _handler: Any = None
 _dropped_body_nodes: int = 0
 
 
+def _capture_py_stack() -> str | None:
+    r"""Capture user frames, innermost first, sharing strings for repeated call sites."""
+    frames: list[tuple[str, int, str]] = []
+    frame = sys._getframe(1)
+    try:
+        # Bound both the walk and its output for deeply nested launch stacks.
+        for _ in range(256):
+            if frame is None or len(frames) == 64:
+                break
+            code = frame.f_code
+            filename = code.co_filename
+            noise = _noise_cache.get(filename)
+            if noise is None:
+                path = filename.replace("\\", "/")
+                noise = any(part in path for part in _STACK_NOISE)
+                _noise_cache[filename] = noise
+            if not noise:
+                frames.append((filename, frame.f_lineno, code.co_name))
+            frame = frame.f_back
+    finally:
+        del frame
+    if not frames:
+        return None
+    key = tuple(frames)
+    stack = _stack_cache.get(key)
+    if stack is None:
+        stack = "\n".join(
+            f"{filename}:{line}:{name}" for filename, line, name in frames
+        )
+        _stack_cache[key] = stack
+    return stack
+
+
 def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
-    """Record the ambient ``mark_kernels`` annotation for a freshly created graph node.
+    r"""Record the ambient annotation and optional launch stack for a new graph node.
 
     Runs on the capturing thread inside the CUDA call. ``cbdata`` is a raw
     ``CUpti_ResourceData*``; its ``resource_descriptor`` is the ``CUpti_GraphData`` carrying
@@ -53,6 +99,7 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
 
     from torch.cuda._graph_annotations import (
         _get_annotatable_types,
+        _kernel_py_stacks,
         capture_root_graph_id,
         current_annotation,
         node_type_has_source_id,
@@ -71,12 +118,10 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
     if graph_data.node_type not in _get_annotatable_types():
         return
     annotation = current_annotation()
-    if annotation is None:
+    if annotation is None and not _record_py_stacks:
         return
-    # toolsId is the value CUPTI later reports as "graph node id". mark_kernels gates on
-    # _is_tools_id_unavailable, so a driver without this API leaves no scope open and we
-    # returned above -- an error here is genuinely unexpected, and Cuspy's switchboard
-    # logs it rather than letting it reach CUPTI's C dispatch.
+    # arm() requires a capture-root stamp, which gates on toolsId support. An error
+    # here is unexpected; Cuspy logs it without letting it reach CUPTI's C dispatch.
     tools_id = _check_cuda_bindings(runtime.cudaGraphNodeGetToolsId(graph_data.node))
     # Nodes reported for any other graph belong to a child-graph or conditional body. Their
     # ids are in that body graph's own space, which remap_to_exec_graph does not rekey, so
@@ -97,7 +142,12 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
     # _graph_annotations.note_sourceless_node).
     if not node_type_has_source_id(graph_data.node_type):
         note_sourceless_node(tools_id)
-    record_node_annotation(tools_id, annotation)
+    if annotation is not None:
+        record_node_annotation(tools_id, annotation)
+    if _record_py_stacks:
+        stack = _capture_py_stack()
+        if stack is not None:
+            _kernel_py_stacks[tools_id] = stack
 
 
 def is_available() -> bool:
@@ -116,8 +166,8 @@ def is_available() -> bool:
     return has_live_subscription()
 
 
-def register(*, force: bool = False) -> bool:
-    """Register the node-creation handler, bringing the CUPTI subscription up.
+def register(*, force: bool = False, record_py_stacks: bool = False) -> bool:
+    r"""Register the node-creation handler, bringing the CUPTI subscription up.
 
     Separate from :func:`arm` -- and called *before* ``capture_begin`` -- so that failing to
     obtain CUPTI cannot leave a capture half-started. Returns ``False`` when the backend is
@@ -125,10 +175,10 @@ def register(*, force: bool = False) -> bool:
 
     ``force`` brings Cuspy up instead of requiring a live subscription. That is a
     deliberate, opt-in cost: once we hold a CUPTI subscription, kineto's one-shot init fails
-    permanently, so a later ``torch.profiler`` run records no GPU activity. Only
-    ``annotation_backend="cupti"`` asks for it.
+    permanently, so a later ``torch.profiler`` run records no GPU activity.
+    ``backend="cupti"`` and ``record_py_stacks=True`` opt into this cost.
     """
-    global _handler
+    global _handler, _record_py_stacks
     if _handler is not None:
         raise RuntimeError("graph-node callbacks are already registered")
     if not force and not is_available():
@@ -155,6 +205,7 @@ def register(*, force: bool = False) -> bool:
         # subscription it did not offer to share. Fall back rather than fail the capture.
         logger.debug("graph-node callback registration failed", exc_info=True)
         return False
+    _record_py_stacks = record_py_stacks
     return True
 
 
@@ -181,7 +232,7 @@ def arm() -> bool:
 def disarm() -> None:
     """Disable and unregister the node-creation callback, and report any work that went
     unannotated. Idempotent, so it is safe in a ``finally`` for a capture that raised."""
-    global _handler
+    global _handler, _record_py_stacks
     if _handler is None:
         return
     from torch.profiler._cuspy.core import Cuspy
@@ -192,6 +243,10 @@ def disarm() -> None:
         cuspy.unregister_callback_handler(_handler)
     finally:
         _handler = None
+        _record_py_stacks = False
+        # The registry owns the strings now; caches only need to span one capture.
+        _stack_cache.clear()
+        _noise_cache.clear()
     # Warn here rather than from the handler: this runs on the normal path, where a
     # warnings filter promoting warnings to errors is harmless. The edge walk reports the
     # same situation at scope entry; reporting it on the drop instead covers both a scope
