@@ -11,17 +11,18 @@ if(NOT __AOTRITON_INCLUDED)
   # But they must be listed from lower version to higher version
   set(__AOTRITON_VER "0.14b")
   set(__AOTRITON_BUILD_VARIANTS "")
-  # Note in this file rocm<X.Y> actually matches the HIP version
+  # Note in this file rocm<X.Y> was actually repurposed to match the HIP version
   # ROCm 7.0 nightlies shipped two incompatible HIP versions, 6.5 and
   # 7.0, so the ROCm version alone cannot select a compatible package
-  # The rocm prefix stays only because renaming to hip may break things.
+  # The rocm prefix stays only because renaming to hip may break things
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
       "manylinux_2_28"  # rocm7.1
       "manylinux_2_28"  # rocm7.2
       "manylinux_2_28"  # rocm7.14
-      "manylinux_2_28"  # "rocm7.16" ROCM 10.0
+      "manylinux_2_28"  # "rocm7.15" ROCM 10.0
+      "manylinux_2_28"  # "rocm7.16" ROCM 10.1/10.2
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.4"
@@ -29,6 +30,7 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm7.1"
       "rocm7.2"
       "rocm7.14"
+      "rocm7.15"
       "rocm7.16"
       )
   if(DEFINED ENV{PYTORCH_AOTRITON_COMMIT})
@@ -42,6 +44,7 @@ if(NOT __AOTRITON_INCLUDED)
       "7614dc3daa1929be0d9b956c1fef1325a9830c869cd09ac6bcac36e50195c00b"  # rocm7.1
       "d0522d670e51898770571fefebb73eb760b95c892ef10b7e05b71a015bcd92cd"  # rocm7.2
       "a26c5e4eee83976d7dd06bda69192c40b01474a0ddc2a44acfa0d544c47f84f2"  # rocm7.14
+      "9cca736886669b4a6bdffbd80736b26f945583868b89b8e0f1c11d7e6988817a"  # rocm7.15
       "81dbadf0d6e74be35a7308aa339173b74ecaa8e35d2d48369ce4696903e03116"  # rocm7.16
       )
   set(__AOTRITON_IMAGE_LIST
