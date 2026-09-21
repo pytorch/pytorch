@@ -1369,9 +1369,7 @@ class TestFlyDSLMXFPDevice(TestCase):
     ):
         inputs, reference = _mxfp_case(mxfp_format, shape, device, *transposed)
         out = torch.empty(shape[:2], device=device, dtype=out_dtype)
-        bias = (
-            torch.randn(shape[1], device=device, dtype=out_dtype) if bias else None
-        )
+        bias = torch.randn(shape[1], device=device, dtype=out_dtype) if bias else None
         param = _mxfp_param(
             mxfp_format,
             tile,

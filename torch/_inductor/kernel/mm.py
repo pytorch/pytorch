@@ -1622,7 +1622,10 @@ def tuned_scaled_mm_v2(
                         use_fast_accum=False,
                     ),
                 )
-            counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
+            logical_k = k * (2 if mxfp_format == "mxfp4" else 1)
+            counters["aten_mm_info"][
+                f"aten._scaled_mm_v2.default_{m}_{n}_{logical_k}"
+            ] += 1
             node, _ = autotune_select_algorithm(
                 "scaled_mm",
                 mxfp_choices,
