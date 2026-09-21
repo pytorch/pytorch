@@ -3684,7 +3684,11 @@ class TestFP8Matmul(TestCase):
         out = scaled_mm_wrap(x, y, x_scale.reciprocal(), y_scale.reciprocal(), out_dtype=out_dtype, bias=bias)
         out_emulated = mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias)
         accum_tol = k * torch.finfo(torch.float32).eps
-        self.assertEqual(out, out_emulated, atol=accum_tol, rtol=max(accum_tol, torch.finfo(out_dtype).eps))
+        atol, rtol = accum_tol, max(accum_tol, torch.finfo(out_dtype).eps)
+        if "cuda" in device and not torch.version.hip:
+            # Allow for cuBLAS FP8 accumulation error near cancellation.
+            atol = 3e-3
+        self.assertEqual(out, out_emulated, atol=atol, rtol=rtol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_mm_few_rows_fp8_values(self, device):
