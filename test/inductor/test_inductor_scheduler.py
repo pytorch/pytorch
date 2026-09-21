@@ -158,6 +158,7 @@ class TestScheduler(TestCase):
         def make_output(buf_name):
             buf = Mock()
             buf.get_name.return_value = buf_name
+            buf.defining_op_name.return_value = name
             buf.get_aliases.return_value = ()
             buf.get_mutations.return_value = ()
             return buf
@@ -177,6 +178,41 @@ class TestScheduler(TestCase):
             OrderedSet(make_dep(dep_name) for dep_name in writes),
             OrderedSet(),
         )
+        return node
+
+    def _mock_group_node(
+        self,
+        scheduler,
+        name,
+        *,
+        reads=(),
+        writes=(),
+        ancestors=(),
+        order=0,
+        device=None,
+    ):
+        node = self._mock_schedule_node(
+            name,
+            reads=reads,
+            writes=writes,
+            ancestors=ancestors,
+        )
+        node.__class__ = SchedulerNode
+        node.scheduler = scheduler
+        node.is_foreach.return_value = False
+        node.get_device.return_value = device
+        node.group = (device, node.group[1])
+        node._read_writes_version = 1
+        node.min_order = order
+        node.max_order = order
+        node.min_input_distance = order
+        node.max_input_distance = order
+        node.unmet_dependencies = OrderedSet(node.read_writes.reads)
+        node.has_strict_reduction.return_value = False
+        node.get_template_node.return_value = None
+        node.outputs_by_name = {
+            output.get_name(): output for output in node.get_outputs()
+        }
         return node
 
     def _make_sub_parent_value_resolver(
@@ -324,6 +360,95 @@ class TestScheduler(TestCase):
         self.assertIn(node3, fused_nodes)
         self.assertNotIn(node1, fused_nodes)
         self.assertNotIn(node2, fused_nodes)
+
+    def test_fuse_two_nodes_updates_absorbed_node_mapping(self):
+        scheduler = object.__new__(Scheduler)
+        device = torch.device(GPU_TYPE, 0)
+        foreach = self._mock_base_snode("foreach", device)
+        absorbed = self._mock_base_snode("absorbed", device)
+        absorbed.get_operation_names.return_value = OrderedSet(["absorbed"])
+        backend = Mock()
+        backend.fuse.return_value = foreach
+        scheduler.get_backend = Mock(return_value=backend)
+        scheduler.node_to_stream = {foreach: 0, absorbed: 0}
+        scheduler.node_to_mempool = {foreach: None, absorbed: None}
+        scheduler.name_to_fused_node = {
+            "foreach": foreach,
+            "absorbed": absorbed,
+        }
+        fused_nodes = OrderedSet([foreach, absorbed])
+
+        self.assertIs(
+            Scheduler.fuse_two_nodes(scheduler, foreach, absorbed, fused_nodes),
+            foreach,
+        )
+
+        self.assertIs(scheduler.name_to_fused_node["foreach"], foreach)
+        self.assertIs(scheduler.name_to_fused_node["absorbed"], foreach)
+
+    def test_foreach_fusion_matches_rebuilt_metadata(self):
+        scheduler = Mock(available_buffer_names=OrderedSet())
+        device = torch.device(GPU_TYPE, 0)
+        left = self._mock_group_node(
+            scheduler,
+            "left",
+            reads=("shared",),
+            writes=("left_out",),
+            order=0,
+            device=device,
+        )
+        right = self._mock_group_node(
+            scheduler,
+            "right",
+            reads=("shared",),
+            writes=("right_out",),
+            order=1,
+            device=device,
+        )
+        foreach = ForeachKernelSchedulerNode(
+            scheduler, [left, right], use_custom_partition_algo=False
+        )
+        old_name = foreach.get_name()
+
+        late_read = MemoryDep("late_input", sympy.S.Zero, (), ())
+        BaseSchedulerNode.set_read_writes(
+            left,
+            ReadWrites(
+                left.read_writes.reads | OrderedSet([late_read]),
+                left.read_writes.writes,
+                left.read_writes.index_exprs,
+            ),
+        )
+
+        added = self._mock_group_node(
+            scheduler,
+            "added",
+            reads=("left_out", "new_input"),
+            writes=("added_out",),
+            ancestors=("left",),
+            order=2,
+            device=device,
+        )
+        scheduler.name_to_buf = {
+            output.get_name(): output for output in left.get_outputs()
+        }
+        fused_foreach = ForeachKernelSchedulerNode.fuse(foreach, added)
+        self.assertIs(fused_foreach, foreach)
+        fused = foreach.snodes[0]
+
+        rebuilt = ForeachKernelSchedulerNode(
+            scheduler, [fused, right], use_custom_partition_algo=False
+        )
+        self.assertEqual(foreach.read_writes, rebuilt.read_writes)
+        self.assertEqual(foreach.unmet_dependencies, rebuilt.unmet_dependencies)
+        self.assertEqual(foreach.ancestors, rebuilt.ancestors)
+        self.assertEqual(foreach.get_operation_names(), rebuilt.get_operation_names())
+        self.assertEqual(foreach.get_buffer_names(), rebuilt.get_buffer_names())
+        self.assertEqual(foreach.outputs_by_name, rebuilt.outputs_by_name)
+        self.assertEqual(foreach.name_to_node, rebuilt.name_to_node)
+        self.assertEqual(foreach.read_to_node, rebuilt.read_to_node)
+        self.assertIs(foreach.read_to_node["shared"], right)
+        self.assertNotEqual(foreach.get_name(), old_name)
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
