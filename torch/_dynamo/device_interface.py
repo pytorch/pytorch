@@ -25,6 +25,7 @@ from typing import Any, Literal
 import torch
 from torch.utils._pallas import has_torch_tpu
 
+
 get_cuda_stream: Callable[[int], int] | None
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
