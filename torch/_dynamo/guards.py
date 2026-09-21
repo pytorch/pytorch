@@ -4392,9 +4392,13 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # Values only: no pruned type is hashable, so a key can
                 # neither be one nor contain one.
                 stack.extend(value.values())
-            elif isinstance(value, (torch.Tensor, torch.nn.Module)):
-                # Compared by identity or pickled whole either way; descending
-                # would only switch pruning off for everything they hold.
+            elif inspect.ismodule(value) or isinstance(
+                value, (torch.Tensor, torch.nn.Module)
+            ):
+                # A module is pickled by name and its dict leads into every other
+                # namespace; a tensor or an nn.Module is compared by identity or
+                # pickled whole either way. Descending would only switch pruning
+                # off for everything they hold.
                 pass
             elif (fields := _instance_dict(value)) is not None:
                 # A by-value comparison reads every field, so the protection
@@ -4554,7 +4558,8 @@ class GuardsStatePickler(FunctionPicklerBase):
     # as a required argument. A non-const dict key is recorded there too
     # (_compared_by_value): the key managers bake it and compare it by value at
     # run time, and that comparison reads every field, so the protection extends
-    # through the key's instance dict. A dict/tuple SUBCLASS is verbatim whenever
+    # through the key's instance dict (not through __slots__: a slotted key's
+    # slot values are not marked, a known limit). A dict/tuple SUBCLASS is verbatim whenever
     # kept, since its type must survive for the guard reading the slot
     # (_keep_container_verbatim).
 
@@ -4577,10 +4582,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Whether a function container (__defaults__/__dict__/...) is carried whole
         rather than pruned per value; the rule and its reasons are in the Note
         [Reconstructing a function a guard is rooted at] above."""
-        # The tuple case is decided on the recording alone. A recorded tuple is
-        # also in guard_tree_values today (EQUALS_MATCH registers the value it
-        # reads), but the failure mode of that second invariant breaking would
-        # be the silent forever-miss this rule exists to prevent.
+        # The tuple case is decided on the recording alone. A tuple EQUALS_MATCH
+        # recorded is also in guard_tree_values; one recorded as a dict key by
+        # _compared_by_value need not be, and either way the failure mode of
+        # relying on guard_tree_values would be the silent forever-miss this
+        # rule exists to prevent.
         if type(container) is tuple:
             return id(container) in self.value_guarded_containers
         if type(container) is dict:
@@ -4754,7 +4760,11 @@ class GuardsStatePickler(FunctionPicklerBase):
     # Everything else in missing_values stays on the reducer_override path, and
     # so does a container that is also in empty_values: reducer_override checks
     # empty_values first, so a bound method's receiver is rebuilt empty rather
-    # than as the sentinel, and this hook keeps that precedence.
+    # than as the sentinel, and this hook keeps that precedence. Above both
+    # ranks _verbatim_elements, in this hook and in reducer_override alike: a
+    # value some guard compares by value travels whole even when it is also an
+    # empty-rebuilt receiver, because carrying it risks a loud dump failure
+    # while an empty or hollow comparand is a silent forever-miss.
     _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
     def persistent_id(self, obj: object) -> int | str | None:
