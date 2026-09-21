@@ -721,6 +721,167 @@ class TestPrecompile(TestCase):
                 with self.assertRaisesRegex(PrecompileError, message):
                     build()
 
+    def test_multigraph_driver_dispatches_captured_frames(self):
+        # The standalone driver rebuilds each frame's f_locals for the guard
+        # check, so the shapes it has to bind are all here: a keyword-only
+        # default the call omits, *args, a continuation closing over a cell of
+        # the entry frame (y, which rows() captures), and a module global the
+        # entry reads (_MULTIGRAPH_SCALE, guarded by EQUALS_MATCH).
+        import inspect
+        from unittest import mock
+
+        from torch import _precompile_driver as driver
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _b64, _multigraph_frames, _serving_mode
+
+        def step(model, x, *rest, scale=2.0):
+            y = model(x) * scale * _MULTIGRAPH_SCALE
+            torch._dynamo.graph_break()
+
+            def rows():
+                # Not x: a captured argument keeps a fast-local slot beside the
+                # continuation's free var, and on 3.13+ the LOAD_FAST closure
+                # load reads that slot, which Dynamo dropped, skipping the frame.
+                return y.shape[0]
+
+            return y + rows() + len(rest)
+
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        package = CompilePackage(step)
+        compiled = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)
+        # The second call recompiles both frames (rest is an entry local guarded
+        # at length 0; len(rest) is a constant in the continuation's graph), so
+        # the continuation carries two variants whose outputs differ by one:
+        # dispatch has to pick, not just run.
+        expected = compiled(model, x)
+        expected_rest = compiled(model, x, torch.ones(1))
+        self.assertNotEqual(expected, expected_rest)
+        frames = _multigraph_frames(package.cache_entry())
+        shape = [(f["bypassed"], len(f["variants"])) for f in frames]
+        self.assertEqual(_serving_mode(frames), "standalone", shape)
+        self.assertGreater(len(frames[1]["variants"]), 1)
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=backend)
+            for backend_id, backend in package.cached_backends.items()
+        }
+        torch._dynamo.reset()
+        # The records name this module, which is __main__ under a script run and
+        # the driver refuses that; serve them from an importable alias of it.
+        module = "precompile_test_captured_module"
+        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
+        self.addCleanup(alias.stop)
+        alias.start()
+        for frame in frames:
+            frame["python_module"] = module
+
+        ns = {
+            "__name__": "precompile_test_artifact",
+            # An artifact-namespace name the captured module also binds: the
+            # module's binding is the one the rebuilt bytecode must LOAD_GLOBAL.
+            "torch": None,
+            "_FRAMES": _b64(frames),
+            "_BACKENDS": _b64(backends),
+            "_ENTRY_BINDING": _b64(
+                {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
+            ),
+            "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
+            "TORCH_VERSION": torch.__version__,
+        }
+        exec(inspect.getsource(driver._build_multigraph_forward), ns)
+        build = ns["_build_multigraph_forward"]
+        # In the process that captured, the live compile of step still holds the
+        # continuation's resume name: the load refuses, before seeding anything,
+        # and sends the user to a fresh process (which the scrub below stands for).
+        with self.assertRaisesRegex(PrecompileError, "fresh process"):
+            build()
+        # A serving process never traced, so the names Dynamo minted into this
+        # module during capture must not be what makes the guards pass; the
+        # driver binds the same names, so the cleanup drops those too.
+        scope = step.__globals__
+        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
+
+        def scrub():
+            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
+
+        removed = scrub()
+        self.addCleanup(lambda: (scrub(), scope.update(removed)))
+        forward = build()
+        self.assertEqual(forward(model, x), expected)
+        self.assertEqual(forward(model, x, scale=2.0), expected)
+        self.assertEqual(forward(model, x, torch.ones(1)), expected_rest)
+        # The guards check the captured module's LIVE globals: the graph baked
+        # _MULTIGRAPH_SCALE in as a constant, so rebinding it after load has to
+        # fail the guard and refuse, not serve the stale graph; the original
+        # binding serves again once restored.
+        entry_miss = "no captured variant of 'step'"
+        with mock.patch.dict(scope, {"_MULTIGRAPH_SCALE": 3}):
+            with self.assertRaisesRegex(PrecompileError, entry_miss):
+                forward(model, x)
+        self.assertEqual(forward(model, x), expected)
+        # Neither call was captured: the entry frame refuses the first, the
+        # continuation (guarding len(rest)) the second. There is no compiler
+        # behind the artifact, so both are coverage gaps rather than recompiles.
+        with self.assertRaisesRegex(PrecompileError, entry_miss):
+            forward(model, x, scale=3.0)
+        resume_miss = "no captured variant of 'torch_dynamo_resume_in_step"
+        with self.assertRaisesRegex(PrecompileError, resume_miss):
+            forward(model, x, torch.ones(1), torch.ones(1))
+        # Rebuilding the same artifact rebinds its names. Another capture of this
+        # module mints the same resume names (backend ids carry a uuid, resume
+        # names only the per-process counter), so loading it beside a live one is
+        # refused on the resume name and the live one keeps serving; the rows
+        # below scrub the live artifact first.
+        self.assertEqual(build()(model, x), expected)
+        # An untagged holder (a user binding, a live compile) refuses: rebinding
+        # would repoint its LOAD_GLOBAL.
+        resume_name = frames[1]["resume_names"][0]
+        with mock.patch.dict(scope, {resume_name: lambda *args: None}):
+            with self.assertRaisesRegex(PrecompileError, resume_name):
+                build()
+        # Two artifacts of one capture keep the backend ids and differ only in
+        # _BACKENDS (here: the subgraphs rotated across the ids): the tag covers
+        # both, and the refusal precedes any seeding, so the live artifact's
+        # subgraph bindings are untouched and it still serves its own answer.
+        subgraphs = list(backends.values())
+        twin = _b64(dict(zip(backends, subgraphs[1:] + subgraphs[:1])))
+        with mock.patch.dict(ns, {"_BACKENDS": twin}):
+            with self.assertRaisesRegex(PrecompileError, "only one standalone"):
+                build()
+        self.assertEqual(forward(model, x), expected)
+        other = _b64({f"{k}_other": v for k, v in backends.items()})
+        trivial = [frames[0], {**frames[1], "variants": []}]
+        with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
+            with mock.patch.dict(ns, {"_BACKENDS": other}):
+                with self.assertRaisesRegex(PrecompileError, "'__resume_at_"):
+                    build()
+            self.assertEqual(forward(model, x), expected)
+            # A zero-variant continuation is diagnosed by cause (trivial or
+            # BYPASSED), not as a coverage gap, at the call that reaches it; the
+            # build succeeds where the entry would refuse.
+            scrub()
+            with self.assertRaisesRegex(PrecompileError, "produced no guarded code"):
+                build()(model, x)
+        bypassed = [frames[0], {**frames[1], "bypassed": True, "variants": []}]
+        with mock.patch.dict(ns, {"_FRAMES": _b64(bypassed)}):
+            scrub()
+            forward_bypassed = build()
+        with self.assertRaisesRegex(PrecompileError, "was BYPASSED"):
+            forward_bypassed(model, x)
+        # A dead record from a module this process cannot import is not what the
+        # artifact dispatches, so it neither refuses the load nor binds anything.
+        dead = {**frames[1], "variants": [], "bypassed": True}
+        dead["python_module"] = "precompile_test_no_such_module"
+        dead["resume_names"] = ["__resume_at_dead"]
+        with mock.patch.dict(ns, {"_FRAMES": _b64(frames + [dead])}):
+            scrub()
+            self.assertEqual(build()(model, x), expected)
+        self.assertNotIn("__resume_at_dead", scope)
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
