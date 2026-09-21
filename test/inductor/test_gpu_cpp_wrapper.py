@@ -619,7 +619,7 @@ class TestGpuWrapper(InductorTestCase):
                 "graph_partition": False,
             }
         )(test_fn)
-        for i in range(3):
+        for _ in range(3):
             res = comp(x, s)
             self.assertEqual(res, expected)
 
