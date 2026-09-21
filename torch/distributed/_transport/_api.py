@@ -5,8 +5,9 @@ from typing import Any, cast, Protocol, runtime_checkable
 from typing_extensions import Self
 
 import torch
+from torch.distributed import Work
 
-from ._work import _validate_timeout, wait_all, Work
+from ._work import _validate_timeout, wait_all
 
 
 @runtime_checkable
@@ -50,8 +51,7 @@ class Transport(ABC):
     ``async_op=True``, they return a :class:`torch.distributed.Work` whose
     ``wait`` blocks until completion and propagates transfer errors.
     ``is_completed`` includes failed operations. Work futures resolve to an
-    empty list on success. Pending NIXL futures require a running asyncio loop;
-    completed work does not require one.
+    empty list on success.
 
     ``read_async`` and ``write_async`` are asyncio coroutines. Cancellation or
     timeout may leave transfers pending. ``wait_all`` awaits their completion
@@ -67,9 +67,7 @@ class Transport(ABC):
     lifetime: it does not cancel DMA. Pending work retains its local buffers.
     After a timeout, wait for the Work or successfully close the transport before
     reusing buffers. A timed-out close rejects new operations but retains resources
-    until close is retried successfully. NIXL also offers ``close_async``.
-    NIXL metadata, registration, and submission calls execute synchronously;
-    their native execution cannot be interrupted by a Python timeout.
+    until close is retried successfully.
     Independent transfers may overlap; wait before submitting dependent or
     overlapping reads/writes. There is no implicit completion ordering.
 
@@ -172,7 +170,7 @@ class Transport(ABC):
         """Drain outstanding operations and release transport resources."""
 
     async def close_async(self, *, timeout: float | None = None) -> None:
-        """Await cleanup when supported by the backend (including NIXL).
+        """Await cleanup when supported by the backend.
 
         Unlike ``close``, this must not block the event loop while waiting for
         transfers. Blocking prototype backends do not implement this method.
