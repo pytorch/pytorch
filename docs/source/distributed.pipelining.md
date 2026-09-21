@@ -406,56 +406,60 @@ For example, `ScheduleGPipe` and `Schedule1F1B` are subclasses of `PipelineSched
 Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, and `ScheduleZBVZeroBubble`
 are subclasses of `PipelineScheduleMulti`.
 
-### Passing Pipeline Stage Information
+### Accessing Stage Forward Information
 
-Manual pipeline stages can receive an immutable description of each scheduled
-forward without reaching into schedule state. Enable
-`pass_pipeline_stage_info` when constructing the schedule:
+A runtime surrounding a pipeline stage may need to select resources by the
+global logical stage and current microbatch. Physical pipeline rank is not a
+substitute for logical stage identity because one rank may own several stages
+in an interleaved schedule.
+
+Register a context factory on the stage without changing the wrapped module's
+forward signature:
 
 ```python
+from contextlib import contextmanager
+
 from torch.distributed.pipelining import PipelineStageInfo
 
 
-class StageModule(torch.nn.Module):
-    def forward(
-        self,
-        x: torch.Tensor,
-        *,
-        pipeline_stage_info: PipelineStageInfo,
-    ) -> torch.Tensor:
-        # The same physical PP rank may execute several logical stages.
-        slot = (
-            pipeline_stage_info.stage_index,
-            pipeline_stage_info.microbatch_index,
-        )
-        return run_stage(x, slot)
+@contextmanager
+def stage_forward_context(info: PipelineStageInfo):
+    planner.enter(
+        stage_index=info.stage_index,
+        microbatch_index=info.microbatch_index,
+        is_metadata_inference=info.is_metadata_inference,
+    )
+    try:
+        yield
+    finally:
+        planner.exit()
 
 
-schedule = ScheduleInterleaved1F1B(
-    stages,
-    n_microbatches,
-    pass_pipeline_stage_info=True,
-)
+handle = stage.register_forward_context(stage_forward_context)
 ```
 
-Every built-in schedule forward then receives `pipeline_stage_info`, a
-`PipelineStageInfo` containing the global logical `stage_index`, the
-step-local `microbatch_index`, and `is_metadata_inference`. Physical PP rank is
-not a substitute for the stage index because one rank may own several virtual
-stages. Dynamic shape-metadata inference uses the actual stage index and
-microbatch zero, with `is_metadata_inference=True`, so a stateful module can
-distinguish the representative probe from real microbatch-zero execution.
+The factory is called around each built-in stage forward. Dynamic metadata
+inference uses microbatch zero and sets `is_metadata_inference=True`, allowing a
+consumer to distinguish the representative probe from real microbatch-zero
+execution. Static metadata setup does not execute the module and therefore does
+not enter the context.
 
-This option supports manually constructed `PipelineStage` instances. The
-single keyword name is reserved while the option is enabled. Custom schedule
-action handlers continue to receive `_Action`, which already carries the stage
-and microbatch indices; replacing built-in action execution also makes the
-handler responsible for any module kwargs it passes. Compiled stage code may
-specialize if it uses the integer fields in control flow or shape computation.
+Only one context can be registered on a stage at a time. Remove its handle
+before registering another context. Register before the first schedule step if
+the consumer must observe dynamic metadata inference.
+
+The context executes outside a compiled or exported stage module, so it does
+not add graph inputs or change the module signature. CUDA graph capture runs
+the Python context while recording the stage computation, but replay does not
+re-enter Python; consumers must bind replay-stable state during capture. A
+custom schedule action receives this context only when it delegates execution
+to `stage.forward_one_chunk()`.
 
 ```{eval-rst}
 .. autoclass:: torch.distributed.pipelining.PipelineStageInfo
   :members:
+
+.. automethod:: torch.distributed.pipelining.PipelineStage.register_forward_context
 ```
 
 ## Logging
