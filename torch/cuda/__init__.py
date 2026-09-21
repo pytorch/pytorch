@@ -371,7 +371,7 @@ DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION: dict[
 }
 
 # TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
-# Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
+# Kept in sync with .ci/wheel/linux/build_env_setup.py by the validator in
 # .github/scripts/generate_binary_build_matrix.py.
 PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
     "12.6": {
@@ -1418,7 +1418,13 @@ def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
 
 
 def current_blas_handle():
-    r"""Return cublasHandle_t pointer to current cuBLAS handle"""
+    r"""Return the ``cublasHandle_t`` pointer for the current device and stream.
+
+    On CUDA, the handle uses cuBLAS's default workspace unless ATen workspace
+    caching is explicitly enabled. When caching is disabled, internal ATen
+    operations may temporarily bind their own workspace, but restore the default
+    workspace before releasing it. ROCm caches workspaces by default.
+    """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
 
