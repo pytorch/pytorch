@@ -330,6 +330,24 @@ class TestFlopCounter(TestCase):
         with FlopCounterMode() as mode:
             T(4, 5).cos()
 
+    def test_sdpa_cpu(self):
+        query = T(1, 2, 16, 16, requires_grad=True)
+        key = T(1, 2, 16, 16, requires_grad=True)
+        value = T(1, 2, 16, 16, requires_grad=True)
+
+        expected_forward = sdpa_flop_count(query.shape, key.shape, value.shape)
+        with FlopCounterMode() as mode:
+            out = F.scaled_dot_product_attention(query, key, value)
+            self.assertEqual(int(get_total_flops(mode)), expected_forward)
+            out.sum().backward()
+
+        expected_backward = sdpa_backward_flop_count(
+            out.shape, query.shape, key.shape, value.shape
+        )
+        self.assertEqual(
+            int(get_total_flops(mode)), expected_forward + expected_backward
+        )
+
     def test_flash_attention_forward_flop_layout(self):
         B, S, H, D = 2, 128, 8, 64
         q = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
