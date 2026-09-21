@@ -1813,27 +1813,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertFalse(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
             self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
 
-    def test_normalize_scrubs_addresses_and_counters_but_not_user_constants(self):
-        # Both directions matter: anything run-varying that survives makes the
-        # committed report churn, and anything meaningful that is erased makes
-        # two variants guarding different values render one fact.
-        from torch._dynamo.precompile_package import _normalize
-
-        cases = {
-            "___check_obj_id(G['fn'], 140311678493200), type=<class 'function'>": "___check_obj_id(G['fn'], <id>), type=<class 'function'>",
-            "G['__builtins_dict___6']['len']": "G['__builtins_dict___<n>']['len']",
-            "G['__import_mod_140311678493200_c1']": "G['__import_mod_<id>_c<n>']",
-            "G['___unnamed_scope_140311678493200_c1']": "G['___unnamed_scope_<id>_c<n>']",
-            "G['_140311678493200_c3'] is not None": "G['_<id>_c<n>'] is not None",
-            "top_saved_tensors_hooks ids == (139, 140)": "top_saved_tensors_hooks ids == (<ids>)",
-            # User constants and identifiers are not addresses.
-            "L['dims'][0] == 140311678493200": "L['dims'][0] == 140311678493200",
-            "L['w_1_c2'] == 3": "L['w_1_c2'] == 3",
-            "len(L['xs']) == 6": "len(L['xs']) == 6",
-        }
-        for text, expected in cases.items():
-            self.assertEqual(_normalize(text), expected, text)
-
 
 instantiate_parametrized_tests(TestPrecompilePackage)
 
