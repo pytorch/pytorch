@@ -2704,7 +2704,8 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "must return one per entry"):
             composed(entries)
 
-    def test_training_lowers_the_backward_eagerly_inside_the_block(self):
+    @parametrize("training", (False, True))
+    def test_training_lowers_the_backward_eagerly_inside_the_block(self, training):
         import torch._functorch.config as functorch_config
 
         observed = []
@@ -2713,31 +2714,25 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             observed.append(functorch_config.force_non_lazy_backward_lowering)
             return [True] * len(entries)
 
-        for training in (False, True):
-            torch._dynamo.reset()
-            observed.clear()
-            session = self._session(
-                _SessionStep(),
-                backend="inductor",
-                training=training,
-                guard_filter_fn=spy,
-            )
-            with session as cap:
-                cap(torch.randn(3, 4))
-            self.assertTrue(observed)
-            self.assertEqual(set(observed), {training})
-            # The outcome, not just the flag: a lazy backward leaves the bundle
-            # unwritten until the first .backward() call, so a capture that
-            # never makes one files no artifact and records that it did not.
-            # The message lists the plausible causes rather than diagnosing
-            # one, so this pins the fact of the error, not a diagnosis.
-            self.assertEqual(bool(session._backend_artifacts), training)
-            if training:
-                self.assertEqual(session._capture_errors, [])
-            else:
-                (recorded,) = session._capture_errors
-                self.assertIn("recorded no artifact", recorded)
-                self.assertIn("the usual causes are", recorded)
+        session = self._session(
+            _SessionStep(), backend="inductor", training=training, guard_filter_fn=spy
+        )
+        with session as cap:
+            cap(torch.randn(3, 4))
+        self.assertTrue(observed)
+        self.assertEqual(set(observed), {training})
+        # The outcome, not just the flag: a lazy backward leaves the bundle
+        # unwritten until the first .backward() call, so a capture that never
+        # makes one files no artifact and records that it did not. The message
+        # lists the plausible causes rather than diagnosing one, so this pins
+        # the fact of the error, not a diagnosis.
+        self.assertEqual(bool(session._backend_artifacts), training)
+        if training:
+            self.assertEqual(session._capture_errors, [])
+        else:
+            (recorded,) = session._capture_errors
+            self.assertIn("recorded no artifact", recorded)
+            self.assertIn("the usual causes are", recorded)
         self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
 
     def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
@@ -2791,6 +2786,11 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
                 self.assertEqual(cap(x), model(x))
         entry = session._package.cache_entry()
         self.assertEqual(len(entry.codes[0].guarded_codes), 2)
+        # The cap truncates the capture, so the session says so: the calls it
+        # refused to compile are variants the artifact does not hold.
+        (recorded,) = session._capture_errors
+        self.assertIn("hit a recompile limit", recorded)
+        self.assertIn("recompile_limit=2", recorded)
 
     def test_session_is_one_shot_and_refuses_reentry(self):
         from torch._dynamo.exc import PackageError
@@ -2800,6 +2800,31 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(PackageError, "already active"):
                 session.__enter__()
             cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "not active"):
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
+            session.__enter__()
+
+    def test_an_interrupted_drain_still_closes_the_session(self):
+        # The drain is the only place __exit__ blocks. An interrupt out of it
+        # must propagate AND leave the session closed: otherwise cap() stays
+        # callable past the block, the artifacts stay staged in
+        # PrecompileContext and the optimize context leaks to process exit.
+        session = self._session(_session_breaks)
+
+        def interrupted(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            with session as cap:
+                cap(torch.ones(3))
+                # One call left in flight is what makes __exit__ wait at all.
+                session._active_calls += 1
+                session._state.wait = interrupted
+        self.assertTrue(session._finished)
+        self.assertFalse(session._entered)
+        self.assertFalse(session._closing)
+        self.assertIsNone(session._compiled)
         with self.assertRaisesRegex(RuntimeError, "not active"):
             cap(torch.ones(3))
         with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
@@ -2815,26 +2840,49 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         self.assertEqual(session._capture_errors, ["ValueError: boom"])
 
     def test_recording_an_error_runs_under_the_session_lock(self):
-        import threading
-
         # The once-only dedup is a check-then-add on shared state, so it has to
-        # hold _state: holding it from here must stall a recording thread.
+        # hold _state. Proven positively rather than by a window: the session's
+        # lock announces every acquire, so a recording thread that reached the
+        # lock says so, and one that never takes it never does.
+        reached = threading.Event()
+
+        class AnnouncingLock:
+            # Only the lock protocol the recording path uses: nothing here waits
+            # or notifies on the condition built over it.
+            def __init__(self):
+                self._lock = threading.RLock()
+
+            def acquire(self, blocking=True, timeout=-1):
+                reached.set()
+                return self._lock.acquire(blocking, timeout)
+
+            def release(self):
+                self._lock.release()
+
+            def __enter__(self):
+                self.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.release()
+
         session = self._session(_session_raises)
-        started = threading.Event()
+        session._state = threading.Condition(AnnouncingLock())
         done = threading.Event()
 
         def record():
-            started.set()
             session._record_capture_error(ValueError("boom"))
             done.set()
 
-        worker = threading.Thread(target=record)
         with session._state:
+            reached.clear()
+            worker = threading.Thread(target=record)
             worker.start()
-            started.wait()
-            self.assertFalse(done.wait(0.5))
+            self.assertTrue(reached.wait(10))
+            self.assertFalse(done.is_set())
             self.assertEqual(session._capture_errors, [])
-        worker.join()
+        worker.join(60)
+        self.assertFalse(worker.is_alive())
         self.assertEqual(session._capture_errors, ["ValueError: boom"])
         session._record_capture_error(ValueError("boom"))
         self.assertEqual(session._capture_errors, ["ValueError: boom"])
@@ -2847,6 +2895,19 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
         for backend in session._package.cached_backends.values():
             self.assertTrue(callable(backend))
+
+    def test_the_eager_family_keeps_its_backends_like_eager_does(self):
+        # The exemption is a property of the resolved backend, not of the name:
+        # eager_noexcept files nothing either, so clearing its backends would
+        # drop the only copy the render has and the empty artifact dict would
+        # read as a capture that recorded nothing.
+        session = self._session(_session_breaks, backend="eager_noexcept")
+        with session as cap:
+            cap(torch.ones(3))
+        entry = session._package.cache_entry()
+        self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._capture_errors, [])
 
     def test_inductor_artifacts_are_taken_from_the_precompile_context(self):
         from torch._dynamo.precompile_context import PrecompileContext
@@ -2874,6 +2935,7 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)
+instantiate_parametrized_tests(TestPrecompileSession)
 
 
 if __name__ == "__main__":
