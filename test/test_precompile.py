@@ -275,6 +275,91 @@ class TestPrecompile(TestCase):
             """8 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 7 UNCOVERED: ['f0', 'f1', 'f2', 'f3', 'f4'] +2 more, 3 CAPTURE ERRORS: 'RuntimeError: boom' +2 more""",
         )
 
+    @parametrize("mode", ["make_fx", "other", "dynamo", "installed"])
+    def test_parse_artifact_metadata_required_set_follows_tracer(self, mode):
+        # TRACER picks which calling-convention constants an artifact must carry
+        # (absent or anything but "dynamo" means make_fx), and an installed dynamo
+        # artifact swaps the per-frame blobs for the package blob.
+        from torch._precompile import _parse_artifact_metadata
+
+        make_fx = (
+            ["BUFFER_NAMES", "OUT_SPEC", "USER_INPUT_BOUNDS"],
+            ["TRACER", "_FRAMES", "_ENTRY_BINDING"],
+        )
+        src, required, not_required = {
+            "make_fx": ("BACKEND = 'inductor'\n", *make_fx),
+            "other": ("TRACER = 'other'\n", *make_fx),
+            "dynamo": (
+                "TRACER = 'dynamo'\n",
+                ["FN_NAME", "_FRAMES", "_BACKENDS", "_ENTRY_BINDING", "TORCH_VERSION"],
+                ["OUT_SPEC", "TRACER", "SERVING_MODE", "_PACKAGE"],
+            ),
+            "installed": (
+                "TRACER = 'dynamo'\nSERVING_MODE = 'installed'\n",
+                ["_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL", "_ENTRY_BINDING"],
+                ["OUT_SPEC", "_FRAMES", "_BACKENDS"],
+            ),
+        }[mode]
+        with self.assertRaises(PrecompileError) as cm:
+            _parse_artifact_metadata(src)
+        msg = str(cm.exception)
+        self.assertIn("missing calling-convention metadata", msg)
+        for name in required:
+            self.assertIn(repr(name), msg)
+        for name in not_required:
+            self.assertNotIn(repr(name), msg)
+
+    def test_parse_artifact_metadata_literals(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        fields = [
+            ("BACKEND", "eager"),
+            ("TRACER", "dynamo"),
+            ("FN_NAME", "step"),
+            ("FRAMES", [{"is_entry": True, "variants": []}]),
+            ("DROPPED_GUARDS", []),
+            ("RISKY_DROPPED_GUARDS", []),
+            ("WONT_GENERALIZE", ()),
+            ("_FRAMES", "blob"),
+            ("_BACKENDS", "blob"),
+            ("_DYNAMO_PYTHON_VERSION", "3.12"),
+            ("_ENTRY_BINDING", "step"),
+            ("TORCH_VERSION", "2.0"),
+        ]
+        src = "".join(f"{name} = {value!r}\n" for name, value in fields)
+        meta = _parse_artifact_metadata(src)
+        self.assertEqual(meta["FRAMES"], [{"is_entry": True, "variants": []}])
+        # Reported but never required: the serving mode defaults for artifacts
+        # predating it, and the guard-audit sections come back as data.
+        self.assertEqual(meta["SERVING_MODE"], "standalone")
+        self.assertNotIn("POLICY_DROPPED_GUARDS", meta)
+        audit = "POLICY_DROPPED_GUARDS = ['g']\nDROPPED_GUARD_CODE = {'g': 'code'}\n"
+        meta = _parse_artifact_metadata(src + audit)
+        self.assertEqual(meta["POLICY_DROPPED_GUARDS"], ["g"])
+        self.assertEqual(meta["DROPPED_GUARD_CODE"], {"g": "code"})
+        # An installed artifact parses without the per-frame blobs.
+        blobs = "_FRAMES = 'blob'\n_BACKENDS = 'blob'\n"
+        package = "SERVING_MODE = 'installed'\n_PACKAGE = 'pkg'\n"
+        installed = src.replace(blobs, package) + "UNREACHABLE_WITHOUT_INSTALL = []\n"
+        meta = _parse_artifact_metadata(installed)
+        self.assertEqual((meta["SERVING_MODE"], meta["_PACKAGE"]), ("installed", "pkg"))
+        # The last top-level assignment wins for the set selection and the
+        # reported value alike, as it would under exec.
+        shadowed = src.replace("TRACER = 'dynamo'", "TRACER = 'other'")
+        meta = _parse_artifact_metadata(shadowed + "TRACER = 'dynamo'\n")
+        self.assertEqual(meta["TRACER"], "dynamo")
+        # A consumed name whose value is not a literal (a call, or a set with an
+        # unhashable member) is named, including the ones that select the required
+        # set; an unconsumed one is skipped.
+        for bad, name in (
+            ("TRACER = object()\n", "TRACER"),
+            ("TRACER = 'dynamo'\nSERVING_MODE = {[]}\n", "SERVING_MODE"),
+        ):
+            with self.assertRaisesRegex(PrecompileError, f"{name!r} .* is malformed"):
+                _parse_artifact_metadata(bad)
+        meta = _parse_artifact_metadata(src + "_x = f()\n")
+        self.assertEqual(meta["TRACER"], "dynamo")
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
