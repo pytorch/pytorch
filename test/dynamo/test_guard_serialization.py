@@ -4082,6 +4082,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
         state = load_guards_state(self._cached_guards_state).output_graph
         self.assertEqual(next(iter(state.local_scope["d"])).sub, sub)
 
+    def test_a_key_field_that_is_an_empty_rebuilt_receiver_stays_whole(self):
+        # A bound method's receiver is normally rebuilt empty (empty_values); when
+        # it is also a field of a by-value key the comparison would read the
+        # empty object, so verbatim outranks the empty rebuild in both hooks.
+        sub = _SubCfg(2.0, ["t"])
+        key = _KeyWithSub("a", sub)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {id(sub): sub}, {}, {id(key): key}, buf).dump(
+            {"k": key, "g": sub.__hash__}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertEqual(out["k"].sub, sub)
+        self.assertEqual(out["k"].sub.tags, ["t"])
+
     def test_grad_mode(self):
         def fn(x):
             return x + 1
