@@ -4978,6 +4978,31 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and _instance_dict(obj) is not None
+            and not inspect.isfunction(obj)
+            and type(obj).__qualname__ == type(obj).__name__
+            and not _is_torch_type(type(obj))
+            and _pickles_by_default(obj)
+            and not pytree.is_constant_class(type(obj))
+            and not is_opaque_constant_type(type(obj))
+            and id(obj) not in self._verbatim_elements
+        ):
+            # Any object the guard tree reached, not only an nn.Module, so one
+            # unguarded attribute several levels down (a live generator, a
+            # process group) no longer takes the frame with it. LAST, so every
+            # specific reducer above gets first refusal (a by-name function
+            # never gets here: its __dict__ does not travel). Rebuilt from a
+            # filtered copy of its own __dict__ rather than by registering the
+            # values globally, so the sentinel never reaches another receiver
+            # that shares one of them and reads it back at load. USER objects
+            # only: torch's structural types (a DTensorSpec rebuilds itself from
+            # fields no guard names) and pytree-registered or opaque constants
+            # (EQUALS_MATCH compares the object by value at run time) travel
+            # whole, and a local class falls through to the loud refusal below.
+            return type(obj).__new__, (type(obj),), self._pruned_state(obj)
+
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -5012,29 +5037,52 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
-        """Mark every ``__dict__`` value nothing guards as prunable.
+    def _keeps_attribute(self, obj: Any, name: str, attr: Any) -> bool:
+        """Whether a guarded object's ``__dict__`` entry travels as is.
 
-        Reaching a module through the guard tree does not mean its whole state
+        Reaching an object through the guard tree does not mean its whole state
         is needed, only the attributes a guard actually reads. The rest becomes
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
-        What the module itself reads back at load stays: the containers in
-        _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that the
-        module's __setstate__ is nn.Module's, since any other may read anything.
+        What the object itself reads back at load stays: for a module, the
+        containers in _NN_MODULE_STATE_ATTRS. Callables stay too, as they always
+        did for modules (hooks, forward references), so a partial or C callable
+        closing over unpicklable state still fails the dump loudly.
+        """
+        if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+            return True
+        if isinstance(obj, torch.nn.Module) and name in _NN_MODULE_STATE_ATTRS:
+            return True
+        if id(attr) in self.guard_tree_values or callable(attr):
+            return True
+        return _is_shared_constant(attr)
+
+    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+        """Register every module attribute nothing guards as prunable.
+
+        Registration is global and by id, so the attribute is the sentinel
+        wherever else the same object appears. Precondition: the caller has
+        checked that the module's __setstate__ is nn.Module's (DDP qualifies
+        because _unpickle_ddp_module rebuilds it through nn.Module.__setstate__).
         """
         for name, attr in obj.__dict__.items():
-            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                continue
-            if name in _NN_MODULE_STATE_ATTRS:
-                continue
-            if id(attr) in self.guard_tree_values:
-                continue
-            if callable(attr):
-                continue
-            if _is_shared_constant(attr):
-                continue
-            self.missing_values[id(attr)] = attr
+            if not self._keeps_attribute(obj, name, attr):
+                self.missing_values[id(attr)] = attr
+
+    def _pruned_state(self, obj: Any) -> dict[str, Any]:
+        """The state a guarded user object is rebuilt from: its ``__dict__`` with
+        every unguarded attribute replaced by the sentinel. Scoped to this one
+        receiver, so a value it shares with an object that is pickled whole (one
+        with its own __setstate__, say) stays real where that object reads it
+        back at load. Names and their order are preserved and only values are
+        substituted: a guard rooted at the receiver's __dict__ re-bakes its keys
+        and length at load."""
+        return {
+            name: attr
+            if self._keeps_attribute(obj, name, attr)
+            else self._missing("unguarded attribute")
+            for name, attr in (_instance_dict(obj) or {}).items()
+        }
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
