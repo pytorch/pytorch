@@ -500,6 +500,14 @@ class TestTorchDeviceType(TestCase):
         # This is OK, it changes the meta storage size without allocating
         s0.resize_(10)
 
+    @onlyAccelerator
+    def test_module_share_memory(self, device):
+        # Test fix for issue #80733
+        # See https://github.com/pytorch/pytorch/issues/80733
+        model = torch.nn.Linear(3, 1)
+        _model_device = model.to(device)
+        model.share_memory()
+
     @dtypes(torch.float32, torch.complex64)
     @slowTestIf(IS_WINDOWS)
     def test_deepcopy(self, device, dtype):
@@ -6751,16 +6759,9 @@ class TestTorchDeviceType(TestCase):
             torch.normal(tensor2345, tensor120, out=output345)
 
 
-class TestTorchDeviceCUDA(TestCase):
+class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
     exact_dtype = True
-
-    def test_module_share_memory(self):
-        # Test fix for issue #80733
-        # See https://github.com/pytorch/pytorch/issues/80733
-        model = torch.nn.Linear(3, 1)
-        _model_cuda = model.to('cuda')
-        model.share_memory()
 
     def test_dtypetensor_warnings(self, device):
         msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
@@ -11388,7 +11389,7 @@ add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
-instantiate_device_type_tests(TestTorchDeviceCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestTorchCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 
 if __name__ == '__main__':
