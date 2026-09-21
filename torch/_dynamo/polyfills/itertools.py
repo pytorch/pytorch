@@ -244,14 +244,23 @@ def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
 @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
 def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
-    a = None
-    first = True
-    for b in iterable:
-        if first:
-            first = False
-        else:
-            yield a, b  # type: ignore[misc]
-        a = b
+    iterator = iter(iterable)
+
+    def _pairwise() -> Iterator[tuple[_T, _T]]:
+        try:
+            a = next(iterator)
+        except StopIteration:
+            return
+
+        while True:
+            try:
+                b = next(iterator)
+            except StopIteration:
+                return
+            yield a, b
+            a = b
+
+    return _pairwise()
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.permutations

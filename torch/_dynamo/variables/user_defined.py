@@ -5552,6 +5552,42 @@ class UserDefinedDequeVariable(UserDefinedObjectVariable, DequeVariable):
         # state) in place with the correct semantics.
         return DequeVariable.tp_init_impl(self, tx, args, kwargs)
 
+    def reduce(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if (
+            self._maybe_get_baseclass_method("__reduce__")
+            is collections.deque.__reduce__
+        ):
+            self._unsupported_reduce()
+        return None  # Let subclass overrides follow normal dispatch
+
+    def reduce_ex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if self._maybe_get_baseclass_method("__reduce_ex__") is object.__reduce_ex__:
+            self._unsupported_reduce()
+        return None
+
+    def _unsupported_reduce(self):
+        unimplemented(
+            gb_type="deque subclass reduction",
+            context=f"copying {self.python_type_name()}",
+            explanation="Dynamo does not support reducing deque subclasses.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    tp_methods = {
+        "__reduce__": Method(reduce),
+        "__reduce_ex__": Method(reduce_ex),
+    }
+
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable, TupleVariable):
     """
