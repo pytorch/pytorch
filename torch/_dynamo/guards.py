@@ -1486,8 +1486,9 @@ class GuardBuilder(GuardBuilderBase):
     def _compared_by_value(self, val: object) -> None:
         # See Note [Reconstructing a function a guard is rooted at] in
         # GuardsStatePickler: what a guard compares by value at run time must
-        # travel verbatim, so the serializer never prunes or substitutes it.
-        if self.save_guards:
+        # travel verbatim, so the serializer never prunes or substitutes it. A
+        # literal is never pruned, so only an object is worth recording.
+        if self.save_guards and not FunctionPicklerBase._is_literal(val):
             self.value_guarded_containers[id(val)] = val
 
     def guard_on_dict_keys_and_order(self, value: dict[Any, Any], guard: Guard) -> None:
@@ -1962,6 +1963,7 @@ class GuardBuilder(GuardBuilderBase):
                         "Expecting clean index here. Likely Dynamo forgot to mark"
                         " a dict as guard_on_key_order"
                     )
+                self._compared_by_value(source.index)
                 out = base_guard_manager.dict_getitem_manager(
                     key=source.index,
                     source=source_name,
@@ -4390,6 +4392,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # Values only: no pruned type is hashable, so a key can
                 # neither be one nor contain one.
                 stack.extend(value.values())
+            elif isinstance(value, (torch.Tensor, torch.nn.Module)):
+                # Compared by identity or pickled whole either way; descending
+                # would only switch pruning off for everything they hold.
+                pass
             elif (fields := _instance_dict(value)) is not None:
                 # A by-value comparison reads every field, so the protection
                 # is transitive through an object's instance dict.
@@ -4547,9 +4553,9 @@ class GuardsStatePickler(FunctionPicklerBase):
     # records those tuples in value_guarded_containers, which the pickler takes
     # as a required argument. A non-const dict key is recorded there too
     # (_compared_by_value): the key managers bake it and compare it by value at
-    # run time, and that comparison reads every field, so the protection
-    # extends through the key's instance dict. A dict/tuple SUBCLASS is verbatim whenever kept,
-    # since its type must survive for the guard reading the slot
+    # run time, and that comparison reads every field, so the protection extends
+    # through the key's instance dict. A dict/tuple SUBCLASS is verbatim whenever
+    # kept, since its type must survive for the guard reading the slot
     # (_keep_container_verbatim).
 
     def _keep(self, value: object) -> bool:
@@ -4767,13 +4773,15 @@ class GuardsStatePickler(FunctionPicklerBase):
     ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
         import sympy
 
-        if id(obj) in self.empty_values:
+        if id(obj) in self.empty_values and id(obj) not in self._verbatim_elements:
             return type(obj).__new__, (type(obj),)
 
         if inspect.iscode(obj):
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
 
-        if id(obj) in self.missing_values:
+        if id(obj) in self.missing_values and id(obj) not in self._verbatim_elements:
+            # A value some guard compares by value (a dict key, one of its
+            # fields) stays whole even when a scope leaf registered it.
             return _Missing, ("missing values",)
 
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
