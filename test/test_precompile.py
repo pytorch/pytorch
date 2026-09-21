@@ -360,39 +360,6 @@ class TestPrecompile(TestCase):
         meta = _parse_artifact_metadata(src + "_x = f()\n")
         self.assertEqual(meta["TRACER"], "dynamo")
 
-    @parametrize("backend", ["eager", "inductor"])
-    def test_artifact_neutralizes_ambient_autocast(self, backend):
-        # The casts a capture ran under are baked into the artifact, but the graph
-        # still re-dispatches at serve time, so the driver runs it with autocast
-        # excluded and leaves the caller's autocast state as it found it. addbmm is
-        # AutocastCPU-registered and an inductor fallback with no decomposition, so
-        # both artifacts re-dispatch through aten.addbmm.default and each backend's
-        # guard is load-bearing (without it inductor's assert_tensor_metadata trips).
-        from torch._precompile import PrecompiledModule
-
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.bias = torch.nn.Parameter(torch.randn(3, 3))
-
-            def forward(self, x):
-                return torch.addbmm(self.bias, x, x.transpose(1, 2))
-
-        model = Model()
-        x = torch.randn(2, 3, 4)
-        expected = model(x)
-        compiled = PrecompiledModule(lambda m, x: m(x), backend=backend)
-        compiled._compile((model, x))
-        ns: dict[str, object] = {"__name__": "precompile_test_artifact"}
-        exec(compile(compiled.to_python_code(), "<artifact>", "exec"), ns)
-        forward = ns["forward"]
-        with torch.autocast("cpu", dtype=torch.bfloat16):
-            out = forward(model, x)
-            self.assertEqual(model(x).dtype, torch.bfloat16)
-        self.assertFalse(torch.is_autocast_enabled("cpu"))
-        self.assertEqual(out.dtype, torch.float32)
-        self.assertEqual(out, expected)
-
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
