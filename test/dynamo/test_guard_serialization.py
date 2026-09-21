@@ -1691,20 +1691,27 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # The module path registers pruned attributes by id, so without the
         # exemption the shared placement would be the sentinel in the spec too;
         # the exemption is by class, so a user Placement subclass is covered.
-        placement = _ScaledPartial()
-        m = torch.nn.Module()
-        m.placement, m.scaler = placement, torch.amp.GradScaler()
-        buf = io.BytesIO()
-        GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump(
-            {"m": m, "shared": placement}
-        )
-        out = load_guards_state(buf.getvalue())
-        # The value assertions carry the test: pruning by id would load the
-        # sentinel on both sides, and identity alone would still hold.
-        self.assertEqual(out["m"].placement, placement)
-        self.assertIsInstance(out["shared"], _ScaledPartial)
-        self.assertIs(out["m"].placement, out["shared"])
-        self.assertIsInstance(out["m"].scaler, _Missing)
+        # Both pickle orders: with the module first, the placement is registered
+        # before the shared local is reached; with the local first, the memo
+        # would carry it real even without the exemption.
+        for order in ("module first", "shared first"):
+            placement = _ScaledPartial()
+            m = torch.nn.Module()
+            m.placement, m.scaler = placement, torch.amp.GradScaler()
+            state = (
+                {"m": m, "shared": placement}
+                if order == "module first"
+                else {"shared": placement, "m": m}
+            )
+            buf = io.BytesIO()
+            GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump(state)
+            out = load_guards_state(buf.getvalue())
+            # The value assertions carry the test: pruning by id would load the
+            # sentinel on both sides, and identity alone would still hold.
+            self.assertEqual(out["m"].placement, placement, order)
+            self.assertIsInstance(out["shared"], _ScaledPartial, order)
+            self.assertIs(out["m"].placement, out["shared"], order)
+            self.assertIsInstance(out["m"].scaler, _Missing, order)
 
     def test_torch_namespace_objects_are_pickled_whole(self):
         # type(obj).__module__ == "torch" is torch's namespace too, so the
