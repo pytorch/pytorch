@@ -11,6 +11,7 @@
 #include <c10/util/llvmMathExtras.h>
 #include <iostream>
 #include <optional>
+#include <string>
 
 #include <atomic>
 #include <deque>
@@ -135,24 +136,18 @@ struct TORCH_API HostStats {
 // avoid locking the allocator while collecting stats.
 struct alignas(hardware_destructive_interference_size) HostStatsStaged {
   std::mutex timing_mutex_;
+  // Guards the two process-wide counters below.  They used to ride on
+  // pool.blocks_mutex_, which is per pool, so a graph private pool and the
+  // default pool already updated them under different locks.  Give them their
+  // own lock rather than leave correctness resting on there being exactly one
+  // default pool.
+  std::mutex global_mutex_;
   // COUNT: total allocations (active + free)
   // LOCK: access to this stat is protected by the allocator's blocks_mutex_
   Stat allocations;
   // SUM: bytes allocated/reserved by this memory allocator. This accounts
   // for both free and in-use blocks.
   Stat allocated_bytes;
-  // COUNT: number of allocations per bucket (active)
-  // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
-  std::vector<Stat> active_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
-  // SUM: bytes of allocation per bucket (active)
-  // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
-  std::vector<Stat> active_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
-  // COUNT: number of allocations per bucket (active + free)
-  // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
-  std::vector<Stat> allocation_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
-  // SUM: bytes of allocation per bucket (active + free)
-  // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
-  std::vector<Stat> allocated_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
   // SUM: time spent in cudaHostAlloc/cudaHostRegister
   // LOCK: access to this stat is protected by the timing_mutex_
   DurationStat host_alloc_time;
@@ -267,6 +262,18 @@ struct HostBlockPool {
   ska::flat_hash_map<void*, B_*> ptr_to_block_;
 
   // Per-size free lists guarded by their own mutexes.
+  // Per-bucket stats live next to the free list that guards them.  They used
+  // to sit in a single process-wide HostStatsStaged while being documented as
+  // protected by pool.free_list_[i].mutex_, so two pools at the same bucket
+  // index took different mutexes yet mutated the same counters.  Latent while
+  // private pools are only created during graph capture, but it is a real race
+  // and the invariant is much easier to see when the counter lives next to the
+  // lock that guards it.
+  std::vector<Stat> active_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
+  std::vector<Stat> active_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
+  std::vector<Stat> allocation_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
+  std::vector<Stat> allocated_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
+
   alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B_>> free_list_ =
       std::vector<FreeBlockList<B_>>(MAX_SIZE_INDEX);
 
@@ -542,6 +549,7 @@ struct CachingHostAllocatorImpl {
         process_events(it->second->blocks, nullptr);
         free_from_pool(it->second->blocks);
         if (it->second->blocks.blocks_.empty()) {
+          retire_bucket_stats(it->second->blocks);
           auto erase_count = graph_pools_.erase(it->first);
           TORCH_INTERNAL_ASSERT(erase_count == 1);
           it = graph_pools_freeable_.erase(it);
@@ -584,25 +592,35 @@ struct CachingHostAllocatorImpl {
     // Accurate reading of memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
-    for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
-      std::scoped_lock lock(
-          default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
+    // Process-wide counters under their own lock, not some pool's.
+    {
+      std::lock_guard<std::mutex> g(stats_.global_mutex_);
+      stats.allocations = stats_.allocations;
+      stats.allocated_bytes = stats_.allocated_bytes;
+      stats.num_host_alloc = stats.allocations.allocated;
+      stats.num_host_free = stats.allocations.freed;
+    }
 
-      // We collect the slow-path stats only once, since they are not collected
-      // per bucket (we pick index 0 arbitrarily). These are also all the host
-      // allocations, not taking into account caching and free lists.
-      if (i == 0) {
-        stats.allocations = stats_.allocations;
-        stats.allocated_bytes = stats_.allocated_bytes;
-        stats.num_host_alloc = stats.allocations.allocated;
-        stats.num_host_free = stats.allocations.freed;
+    std::shared_lock<std::shared_mutex> pools_lg(instance_mutex_);
+    for (auto* pool_ptr : all_pools()) {
+      auto& pool = *pool_ptr;
+      for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+        std::scoped_lock lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
+        // Bucket stats need to be merged with the slow-path stats. We do this in
+        // a best effort manner, since we can't really replay the cached events per bucket.
+        add_bucket_stats(stats.active_requests, pool.active_bucket_stats[i]);
+        add_bucket_stats(stats.active_bytes, pool.active_bytes_bucket_stats[i]);
+        stats.bucket_allocation[i] += pool.allocation_bucket_stats[i].allocated;
       }
+    }
 
-      // Bucket stats need to be merged with the slow-path stats. We do this in
-      // a best effort manner, since we can't really replay the cached events per bucket.
-      add_bucket_stats(stats.active_requests, stats_.active_bucket_stats[i]);
-      add_bucket_stats(stats.active_bytes, stats_.active_bytes_bucket_stats[i]);
-      stats.bucket_allocation[i] = stats_.allocation_bucket_stats[i].allocated;
+    {
+      std::lock_guard<std::mutex> rg(retired_.mutex_);
+      for (size_t i = 0; i < retired_.active.size(); ++i) {
+        add_bucket_stats(stats.active_requests, retired_.active[i]);
+        add_bucket_stats(stats.active_bytes, retired_.active_bytes[i]);
+        stats.bucket_allocation[i] += retired_.allocation[i].allocated;
+      }
     }
 
     // Get the timing stats
@@ -620,18 +638,32 @@ struct CachingHostAllocatorImpl {
     // Resetting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
-    for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
-      std::scoped_lock lock(
-          default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
+    {
+      std::lock_guard<std::mutex> g(stats_.global_mutex_);
+      stats_.allocations.reset_accumulated();
+      stats_.allocated_bytes.reset_accumulated();
+    }
 
-      if (i == 0) {
-        stats_.allocations.reset_accumulated();
-        stats_.allocated_bytes.reset_accumulated();
+    std::shared_lock<std::shared_mutex> pools_lg(instance_mutex_);
+    for (auto* pool_ptr : all_pools()) {
+      auto& pool = *pool_ptr;
+      for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+        std::scoped_lock lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
+        pool.active_bucket_stats[i].reset_accumulated();
+        pool.active_bytes_bucket_stats[i].reset_accumulated();
+        pool.allocation_bucket_stats[i].reset_accumulated();
+        pool.allocated_bytes_bucket_stats[i].reset_accumulated();
       }
-      stats_.active_bucket_stats[i].reset_accumulated();
-      stats_.active_bytes_bucket_stats[i].reset_accumulated();
-      stats_.allocation_bucket_stats[i].reset_accumulated();
-      stats_.allocated_bytes_bucket_stats[i].reset_accumulated();
+    }
+
+    {
+      std::lock_guard<std::mutex> rg(retired_.mutex_);
+      for (size_t i = 0; i < retired_.active.size(); ++i) {
+        retired_.active[i].reset_accumulated();
+        retired_.active_bytes[i].reset_accumulated();
+        retired_.allocation[i].reset_accumulated();
+        retired_.allocated_bytes[i].reset_accumulated();
+      }
     }
 
     // Also reset timing stats
@@ -646,18 +678,32 @@ struct CachingHostAllocatorImpl {
     // Resetting peak memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
-    for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
-      std::scoped_lock lock(
-          default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
+    {
+      std::lock_guard<std::mutex> g(stats_.global_mutex_);
+      stats_.allocations.reset_peak();
+      stats_.allocated_bytes.reset_peak();
+    }
 
-      if (i == 0) {
-        stats_.allocations.reset_peak();
-        stats_.allocated_bytes.reset_peak();
+    std::shared_lock<std::shared_mutex> pools_lg(instance_mutex_);
+    for (auto* pool_ptr : all_pools()) {
+      auto& pool = *pool_ptr;
+      for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+        std::scoped_lock lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
+        pool.active_bucket_stats[i].reset_peak();
+        pool.active_bytes_bucket_stats[i].reset_peak();
+        pool.allocation_bucket_stats[i].reset_peak();
+        pool.allocated_bytes_bucket_stats[i].reset_peak();
       }
-      stats_.active_bucket_stats[i].reset_peak();
-      stats_.active_bytes_bucket_stats[i].reset_peak();
-      stats_.allocation_bucket_stats[i].reset_peak();
-      stats_.allocated_bytes_bucket_stats[i].reset_peak();
+    }
+
+    {
+      std::lock_guard<std::mutex> rg(retired_.mutex_);
+      for (size_t i = 0; i < retired_.active.size(); ++i) {
+        retired_.active[i].reset_peak();
+        retired_.active_bytes[i].reset_peak();
+        retired_.allocation[i].reset_peak();
+        retired_.allocated_bytes[i].reset_peak();
+      }
     }
 
     // Also reset timing stats
@@ -672,8 +718,11 @@ struct CachingHostAllocatorImpl {
   virtual void add_allocated_block(B* block, BlockPool& pool) {
     std::lock_guard<std::mutex> g(pool.blocks_mutex_);
     pool.blocks_.insert(block);
-    stats_.allocations.increase(1);
-    stats_.allocated_bytes.increase(block->size_);
+    {
+      std::lock_guard<std::mutex> g(stats_.global_mutex_);
+      stats_.allocations.increase(1);
+      stats_.allocated_bytes.increase(block->size_);
+    }
     pool.ptr_to_block_.insert({block->ptr_, block});
 
     // Unfortunately, we have to, on the slow path, quickly
@@ -683,10 +732,10 @@ struct CachingHostAllocatorImpl {
     auto index = size_index(size);
     {
       std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-      stats_.allocation_bucket_stats[index].increase(1);
-      stats_.allocated_bytes_bucket_stats[index].increase(size);
-      stats_.active_bucket_stats[index].increase(1);
-      stats_.active_bytes_bucket_stats[index].increase(size);
+      pool.allocation_bucket_stats[index].increase(1);
+      pool.allocated_bytes_bucket_stats[index].increase(size);
+      pool.active_bucket_stats[index].increase(1);
+      pool.active_bytes_bucket_stats[index].increase(size);
     }
   }
 
@@ -705,8 +754,8 @@ struct CachingHostAllocatorImpl {
       if (block->size_ >= size) {
         list.erase(std::next(it).base());
         block->allocated_.store(true, std::memory_order_relaxed);
-        stats_.active_bucket_stats[index].increase(1);
-        stats_.active_bytes_bucket_stats[index].increase(block->size_);
+        pool.active_bucket_stats[index].increase(1);
+        pool.active_bytes_bucket_stats[index].increase(block->size_);
         return block;
       }
     }
@@ -843,8 +892,8 @@ struct CachingHostAllocatorImpl {
     } else {
       std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
       pool.free_list_[index].list_.push_back(block);
-      stats_.active_bucket_stats[index].decrease(1);
-      stats_.active_bytes_bucket_stats[index].decrease(size);
+      pool.active_bucket_stats[index].decrease(1);
+      pool.active_bytes_bucket_stats[index].decrease(size);
     }
   }
 
@@ -864,13 +913,16 @@ struct CachingHostAllocatorImpl {
 
     record_trace(TraceEntry::SEGMENT_FREE, ptr, size, nullptr, mempool_id, nullptr);
 
-    stats_.allocations.decrease(1);
-    stats_.allocated_bytes.decrease(size);
-    stats_.allocation_bucket_stats[index].decrease(1);
-    stats_.allocated_bytes_bucket_stats[index].decrease(size);
+    {
+      std::lock_guard<std::mutex> g(stats_.global_mutex_);
+      stats_.allocations.decrease(1);
+      stats_.allocated_bytes.decrease(size);
+    }
+    pool.allocation_bucket_stats[index].decrease(1);
+    pool.allocated_bytes_bucket_stats[index].decrease(size);
     if (is_active) {
-      stats_.active_bucket_stats[index].decrease(1);
-      stats_.active_bytes_bucket_stats[index].decrease(size);
+      pool.active_bucket_stats[index].decrease(1);
+      pool.active_bytes_bucket_stats[index].decrease(size);
     }
     delete block;
   }
@@ -958,6 +1010,42 @@ struct CachingHostAllocatorImpl {
       }
     }
     return {c10::MempoolId_t{0, 0}, default_pool_};
+  }
+
+  // Every pool whose bucket stats contribute to the reported totals: the
+  // the default pool plus any live graph private pools.  Before the bucket
+  // stats moved into HostBlockPool they were shared, so private-pool activity
+  // showed up in the totals; it has to keep doing so.  Caller must
+  // hold instance_mutex_ (shared is enough) if graph_pools_ can change.
+  // Fold a pool's bucket counters into retired_ before it is dropped.
+  void retire_bucket_stats(BlockPool& pool) {
+    std::lock_guard<std::mutex> rg(retired_.mutex_);
+    for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+      std::scoped_lock lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
+      auto absorb = [](Stat& into, const Stat& from) {
+        into.allocated += from.allocated;
+        into.current += from.current;
+        into.freed += from.freed;
+        // Max, not sum: retired pools no longer exist, so their peaks cannot
+        // overlap each other.  Summing them would grow without bound as pools
+        // come and go at unchanged concurrent use.
+        into.peak = std::max(into.peak, from.peak);
+      };
+      absorb(retired_.active[i], pool.active_bucket_stats[i]);
+      absorb(retired_.active_bytes[i], pool.active_bytes_bucket_stats[i]);
+      absorb(retired_.allocation[i], pool.allocation_bucket_stats[i]);
+      absorb(retired_.allocated_bytes[i], pool.allocated_bytes_bucket_stats[i]);
+    }
+  }
+
+  std::vector<BlockPool*> all_pools() {
+    std::vector<BlockPool*> pools;
+    pools.reserve(1 + graph_pools_.size());
+    pools.push_back(&default_pool_);
+    for (auto& [_, private_pool] : graph_pools_) {
+      pools.push_back(&private_pool->blocks);
+    }
+    return pools;
   }
 
   // Helper: return the pool containing a block, based on its owning_pool_.
@@ -1304,6 +1392,17 @@ private:
   ska::flat_hash_map<void*, ExternalRegistration> external_registrations_;
 
 protected:
+  // Bucket counters of private pools that have been erased.  They used to live
+  // in one shared vector that outlived every pool, so cumulative totals never
+  // went backwards; keep that true now that each pool owns its own.
+  struct {
+    std::mutex mutex_;
+    std::vector<Stat> active = std::vector<Stat>(MAX_SIZE_INDEX);
+    std::vector<Stat> active_bytes = std::vector<Stat>(MAX_SIZE_INDEX);
+    std::vector<Stat> allocation = std::vector<Stat>(MAX_SIZE_INDEX);
+    std::vector<Stat> allocated_bytes = std::vector<Stat>(MAX_SIZE_INDEX);
+  } retired_;
+
   alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
 };
 
