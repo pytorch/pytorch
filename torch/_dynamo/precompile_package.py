@@ -38,7 +38,6 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch._guards import ChainedSource
-from torch.compiler._precompile_types import PrecompileSummary
 from torch.utils._config_module import ConfigModule
 
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
@@ -59,7 +58,6 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch.compiler._precompile_types import GuardFact as _GuardFact
 
-    from .package import _DynamoCacheEntry
     from .types import GuardFilterEntry
 
 
@@ -1345,99 +1343,3 @@ def _wont_generalize(
             generic |= {f.source for f in facts} - here
         survivors |= pins - generic
     return tuple(sorted(pinned & survivors))
-
-
-def _varying_guard_slots(
-    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
-) -> frozenset[tuple[str, str]]:
-    """The guard slots that actually discriminate between captured variants.
-
-    A slot is ``(guard_type, source)``, the source as ``GuardFact.source``
-    spells it: the ``GuardFilterEntry.name`` with local scope stripped
-    (``L['x']`` -> ``x``). It varies when two variants of one frame
-    recorded DIFFERENT facts for it, and also when it is present in some
-    variants and absent in others -- a guard only one variant carries is what
-    tells that variant apart, and comparing values alone would call it
-    invariant and drop it. That present-in-some case is the majority of what is
-    kept, not an edge. A fact is its rendered code and value; ``enforced`` says
-    whether the serialized copy keeps the guard, not what it checks, so two
-    variants that differ only there agree. One variant can hold several facts
-    on one slot (a ``HASATTR`` per attribute name, all on the parent source),
-    so what is compared across variants is each variant's SET of facts for the
-    slot, never one fact against another inside a variant.
-
-    Everything else held identically in every variant, which is what licenses a
-    caller to leave it out of the serialized copy.
-    """
-    varying: set[tuple[str, str]] = set()
-    for variants in guard_sets.values():
-        seen: dict[tuple[str, str], list[frozenset[tuple[tuple[str, ...], str]]]] = {}
-        for facts in variants:
-            rendered: dict[tuple[str, str], set[tuple[tuple[str, ...], str]]] = {}
-            for f in facts:
-                slot = (f.guard_type, f.source)
-                rendered.setdefault(slot, set()).add((f.code, f.value))
-            for slot, facts_here in rendered.items():
-                seen.setdefault(slot, []).append(frozenset(facts_here))
-        for slot, per_variant in seen.items():
-            if len(per_variant) != len(variants) or len(set(per_variant)) > 1:
-                varying.add(slot)
-    return frozenset(varying)
-
-
-def _summarize(
-    entry: _DynamoCacheEntry,
-    *,
-    dropped: set[tuple[str, str]],
-    kept: set[tuple[str, str]],
-    policy_dropped: set[tuple[str, str]],
-    risky: set[tuple[str, str]],
-    truncated: frozenset[str],
-    capture_errors: Sequence[str],
-    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
-    dropped_code: Mapping[tuple[str, str], str],
-) -> PrecompileSummary:
-    """Assemble the report. ``dropped_code`` maps a dropped slot to the one
-    rendering the report carries for it, the caller's pick among the variants
-    that dropped it; a slot without one gets no ``dropped_guard_code`` entry.
-
-    ``bypassed`` and ``uncovered_frames`` are read off the entry, one bare
-    ``co_name`` per frame, so a repeated name is two frames and both lists are
-    subsets of ``frames`` by construction. Uncovered is the coverage gap: the
-    frame entered Dynamo (``has_compile_id``) and holds no guarded code, and was
-    not bypassed. ``install()`` ``skip_code()``s a superset, every entry that is
-    not bypassed and has no guarded codes whether or not it entered Dynamo, so a
-    generated-but-never-executed resume entry is skipped there and is not a gap
-    here. ``backend_graphs`` counts the backend ids of the entries that are not
-    bypassed, the ones ``install()`` loads: a save-time bypass
-    (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
-    the entry and leaves its ids in place. ``truncated`` comes from the compile
-    path, which sees a frame hit the limit once and records it as ``co_name
-    (filename:firstlineno)``, so that set cannot merge two frames.
-    """
-    return PrecompileSummary(
-        frames=len(entry.codes),
-        resume_functions=sum(1 for c in entry.codes if c.install_to_global),
-        guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
-        backend_graphs=len(
-            {b for c in entry.codes if not c.bypassed for b in c.backend_ids}
-        ),
-        bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
-        truncated=tuple(sorted(truncated)),
-        uncovered_frames=tuple(
-            c.python_code.co_name
-            for c in entry.codes
-            if c.has_compile_id and not c.guarded_codes and not c.bypassed
-        ),
-        wont_generalize=_wont_generalize(kept, guard_sets),
-        dropped_guards=tuple(sorted(dropped)),
-        dropped_guard_code=tuple(
-            (gtype, name, dropped_code[(gtype, name)])
-            for gtype, name in sorted(dropped | policy_dropped)
-            if (gtype, name) in dropped_code
-        ),
-        kept_guards=tuple(sorted(kept)),
-        risky_dropped_guards=tuple(sorted(risky)),
-        policy_dropped_guards=tuple(sorted(policy_dropped)),
-        capture_errors=tuple(capture_errors),
-    )
