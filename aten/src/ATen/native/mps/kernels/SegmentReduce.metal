@@ -1,8 +1,8 @@
-#include <metal_stdlib>
+#include <SegmentReduce.h>
 #include <c10/metal/error.h>
 #include <c10/metal/reduction_utils.h>
 #include <c10/metal/utils.h>
-#include "SegmentReduce.h"
+#include <metal_stdlib>
 
 using namespace metal;
 using namespace c10::metal;
@@ -26,7 +26,9 @@ kernel void segment_validate(
   }
   valid[row] = ok;
   if (!ok) {
-    TORCH_REPORT_ERROR(errors, "segment_reduce(): offsets must be nondecreasing and within the data axis");
+    TORCH_REPORT_ERROR(
+        errors,
+        "segment_reduce(): offsets must be nondecreasing and within the data axis");
   }
 }
 
@@ -90,7 +92,8 @@ kernel void segment_reduce_serial(
   for (ulong j = start; j < end; ++j) {
     value = segment_combine<R>(value, float(data[data_base + j * p.inner]));
   }
-  output[index] = T(segment_finalize<R>(float(value), end - start, p.has_initial));
+  output[index] =
+      T(segment_finalize<R>(float(value), end - start, p.has_initial));
 }
 
 // Like CUDA's 1-D segmented reduction, distribute long contiguous segments
@@ -131,7 +134,8 @@ kernel void segment_reduce_parallel(
   }
   if (tid == 0) {
     if (p.has_initial) {
-      value = start == end ? float(T(p.initial)) : segment_combine<R>(float(T(p.initial)), value);
+      value = start == end ? float(T(p.initial))
+                           : segment_combine<R>(float(T(p.initial)), value);
     }
     output[index] = T(segment_finalize<R>(value, end - start, p.has_initial));
   }
@@ -147,6 +151,7 @@ kernel void segment_reduce_backward(
     constant uint* valid,
     constant SegmentReduceParams& p,
     constant ulong& base,
+    device float* prod_prefix,
     uint tid [[thread_position_in_grid]]) {
   const ulong index = base + tid;
   const ulong row = index / p.inner;
@@ -159,7 +164,39 @@ kernel void segment_reduce_backward(
   const ulong end = offsets[o + 1];
   const ulong data_base = outer * p.axis_size * p.inner + index % p.inner;
   const float g = float(grad[index]);
-  const float result = float(output[index]);
+  float result = float(output[index]);
+  if (R == SegmentReduction::Prod &&
+      (sizeof(T) < sizeof(float) || result == 0 || isnan(result))) {
+    // Exclusive prefix/suffix products keep zero/NaN handling linear.
+    opmath_t<T> prefix = T(p.has_initial ? p.initial : 1.0f);
+    for (ulong j = start; j < end; ++j) {
+      const ulong input_index = data_base + j * p.inner;
+      const float x = float(data[input_index]);
+      if (x == 0 || isnan(x)) {
+        prod_prefix[input_index] = prefix;
+      }
+      prefix *= x;
+    }
+    if (sizeof(T) < sizeof(float)) {
+      // The stored low-precision output can overflow even when gradients do
+      // not.
+      result = prefix;
+    }
+    if (result == 0 || isnan(result)) {
+      opmath_t<T> suffix = 1;
+      for (ulong j = end; j > start;) {
+        --j;
+        const ulong input_index = data_base + j * p.inner;
+        const float x = float(data[input_index]);
+        const float value = x == 0 || isnan(x)
+            ? g * (prod_prefix[input_index] * suffix)
+            : g * result / x;
+        grad_input[input_index] = T(value);
+        suffix *= x;
+      }
+      return;
+    }
+  }
   ulong ties = 0;
   if (R == SegmentReduction::Min || R == SegmentReduction::Max) {
     for (ulong j = start; j < end; ++j) {
@@ -180,35 +217,45 @@ kernel void segment_reduce_backward(
     } else if (R == SegmentReduction::Mean) {
       value /= float(end - start);
     } else if (R == SegmentReduction::Prod) {
-      if (x == 0 || isnan(x)) {
-        T exclusive = T(p.has_initial ? p.initial : 1.0f);
-        for (ulong k = start; k < end; ++k) {
-          if (k != j) {
-            exclusive = T(float(exclusive) * float(data[data_base + k * p.inner]));
-          }
-        }
-        value *= float(exclusive);
-      } else {
-        value = float(T(g * result)) / x;
-      }
+      value = g * result / x;
     }
     grad_input[input_index] = T(value);
   }
 }
 
-#define REGISTER_SEGMENT(T, I, R)                                           \
-  template [[host_name("segment_serial_" #T "_" #I "_" #R)]]                 \
-  kernel void segment_reduce_serial<T, I, SegmentReduction::R>(            \
-      constant T*, device T*, constant I*, constant uint*,                  \
-      constant SegmentReduceParams&, constant ulong&, uint);               \
-  template [[host_name("segment_parallel_" #T "_" #I "_" #R)]]               \
-  kernel void segment_reduce_parallel<T, I, SegmentReduction::R>(          \
-      constant T*, device T*, constant I*, constant uint*,                  \
-      constant SegmentReduceParams&, constant ulong&, uint, uint, uint);   \
-  template [[host_name("segment_backward_" #T "_" #I "_" #R)]]               \
-  kernel void segment_reduce_backward<T, I, SegmentReduction::R>(          \
-      constant T*, constant T*, constant T*, device T*, constant I*,        \
-      constant uint*, constant SegmentReduceParams&, constant ulong&, uint)
+#define REGISTER_SEGMENT(T, I, R)                                 \
+  template [[host_name("segment_serial_" #T "_" #I "_" #R)]]      \
+  kernel void segment_reduce_serial<T, I, SegmentReduction::R>(   \
+      constant T*,                                                \
+      device T*,                                                  \
+      constant I*,                                                \
+      constant uint*,                                             \
+      constant SegmentReduceParams&,                              \
+      constant ulong&,                                            \
+      uint);                                                      \
+  template [[host_name("segment_parallel_" #T "_" #I "_" #R)]]    \
+  kernel void segment_reduce_parallel<T, I, SegmentReduction::R>( \
+      constant T*,                                                \
+      device T*,                                                  \
+      constant I*,                                                \
+      constant uint*,                                             \
+      constant SegmentReduceParams&,                              \
+      constant ulong&,                                            \
+      uint,                                                       \
+      uint,                                                       \
+      uint);                                                      \
+  template [[host_name("segment_backward_" #T "_" #I "_" #R)]]    \
+  kernel void segment_reduce_backward<T, I, SegmentReduction::R>( \
+      constant T*,                                                \
+      constant T*,                                                \
+      constant T*,                                                \
+      device T*,                                                  \
+      constant I*,                                                \
+      constant uint*,                                             \
+      constant SegmentReduceParams&,                              \
+      constant ulong&,                                            \
+      device float*,                                              \
+      uint)
 
 #define REGISTER_SEGMENT_REDUCTIONS(T, I) \
   REGISTER_SEGMENT(T, I, Max);            \
@@ -217,13 +264,17 @@ kernel void segment_reduce_backward(
   REGISTER_SEGMENT(T, I, Sum);            \
   REGISTER_SEGMENT(T, I, Prod)
 
-#define REGISTER_SEGMENT_INDEX(I)                                          \
-  template [[host_name("segment_validate_" #I)]]                            \
-  kernel void segment_validate<I>(                                        \
-      constant I*, device uint*, constant SegmentReduceParams&,            \
-      device ErrorMessages*, constant ulong&, uint);                       \
-  REGISTER_SEGMENT_REDUCTIONS(float, I);                                   \
-  REGISTER_SEGMENT_REDUCTIONS(half, I);                                    \
+#define REGISTER_SEGMENT_INDEX(I)                \
+  template [[host_name("segment_validate_" #I)]] \
+  kernel void segment_validate<I>(               \
+      constant I*,                               \
+      device uint*,                              \
+      constant SegmentReduceParams&,             \
+      device ErrorMessages*,                     \
+      constant ulong&,                           \
+      uint);                                     \
+  REGISTER_SEGMENT_REDUCTIONS(float, I);         \
+  REGISTER_SEGMENT_REDUCTIONS(half, I);          \
   REGISTER_SEGMENT_REDUCTIONS(bfloat, I)
 
 REGISTER_SEGMENT_INDEX(int);
