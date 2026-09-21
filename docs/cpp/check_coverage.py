@@ -112,14 +112,18 @@ EXCLUDED_PATTERNS = [
     r"at::TensorRef",
     # at::cuda internals (allocator, workspace, cublas)
     r"at::cuda::WorkspaceMapWithMutex",
+    r"at::cuda::CUDABlasHandleWithWorkspace.*",
+    r"at::cuda::allocateCUDABlasWorkspace",
     r"at::cuda::clearCublasWorkspaces.*",
     r"at::cuda::cublas_handle_stream_to_workspace",
     r"at::cuda::cublaslt_handle_stream_to_workspace",
     r"at::cuda::getCUDABlasLt.*",
+    r"at::cuda::getCurrentCUDABlasHandleWithWorkspace",
     r"at::cuda::getCUDADeviceAllocator",
     r"at::cuda::getChosenWorkspaceSize",
     r"at::cuda::getNumGPUs",
     r"at::cuda::is_available",
+    r"at::cuda::isCUDABlasWorkspaceCachingEnabled",
     r"at::cuda::warp_size",
     # jit namespace (deprecated)
     r"torch::jit::.*",

@@ -382,7 +382,7 @@ at::Tensor evenly_distribute_backward(
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
 Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask);
 Tensor masked_fill_inplace_if_safe(
-    Tensor tensor,
+    const Tensor& tensor,
     const Tensor& mask,
     const Scalar& value);
 at::Tensor var_backward(
@@ -584,6 +584,7 @@ std::tuple<at::Tensor, at::Tensor> slogdet_jvp(
     const at::Tensor& LU,
     const at::Tensor& pivots,
     const at::Tensor& dA,
+    const at::Tensor& A,
     const at::Tensor& sign,
     const bool use_A_T);
 at::Tensor slogdet_backward(
@@ -935,6 +936,14 @@ Tensor i1_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);
+Tensor bessel_j1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor bessel_y1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
 Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -966,6 +975,7 @@ Tensor linalg_solve_jvp(
     const Tensor& dA,
     const Tensor& dB,
     const Tensor& X,
+    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool left);
@@ -984,6 +994,7 @@ Tensor linalg_det_backward(
 Tensor linalg_det_jvp(
     const Tensor& dA,
     const Tensor& det,
+    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool use_A_T);
