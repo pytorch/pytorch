@@ -4143,6 +4143,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         state = load_guards_state(self._cached_guards_state).output_graph
         self.assertEqual(next(iter(state.local_scope["d"])).sub.tags, ["t"])
 
+    def test_a_plain_object_key_field_shared_with_a_module_attribute_stays_real(self):
+        # The module path registers its unguarded attributes in missing_values,
+        # and a plain object among them is pruned by reducer_override rather than
+        # persistent_id; the same object is a field of a by-value key, so it must
+        # stay whole. The module comes first in the scope so it is reduced first.
+        def fn(m, d, x):
+            for v in d.values():
+                x = x + v
+            return m(x)
+
+        sub = _SubCfg(2.0, ["t"])
+        m, d, x = _NetWithTags(sub), {_KeyWithSub("a", sub): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, m, d, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).sub, sub)
+
     def test_grad_mode(self):
         def fn(x):
             return x + 1
