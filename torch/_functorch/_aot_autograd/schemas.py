@@ -519,6 +519,11 @@ class ViewAndMutationMeta:
 
     # Whether each saved tensor is also a graph input.
     saved_tensor_is_graph_input: list[bool] = field(default_factory=list)
+
+    # For every saved tensor, the graph input whose storage it aliases, or None.
+    # Saved views that alias inputs must be regenerated from that input before
+    # save_for_backward so that they share its version counter at runtime.
+    saved_tensor_input_alias_indices: list[int | None] = field(default_factory=list)
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
