@@ -7,8 +7,10 @@
 #include <c10/core/Stream.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
+#include <c10/util/numa.h>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -46,6 +48,10 @@ struct HostBlock {
   size_t event_count_{0}; // number of related events
   ska::flat_hash_set<S> streams_; // streams on which the block was used
   c10::MempoolId_t owning_pool_{0,0}; // never changes after construction, so we don't need a mutex to guard this
+  // The node of the default pool this block came from, which is the pool it
+  // returns to on free.  An expected page location, not a verified one; see
+  // HostBlockPool::numa_node_.  Always 0 unless pinned_numa_aware is on.
+  int numa_node_{0};
   bool was_allocated_during_stream_capture_;
   std::shared_ptr<c10::GatheredContext> context_when_allocated_;
 };
@@ -137,10 +143,9 @@ struct TORCH_API HostStats {
 struct alignas(hardware_destructive_interference_size) HostStatsStaged {
   std::mutex timing_mutex_;
   // Guards the two process-wide counters below.  They used to ride on
-  // pool.blocks_mutex_, which is per pool, so a graph private pool and the
-  // default pool already updated them under different locks.  Give them their
-  // own lock rather than leave correctness resting on there being exactly one
-  // default pool.
+  // pool.blocks_mutex_, so a graph private pool and the default pool already
+  // updated them under different locks; per-NUMA-node pools would have made
+  // that routine.
   std::mutex global_mutex_;
   // COUNT: total allocations (active + free)
   // LOCK: access to this stat is protected by the allocator's blocks_mutex_
@@ -261,19 +266,23 @@ struct HostBlockPool {
   ska::flat_hash_set<B_*> blocks_; // all blocks in this pool
   ska::flat_hash_map<void*, B_*> ptr_to_block_;
 
-  // Per-size free lists guarded by their own mutexes.
-  // Per-bucket stats live next to the free list that guards them.  They used
-  // to sit in a single process-wide HostStatsStaged while being documented as
-  // protected by pool.free_list_[i].mutex_, so two pools at the same bucket
-  // index took different mutexes yet mutated the same counters.  Latent while
-  // private pools are only created during graph capture, but it is a real race
-  // and the invariant is much easier to see when the counter lives next to the
-  // lock that guards it.
+  // Which NUMA node this pool serves.  Blocks record this rather than
+  // resampling when they are created: a thread that migrated in between would
+  // register a block in one pool and free it into another.  For the pages
+  // themselves the node is an expectation, not a guarantee -- see
+  // pinned_numa_aware in docs/source/notes/cuda.md for what it rests on.
+  int numa_node_{0};
+
+  // Per-bucket stats live next to the free list that guards them.  They used to
+  // sit in one process-wide instance while documented as protected by
+  // pool.free_list_[i].mutex_, so two pools at the same index took different
+  // mutexes yet mutated the same counters.
   std::vector<Stat> active_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
   std::vector<Stat> active_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
   std::vector<Stat> allocation_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
   std::vector<Stat> allocated_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
 
+  // Per-size free lists guarded by their own mutexes.
   alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B_>> free_list_ =
       std::vector<FreeBlockList<B_>>(MAX_SIZE_INDEX);
 
@@ -392,7 +401,9 @@ struct CachingHostAllocatorImpl {
             // events only. Private pools never use a background
             // thread because cuda stream capture does not benefit
             // from asynchronous event processing.
-            process_events(default_pool_, nullptr);
+            for (auto& pool : default_pools_) {
+              process_events(pool, nullptr);
+            }
             std::this_thread::sleep_for(std::chrono::microseconds(100));
           }
         });
@@ -403,6 +414,13 @@ struct CachingHostAllocatorImpl {
     // Slow path: if we can't allocate from the cached free list, we need
     // to create a new block.
     void* ptr = nullptr;
+    if (numa_aware_at_init_) {
+      // Rechecked rather than trusted from pool setup: those settings are
+      // mutable, and turning one on since would hand page placement to
+      // something other than the thread whose node is about to be recorded.
+      auto reason = numa_placement_untrustworthy_reason();
+      TORCH_CHECK(!reason.has_value(), "pinned_numa_aware: ", *reason);
+    }
     allocate_host_memory(roundSize, &ptr);
 
     record_trace(
@@ -415,6 +433,7 @@ struct CachingHostAllocatorImpl {
 
     // Then, create a new block.
     block = new B(roundSize, ptr);
+    block->numa_node_ = pool.numa_node_;
     block->allocated_.store(true, std::memory_order_relaxed);
     block->owning_pool_ = mempool_id;
     block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
@@ -540,8 +559,11 @@ struct CachingHostAllocatorImpl {
 
   // TODO: Make this take a pool id like in CUDACachingAllocator
   virtual void empty_cache() {
-    process_events(default_pool_, nullptr);
-    free_from_pool(default_pool_);
+    ensure_numa_pools_initialized();
+    for (auto& pool : default_pools_) {
+      process_events(pool, nullptr);
+      free_from_pool(pool);
+    }
 
     {
       std::unique_lock<std::shared_mutex> lg(instance_mutex_);
@@ -574,6 +596,7 @@ struct CachingHostAllocatorImpl {
   }
 
   HostStats getStats() {
+    ensure_numa_pools_initialized();
     HostStats stats;
 
     // To keep getStats lightweight we do *not* flush any available blocks
@@ -592,7 +615,6 @@ struct CachingHostAllocatorImpl {
     // Accurate reading of memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
-    // Process-wide counters under their own lock, not some pool's.
     {
       std::lock_guard<std::mutex> g(stats_.global_mutex_);
       stats.allocations = stats_.allocations;
@@ -635,6 +657,7 @@ struct CachingHostAllocatorImpl {
   }
 
   void resetAccumulatedStats() {
+    ensure_numa_pools_initialized();
     // Resetting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
@@ -675,6 +698,7 @@ struct CachingHostAllocatorImpl {
   }
 
   void resetPeakStats() {
+    ensure_numa_pools_initialized();
     // Resetting peak memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
@@ -988,8 +1012,9 @@ struct CachingHostAllocatorImpl {
 
  private:
   std::tuple<c10::MempoolId_t, BlockPool&> get_allocation_pool_for_current_stream() {
+    ensure_numa_pools_initialized();
     if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
-      return {c10::MempoolId_t{0, 0}, default_pool_};
+      return {c10::MempoolId_t{0, 0}, default_pools_[current_numa_node()]};
     }
 
     std::shared_lock<std::shared_mutex> lg(instance_mutex_);
@@ -1009,15 +1034,47 @@ struct CachingHostAllocatorImpl {
         return {id, it->second->blocks};
       }
     }
-    return {c10::MempoolId_t{0, 0}, default_pool_};
+    return {c10::MempoolId_t{0, 0}, default_pools_[current_numa_node()]};
   }
 
-  // Every pool whose bucket stats contribute to the reported totals: the
-  // the default pool plus any live graph private pools.  Before the bucket
-  // stats moved into HostBlockPool they were shared, so private-pool activity
-  // showed up in the totals; it has to keep doing so.  Caller must
-  // hold instance_mutex_ (shared is enough) if graph_pools_ can change.
-  // Fold a pool's bucket counters into retired_ before it is dropped.
+  // Lazy because the allocator is a static singleton and the config is only
+  // readable after static initialization has finished.
+  void ensure_numa_pools_initialized() {
+    c10::call_once(numa_init_flag_, [this]() {
+      bool want = c10::CachingAllocator::AcceleratorAllocatorConfig::
+          pinned_numa_aware();
+      if (want) {
+        auto reason = numa_placement_untrustworthy_reason();
+        TORCH_CHECK(!reason.has_value(), "pinned_numa_aware: ", *reason);
+        // Size by the highest node id, not the node count: ids can be sparse,
+        // and an id past the end would be clamped to pool 0, quietly putting
+        // two nodes back on one pool -- the failure this flag exists to fix.
+        int nodes = c10::GetNUMANodeIdUpperBound();
+        if (nodes > 1) {
+          // call_once does not latch on throw: a retry would append a second
+          // run of pools, leaving two that claim the same node id.
+          try {
+            for (int i = 1; i < nodes; ++i) {
+              default_pools_.emplace_back().numa_node_ = i;
+            }
+          } catch (...) {
+            while (default_pools_.size() > 1) {
+              default_pools_.pop_back();
+            }
+            throw;
+          }
+          numa_node_count_ = nodes;
+        }
+      }
+      numa_aware_at_init_ = want;
+      // Published last and only on success: the setter reads it to reject a
+      // later change, and a throw here leaves a retry free to try again.
+      c10::CachingAllocator::AcceleratorAllocatorConfig::
+          pinned_numa_aware_latch()
+              .store(want ? 1 : 0, std::memory_order_release);
+    });
+  }
+
   void retire_bucket_stats(BlockPool& pool) {
     std::lock_guard<std::mutex> rg(retired_.mutex_);
     for (size_t i = 0; i < pool.free_list_.size(); ++i) {
@@ -1026,9 +1083,8 @@ struct CachingHostAllocatorImpl {
         into.allocated += from.allocated;
         into.current += from.current;
         into.freed += from.freed;
-        // Max, not sum: retired pools no longer exist, so their peaks cannot
-        // overlap each other.  Summing them would grow without bound as pools
-        // come and go at unchanged concurrent use.
+        // Max, not sum: retired pools no longer overlap in time, and summing
+        // their peaks would grow without bound as pools come and go.
         into.peak = std::max(into.peak, from.peak);
       };
       absorb(retired_.active[i], pool.active_bucket_stats[i]);
@@ -1038,21 +1094,53 @@ struct CachingHostAllocatorImpl {
     }
   }
 
+  // Caller must hold instance_mutex_ (shared is enough) if graph_pools_ can
+  // change.
   std::vector<BlockPool*> all_pools() {
     std::vector<BlockPool*> pools;
-    pools.reserve(1 + graph_pools_.size());
-    pools.push_back(&default_pool_);
+    pools.reserve(default_pools_.size() + graph_pools_.size());
+    for (auto& pool : default_pools_) {
+      pools.push_back(&pool);
+    }
     for (auto& [_, private_pool] : graph_pools_) {
       pools.push_back(&private_pool->blocks);
     }
     return pools;
   }
 
+  // A cpuset restricts which CPUs a thread may run on but does not renumber
+  // node ids, so the pools are sized by the host's highest node id rather than
+  // by how many nodes this task can reach.  The fallback warns rather than
+  // silently putting two nodes back on one pool with nothing to show for it.
+  int current_numa_node() const {
+    if (numa_node_count_ <= 1) {
+      return 0;
+    }
+    int node = c10::GetCurrentNUMANode();
+    if (C10_UNLIKELY(node < 0 || node >= numa_node_count_)) {
+      TORCH_WARN_ONCE(
+          "pinned_numa_aware: could not place this thread on one of the ",
+          numa_node_count_,
+          " known NUMA nodes (got node id ",
+          node,
+          "), falling back to the first pool.  Blocks will be shared across "
+          "nodes and the per-node split will not take effect for this thread.");
+      return 0;
+    }
+    return node;
+  }
+
   // Helper: return the pool containing a block, based on its owning_pool_.
+  // Deliberately does not touch the config: a live block means the pools were
+  // already sized, and this runs on the free path, where raising would reach a
+  // noexcept destruction path.
   BlockPool& pool_from_block(B* block) {
     auto id = block->owning_pool_;
     if (id == c10::MempoolId_t{0, 0}) {
-      return default_pool_;
+      // Route by the node recorded on the block, not by where the freeing
+      // thread runs: otherwise blocks drift to whichever node frees most often
+      // and the split decays.
+      return default_pools_[block->numa_node_];
     }
     std::shared_lock<std::shared_mutex> lg(instance_mutex_);
     auto it = graph_pools_.find(id);
@@ -1061,11 +1149,15 @@ struct CachingHostAllocatorImpl {
   }
 
   B* get_block_from_ptr(void *ptr) {
+    ensure_numa_pools_initialized();
     std::shared_lock<std::shared_mutex> lk(instance_mutex_);
     {
-      std::lock_guard<std::mutex> lk(default_pool_.blocks_mutex_);
-      if (default_pool_.ptr_to_block_.count(ptr)) {
-        return default_pool_.ptr_to_block_.at(ptr);
+      for (auto& pool : default_pools_) {
+        std::lock_guard<std::mutex> lk(pool.blocks_mutex_);
+        auto it = pool.ptr_to_block_.find(ptr);
+        if (it != pool.ptr_to_block_.end()) {
+          return it->second;
+        }
       }
     }
     if (C10_LIKELY(graph_pools_.empty())) {
@@ -1083,12 +1175,15 @@ struct CachingHostAllocatorImpl {
   }
 
   bool block_exists(void *block_) {
+    ensure_numa_pools_initialized();
     B *block = reinterpret_cast<B*>(block_);
     std::shared_lock<std::shared_mutex> lk(instance_mutex_);
     {
-      std::lock_guard<std::mutex> lk(default_pool_.blocks_mutex_);
-      if (default_pool_.blocks_.count(block)) {
-        return true;
+      for (auto& pool : default_pools_) {
+        std::lock_guard<std::mutex> lk(pool.blocks_mutex_);
+        if (pool.blocks_.count(block)) {
+          return true;
+        }
       }
     }
     if (C10_LIKELY(graph_pools_.empty())) {
@@ -1124,6 +1219,15 @@ protected:
 
 private:
   /* These following functions are runtime-related. */
+
+  // Whether a backing allocation made by this thread can be expected to land
+  // on this thread's NUMA node.  A backend with an allocation mode that hands
+  // placement to someone else must say so: pinned_numa_aware would otherwise
+  // partition on a node id that means nothing.
+  virtual std::optional<std::string> numa_placement_untrustworthy_reason()
+      const {
+    return std::nullopt;
+  }
 
   // Allocate page-locked memory on the host.
   virtual void allocate_host_memory(size_t size, void** ptr) {
@@ -1226,6 +1330,7 @@ private:
   }
 
   std::vector<HostSegmentInfo> getSegments() {
+    ensure_numa_pools_initialized();
     std::vector<HostSegmentInfo> result;
     auto collect_from_pool = [&](BlockPool& pool) {
       std::lock_guard<std::mutex> g(pool.blocks_mutex_);
@@ -1243,7 +1348,9 @@ private:
         result.push_back(std::move(seg));
       }
     };
-    collect_from_pool(default_pool_);
+    for (auto& pool : default_pools_) {
+      collect_from_pool(pool);
+    }
     {
       std::shared_lock<std::shared_mutex> lg(instance_mutex_);
       for (auto& [_, private_pool] : graph_pools_) {
@@ -1344,7 +1451,7 @@ private:
   // and captures_underway_, as well as the use_count field of
   // PrivatePools in graph_pools_ and graph_pools_freeable_.  We use a
   // shared mutex because we want to allow for multiple private pools
-  // to be allocated to concurrently.  Does not protect default_pool_,
+  // to be allocated to concurrently.  Does not protect default_pools_,
   // which has its own mutex.
   alignas(hardware_destructive_interference_size) mutable std::shared_mutex instance_mutex_;
 
@@ -1370,8 +1477,13 @@ private:
   std::vector<
       std::pair<c10::MempoolId_t, std::function<bool(c10::Stream)>>> captures_underway_;
 
-  // corresponds to c10::MempoolId_t{0,0}
-  BlockPool default_pool_;
+  // corresponds to c10::MempoolId_t{0,0}.  One entry per NUMA node when
+  // pinned_numa_aware is on, otherwise a single entry.  A deque because
+  // HostBlockPool holds mutexes and must not be moved once constructed.
+  std::deque<BlockPool> default_pools_{1};
+  int numa_node_count_{1};
+  bool numa_aware_at_init_{false};
+  c10::once_flag numa_init_flag_;
 
   // Indicates whether the event-processing thread pool is active.
   // Set to false in the destructor to signal background threads to stop.
