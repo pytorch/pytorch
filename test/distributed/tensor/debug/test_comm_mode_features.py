@@ -386,7 +386,7 @@ class TestCommModeTransformerCUDA(DTensorTestBase):
         )
 
 
-instantiate_device_type_tests(TestCommModeFeatures, globals(), except_for=("cpu",))
+instantiate_device_type_tests(TestCommModeFeatures, globals())
 
 if __name__ == "__main__":
     run_tests()
