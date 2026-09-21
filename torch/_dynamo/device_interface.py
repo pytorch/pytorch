@@ -260,7 +260,7 @@ class DeviceInterface:
         return True
 
     @staticmethod
-    def maybe_warn_tf32_disabled() -> bool:
+    def should_warn_tf32_disabled() -> bool:
         return False
 
     @staticmethod
@@ -414,7 +414,7 @@ class CudaInterface(DeviceInterface):
         return False
 
     @staticmethod
-    def maybe_warn_tf32_disabled() -> bool:
+    def should_warn_tf32_disabled() -> bool:
         if torch.backends.cuda.matmul.fp32_precision == "bfx9":
             return False
         return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)

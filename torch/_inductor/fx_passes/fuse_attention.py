@@ -969,7 +969,7 @@ def _sfdp_params_check(match):
     # fused kernels use tf32
     iface = get_interface_for_device(query.device.type)
     if not iface.is_fp32_attention_fusion_safe(query.dtype):
-        if iface.maybe_warn_tf32_disabled():
+        if iface.should_warn_tf32_disabled():
             _warn_tf32_disabled()
         return False
 
