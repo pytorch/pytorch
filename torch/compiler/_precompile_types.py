@@ -39,17 +39,32 @@ class GuardFact:
         code: The rendered check parts, with the addresses Dynamo interpolates
             scrubbed by the producer and the values the check embeds masked by
             type, e.g. ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``
-            and ``("L['self'].prompt == <str>",)``; empty when the guard renders
-            none. A guard that pins a string pins it BY VALUE, so the check
-            guards.py renders carries the string itself, and these reports are
-            written to a file to be committed and diffed: what a check compares
-            is named by type, and that it differed between variants is reported
-            by the slot (``PrecompileSummary.risky_dropped_guards``) rather than
-            by printing the value. The attribute name a ``hasattr`` reads is part
-            of the source and stays.
+            and ``("L['self'].prompt == '<str>'",)``; empty when the guard
+            renders none. A guard that pins a string pins it BY VALUE, so the
+            check guards.py renders carries the string itself, and these reports
+            are written to a file to be committed and diffed: what a check
+            compares is named by type, and that it differed between variants is
+            reported by the slot (``PrecompileSummary.risky_dropped_guards``)
+            rather than by printing the value. A container is named by its type
+            and its length (``'<list:3>'``), so two variants pinning containers
+            of the same length render one check and only the slot says they
+            differed, and a rendering that is not a Python expression at all
+            becomes ``"<unparsed check>"``, since nothing can be masked in a
+            shape the producer cannot read. The attribute name a ``hasattr``
+            reads stays, as does a key that names a scope or an nn.Module
+            attribute (``L['x']``, ``self._modules['lin']``); every other
+            subscript key is masked, its shape notwithstanding.
         value: A rendered fragment for what the check compares that its code does
-            not show: a tensor's dtype and shape line, or ``"is <callable>"`` for
-            an identity guard. Empty when the code says it all.
+            not show: the ``check_tensor`` line for a tensor guard (python type,
+            dispatch keys, dtype, size and stride), ``"is <callable>"`` for an
+            identity guard -- module, qualname and definition site of the object,
+            never the data bound to it -- the flags a global-state guard
+            snapshots, and a digest of the saved-tensors hooks. Empty when the
+            code says it all. Unlike ``code`` this is not masked, and does not
+            need to be: every shape it takes is metadata, a name or a digest
+            derived from the guarded object rather than a literal the guard
+            pinned, and it is what still tells two variants apart once ``code``
+            has masked what they compared.
         enforced: Whether the artifact still checks this guard (it was serialized).
     """
 
@@ -115,6 +130,10 @@ class PrecompileSummary:
       voted -- a guard type whose ``GuardBuilder`` method is ``pass`` -- is in
       NEITHER list, since no verdict took it away; ``GuardFact.enforced`` is
       where a report says that guard is not checked.
+    * the guards of a compile that BYPASSED are in neither list either: a bypass
+      installs no guarded code, so nothing enforces what its filter kept and no
+      serving artifact was widened by what it dropped. ``bypassed`` is where the
+      report names those frames.
     * ``risky_dropped_guards`` is drawn from ``dropped_guards``.
     * ``policy_dropped_guards`` is disjoint from both: a policy drop is taken
       out of the serialized copy the filter kept, once the slot held
