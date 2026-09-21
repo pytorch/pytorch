@@ -3,6 +3,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Copy.h>
@@ -205,9 +206,6 @@ static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const
 }
 
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
-  auto sameMemFormat =
-      src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-
   MPSStream* stream = getCurrentMPSStream();
   Tensor dst = dst_;
   Tensor src = src_;
@@ -248,6 +246,11 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     NSUInteger blitSourceOffset = storage_byte_offset;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
+      // The castout kernel picks the store type from a runtime switch over the
+      // dtypes Metal can represent. A CPU destination can have any other dtype
+      // (Double, ComplexDouble, ...), for which the store would be silently
+      // skipped, so raise for those here.
+      scalarToMetalTypeString(dst.scalar_type());
       // Unified memory: cast straight from the MPS source into the CPU-wrapped
       // destination buffer at the requested offsets. This avoids the temporary
       // that used to alias the live source buffer and blitting from it (see
@@ -482,5 +485,11 @@ Tensor _copy_from_and_resize_mps(const at::Tensor& self, const at::Tensor& dst) 
 Tensor _copy_from_mps(const at::Tensor& self, const at::Tensor& dst, bool non_blocking) {
   return mps::mps_copy_(const_cast<Tensor&>(dst), self, non_blocking);
 }
+
+static void conj_physical_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "copy_conj");
+}
+
+REGISTER_DISPATCH(conj_physical_stub, &conj_physical_kernel_mps)
 
 } // namespace at::native

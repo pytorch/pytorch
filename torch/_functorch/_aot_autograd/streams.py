@@ -48,7 +48,7 @@ def get_roofline_estimate(node: Node) -> float:
         raise AssertionError(f"non-func node in roofline estimate: {node.op}")
 
     def map_value(x: Any) -> Any:
-        return x.meta.get("value", x) if isinstance(x, Node) else x
+        return x.meta.get("val", x) if isinstance(x, Node) else x
 
     func = node.target
     if func in _IGNORE_OPS:
@@ -57,18 +57,33 @@ def get_roofline_estimate(node: Node) -> float:
     mapped_args = torch.fx.map_arg(node.args, map_value)
     mapped_kwargs = torch.fx.map_arg(node.kwargs, map_value)
     flat_args_kwargs = [map_value(x) for x in _get_flat_args(node, {})]
-    flat_outs, _ = pytree.tree_flatten(node.meta.get("value", node))
-    out = node.meta.get("value", node)
+    flat_outs, _ = pytree.tree_flatten(node.meta.get("val", node))
+    out = node.meta.get("val", node)
     out_dtypes = {
         t.dtype
         for t in flat_outs
         if isinstance(t, torch.Tensor) and t.dtype in _FLOAT_TYPES
     }
+    device = next(
+        (
+            value.device
+            for value in [*flat_outs, *flat_args_kwargs]
+            if isinstance(value, torch.Tensor)
+        ),
+        None,
+    )
 
     return (
         max(
-            get_transfer_time(flat_args_kwargs, flat_outs),
-            get_compute_time(func, mapped_args, mapped_kwargs, out, out_dtypes),
+            get_transfer_time(flat_args_kwargs, flat_outs, device=device),
+            get_compute_time(
+                func,
+                mapped_args,
+                mapped_kwargs,
+                out,
+                out_dtypes,
+                device=device,
+            ),
         )
         / 1e6
     )
@@ -164,7 +179,7 @@ def populate_stream_timeline(
 # we then try and use these timestamps to estimate when to deallocate tensors used in side streams
 # See https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
 # for details on the problem being addressed. Rather than using the automatic memory management approach of record_stream
-# we attempt to find the point which to deallocate based on the estimated timestamps.
+# we attempt to find the point at which to deallocate based on the estimated timestamps.
 def handle_synced_deallocation(
     graph: Graph,
     stream_to_exec_trace: dict[int | None, IndexedDict[Node, float]],
@@ -613,6 +628,15 @@ def _collect_sync_forward_deps(
         node_locations.add((partition, stream))
 
     for node in reversed(graph.nodes):
+        # Reaching a node's definition ends its liveness. A sync's control_deps is
+        # inserted at the sync, so a dep whose definition site is below that point
+        # would be referenced before it has been defined. Applies to every node
+        # kind, not just call_function: get_attr tensor constants are materialized
+        # next to their first user, which can be after the sync.
+        inherited_locations = locations.pop(node, _EMPTY_LOCATIONS)
+        for partition, stream in inherited_locations:
+            live_inputs[partition][stream].discard(node)
+
         if node.op == "call_function" and node.target in full_barriers:
             deps = OrderedSet(
                 dep
@@ -644,9 +668,6 @@ def _collect_sync_forward_deps(
         if node.op != "call_function" or node.target in _SYNC_OPS:
             continue
 
-        inherited_locations = locations.pop(node, _EMPTY_LOCATIONS)
-        for partition, stream in inherited_locations:
-            live_inputs[partition][stream].discard(node)
         execution_stream = get_stream(node)
         if execution_stream is None:
             execution_stream = 0
