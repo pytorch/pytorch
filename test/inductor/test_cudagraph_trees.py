@@ -12,6 +12,7 @@ import unittest
 import warnings
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from unittest import mock
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -113,6 +114,58 @@ class capture_stderr(list):
         self.append(str(self.stringio.getvalue()))
         del self.stringio
         sys.stderr = self.sys_stderr
+
+
+class _GraphPartitionCompileRecord:
+    """What the fw/bw compilers saw for a graph-partitioned compile."""
+
+    def __init__(self) -> None:
+        self.bw_graph = None
+        self.bw_static_input_idxs = None
+        self.forward_is_cudagraph_partitioned = None
+
+
+@contextlib.contextmanager
+def record_graph_partition_compiles():
+    """Capture the state the backward's static-input classification depends on."""
+    record = _GraphPartitionCompileRecord()
+    orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+    def intercept_bw(
+        gm, example_inputs, compiler_config_extra, inner_compile, **kwargs
+    ):
+        def capture_inner_compile(*args, **inner_kwargs):
+            record.bw_static_input_idxs = inner_kwargs["static_input_idxs"]
+            return inner_compile(*args, **inner_kwargs)
+
+        record.bw_graph = gm
+        record.forward_is_cudagraph_partitioned = (
+            compiler_config_extra.forward_is_cudagraph_partitioned.value
+        )
+        return orig_bw(
+            gm,
+            example_inputs,
+            compiler_config_extra,
+            inner_compile=capture_inner_compile,
+            **kwargs,
+        )
+
+    with mock.patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+        yield record
+
+
+def train_steps(model, inputs, steps=1):
+    """Run classification-style fwd/bwd/step iterations against `model`."""
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    for _ in range(steps):
+        loss = criterion(
+            model(inputs),
+            torch.randint(0, 10, (inputs.shape[0],), device=inputs.device),
+        )
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
 
 def cdata(t):
@@ -5474,17 +5527,7 @@ if HAS_CUDA_AND_TRITON:
             # NOT at fixed addresses. The backward must not mark them as
             # static inputs, or it would re-record on every iteration.
             # Primals (params/buffers) should still be marked static.
-            from unittest.mock import patch
-
             from torch._inductor.utils import count_tangents, get_static_bw_input_idxs
-
-            bw_graph = None
-            orig_bw = torch._inductor.compile_fx.compile_fx_backward
-
-            def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
-                nonlocal bw_graph
-                bw_graph = gm
-                return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
 
             class Mod(torch.nn.Module):
                 def __init__(self) -> None:
@@ -5501,17 +5544,12 @@ if HAS_CUDA_AND_TRITON:
 
             model = Mod().cuda()
             input_data = torch.randn(16, 16, device="cuda")
-            criterion = torch.nn.CrossEntropyLoss()
-            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 
-            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+            with record_graph_partition_compiles() as compiles:
                 compiled_model = torch.compile(model, mode="reduce-overhead")
-                output = compiled_model(input_data)
-                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                train_steps(compiled_model, input_data)
 
+            bw_graph = compiles.bw_graph
             self.assertIsNotNone(bw_graph)
             # count_tangents marks ALL saved tensors as static (old behavior)
             all_static = list(range(count_tangents(bw_graph)))
@@ -5524,30 +5562,13 @@ if HAS_CUDA_AND_TRITON:
                 self.assertIn(idx, all_static)
 
             # Run a few more iterations to confirm stability
-            for _ in range(4):
-                output = compiled_model(input_data)
-                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            train_steps(compiled_model, input_data, steps=4)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
             # When graph_partition is enabled but the forward has no unsafe
             # ops, forward_is_cudagraph_partitioned should be False and all saved
             # tensors remain static in the backward.
-            from unittest.mock import patch
-
-            forward_cudagraph_partitioned = None
-            orig_bw = torch._inductor.compile_fx.compile_fx_backward
-
-            def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
-                nonlocal forward_cudagraph_partitioned
-                forward_cudagraph_partitioned = (
-                    compiler_config_extra.forward_is_cudagraph_partitioned.value
-                )
-                return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
-
             class Mod(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -5558,18 +5579,12 @@ if HAS_CUDA_AND_TRITON:
 
             model = Mod().cuda()
             input_data = torch.randn(16, 16, device="cuda")
-            criterion = torch.nn.CrossEntropyLoss()
-            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 
-            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+            with record_graph_partition_compiles() as compiles:
                 compiled_model = torch.compile(model, mode="reduce-overhead")
-                output = compiled_model(input_data)
-                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                train_steps(compiled_model, input_data)
 
-            self.assertFalse(forward_cudagraph_partitioned)
+            self.assertFalse(compiles.forward_is_cudagraph_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
