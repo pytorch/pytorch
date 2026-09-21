@@ -199,6 +199,29 @@ class CPUOffloadPolicy(OffloadPolicy):
     pin_memory: bool = True
 
 
+@dataclass(frozen=True)
+class AllGatherInput:
+    r"""Describe one all-gather payload and its gathered layout.
+
+    Payloads must be flattenable with ``view(-1)``. Each rank must return the
+    same payload shapes, dtypes, and layouts; extensions own any padding.
+    The number, element counts, and dtypes of payloads must stay fixed across
+    calls so FSDP can reuse their output buffers.
+
+    Attributes:
+        tensor (Tensor): Local payload to communicate.
+        dim (int): Payload dimension to concatenate across ranks. Negative
+            dimensions are supported. Defaults to 0.
+        output_size (torch.Size, optional): Shape passed to the post hook, with
+            the same number of elements as the gathered payload. Defaults to
+            the concatenated shape.
+    """
+
+    tensor: torch.Tensor
+    dim: int = 0
+    output_size: torch.Size | None = None
+
+
 @dataclass
 class ReduceScatterInput:
     r"""Describe a parameter group's reduce-scatter input layout and copy.

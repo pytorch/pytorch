@@ -435,8 +435,7 @@ def _default_all_gather_output_fn(
 ) -> None:
     r"""Copy all-gather outputs into their final layout.
 
-    Nonzero-dimension extensions use the padded parameter's output layout.
-    Empty outputs and flat post-forward shards copy directly.
+    Each payload's prepared layout determines its copy into the final output.
     """
     all_gather_output = all_gather_result.all_gather_output
     device = all_gather_output.device
@@ -451,30 +450,9 @@ def _default_all_gather_output_fn(
             all_gather_input_numels, all_gather_input_dtypes, world_size, device
         )
         fsdp_param.alloc_all_gather_outputs()
-        outputs = fsdp_param.all_gather_outputs
-        shard_dim = fsdp_param.fsdp_placement.dim
-        prefix_count = 1
-        if (
-            shard_dim != 0
-            and fsdp_param.sharded_state == ShardedState.SHARDED
-            and any(all_gather_input_numels)
-        ):
-            prefix_count = math.prod(fsdp_param.padded_sharded_param_size[:shard_dim])
-            if hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather"):
-                padded_numel = fsdp_param.padded_sharded_param_size.numel()
-                if any(numel != padded_numel for numel in all_gather_input_numels):
-                    # Cached outputs may have a different dtype from current inputs.
-                    expected_numel = padded_numel * world_size
-                    for output in outputs:
-                        if output.numel() != expected_numel:
-                            raise RuntimeError(
-                                f"Shard({shard_dim}) all-gather output must have "
-                                f"{expected_numel} elements for padded local size "
-                                f"{fsdp_param.padded_sharded_param_size} and world size "
-                                f"{world_size}, but got {output.numel()}"
-                            )
-        copy_outputs.extend(outputs)
-        num_prefixes.extend([prefix_count] * len(outputs))
+        copy_outputs.extend(fsdp_param.all_gather_outputs)
+        for layout in fsdp_param.all_gather_copy_layouts:
+            num_prefixes.append(layout.num_prefixes)
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
         torch.ops.fsdp._all_gather_copy_out_(

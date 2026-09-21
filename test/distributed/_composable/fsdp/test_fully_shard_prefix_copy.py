@@ -7,11 +7,16 @@ from unittest.mock import Mock
 
 import torch
 import torch.distributed as dist
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     AllGatherResult,
     foreach_reduce_scatter_copy_in,
+)
+from torch.distributed.fsdp._fully_shard._fsdp_extensions import (
+    _get_all_gather_output_layout,
+    _normalize_all_gather_inputs,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 from torch.distributed.tensor import Shard
@@ -44,6 +49,123 @@ class _OpCounter(TorchDispatchMode):
 @unittest.skipIf(IS_WINDOWS, "FSDP2 is not supported on Windows")
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
+    @parametrize(
+        "dim,output_size,match",
+        [
+            (2, None, "dim 2 is invalid"),
+            (-3, None, "dim -3 is invalid"),
+            (0, torch.Size((-1, 12)), "must be nonnegative"),
+            (1, torch.Size((2, 5)), "must contain 12 elements"),
+        ],
+    )
+    def test_all_gather_input_invalid(self, device, dim, output_size, match):
+        tensor = torch.empty(2, 3, device=device)
+        with self.assertRaisesRegex(ValueError, match):
+            _normalize_all_gather_inputs(
+                (AllGatherInput(tensor, dim, output_size),),
+                world_size=2,
+                shard_dim=1,
+                padded_sharded_size=tensor.size(),
+                require_padding=False,
+            )
+
+    @parametrize("explicit_layout", [False, True])
+    def test_all_gather_input_padding(self, device, explicit_layout):
+        tensor = torch.empty(2, 3, device=device)
+        inputs = (AllGatherInput(tensor, dim=1) if explicit_layout else tensor,)
+        kwargs = {
+            "world_size": 2,
+            "shard_dim": 0,
+            "padded_sharded_size": torch.Size((4, 3)),
+            "require_padding": True,
+        }
+        if explicit_layout:
+            tensors, layouts = _normalize_all_gather_inputs(inputs, **kwargs)
+            self.assertIs(tensors[0], tensor)
+            self.assertEqual(layouts[0].output_size, (2, 6))
+        else:
+            with self.assertRaisesRegex(AssertionError, "padded sharded size"):
+                _normalize_all_gather_inputs(inputs, **kwargs)
+
+    @parametrize("world_size", [1, 2])
+    def test_legacy_all_gather_input_size(self, device, world_size):
+        tensor = torch.empty(2, 3, device=device)
+        kwargs = {
+            "world_size": world_size,
+            "shard_dim": 1,
+            "padded_sharded_size": torch.Size((4, 3)),
+            "require_padding": False,
+        }
+        if world_size == 1:
+            tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
+            self.assertIs(tensors[0], tensor)
+            self.assertEqual(tensor.view(layouts[0].output_size).size(), (2, 3))
+            self.assertEqual(layouts[0].num_prefixes, 1)
+        else:
+            with self.assertRaisesRegex(
+                RuntimeError, "Shard.*all-gather output must have.*elements"
+            ):
+                _normalize_all_gather_inputs((tensor,), **kwargs)
+
+    @parametrize("input_size", [None, (0, 3), (3, 0)])
+    def test_empty_all_gather_inputs(self, device, input_size):
+        kwargs = {
+            "world_size": 2,
+            "shard_dim": 1,
+            "padded_sharded_size": torch.Size((4, 3)),
+            "require_padding": False,
+        }
+        if input_size is None:
+            self.assertEqual(_normalize_all_gather_inputs((), **kwargs), ([], ()))
+        else:
+            tensor = torch.empty(input_size, device=device)
+            tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
+            self.assertIs(tensors[0], tensor)
+            self.assertEqual(
+                tensor.view(layouts[0].output_size).size(),
+                (input_size[0] * kwargs["world_size"], *input_size[1:]),
+            )
+            self.assertEqual(layouts[0].num_prefixes, 1)
+
+    def test_all_gather_mixed_empty_inputs(self, device):
+        world_size = 2
+        expected = make_tensor((2, 4, 3), device=device, dtype=torch.float32)
+        shards = [shard.contiguous() for shard in expected.chunk(world_size, dim=1)]
+        empty = torch.empty(0, 3, device=device)
+        tensors, layouts = _normalize_all_gather_inputs(
+            (shards[0], empty),
+            world_size=world_size,
+            shard_dim=1,
+            padded_sharded_size=shards[0].size(),
+            require_padding=False,
+        )
+        self.assertIs(tensors[0], shards[0])
+        self.assertIs(tensors[1], empty)
+        self.assertEqual([layout.num_prefixes for layout in layouts], [2, 1])
+        self.assertEqual([layout.dim for layout in layouts], [1, 0])
+        param = Mock(all_gather_outputs=[], all_gather_copy_layouts=layouts)
+        param.init_all_gather_outputs = FSDPParam.init_all_gather_outputs.__get__(param)
+        param.alloc_all_gather_outputs = FSDPParam.alloc_all_gather_outputs.__get__(
+            param
+        )
+        result = AllGatherResult(
+            torch.cat([shard.flatten() for shard in shards]),
+            None,
+            None,
+            [[expected.dtype, empty.dtype]],
+            [[shards[0].numel(), 0]],
+            [shards[0].numel(), 0],
+        )
+        with torch.no_grad(), _OpCounter() as counter:
+            _default_all_gather_output_fn([param], result, world_size)
+        output, empty_output = param.all_gather_outputs
+        self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
+        self.assertEqual(empty_output.view(layouts[1].output_size).size(), (0, 3))
+        self.assertEqual(
+            counter.counts[torch.ops.fsdp._all_gather_copy_out_.default], 1
+        )
+        self.assertEqual(counter.counts[torch.ops.aten.cat.out], 0)
+
     @parametrize("nonzero_shards", [False, True])
     @parametrize("world_size", [1, 4])
     @parametrize("mixed_layout", [False, True])
@@ -157,6 +279,13 @@ class TestPrefixCopy(TestCase):
                         rank_shards[0] if is_post_forward else None
                     ),
                     all_gather_outputs=[output],
+                    all_gather_copy_layouts=[
+                        _get_all_gather_output_layout(
+                            rank_shards[0].size(),
+                            0 if is_post_forward else dim,
+                            world_size,
+                        )
+                    ],
                 )
             )
             expected.append(tensor)
@@ -249,8 +378,25 @@ class TestPrefixCopy(TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "Shard.*all-gather output must have.*elements"
             ):
-                _default_all_gather_output_fn([param], result, world_size)
+                _normalize_all_gather_inputs(
+                    (inputs[0],),
+                    world_size=world_size,
+                    shard_dim=shard_dim,
+                    padded_sharded_size=param.padded_sharded_param_size,
+                    require_padding=False,
+                )
             return
+        tensors, layouts = _normalize_all_gather_inputs(
+            (inputs[0],),
+            world_size=world_size,
+            shard_dim=shard_dim,
+            padded_sharded_size=param.padded_sharded_param_size,
+            require_padding=False,
+            all_gather_outputs=param.all_gather_outputs,
+        )
+        self.assertIs(tensors[0], inputs[0])
+        self.assertEqual(output.view(layouts[0].output_size).size(), output.size())
+        param.all_gather_copy_layouts = layouts
         with torch.no_grad(), _OpCounter() as counter:
             _default_all_gather_output_fn([param], result, world_size)
         self.assertIs(param.all_gather_outputs[0], output)

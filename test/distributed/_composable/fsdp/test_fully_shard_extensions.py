@@ -235,6 +235,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
     def test_legacy_all_gather_direct_copy(self, shard_dim: int, invalid_payload: bool):
         expected = torch.arange(48, device=device_type).float().view(2, 4, 6) / 64
         post_out_ids: list[int | None] = []
+        byte_inputs = False
 
         class Scale(nn.Module):
             def __init__(self):
@@ -266,13 +267,14 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
             mp_policy: MixedPrecisionPolicy,
         ) -> tuple[tuple[torch.Tensor, ...], Any]:
             del outer_stride, module, mp_policy
+            weight = local_tensor.view(4, 6)
             auxiliary = (local_tensor.to(torch.bfloat16) + 1).view(6, 4)
             if invalid_payload:
                 auxiliary = auxiliary[:3]
-            return (
-                local_tensor.view(3, 8),
-                auxiliary,
-            ), (outer_size, mesh.size())
+            if byte_inputs:
+                weight = weight.view(torch.uint8)
+                auxiliary = auxiliary.view(torch.uint8)
+            return (weight, auxiliary), (outer_size, mesh.size())
 
         @torch.no_grad()
         def fsdp_post_all_gather(
@@ -285,14 +287,24 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
         ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
             del local_tensor
             weight, auxiliary = all_gather_outputs
+            weight_tail = 24 if byte_inputs else 6
+            auxiliary_tail = 8 if byte_inputs else 4
             self.assertEqual(metadata, (expected.size(), self.world_size))
             self.assertEqual(weight.dtype, param_dtype)
-            self.assertEqual(weight.size(), (self.world_size * 3, 8))
-            self.assertEqual(weight, expected.view(6, 8), atol=0, rtol=0)
-            self.assertEqual(auxiliary.dtype, torch.bfloat16)
-            self.assertEqual(auxiliary.size(), (self.world_size * 6, 4))
             self.assertEqual(
-                auxiliary, (expected + 1).to(torch.bfloat16).view(12, 4), atol=0, rtol=0
+                weight.size(), (expected.numel() // weight_tail, weight_tail)
+            )
+            self.assertEqual(weight, expected.view(-1, weight_tail), atol=0, rtol=0)
+            self.assertEqual(auxiliary.dtype, torch.bfloat16)
+            self.assertEqual(
+                auxiliary.size(),
+                (expected.numel() // auxiliary_tail, auxiliary_tail),
+            )
+            self.assertEqual(
+                auxiliary,
+                (expected + 1).to(torch.bfloat16).view(-1, auxiliary_tail),
+                atol=0,
+                rtol=0,
             )
             post_out_ids.append(None if out is None else id(out))
             weight = weight.view(expected.size())
@@ -319,7 +331,8 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
             ):
                 model(inp)
             return
-        for _ in range(2):
+        for iteration in range(2):
+            byte_inputs = iteration == 1
             model.zero_grad(set_to_none=True)
             ref_model.zero_grad(set_to_none=True)
             with CopyCounter() as counter:
