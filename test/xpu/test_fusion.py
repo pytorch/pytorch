@@ -6,7 +6,11 @@ from typing import NamedTuple
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize as parametrize_test,
+    run_tests,
+    TestCase,
+)
 
 
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -280,6 +284,45 @@ class TestoneDNNFusion(TestCase):
                     self.assertEqual(ref, other)
                     self.assertEqual(ref, fused_inplace)
                 self.assertEqual(ref, fused, atol=5e-4, rtol=5e-4)
+
+    @parametrize_test("inplace", [False, True])
+    @parametrize_test("x_channels_last", [False, True])
+    @parametrize_test("other_channels_last", [False, True])
+    def test_conv_binary_other_layout(
+        self, device, inplace, x_channels_last, other_channels_last
+    ):
+        # `other` is read (and for the in-place op written) under the layout the
+        # conv picked from src/weight, not under its own strides, so a layout
+        # that disagrees has to be normalized instead of used transposed
+        conv = nn.Conv2d(3, 6, 3).to(device)
+        x = torch.randn(2, 3, 8, 8, device=device)
+        if x_channels_last:
+            x = x.to(memory_format=torch.channels_last)
+        with torch.no_grad():
+            ref = conv(x)
+            other = torch.randn_like(ref)
+            if other_channels_last:
+                other = other.to(memory_format=torch.channels_last)
+            expected = ref + other
+            args = (
+                conv.weight,
+                conv.bias,
+                conv.padding,
+                conv.stride,
+                conv.dilation,
+                conv.groups,
+                "add",
+                None,
+                None,
+                [],
+                None,
+            )
+            if inplace:
+                fused = torch.ops.mkldnn._convolution_pointwise_.binary(other, x, *args)
+                self.assertEqual(expected, other)
+            else:
+                fused = torch.ops.mkldnn._convolution_pointwise.binary(x, other, *args)
+        self.assertEqual(expected, fused)
 
 
 instantiate_device_type_tests(

@@ -72,6 +72,12 @@ bool use_channels_last_for_conv(
     const at::Tensor& src,
     const at::Tensor& weight);
 
+void check_conv_layout_agreement(
+    bool is_channels_last,
+    const at::Tensor& src,
+    const at::Tensor& weight,
+    const at::Tensor& dst);
+
 dnnl::memory::format_tag conv_src_fmt(
     const int64_t ndim,
     const bool is_channels_last = false);

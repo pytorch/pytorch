@@ -507,6 +507,38 @@ bool use_channels_last_for_conv(
   return xpu_conv_use_channels_last(src, weight);
 }
 
+// The conv entry points pick one memory format per call and normalize src,
+// weight and dst to it, while the primitives describe those three buffers to
+// oneDNN by format tag alone, so a disagreement reads a buffer transposed.
+// Post-op operands are out of scope: Attr::append_post_binary keeps them in
+// their own layout and gives them their own md.
+void check_conv_layout_agreement(
+    bool is_channels_last,
+    const at::Tensor& src,
+    const at::Tensor& weight,
+    const at::Tensor& dst) {
+  auto check = [is_channels_last](const char* name, const at::Tensor& tensor) {
+    if (!tensor.defined()) {
+      return;
+    }
+    auto fmt = is_channels_last ? get_cl_tag_by_ndim(tensor.ndimension())
+                                : at::MemoryFormat::Contiguous;
+    TORCH_INTERNAL_ASSERT(
+        tensor.is_contiguous(fmt),
+        "xpu oneDNN conv: src, weight and dst of one call must be contiguous in the same memory format, but ",
+        name,
+        " with sizes ",
+        tensor.sizes(),
+        " and strides ",
+        tensor.strides(),
+        " is not contiguous in ",
+        fmt);
+  };
+  check("src", src);
+  check("weight", weight);
+  check("dst", dst);
+}
+
 dnnl::memory::format_tag conv_src_fmt(
     const int64_t ndim,
     const bool is_channels_last) {

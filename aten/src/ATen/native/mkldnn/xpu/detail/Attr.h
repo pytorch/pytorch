@@ -216,6 +216,21 @@ class Attr {
     return *this;
   }
 
+  // A conv post-op binary operand is described to oneDNN with
+  // format_tag::any, which the primitive resolves to the dst layout: the
+  // operand is read under that layout and not under the md we bind here, so it
+  // has to be normalized to the format the conv entry point picked.
+  void normalize_post_binary(at::MemoryFormat mfmt, int64_t ndim) {
+    for (auto& param : ops_params_) {
+      if (param.kind_ != kind_t::binary || param.binary_.dim() != ndim ||
+          param.binary_.is_contiguous(mfmt)) {
+        continue;
+      }
+      param.binary_ = param.binary_.contiguous(mfmt);
+      param.meta_ = get_onednn_md(param.binary_);
+    }
+  }
+
   Attr& append_scale_binary(
       dnnl::algorithm algo,
       at::Tensor binary,
@@ -345,10 +360,19 @@ class Attr {
         dnnl::memory binary_m;
         auto binary = ops_params_[i].binary_;
         auto md = ops_params_[i].meta_;
-        // query expected_md to achieve peak performance
         auto expected_md = pd.query_md(
             dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
+        // the primitive reads the operand under the layout it resolved
+        // format_tag::any to, not under the md bound below, so a mismatch here
+        // means the caller handed over a transposed buffer
+        TORCH_INTERNAL_ASSERT(
+            expected_md == md,
+            "xpu oneDNN post-op binary operand with sizes ",
+            binary.sizes(),
+            " and strides ",
+            binary.strides(),
+            " is not laid out the way the primitive expects to read it");
 
         binary_m = at::native::onednn::make_onednn_memory(
             md, engine, binary.const_data_ptr());

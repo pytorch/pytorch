@@ -329,12 +329,20 @@ Tensor _convolution_out(
   auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
   input = make_contiguous_and_aligned(input, mfmt);
   weight = make_contiguous_and_aligned(weight, mfmt);
+  attr.normalize_post_binary(mfmt, input.ndimension());
   check_shape_forward(input, weight, bias, params);
 
+  // a caller-supplied output needs the same normalization as input/weight: the
+  // primitives describe dst to oneDNN by format tag alone, so a dst that is not
+  // contiguous in mfmt would be read and written under the wrong strides
   Tensor output;
+  if (output_r.defined()) {
+    Tensor out = ndim == 3 ? view4d(output_r) : output_r;
+    output = make_contiguous_and_aligned(out, mfmt);
+  }
   if (transposed_) {
     // create output and propagate memory format
-    if (!output_r.defined()) {
+    if (!output.defined()) {
       auto dst_tz = deconv_dst_size(
           input.sizes(),
           weight.sizes(),
@@ -344,8 +352,6 @@ Tensor _convolution_out(
           params.output_padding,
           params.groups);
       output = at::empty(dst_tz, input.options(), mfmt);
-    } else {
-      output = output_r;
     }
 
     onednn::deconvolution(
@@ -353,6 +359,7 @@ Tensor _convolution_out(
         input,
         weight,
         bias,
+        /*is_channels_last=*/is_channels_last_suggested,
         params.stride,
         params.padding,
         params.output_padding,
@@ -378,7 +385,7 @@ Tensor _convolution_out(
     }
 
     // create output and propagate memory format
-    if (!output_r.defined()) {
+    if (!output.defined()) {
       auto dst_tz = conv_dst_size(
           input.ndimension(),
           input.sizes(),
@@ -388,14 +395,13 @@ Tensor _convolution_out(
           params.stride,
           params.dilation);
       output = at::empty(dst_tz, input.options(), mfmt);
-    } else {
-      output = output_r;
     }
     onednn::convolution(
         output,
         input,
         weight,
         bias,
+        /*is_channels_last=*/is_channels_last_suggested,
         padding_front_top_left,
         padding_back_bottom_right,
         params.stride,
@@ -407,10 +413,11 @@ Tensor _convolution_out(
   if (ndim == 3) {
     output = view3d(output);
   }
-  if (output_r.defined() && !output_r.is_same(output)) {
-    output_r.copy_(output);
-  } else {
+  if (!output_r.defined()) {
     output_r = output;
+  } else if (!output.is_alias_of(output_r)) {
+    // normalizing output_r had to copy, so write the result back
+    output_r.copy_(output);
   }
   return output_r;
 }
@@ -493,8 +500,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
       "so far only support float, bfloat16, half and double convolution backward in XPU backend, your data type is ",
       grad_output.scalar_type());
 
-  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight);
-
   Tensor grad_output_, input_, weight_;
   IntArrayRef stride_, padding_, dilation_, output_padding_;
   bool transposed_ = false;
@@ -529,6 +534,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     groups_ = groups;
   }
 
+  // get computation format for Conv/TransposedConv; use the same tensors the
+  // forward pass does, so conv1d does not pick different layouts in fwd/bwd
+  bool is_channels_last_suggested = use_channels_last_for_conv(input_, weight_);
+
   // ensure the tensors are contiguous
   auto mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input_.ndimension())
@@ -557,6 +566,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             grad_input,
             grad_output_,
             weight_,
+            /*is_channels_last=*/is_channels_last_suggested,
             stride_,
             padding_,
             output_padding_,
@@ -568,6 +578,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             grad_input,
             grad_output_,
             weight_,
+            /*is_channels_last=*/is_channels_last_suggested,
             padding_,
             padding_,
             stride_,
@@ -590,6 +601,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             grad_bias,
             grad_output_,
             input_,
+            /*is_channels_last=*/is_channels_last_suggested,
             stride_,
             padding_,
             output_padding_,
@@ -601,6 +613,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             grad_bias,
             grad_output_,
             input_,
+            /*is_channels_last=*/is_channels_last_suggested,
             weight_.sizes(),
             padding_,
             padding_,
