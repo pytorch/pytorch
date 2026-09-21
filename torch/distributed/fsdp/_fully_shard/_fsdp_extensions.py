@@ -52,14 +52,20 @@ def _normalize_all_gather_inputs(
     shard_dim: int,
     padded_sharded_size: torch.Size,
     require_padding: bool,
+    all_gather_outputs: Sequence[torch.Tensor] = (),
 ) -> tuple[list[torch.Tensor], tuple[_AllGatherOutputLayout, ...]]:
-    if len(inputs) == 0:
-        raise ValueError(
-            "fsdp_pre_all_gather must return at least one all-gather input"
-        )
+    legacy_numels = [inp.numel() for inp in inputs if isinstance(inp, torch.Tensor)]
+    legacy_dim = shard_dim if world_size > 1 and any(legacy_numels) else 0
+    padded_numel = padded_sharded_size.numel()
+    validate_legacy_outputs = (
+        legacy_dim != 0
+        and any(numel != padded_numel for numel in legacy_numels)
+        and (not all_gather_outputs or len(all_gather_outputs) == len(inputs))
+    )
+    legacy_prefixes = math.prod(padded_sharded_size[:legacy_dim]) if legacy_dim else 1
     tensors: list[torch.Tensor] = []
     layouts: list[_AllGatherOutputLayout] = []
-    for inp in inputs:
+    for i, inp in enumerate(inputs):
         tensor = inp.tensor if isinstance(inp, AllGatherInput) else inp
         if not isinstance(tensor, torch.Tensor):
             raise TypeError(
@@ -76,19 +82,33 @@ def _normalize_all_gather_inputs(
                     "fsdp_pre_all_gather must return all-gather inputs with the padded sharded size "
                     f"{padded_sharded_size} but got {input_size}"
                 )
-            output_size = list(input_size or (1,))
-            output_size[0] *= world_size
-            dim = shard_dim if world_size > 1 and tensor.numel() else 0
-            if dim != 0:
-                if tensor.numel() != padded_sharded_size.numel():
-                    raise ValueError(
-                        f"Legacy Shard({shard_dim}) all-gather input size {input_size} "
-                        f"must have the same number of elements as {padded_sharded_size}"
+            input_numel = tensor.numel()
+            if validate_legacy_outputs:
+                output_numel = (
+                    all_gather_outputs[i].numel()
+                    if all_gather_outputs
+                    else input_numel * world_size
+                )
+                expected_numel = padded_numel * world_size
+                if output_numel != expected_numel and (
+                    input_numel != 0 or output_numel != 0
+                ):
+                    raise RuntimeError(
+                        f"Shard({shard_dim}) all-gather output must have "
+                        f"{expected_numel} elements for padded local size "
+                        f"{padded_sharded_size} and world size "
+                        f"{world_size}, but got {output_numel}"
                     )
-                input_size = padded_sharded_size
-            # Legacy hooks receive a dim-0-expanded view after parameter-layout copying.
-            layout = _get_all_gather_output_layout(
-                input_size, dim, world_size, torch.Size(output_size)
+            # Legacy hooks reshape cached outputs using the current input's tail.
+            output_size = torch.Size((-1, *input_size[1:]))
+            if 0 in input_size[1:]:
+                output_size = torch.Size((input_size[0] * world_size, *input_size[1:]))
+            dim = legacy_dim if input_numel else 0
+            layout = _AllGatherOutputLayout(
+                padded_sharded_size if dim else torch.Size(input_size or (1,)),
+                dim,
+                output_size,
+                legacy_prefixes if dim else 1,
             )
         tensors.append(tensor)
         layouts.append(layout)

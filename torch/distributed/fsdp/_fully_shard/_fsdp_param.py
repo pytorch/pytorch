@@ -1183,6 +1183,7 @@ class FSDPParam:
                             and sharded_local_tensor.size()
                             != self.padded_sharded_param_size
                         ),
+                        all_gather_outputs=self.all_gather_outputs,
                     )
                 )
                 return [t.view(-1) for t in all_gather_inputs]
