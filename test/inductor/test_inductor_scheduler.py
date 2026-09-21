@@ -307,6 +307,7 @@ class TestScheduler(TestCase):
         node2 = self._mock_base_snode("node2", device)
         node3 = self._mock_base_snode("node3", device)
         node3.get_nodes.return_value = [node1, node2]
+        node3.get_operation_names.return_value = OrderedSet(["node1", "node2"])
         backend = Mock()
         backend.fuse.return_value = node3
         scheduler.get_backend = Mock(return_value=backend)
