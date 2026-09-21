@@ -4491,6 +4491,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             else exception_methods
         )
         if sys.version_info >= (3, 11):
+            # Base delegation targets _base_vt, but add_note must mutate this object.
             self._base_methods.discard(BaseException.add_note)
 
     @property

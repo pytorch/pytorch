@@ -909,6 +909,7 @@ class ExceptionVariable(VariableTracker):
         if isinstance(notes, variables.UserDefinedListVariable):
             if notes._base_vt is None:
                 raise AssertionError("UserDefinedListVariable must have a base VT")
+            # CPython uses PyList_Append, bypassing list subclass overrides.
             notes = notes._base_vt
         notes.call_method(tx, "append", [note], {})
         return variables.ConstantVariable.create(None)
