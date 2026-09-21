@@ -82,7 +82,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
-    MI200_ARCH,
     MI350_ARCH,
     NAVI_ARCH,
     parametrize,
@@ -4298,10 +4297,10 @@ exit(2)
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2**40, device="cuda")
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     @blas_library_context("cublas")
     def test_graph_capture_cublas_workspace_separate_graphs(self):
@@ -4347,6 +4346,7 @@ exit(2)
 
         stream.synchronize()
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
