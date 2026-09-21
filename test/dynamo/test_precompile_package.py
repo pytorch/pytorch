@@ -48,6 +48,7 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import ChainedSource, Guard
+from torch.compiler._precompile_types import GuardFact
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -3626,6 +3627,10 @@ def _drop_scale(entries):
     return ["scale" not in e.name for e in entries]
 
 
+def _session_branches(x, flag):
+    return x * 2 if flag else x + 1
+
+
 def _session_reads_optional(x, obj):
     return x + 1 if obj is None else x + obj.k
 
@@ -3662,6 +3667,16 @@ class _FakeCompile:
         self.guarded_codes = []
 
 
+def _fact(guard_type, source, code=(), value="", enforced=True):
+    return GuardFact(
+        guard_type=guard_type,
+        source=source,
+        code=code,
+        value=value,
+        enforced=enforced,
+    )
+
+
 class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
     def setUp(self):
         super().setUp()
@@ -3673,6 +3688,15 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         kwargs.setdefault("backend", "eager")
         kwargs.setdefault("dynamic", False)
         return precompile_capture(fn, **kwargs)
+
+    def _gate(self, session, **flags):
+        flags = {
+            "require_complete": True,
+            "require_no_risky_drops": True,
+            "require_no_dropped_guards": False,
+            **flags,
+        }
+        return session._gated_summary(**flags)
 
     def _risky_session(self):
         """A capture whose custom filter drops self.scale, so the drop is risky."""
@@ -3712,6 +3736,30 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         """
         session._package._current_entry.guarded_codes.append(object())
 
+    def _record(self, session, frame, *variants):
+        """File compiles for `frame` the report will confirm, running none.
+
+        One fake entry for the frame, gaining a guarded code per variant, since
+        that is what a recorded compile is confirmed against (see
+        _confirmed_compiles).
+        """
+        entry = _FakeCompile(None)
+        for facts in variants:
+            session._compiles.append(
+                precompile_package._RecordedCompile(
+                    frame=frame,
+                    entry=entry,
+                    guarded_codes_before=len(entry.guarded_codes),
+                    kept=frozenset(),
+                    dropped=frozenset(),
+                    risky=frozenset(),
+                    dropped_code=(),
+                    facts=facts,
+                    undetermined=frozenset(),
+                )
+            )
+            entry.guarded_codes.append(object())
+
     def _summary(self, session):
         """The report, read as a caller outside a compile reads it."""
         compiling = session._package._current_entry
@@ -3726,6 +3774,19 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         previous = globals()["_SESSION_HOOK"]
         self.addCleanup(globals().__setitem__, "_SESSION_HOOK", previous)
         globals()["_SESSION_HOOK"] = fn
+
+    def _report(self, session):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "inv.txt")
+            session.write_invariants(path)
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+
+    def _assert_no_literal_in_report(self, session):
+        """No pinned literal reaches the FILE, whichever shape rendered it."""
+        report = self._report(session)
+        for literal in _pinned_needles():
+            self.assertNotIn(literal, report)
 
     def test_summary_counts_frames_variants_and_guards(self):
         model = _SessionReadsAttr()
@@ -3756,6 +3817,151 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertTrue(
             any("scale" in name for _, name, _ in summary.dropped_guard_code)
         )
+
+    def test_invariants_classify_guards_across_variants(self):
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.randn(2, 4))
+            cap(torch.randn(3, 4))
+        (frame,) = session.invariants()
+        self.assertEqual(frame.frame, "forward")
+        self.assertEqual(frame.variants, 2)
+        varying = {(f.guard_type, f.source) for f in frame.varying}
+        self.assertIn(("TENSOR_MATCH", "x"), varying)
+        self.assertTrue(any("scale" in f.source for f in frame.invariant))
+
+    def test_a_bypassed_compile_is_not_a_variant_of_the_report(self):
+        # The filter runs during the guard BUILD, so a compile the serializer
+        # then bypasses has already handed over a full fact set. None of its
+        # guards are in the artifact, so counting it would report a whole
+        # compilation's guards as enforced and let its guards tell the variants
+        # apart. One frame, two compiles, one of them kept.
+        class LocalThing:
+            # Defined in local scope, so its TYPE_MATCH cannot be serialized and
+            # serialize_guards bypasses the compile that carries it.
+            k = 3
+
+        session = self._session(_session_reads_optional)
+        with session as cap:
+            cap(torch.ones(2), None)
+            cap(torch.ones(2), LocalThing())
+        (code,) = session._package.cache_entry().codes
+        self.assertEqual(len(code.guarded_codes), 1)
+        # Not marked bypassed: one compile of the frame WAS kept, which is why
+        # the entry's flag cannot stand in for this.
+        self.assertFalse(code.bypassed)
+        (frame,) = session.invariants()
+        self.assertEqual(frame.variants, 1)
+        rendered = [
+            precompile_package._render_fact(f)
+            for f in frame.invariant + frame.varying + frame.undetermined
+        ]
+        self.assertTrue(any("L['obj'] is None" in line for line in rendered))
+        self.assertFalse([line for line in rendered if "LocalThing" in line])
+        report = self._report(session)
+        self.assertIn("1 frame(s), 1 compilation(s)", report)
+        self.assertNotIn("LocalThing", report)
+
+    def test_invariants_report_is_written_on_a_clean_exit_only(self):
+        model = _SessionReadsAttr()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "inv.txt")
+            with self._session(model, invariants=path) as cap:
+                cap(torch.randn(2, 4))
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("frame forward", text)
+            self.assertIn("invariant", text)
+            self.assertIn("# NOTE: some frames were compiled once", text)
+            os.unlink(path)
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with self._session(model, invariants=path) as cap:
+                    cap(torch.randn(2, 4))
+                    raise RuntimeError("boom")
+            self.assertFalse(os.path.exists(path))
+
+    def test_a_report_that_cannot_be_written_is_recorded_not_raised(self):
+        # The report is a diagnostic, so a directory it cannot be written to must
+        # not turn a capture that succeeded into a raising block: the failure
+        # goes where the other teardown failures go.
+        with tempfile.TemporaryDirectory() as d:
+            session = self._session(
+                _SessionReadsAttr(), invariants=os.path.join(d, "inv.txt")
+            )
+            with mock.patch(
+                "torch._dynamo.precompile_package.open",
+                create=True,
+                side_effect=OSError("read-only file system"),
+            ):
+                with session as cap:
+                    cap(torch.randn(2, 4))
+        (recorded,) = session._capture_errors
+        self.assertIn("read-only file system", recorded)
+        self.assertEqual(session.summary().guarded_codes, 1)
+
+    def test_gates_refuse_an_empty_or_failed_capture(self):
+        session = self._session(_SessionReadsAttr())
+        with session:
+            pass
+        with self.assertRaisesRegex(PackageError, "captured no compiled code"):
+            self._gate(session)
+        self.assertEqual(self._gate(session, require_complete=False).guarded_codes, 0)
+
+        session = self._session(_session_raises)
+        with session as cap:
+            with self.assertRaisesRegex(ValueError, "boom"):
+                cap(torch.ones(2), True)
+        with self.assertRaisesRegex(PackageError, "incomplete because capture raised"):
+            self._gate(session)
+
+    def test_the_gates_run_mid_block_on_what_is_captured_so_far(self):
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            with self.assertRaisesRegex(PackageError, "captured no compiled code"):
+                self._gate(session)
+            cap(torch.randn(2, 4))
+            self.assertEqual(self._gate(session).guarded_codes, 1)
+            cap(torch.randn(3, 4))
+            self.assertEqual(self._gate(session).guarded_codes, 2)
+
+    def test_gates_refuse_risky_and_plain_drops_as_asked(self):
+        session = self._risky_session()
+        with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+            self._gate(session)
+        with self.assertRaisesRegex(PackageError, "were not serialized"):
+            self._gate(
+                session, require_no_risky_drops=False, require_no_dropped_guards=True
+            )
+        self.assertTrue(self._gate(session, require_no_risky_drops=False).complete)
+
+    def test_an_accepted_risky_drop_is_warned_with_what_it_gave_up(self):
+        session = self._risky_session()
+        with self.assertLogs(
+            "torch._dynamo.precompile_package", level="WARNING"
+        ) as logs:
+            self._gate(session, require_no_risky_drops=False)
+        message = "\n".join(logs.output)
+        self.assertIn("dropped guard(s) can affect dispatch", message)
+        self.assertIn("COULD BEAR ON SHAPE", message)
+        self.assertIn("scale", message)
+        self.assertIn("require_no_risky_drops=False", message)
+
+    def test_two_calls_with_the_same_shape_are_not_a_varying_tensor(self):
+        # The fact's value is a guard comparison, not a data comparison: same
+        # dtype and shape, different elements, so the TENSOR_MATCH held across
+        # both variants and only the branch flag tells them apart.
+        session = self._session(_session_branches)
+        with session as cap:
+            cap(torch.randn(2, 4), True)
+            cap(torch.randn(2, 4), False)
+        (frame,) = session.invariants()
+        self.assertEqual(frame.variants, 2)
+        varying = {(f.guard_type, f.source) for f in frame.varying}
+        invariant = {(f.guard_type, f.source) for f in frame.invariant}
+        self.assertIn(("TENSOR_MATCH", "x"), invariant)
+        self.assertNotIn(("TENSOR_MATCH", "x"), varying)
+        self.assertTrue(any(source == "flag" for _, source in varying))
+        self.assertNotIn(("TENSOR_MATCH", "x"), set(session.summary().dropped_guards))
 
     def test_a_dropped_slot_keeps_the_first_rendering(self):
         # One rendering per slot, whatever the variants: see
@@ -3790,6 +3996,157 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         # filter added: the by-filter rail of risky_dropped_guards.
         self.assertIn(("EQUALS_MATCH", "n"), summary.risky_dropped_guards)
         self.assertIn(("TENSOR_MATCH", "x"), summary.risky_dropped_guards)
+
+    def test_the_rendered_report_is_stable_and_names_every_class(self):
+        # Driven by a real capture, so the golden pins the recording path too --
+        # the filter's verdicts, the rendered checks and values, the frame key
+        # and both orderings -- rather than write_invariants alone. Deterministic
+        # on eager and CPU with fixed shapes.
+        session = self._session(_session_calls_hook)
+        with session as cap:
+            cap(torch.ones(2, 4))
+            self._rebind_hook(_hook_increment)
+            cap(torch.ones(3, 4))
+        # Every line number masked, not just the frame header's: a callable's
+        # identity names its definition line too, and both move with any edit to
+        # this file.
+        report = re.sub(r"(\.py):\d+", r"\1:<line>", self._report(session))
+        self.assertExpectedInline(
+            report,
+            """\
+# precompile invariants for _session_calls_hook
+#
+# Conditions that held in EVERY compiled variant of a frame. A call
+# violating one cannot be served by any graph in this artifact, so
+# these are the preconditions the artifact is only valid under.
+# 'varies' lists what differed between variants -- those are what
+# distinguish one compiled graph from another, not preconditions.
+# 'unknown' lists guards whose check this report cannot model, so it
+# cannot say whether they held across variants. Treat them as
+# neither: they may or may not be preconditions.
+#
+# enforced = the guard is serialized and rechecked when the artifact
+#            is loaded.
+# dropped  = it was not serialized, so it is a precondition
+#            NOTHING checks at serving time. See
+#            PrecompileSummary.dropped_guards.
+#
+# 1 frame(s), 2 compilation(s)
+
+frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 invariant, 4 varying, 5 undetermined
+  invariant [enforced] <DETERMINISTIC_ALGORITHMS> deterministic=False, warn_only=False
+  invariant [enforced] <GRAD_MODE> grad_enabled=True
+  varies    [dropped ] <CLOSURE_MATCH> is @test_precompile_package.py:<line>#b6b88fff1d6f __main__._hook_double on G['_SESSION_HOOK']
+  varies    [dropped ] <CLOSURE_MATCH> is @test_precompile_package.py:<line>#5053804058b3 __main__._hook_increment on G['_SESSION_HOOK']
+  varies    [enforced] hasattr(L['x'], '_dynamo_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_static_indices') == False check_tensor(<value>, Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[2, 4], stride=[4, 1]) on x
+  varies    [enforced] hasattr(L['x'], '_dynamo_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_static_indices') == False check_tensor(<value>, Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[3, 4], stride=[4, 1]) on x
+  unknown   [enforced] <unparsed check> hooks=None
+  unknown   [enforced] utils_device.CURRENT_DEVICE == None
+  unknown   [enforced] <GLOBAL_STATE>
+  unknown   [enforced] <SHAPE_ENV>
+  unknown   [enforced] <TORCH_FUNCTION_STATE>
+""",
+        )
+
+    def test_a_value_check_renders_with_its_value_masked(self):
+        # A value guard's check is guards.py's own, down to the value it embeds,
+        # and this file is meant to be committed: a guard that pins a prompt or a
+        # path would publish it. The check keeps its SHAPE, which is what makes
+        # the line worth reading, and names the value by type. See GuardFact.code.
+        session = self._session(_SessionPinsValues())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        (frame,) = session.invariants()
+        rendered = {
+            (f.guard_type, f.source): precompile_package._render_fact(f)
+            for f in frame.invariant + frame.varying + frame.undetermined
+        }
+        for slot, line in [
+            (("EQUALS_MATCH", "self.n"), "[enforced] L['self'].n == 3 on self.n"),
+            (
+                ("CONSTANT_MATCH", "self.on"),
+                "[enforced] L['self'].on == True on self.on",
+            ),
+            (("DEFAULT_DEVICE", ""), "[enforced] utils_device.CURRENT_DEVICE == None"),
+            (
+                ("CONSTANT_MATCH", "self.prompt"),
+                "[enforced] L['self'].prompt == '<str>' on self.prompt",
+            ),
+            (
+                ("CONSTANT_MATCH", "self.path"),
+                "[enforced] L['self'].path == '<str>' on self.path",
+            ),
+        ]:
+            self.assertEqual(rendered[slot], line)
+        # Nor may a check keep an address: the file is meant to be committed and
+        # diffed, and an id differs between two runs of one capture. See
+        # _normalize.
+        self.assertIn("<id>", rendered[("TYPE_MATCH", "self")])
+        self._assert_no_literal_in_report(session)
+
+    def test_a_container_check_renders_with_its_value_masked(self):
+        # The shapes a value takes inside a check that are not a bare repr: a
+        # container display, a keys list, a containment argument, and the key
+        # GetItemSource interpolates into the guard's own NAME, which is what a
+        # slot of a dict is called in every list this report prints. Each is
+        # masked, the key in the name included, or the value would reach the file
+        # through whichever shape the guard happened to use.
+        session = self._session(_SessionPinsContainers())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        (frame,) = session.invariants()
+        rendered = {
+            (f.guard_type, f.source): precompile_package._render_fact(f)
+            for f in frame.invariant + frame.varying + frame.undetermined
+        }
+        key = "self.cfg['<str>']"
+        for slot, line in [
+            (
+                ("CONSTANT_MATCH", "self.names[0]"),
+                "[enforced] L['self'].names[0] == '<str>' on self.names[0]",
+            ),
+            (
+                ("CONSTANT_MATCH", "self.tags"),
+                "[enforced] L['self'].tags == '<set:1>' on self.tags",
+            ),
+            (
+                ("SET_CONTAINS", "self.tags"),
+                "[enforced] set.__contains__(L['self'].tags, '<str>') on self.tags",
+            ),
+            (
+                ("DICT_KEYS_MATCH", "self.keys"),
+                "[enforced] len(L['self'].keys) == 1 ; "
+                "list(dict.keys(L['self'].keys)) == '<list:1>' on self.keys",
+            ),
+            (
+                ("EQUALS_MATCH", key),
+                f"[enforced] L['self'].cfg['<str>'] == 3 on {key}",
+            ),
+        ]:
+            self.assertEqual(rendered[slot], line)
+        self._assert_no_literal_in_report(session)
+
+    def test_the_saved_tensors_hooks_check_renders_without_its_ids(self):
+        # The saved-tensors-hooks guard renders prose rather than an expression
+        # ("top_saved_tensors_hooks ids == (11, 12)"), so masking has no shape to
+        # read and fails closed: the text is dropped whole, which takes the hook
+        # ids -- churn in a file meant to be diffed -- with it, and
+        # _value_fingerprint puts back a discriminator derived from what the
+        # hooks ARE. The guard is unmodelled, so the fact is reported as
+        # undetermined rather than compared.
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        (frame,) = session.invariants()
+        (hooks,) = [
+            f
+            for f in frame.invariant + frame.varying + frame.undetermined
+            if f.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS"
+        ]
+        self.assertEqual(
+            precompile_package._render_fact(hooks),
+            "[enforced] <unparsed check> hooks=None",
+        )
 
     def test_two_frames_dropping_a_same_named_slot_are_not_risky(self):
         # entry.name is frame-local, so the same name in two frames is two
@@ -3892,6 +4249,13 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         summary = session.summary()
         self.assertIn(_HOOK_SLOT, summary.dropped_guards)
         self.assertIn(_HOOK_SLOT, summary.risky_dropped_guards)
+        # And the report agrees: both variants render the slot identically, since
+        # the id its check embeds is masked, but its value did not hold.
+        (frame,) = session.invariants()
+        self.assertIn(_HOOK_SLOT, {(f.guard_type, f.source) for f in frame.varying})
+        self.assertNotIn(
+            _HOOK_SLOT, {(f.guard_type, f.source) for f in frame.invariant}
+        )
 
     def test_a_dropped_slot_whose_value_held_is_not_risky(self):
         session = self._session(_session_calls_hook)
@@ -3901,6 +4265,8 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         summary = session.summary()
         self.assertIn(_HOOK_SLOT, summary.dropped_guards)
         self.assertEqual(summary.risky_dropped_guards, ())
+        (frame,) = session.invariants()
+        self.assertIn(_HOOK_SLOT, {(f.guard_type, f.source) for f in frame.invariant})
 
     def test_a_bypassed_compile_is_in_neither_slot_list(self):
         # The filter runs during the guard BUILD, so a compile the serializer
@@ -4127,6 +4493,46 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         summary = session.summary()
         self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
         self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
+
+    def test_two_facts_differing_only_in_enforced_sort_stably(self):
+        # enforced is in the sort key because it is the one field two facts of
+        # one frame can differ in and nothing else: the filter reads
+        # skip_nnmodule_hook_guards, so toggling it between two calls flips
+        # whether the slot is checked. Tied lines would keep frozenset order,
+        # which follows the hash of their strings, so the file would differ
+        # between runs of one capture.
+        dropped = _fact("EMPTY_NN_MODULE_HOOKS_DICT", "self", enforced=False)
+        kept = _fact("EMPTY_NN_MODULE_HOOKS_DICT", "self", enforced=True)
+        session = self._session(_SessionReadsAttr())
+        self._record(
+            session,
+            ("forward", "/pkg/m.py", 7),
+            frozenset({kept}),
+            frozenset({dropped}),
+        )
+        (frame,) = session.invariants()
+        self.assertEqual(frame.varying, (dropped, kept))
+
+    def test_the_report_is_written_as_utf8_whatever_the_locale(self):
+        session = self._session(_SessionReadsAttr())
+        name = "self.gewichtsma\u00df"
+        self._record(
+            session,
+            ("forward", "/pkg/m.py", 7),
+            frozenset({_fact("EQUALS_MATCH", name)}),
+        )
+        real_open = open
+
+        def ascii_default_open(file, mode="r", **kwargs):
+            # An ASCII locale, as a container often has: without an explicit
+            # encoding= the write would raise and leave the file truncated.
+            if kwargs.get("encoding") is None and "b" not in mode:
+                kwargs["encoding"] = "ascii"
+            return real_open(file, mode, **kwargs)
+
+        with mock.patch("builtins.open", ascii_default_open):
+            report = self._report(session)
+        self.assertIn(name, report)
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)

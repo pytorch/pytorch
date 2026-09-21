@@ -16,6 +16,12 @@ import collections
 import dataclasses
 
 
+# The types this module owns, named here rather than only in the modules that
+# consume them: a caller annotating against what a capture reports reads them
+# from here.
+__all__ = ["FrameInvariants", "GuardFact", "PrecompileSummary"]
+
+
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GuardFact:
     """One guard observed while compiling a frame variant.
@@ -82,6 +88,35 @@ class GuardFact:
     code: tuple[str, ...]
     value: str
     enforced: bool
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class FrameInvariants:
+    """Guards that held, varied, or were undetermined across one frame's variants.
+
+    Guards from different frames are not comparable (an entry frame guards its
+    arguments, a resume frame whatever crossed the break), so the report is per frame.
+
+    Attributes:
+        frame: The frame's code name.
+        filename: The file its code lives in.
+        lineno: Its first line.
+        variants: How many guarded variants of the frame were captured.
+        invariant: Guards that held identically in every variant: preconditions
+            the artifact is only valid under.
+        varying: Guards that differed between variants: what tells its graphs apart.
+        undetermined: Guards whose check this report cannot model a comparable
+            value for, so it cannot say whether they held: every variant's are
+            listed, however many were captured.
+    """
+
+    frame: str
+    filename: str
+    lineno: int
+    variants: int
+    invariant: tuple[GuardFact, ...]
+    varying: tuple[GuardFact, ...]
+    undetermined: tuple[GuardFact, ...]
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

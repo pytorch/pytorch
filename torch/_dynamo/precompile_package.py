@@ -41,6 +41,12 @@ forward outputs' own metadata.
 serializer, so the guards it drops leave the live check too and a capture
 recompiles less often than ordinary ``torch.compile`` would, and every dropped
 guard is reported in ``PrecompileSummary.dropped_guards``.
+``invariants`` writes a readable report that separates, per frame, the guards
+holding in EVERY variant from the ones that differed: the first are
+preconditions the artifact is only valid under, the second are what tell its
+graphs apart. Guards from different frames are not comparable -- an entry frame
+guards its arguments, a resume frame guards whatever crossed the break -- so
+the intersection is per frame.
 
 A resume function only exists once the frame ahead of it has actually run, so
 every variant must be exercised. Whatever you do not run is not in the
@@ -63,11 +69,13 @@ Know these before relying on an artifact in production:
   ``dynamic=True`` helps with shapes but not with pinned values.
 * Identity guards cannot be serialized, so precompiling gives up on noticing
   that a guarded object was rebound. ``summary().dropped_guards`` is the
-  authoritative list, and ``risky_dropped_guards`` narrows it to the drops
-  observed to distinguish the captured variants plus the ones a custom filter
-  added; it is still not a proof for unobserved deployments. Every model drops
-  identity guards, so a policy that refused every drop would refuse essentially
-  every real artifact.
+  authoritative list. ``risky_dropped_guards`` includes every drop observed to
+  distinguish captured variants plus the ones a custom filter added; it is still
+  not a proof for unobserved deployments.
+  Refusing every drop is opt-in: every model drops the identity guards
+  precompile cannot serialize, so ``require_no_dropped_guards=True`` refuses
+  essentially every real artifact. Audit the list before relying on the relaxed
+  dropped-guard default, and before relaxing the risky-drop rail on top of it.
 * Some models do not capture yet. For example, T5 raises ``PackageError: Cannot
   find module for code <code object __init__`` from ``_get_code_source``, which
   is byte-identical to base and which plain ``caching_precompile`` also raises.
@@ -83,6 +91,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib.machinery
+import logging
 import os
 import re
 import site
@@ -95,7 +104,11 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch._functorch.config as functorch_config
 from torch._guards import ChainedSource
-from torch.compiler._precompile_types import GuardFact as _GuardFact, PrecompileSummary
+from torch.compiler._precompile_types import (
+    FrameInvariants,
+    GuardFact as _GuardFact,
+    PrecompileSummary,
+)
 from torch.utils._config_module import ConfigModule
 
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
@@ -256,6 +269,9 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
             )
         finally:
             revert()
+
+
+log = logging.getLogger(__name__)
 
 
 def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
@@ -1998,6 +2014,29 @@ class _RecordedCompile:
     # came in; summary() takes the first rendering across compiles.
     dropped_code: tuple[tuple[tuple[str, str], str], ...]
     facts: frozenset[_GuardFact]
+    # The facts of the guards nothing here can compare, kept apart rather than
+    # intersected with the rest: see _UNMODELLED_GUARD_TYPES.
+    undetermined: frozenset[_GuardFact]
+
+
+def _fact_key(fact: _GuardFact) -> tuple[str, str, str, str, bool]:
+    # _fact_order leaves out enforced, which is the one field two otherwise
+    # identical facts of one frame can differ in: a config read by the filter
+    # (skip_nnmodule_hook_guards) toggled between two calls flips whether a slot
+    # is checked and nothing else. Tied lines would keep frozenset iteration
+    # order, which follows the hash of their strings, so the file would differ
+    # between runs of the same capture -- the one property it has to have.
+    return (*_fact_order(fact), fact.enforced)
+
+
+def _render_fact(fact: _GuardFact) -> str:
+    """Render one guard as a stable, human-readable line for the report."""
+    body = " ; ".join(fact.code) if fact.code else f"<{fact.guard_type}>"
+    if fact.value:
+        body = f"{body} {fact.value}"
+    where = f" on {fact.source}" if fact.source else ""
+    label = "enforced" if fact.enforced else "dropped"
+    return f"[{label:<8}] {body}{where}"
 
 
 def _entry_fn_of(fn: object) -> Callable[..., object]:
@@ -2149,6 +2188,58 @@ def _optimize_isolated(
     return optimize_ctx
 
 
+def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
+    """Report accepted risky drops, shape-bearing ones first.
+
+    Ordering by type only puts the candidates where they can be seen; whether a
+    guarded VALUE can differ at serve time is not something the type answers.
+    """
+    by_type: dict[str, list[str]] = {}
+    for guard_type, name in sorted(risky):
+        by_type.setdefault(guard_type, []).append(name)
+
+    # Grouped rather than a flat cut, and capped PER TYPE: a flat list is
+    # dominated by whichever type happens to be most numerous, which can bury a
+    # lone SEQUENCE_LENGTH behind a crowd of CONSTANT_MATCH and CLOSURE_MATCH.
+    def render(types: list[str], per_type: int) -> str:
+        parts = []
+        for t in types:
+            names = by_type[t]
+            shown = ", ".join(names[:per_type])
+            more = f", +{len(names) - per_type} more" if len(names) > per_type else ""
+            parts.append(f"{t} x{len(names)}: {shown}{more}")
+        return "; ".join(parts)
+
+    shape_types = [t for t in by_type if t in _SHAPE_BEARING_GUARD_TYPES]
+    other_types = [t for t in by_type if t not in _SHAPE_BEARING_GUARD_TYPES]
+    # Says "could" rather than "can", and points at the distinction that
+    # actually decides it. This is a classification by guard TYPE, and the
+    # question a reader has is whether the guarded VALUE can differ at serve
+    # time -- which the type does not answer. The first four this ordering
+    # surfaced on a real model were all reached through a class or function
+    # definition (__mro__ walks to __defaults__, __code__) and were therefore
+    # compile-time constants that no batch could change. Distinguishing those
+    # properly needs the structured source, not the name.
+    shape_report = (
+        f" COULD BEAR ON SHAPE ({sum(len(by_type[t]) for t in shape_types)}), "
+        f"unlike the rest, so check these first -- but check whether each one "
+        f"can actually differ at serve time: a guard reached through a class or "
+        f"function definition (an __mro__ walk, __defaults__, __code__) is a "
+        f"compile-time constant and cannot: {render(shape_types, 3)}."
+        if shape_types
+        else ""
+    )
+    log.warning(
+        "precompile: %d dropped guard(s) can affect dispatch, so nothing checks "
+        "them at load.%s The remaining dropped slots to audit: %s. "
+        "summary().risky_dropped_guards has all of them; this warning appears "
+        "only because require_no_risky_drops=False explicitly accepted them.",
+        len(risky),
+        shape_report,
+        render(other_types, 2) or "none",
+    )
+
+
 class PrecompileSession:
     """
     A caller-driven capture in progress. Enter as a context manager to get the
@@ -2167,6 +2258,7 @@ class PrecompileSession:
         recompile_limit: int = 256,
         dynamic: bool | None = None,
         training: bool = False,
+        invariants: str | None = None,
     ) -> None:
         self._fn = fn
         self._backend = backend
@@ -2174,8 +2266,9 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
+        self._invariants_path = invariants
         # One record per guard-filter call, whether or not that compile went
-        # on to land anything; summary() reports the ones that did. See
+        # on to land anything; the report covers the ones that did. See
         # _RecordedCompile.
         self._compiles: list[_RecordedCompile] = []
         self._capture_errors: list[str] = []
@@ -2467,6 +2560,28 @@ class PrecompileSession:
         if isinstance(exc[1], BaseException):
             self._record_capture_error(exc[1])
         self._drain_then_close()
+        if self._invariants_path is None:
+            return
+        if exc[0] is None:
+            try:
+                self.write_invariants(self._invariants_path)
+            except Exception as error:
+                # The teardown policy above, for the same reason: a diagnostic
+                # file that could not be written must not turn a capture that
+                # succeeded into a raising block. It is reported where the other
+                # teardown failures are, so require_complete still sees it.
+                self._record_capture_error(error)
+        else:
+            # A partial capture's report reads exactly like a complete one, so
+            # it is not written; say why rather than leaving the user looking
+            # for a file that never appeared.
+            log.warning(
+                "precompile: the capture block raised %s, so no invariants "
+                "report was written to %s. Call write_invariants() for the "
+                "partial one.",
+                getattr(exc[0], "__name__", exc[0]),
+                self._invariants_path,
+            )
 
     def _recording_filter(
         self,
@@ -2496,6 +2611,7 @@ class PrecompileSession:
                 for keep, e in zip(decisions, entries)
             )
             facts: set[_GuardFact] = set()
+            undetermined: set[_GuardFact] = set()
             kept_slots: set[tuple[str, str]] = set()
             dropped_slots: set[tuple[str, str]] = set()
             risky_slots: set[tuple[str, str]] = set()
@@ -2527,14 +2643,10 @@ class PrecompileSession:
                 )
                 enforced = not unchecked and (global_state_kept if noop else keep)
                 unmodelled = entry.guard_type in _UNMODELLED_GUARD_TYPES
-                # Rendered once per entry, and only where something reads the
-                # rendering: the dropped-code line and the fact of a slot the
-                # filter did not enforce. Rendering parses the check and
-                # fingerprinting reads the guarded value, per guard per compile,
-                # while the report spells an enforced guard as its slot alone.
-                code: tuple[str, ...] = (
-                    () if enforced else _render_code(entry.orig_guard.code_list)
-                )
+                # Rendered once per entry: the fact and the dropped-code line
+                # want the same rendering, and the report below prints the check
+                # of an enforced guard as well as of a dropped one.
+                code = _render_code(entry.orig_guard.code_list)
                 if enforced:
                     kept_slots.add(slot)
                 elif unchecked:
@@ -2557,18 +2669,17 @@ class PrecompileSession:
                     # summary() decides from the fact sets recorded below.
                     if by_default:
                         risky_slots.add(slot)
-                # Never compared, so never claimed to hold, and nothing here
-                # reads such a fact: see _UNMODELLED_GUARD_TYPES.
-                if not unmodelled:
-                    facts.add(
-                        _GuardFact(
-                            guard_type=entry.guard_type,
-                            source=slot[1],
-                            code=code,
-                            value="" if enforced else _value_fingerprint(entry),
-                            enforced=enforced,
-                        )
+                # Never compared, so never claimed to hold: see
+                # _UNMODELLED_GUARD_TYPES.
+                (undetermined if unmodelled else facts).add(
+                    _GuardFact(
+                        guard_type=entry.guard_type,
+                        source=slot[1],
+                        code=code,
+                        value=_value_fingerprint(entry),
+                        enforced=enforced,
                     )
+                )
             # One filter call is one compilation, and only the package knows
             # which frame is being compiled. Without it there is no frame to
             # attribute the facts to, and no entry to tell later whether this
@@ -2603,6 +2714,9 @@ class PrecompileSession:
                         # repeating nearly all of its guards costs facts rather
                         # than variants.
                         facts=frozenset(pool.setdefault(f, f) for f in facts),
+                        undetermined=frozenset(
+                            pool.setdefault(f, f) for f in undetermined
+                        ),
                     )
                 )
             return decisions
@@ -2640,6 +2754,17 @@ class PrecompileSession:
         confirmed: dict[_FrameKey, list[frozenset[_GuardFact]]] = {}
         for compiled in self._confirmed_compiles():
             confirmed.setdefault(compiled.frame, []).append(compiled.facts)
+        return confirmed
+
+    def _confirmed_undetermined(self) -> dict[_FrameKey, set[_GuardFact]]:
+        """frame -> the unmodelled facts of its confirmed compiles, merged.
+
+        Merged rather than kept per compile because nothing compares them: the
+        report lists them as undetermined, once per frame. Call under _state.
+        """
+        confirmed: dict[_FrameKey, set[_GuardFact]] = {}
+        for compiled in self._confirmed_compiles():
+            confirmed.setdefault(compiled.frame, set()).update(compiled.undetermined)
         return confirmed
 
     def _value_varying_slots(
@@ -2681,6 +2806,135 @@ class PrecompileSession:
                 slot for slot, per_variant in seen.items() if len(per_variant) > 1
             }
         return varying
+
+    def invariants(self) -> tuple[FrameInvariants, ...]:
+        """
+        Per frame, the guards that held in EVERY compiled variant of it.
+
+        Intersection is per frame rather than global because guards from
+        different frames are not comparable: the entry frame guards its
+        arguments, a resume frame guards whatever crossed the graph break, so a
+        global intersection would be empty for any model that breaks.
+
+        A frame compiled once reports everything as invariant, which is true but
+        uninformative -- exercise more than one variant for the diff to mean
+        anything.
+
+        A variant is a compilation whose guards are IN the artifact: a compile
+        the serializer bypassed contributes none of them, so it is not counted
+        here even though it ran the guard filter.
+
+        GLOBAL_STATE, TORCH_FUNCTION_STATE and FSDP_TRAINING_STATE carry no
+        value of their own, so nothing here can say whether two variants agreed
+        on, say, autocast. They are listed as UNDETERMINED rather than compared
+        -- see _UNMODELLED_GUARD_TYPES, and note that calling them equal is
+        precisely how the report would assert a precondition that does not
+        hold. GRAD_MODE and DETERMINISTIC_ALGORITHMS are compared like any other
+        guard, on the process state GlobalStateGuard snapshots for them.
+        """
+        # Snapshotted under the lock because a compile on another thread records
+        # into these dicts; the facts themselves are immutable, so the rendering
+        # below needs no lock.
+        with self._state:
+            undetermined_facts = self._confirmed_undetermined()
+            recorded = [
+                (
+                    key,
+                    list(sets),
+                    undetermined_facts.get(key, set()),
+                    self._value_varying_slots(key),
+                )
+                for key, sets in self._confirmed_facts().items()
+            ]
+        out = []
+        for key, sets, undetermined, varying in sorted(recorded, key=lambda i: i[0]):
+            name, filename, lineno = key
+            shared = frozenset.intersection(*sets) if sets else frozenset()
+            # A dropped slot whose VALUE varied did not hold, however its
+            # renderings compare: the report masks the id a check embeds, so two
+            # distinct objects render one fact. See _value_fingerprint.
+            shared -= {f for f in shared if (f.guard_type, f.source) in varying}
+            everything: set[_GuardFact] = set()
+            for one in sets:
+                everything |= one
+            out.append(
+                FrameInvariants(
+                    frame=name,
+                    filename=filename,
+                    lineno=lineno,
+                    variants=len(sets),
+                    invariant=tuple(sorted(shared, key=_fact_key)),
+                    varying=tuple(sorted(everything - shared, key=_fact_key)),
+                    undetermined=tuple(sorted(undetermined, key=_fact_key)),
+                )
+            )
+        return tuple(out)
+
+    def write_invariants(self, path: str, /) -> None:
+        """
+        Write :meth:`invariants` to ``path`` in human-readable form.
+
+        ``path`` is a FILE, written exactly as given, with parent directories
+        created -- ``snapshots/invariants.txt`` is a text file.
+
+        Output is stable across runs of the same capture: object ids and
+        Dynamo's per-process counters are normalized away, so the file can be
+        committed and diffed to see what a model change did to its guards.
+        """
+        frames = self.invariants()
+        target = getattr(self._fn, "__qualname__", None) or type(self._fn).__qualname__
+        lines = [
+            f"# precompile invariants for {target}",
+            "#",
+            "# Conditions that held in EVERY compiled variant of a frame. A call",
+            "# violating one cannot be served by any graph in this artifact, so",
+            "# these are the preconditions the artifact is only valid under.",
+            "# 'varies' lists what differed between variants -- those are what",
+            "# distinguish one compiled graph from another, not preconditions.",
+            "# 'unknown' lists guards whose check this report cannot model, so it",
+            "# cannot say whether they held across variants. Treat them as",
+            "# neither: they may or may not be preconditions.",
+            "#",
+            "# enforced = the guard is serialized and rechecked when the artifact",
+            "#            is loaded.",
+            "# dropped  = it was not serialized, so it is a precondition",
+            "#            NOTHING checks at serving time. See",
+            "#            PrecompileSummary.dropped_guards.",
+            "#",
+            f"# {len(frames)} frame(s), "
+            f"{sum(f.variants for f in frames)} compilation(s)",
+        ]
+        if any(f.variants < 2 for f in frames):
+            lines.append(
+                "# NOTE: some frames were compiled once, so their invariants are"
+                " just every guard. Exercise more variants for a real diff."
+            )
+        for f in frames:
+            where = f"{os.path.basename(f.filename)}:{f.lineno}"
+            lines.append("")
+            lines.append(
+                f"frame {f.frame} ({where})  {f.variants} variant(s), "
+                f"{len(f.invariant)} invariant, {len(f.varying)} varying, "
+                f"{len(f.undetermined)} undetermined"
+            )
+            if not f.invariant:
+                lines.append("  invariant: (none)")
+            for fact in f.invariant:
+                lines.append(f"  invariant {_render_fact(fact)}")
+            for fact in f.varying:
+                lines.append(f"  varies    {_render_fact(fact)}")
+            for fact in f.undetermined:
+                lines.append(f"  unknown   {_render_fact(fact)}")
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        # UTF-8 explicitly: the report renders user identifiers (module, class and
+        # parameter names) and the ambient locale can be ASCII in a container, where
+        # a non-ASCII name would raise UnicodeEncodeError and leave a truncated file
+        # behind -- from the one call that exists to explain the artifact.
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        log.info(
+            "precompile: wrote invariants for %d frame(s) to %s", len(frames), path
+        )
 
     def summary(self) -> PrecompileSummary:
         """The report for the capture so far.
@@ -2751,6 +3005,74 @@ class PrecompileSession:
             dropped_code=dropped_code,
         )
 
+    def _gated_summary(
+        self,
+        *,
+        require_complete: bool,
+        require_no_risky_drops: bool,
+        require_no_dropped_guards: bool,
+    ) -> PrecompileSummary:
+        """Run the coverage and guard gates, or raise saying which one failed.
+
+        Callable mid-block, while the compiled region is still live, on
+        :meth:`summary`'s terms: it waits for the calls in flight rather than
+        reading the package under a compile, and refuses a read from inside the
+        block's own callable.
+        """
+        summary = self.summary()
+        if require_complete and summary.capture_errors:
+            raise PackageError(
+                "Precompilation is incomplete because capture raised: "
+                f"{list(summary.capture_errors)}. Re-run every example successfully, "
+                "or pass require_complete=False to save the partial artifact."
+            )
+        if require_no_dropped_guards and summary.dropped_guards:
+            raise PackageError(
+                f"Precompilation dropped {len(summary.dropped_guards)} guard(s) that "
+                f"were not serialized: {list(summary.dropped_guards)}. Rebinding any "
+                f"of those sources between capture and load can silently serve a graph "
+                f"traced against the old value. Pass require_no_dropped_guards=False "
+                f"only to select the relaxed risky-drop policy."
+            )
+        if summary.risky_dropped_guards and require_no_risky_drops:
+            raise PackageError(
+                f"Precompilation dropped guard(s) that can affect dispatch on "
+                f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
+                f"either a configuration-dependent identity slot or a guard discarded "
+                f"by a custom filter. Nothing checks it at load time, so a different "
+                f"value can silently select the wrong graph instead of recompiling. "
+                f"Make the value reachable through a serializable guard, pin both "
+                f"machines to the same value, or pass "
+                f"require_no_risky_drops=False to accept the risk explicitly."
+            )
+        elif summary.risky_dropped_guards:
+            # The caller explicitly accepted the risk.
+            _warn_risky_drops(summary.risky_dropped_guards)
+        if require_complete:
+            if summary.guarded_codes == 0:
+                raise PackageError(
+                    "Precompilation captured no compiled code. Capture happens by "
+                    "execution, so the callable must actually be run inside the "
+                    "capture block. A call Dynamo could not turn into guarded code "
+                    "is reported separately as an uncovered frame."
+                )
+            if summary.backend_graphs == 0:
+                raise PackageError(
+                    "Precompilation compiled no graph: every captured frame was "
+                    "empty, so the artifact carries no compiled compute. This is "
+                    "what a callable whose whole body sits behind "
+                    "torch._dynamo.disable looks like. Pass require_complete=False "
+                    "to write the guards-only artifact anyway."
+                )
+            if summary.bypassed:
+                raise PackageError(
+                    f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
+                    f"were bypassed and will serve nothing: {list(summary.bypassed)}. "
+                    f"This usually means their guards could not be serialized. Pass "
+                    f"require_complete=False to accept a partial artifact."
+                )
+        return summary
+
 
 def precompile_capture(
     fn: Callable[..., object],
@@ -2761,6 +3083,7 @@ def precompile_capture(
     recompile_limit: int = 256,
     dynamic: bool | None = None,
     training: bool = False,
+    invariants: str | None = None,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2779,7 +3102,8 @@ def precompile_capture(
     exactly as you would ``fn`` inside the ``with`` body, and the calls fold into
     the artifact in the ambient grad mode. The compiled region stays alive for
     the whole block, so every call reuses the variants the earlier ones
-    produced.
+    produced. ``invariants`` names a file written when the block exits without
+    an exception.
 
     ``guard_filter_fn`` narrows ``default_guard_filter_fn``, and the guards it
     drops leave the live check as well as the serialized copy.
@@ -2791,4 +3115,5 @@ def precompile_capture(
         recompile_limit=recompile_limit,
         dynamic=dynamic,
         training=training,
+        invariants=invariants,
     )
