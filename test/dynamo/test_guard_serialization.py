@@ -1883,6 +1883,65 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         ):
             pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
 
+    def test_unpicklable_function_default_names_the_path(self):
+        # A function a guard is rooted at is pickled by value, and a default some
+        # guard reads travels with it verbatim. When that default cannot be
+        # pickled the walk used to stop at the function -- no attribute holds a
+        # default -- and the error arrived with no path at all.
+        from torch._dynamo.guards import pickle_guards_state
+
+        def fn(x, cfg=threading.Lock()):
+            return x
+
+        graph = types.SimpleNamespace(
+            guards=[], local_scope={"fn": fn}, global_scope={}, guard_on_key_order=set()
+        )
+        # What a guard on fn.__defaults__[0] leaves in the guard tree.
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(fn): fn, id(fn.__defaults__): fn.__defaults__},
+            value_guarded_containers={id(fn.__defaults__): fn.__defaults__},
+        )
+        with self.assertRaisesRegex(
+            PackageError, r"reached via: local_scope\['fn'\]\.__defaults__\[0\]"
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_offending_value_path_descends_kwdefaults_and_closures(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        lock = threading.Lock()
+        in_cell = threading.RLock()
+
+        def outer():
+            cell = in_cell
+            if lock is None:
+                empty = 1  # never runs, so the `empty` cell fn closes over stays EMPTY
+
+            def fn(x, *, kw=lock):
+                return cell, empty
+
+            return fn
+
+        fn = outer()
+        graph = types.SimpleNamespace(
+            local_scope={"fn": fn, "m": fn.__get__(object())}, global_scope={}
+        )
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "local_scope['fn'].__kwdefaults__['kw']", _offending_value_path(state, lock)
+        )
+        # The path is a pasteable accessor; the empty cell is skipped, not fatal.
+        self.assertIn(
+            "local_scope['fn'].__closure__[0].cell_contents  # cell",
+            _offending_value_path(state, in_cell),
+        )
+        # A bound method is descended through its function and receiver.
+        graph.local_scope.pop("fn")
+        self.assertIn(
+            "local_scope['m'].__func__.__kwdefaults__['kw']",
+            _offending_value_path(state, lock),
+        )
+
     def test_offending_value_path_is_found_by_identity(self):
         from torch._dynamo.guards import _offending_value_path
 
