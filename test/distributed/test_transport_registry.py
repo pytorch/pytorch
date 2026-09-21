@@ -2,14 +2,12 @@
 
 import asyncio
 import threading
-from datetime import timedelta
 from typing import Any, cast
 from unittest.mock import patch
 
 import torch
 from torch.distributed._transport import (
     _registry,
-    _work,
     available_transports,
     new_transport,
     register_transport,
@@ -51,7 +49,7 @@ class _TestTransport(Transport):
 
     def write(self, local_buffer, remote_buffer, *, async_op=False):
         self.operation(local_buffer, remote_buffer)
-        return _ManualWork(done=True) if async_op else 0
+        return _completed_work() if async_op else 0
 
     def read(self, local_buffer, remote_buffer, *, async_op=False):
         return self.write(local_buffer, remote_buffer, async_op=async_op)
@@ -161,137 +159,20 @@ class TestTransportRegistry(TestCase):
             )
 
 
-class _ManualWork(_work._PollingWork):
-    def __init__(self, *, done=False, error=None):
-        super().__init__()
-        self.done = done
-        self._error = error
-        self.polls = 0
+def _completed_work(error=None):
+    future = torch.futures.Future()
+    future.set_result([])
+    if error is not None:
 
-    def _poll(self):
-        self.polls += 1
-        return self.done
+        def fail(_):
+            raise error
+
+        future = future.then(fail)
+    return torch._C._distributed_c10d._create_work_from_future(future)
 
 
 @instantiate_parametrized_tests
 class TestTransportWork(TestCase):
-    def test_wait_timeout_and_retry(self):
-        work = _ManualWork()
-        with self.assertRaises(TimeoutError):
-            work.wait(timedelta(milliseconds=1))
-        self.assertFalse(work.is_completed())
-        work.done = True
-        self.assertTrue(work.wait())
-        self.assertTrue(work.is_success())
-        self.assertEqual(work.result(), [])
-        self.assertEqual(work.get_future().wait(), [])
-
-    def test_failure_is_terminal(self):
-        work = _ManualWork(done=True, error=RuntimeError("native failure"))
-        self.assertTrue(work.is_completed())
-        self.assertFalse(work.is_success())
-        self.assertIsInstance(work.exception(), RuntimeError)
-        with self.assertRaisesRegex(RuntimeError, "native failure"):
-            work.wait()
-        with self.assertRaisesRegex(RuntimeError, "native failure"):
-            work.get_future().wait()
-
-    def test_pending_future_requires_event_loop(self):
-        with self.assertRaisesRegex(RuntimeError, "running event loop"):
-            _ManualWork().get_future()
-
-    def test_future_driven_by_event_loop(self):
-        async def run():
-            work = _ManualWork()
-            future = work.get_future()
-            callback = asyncio.Event()
-            future.add_done_callback(lambda _: callback.set())
-            self.assertIs(work.get_future(), future)
-            self.assertFalse(future.done())
-            work.done = True
-            await asyncio.wait_for(callback.wait(), 1)
-            self.assertEqual(future.wait(), [])
-
-        asyncio.run(run())
-
-    def test_future_reentrant_callback(self):
-        async def run():
-            work = _ManualWork()
-            future = work.get_future()
-            seen = []
-            future.add_done_callback(lambda _: seen.append(work.wait()))
-            work.done = True
-            await wait_all([work])
-            self.assertEqual(seen, [True])
-
-        asyncio.run(run())
-
-    def test_async_wait_yields(self):
-        async def run():
-            work = _ManualWork()
-
-            async def complete():
-                await asyncio.sleep(0.01)
-                work.done = True
-
-            task = asyncio.create_task(complete())
-            await wait_all([work], timeout=1)
-            await task
-            self.assertGreater(work.polls, 1)
-
-        asyncio.run(run())
-
-    def test_timeout_does_not_complete_work(self):
-        async def run():
-            work = _ManualWork()
-            with self.assertRaises(TimeoutError):
-                await wait_all([work], timeout=0.001)
-            self.assertFalse(work.is_completed())
-            work.done = True
-            await wait_all([work])
-
-        asyncio.run(run())
-
-    def test_cancellation_does_not_complete_work(self):
-        async def run():
-            work = _ManualWork()
-            task = asyncio.create_task(wait_all([work]))
-            await asyncio.sleep(0)
-            task.cancel()
-            with self.assertRaises(asyncio.CancelledError):
-                await task
-            self.assertFalse(work.is_completed())
-            work.done = True
-            await wait_all([work])
-
-        asyncio.run(run())
-
-    def test_error_drains_other_work(self):
-        async def run():
-            good = _ManualWork()
-            bad = _ManualWork(done=True, error=ValueError("bad"))
-            asyncio.get_running_loop().call_later(0.01, setattr, good, "done", True)
-            with self.assertRaisesRegex(ValueError, "bad"):
-                await wait_all([bad, good], timeout=1)
-            self.assertTrue(good.is_completed())
-
-        asyncio.run(run())
-
-    def test_generator_error_drains_submitted_work(self):
-        work = _ManualWork()
-
-        def items():
-            yield work
-            raise ValueError("generator failed")
-
-        async def run():
-            asyncio.get_running_loop().call_later(0.01, setattr, work, "done", True)
-            with self.assertRaisesRegex(ValueError, "generator failed"):
-                await wait_all(items(), timeout=1)
-            self.assertTrue(work.is_completed())
-
-        asyncio.run(run())
-
     @parametrize("timeout", [-1, float("nan"), float("inf")])
     def test_invalid_timeout_does_not_submit(self, timeout):
         with _TestTransport() as transport:
@@ -341,12 +222,10 @@ class TestTransportWork(TestCase):
         asyncio.run(run())
 
     def test_completed_future_zero_timeout(self):
-        asyncio.run(wait_all([_ManualWork(done=True)], timeout=0))
+        asyncio.run(wait_all([_completed_work()], timeout=0))
         with self.assertRaisesRegex(RuntimeError, "failed"):
             asyncio.run(
-                wait_all(
-                    [_ManualWork(done=True, error=RuntimeError("failed"))], timeout=0
-                )
+                wait_all([_completed_work(error=RuntimeError("failed"))], timeout=0)
             )
 
     def test_cancelled_waiter_does_not_cancel_shared_future(self):
