@@ -121,7 +121,7 @@ def {{kernel_name}}_precompile(
     device_capability=None,
     flydsl_gpu_arch=None,
 ):
-    del device_index, device_capability
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
 
     env_updates = {"COMPILE_ONLY": "1", "FLYDSL_COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:

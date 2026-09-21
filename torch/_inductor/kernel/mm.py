@@ -1588,11 +1588,10 @@ def tuned_scaled_mm_v2(
             mat_a, mat_b, layout=layout, out_dtype=out_dtype
         )
         mxfp_scale_a, mxfp_scale_b = realize_inputs(scale_a[0], scale_b[0])
-        mxfp_input_nodes = [mxfp_a, mxfp_b, mxfp_scale_a, mxfp_scale_b]
+        mxfp_nodes = [mxfp_a, mxfp_b, mxfp_scale_a, mxfp_scale_b]
         mxfp_bias = realize_inputs(bias) if bias is not None else None
         if mxfp_bias is not None:
-            mxfp_input_nodes.append(mxfp_bias)
-        mxfp_nodes = mxfp_input_nodes
+            mxfp_nodes.append(mxfp_bias)
         mxfp_choices: list[ChoiceCaller] = []
         for mxfp_kwargs in get_flydsl_mxfp_template_kwargs(
             mxfp_format,

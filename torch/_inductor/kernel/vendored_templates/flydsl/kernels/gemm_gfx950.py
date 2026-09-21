@@ -667,7 +667,9 @@ def make_mxfp_lds_layout(rows, block_k, is_k_major):
 
 def make_mxfp_tiled_mma(param):
     if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4):
-        # FP4 uses the same byte fragments with half the storage K.
+        # This TiledMma defines layouts only. One FP8 slot has the same 8-bit
+        # payload as two packed FP4 values, so its K/2 fragments are byte-identical
+        # to the 16x16x128 FP4 scaled-MFMA fragments consumed by mxfp_gemm.
         op = fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k // 2, fx.Float8E4M3FN)
         k_layout = fx.make_layout((16, 4), (1, 16))
     else:
@@ -748,13 +750,14 @@ def mxfp_gemm(
     mma_atom = fx.make_mma_atom(
         fx.rocdl.cdna4.MFMA_Scale(param.mma_m, param.mma_n, param.mma_k, dtype)
     )
-    lane = tid % GFX950_WAVE_SIZE
-    wave = tid // GFX950_WAVE_SIZE
-    wave_m = wave // param.n_waves
-    wave_n = wave % param.n_waves
-    scale_lane = lane % param.mma_m
-    scale_group = lane // param.mma_m
-    scale_k = k_offset // MXFP_SCALE_BLOCK_K + scale_group
+    if const_expr(not scales_are_fragments):
+        lane = tid % GFX950_WAVE_SIZE
+        wave = tid // GFX950_WAVE_SIZE
+        wave_m = wave // param.n_waves
+        wave_n = wave % param.n_waves
+        scale_lane = lane % param.mma_m
+        scale_group = lane // param.mma_m
+        scale_k = k_offset // MXFP_SCALE_BLOCK_K + scale_group
 
     a_scales = []
     for mi in range_constexpr(fx.size(frag_A.shape[1]).unpack()):
@@ -836,9 +839,6 @@ def gemm_gfx950_kernel(
     tid = fx.thread_idx.x
     num_pid_m = (m - 1) // block_m + 1
     num_pid_n = (n - 1) // block_n + 1
-    if const_expr(is_mxfp):
-        num_pid_m = (m + block_m - 1) // block_m
-        num_pid_n = (n + block_n - 1) // block_n
     block_swizzle = BlockSwizzle(
         NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
     )
