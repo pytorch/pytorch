@@ -1681,19 +1681,6 @@ def _entry_fn_of(fn: object) -> Callable[..., object]:
     return fn  # type: ignore[return-value]
 
 
-# Backends whose compiled callable is worth keeping on the package for a render
-# to serialize, for the ids that filed no artifact of their own. Only eager is:
-# EagerCacheArtifact.__reduce__ (precompile_context.py) serializes a bound
-# GraphModule.forward, which is what eager hands back, and plain-pickles anything
-# else -- and ts hands back a RecursiveScriptModule while eager_noexcept and
-# eager_debug hand back local closures, none of which pickle at all. Whether a
-# backend files instead of keeping is not a property of the backend function:
-# aot_eager files a bundle once force_autograd_cache is on, and inductor files
-# nothing with its caches disabled. So the session reads what each compile
-# actually filed and consults this set only for the ids that filed nothing.
-_RENDER_SERIALIZABLE_BACKENDS = frozenset({"eager"})
-
-
 class _PrecompileBackend:
     """One session's own object wrapped around the inner backend.
 
@@ -1860,6 +1847,10 @@ class PrecompileSession:
         # ones, exactly as caching_precompile does today.
         self._package = CompilePackage(self._entry_fn)
         self._backend_artifacts: dict[_BackendId, Any] = {}
+        # The ids whose compiled callable _take_backend_artifacts decided to
+        # leave on the package for a render to serialize off it; _release drops
+        # every other copy the package holds.
+        self._kept_backend_ids: set[_BackendId] = set()
         self._entered = False
         self._compiled: Callable[..., object] | None = None
         self._state = threading.Condition()
@@ -1868,14 +1859,24 @@ class PrecompileSession:
         self._finished = False
 
     def _take_backend_artifacts(self) -> None:
+        """Collect what each backend id the entry names actually filed.
+
+        Single-threaded by contract: this reads the package's cache entry and
+        pops out of the process-global staging area, both of which a compile
+        still running is using (see _drain_then_close). A caller must either
+        hold self._state or be the thread that has drained the session, which is
+        what _close is; a render collecting mid-block runs on the same terms.
+        """
         from torch._dynamo.output_graph import noop_graph_call
         from torch._dynamo.precompile_context import (
             EagerCacheArtifact,
             PrecompileContext,
+            reduces_to_graph_source,
         )
 
         backend_ids = self._package.cache_entry().backend_ids
         unfiled: list[_BackendId] = []
+        kept: set[_BackendId] = set()
         for backend_id in backend_ids:
             if backend_id in self._backend_artifacts:
                 # Already collected. A render can collect mid-block and again at
@@ -1892,32 +1893,52 @@ class PrecompileSession:
                 # without filing anything under its id, which the bytecode still
                 # names. Record the no-op so the served frame dispatches to it
                 # rather than running eager. Done here rather than at
-                # render time because _release drops the package's copy for
-                # every backend but the ones a render serializes off it.
+                # render time because _release drops the package's copy of every
+                # id whose artifact this pass took.
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
-            elif compiled is not None:
-                # Compiled, but the compile filed nothing under the id, so the
-                # package's callable is the only copy there is. An id the
-                # bytecode names with no callable either is skipped: a resume
-                # frame that was never exercised has nothing to keep or to file.
+            elif compiled is None:
+                # An id the bytecode names that no compile ever reached: a resume
+                # frame the capture never exercised has nothing to keep and
+                # nothing to file.
+                continue
+            elif reduces_to_graph_source(compiled):
+                # Filed nothing, but what it left on the package is the shape
+                # EagerCacheArtifact.__reduce__ carries, so a render serializes
+                # it straight off the package. Decided from the object rather
+                # than from the backend's name, which does not determine the
+                # shape: eager hands back a bound GraphModule.forward only while
+                # force_autograd_cache is off, and a caller's own backend may
+                # hand one back too.
+                kept.add(backend_id)
+            else:
                 unfiled.append(backend_id)
-        if unfiled and self._backend not in _RENDER_SERIALIZABLE_BACKENDS:
-            # The render cannot serialize what those compiles left behind, so
-            # the capture is short the variants they hold rather than merely
-            # keeping them elsewhere (see _release).
+        # Recomputed per pass rather than accumulated: an id that filed an
+        # artifact after an earlier pass left its callable here has no further
+        # use for a second copy on the package.
+        self._kept_backend_ids = kept
+        if unfiled:
+            # Only what was observed: these ids filed nothing and what they left
+            # behind is not the shape a render serializes, so the capture is
+            # short those graphs. Why they filed nothing is not checked here, so
+            # the causes stay a list of possibilities. Deduplicated on the
+            # condition rather than on the wording, which names the ids and so
+            # differs between a mid-block collection and the one at exit.
             self._record_capture_error(
                 PackageError(
-                    f"the capture recorded no artifact for {len(unfiled)} of "
-                    f"{len(backend_ids)} compiled graphs, and backend "
-                    f"{self._backend!r} leaves behind a callable the render "
-                    "cannot serialize; the usual causes are a grad-enabled "
-                    "capture without training=True, which leaves the backward "
-                    "lowering deferred past the end of the capture, caches "
-                    "turned off through force_disable_caches, and a backend "
-                    "that never files its compiled code"
-                )
+                    "the capture recorded no artifact for backend id(s) "
+                    f"{', '.join(unfiled)}, and the callable backend "
+                    f"{self._backend!r} left on the package for each is not a "
+                    "bound GraphModule.forward, the one shape a render can "
+                    "serialize off the package; the usual causes are a "
+                    "grad-enabled capture without training=True, which leaves "
+                    "the backward lowering deferred past the end of the "
+                    "capture, caches turned off through force_disable_caches, "
+                    "and a backend that never files its compiled code -- any of "
+                    "them may apply, since nothing here diagnoses which"
+                ),
+                dedup_on="backend ids that filed no artifact",
             )
 
     def _record_recompile_limit(self) -> None:
@@ -1936,9 +1957,17 @@ class PrecompileSession:
             )
         )
 
-    def _record_capture_error(self, error: BaseException) -> None:
+    def _record_capture_error(
+        self, error: BaseException, *, dedup_on: str | None = None
+    ) -> None:
+        """Record one capture error, at most once per kind.
+
+        dedup_on names the stable part of a message whose text varies with how
+        far the capture has got, so that one condition observed twice records one
+        entry rather than one per wording.
+        """
         message = str(error)
-        key = (type(error), message)
+        key = (type(error), dedup_on if dedup_on is not None else message)
         # Under _state: the check-then-add IS the once-only invariant, so two
         # concurrent calls raising the same exception must not both append. No
         # caller holds _state when it gets here, and a Condition's default lock
@@ -1953,11 +1982,12 @@ class PrecompileSession:
         # The compiled variants stay in the entry's ordinary Dynamo cache, as
         # they would after torch.compile; clearing them per capture needs the
         # region-scoped cache entries that are not part of this build. What goes
-        # is the package's own copies: _take_backend_artifacts either filed them
-        # or recorded a capture error for them, and only a backend the render can
-        # serialize off the package has a reason to leave them here.
-        if self._backend not in _RENDER_SERIALIZABLE_BACKENDS:
-            self._package.cached_backends.clear()
+        # is the package's own copies, all but the ids _take_backend_artifacts
+        # decided to leave behind: it took an artifact for the rest or recorded a
+        # capture error naming them, so a second copy here serves no render.
+        for backend_id in list(self._package.cached_backends):
+            if backend_id not in self._kept_backend_ids:
+                del self._package.cached_backends[backend_id]
 
     def _call(self, *args: object, **kwargs: object) -> object:
         with self._state:
