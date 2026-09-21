@@ -2362,6 +2362,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                     value = cell_contents.as_python_constant()
                     cell = make_cell(value)
                     if allow_sourced_cells:
+                        # Let bind_args reuse the tracked contents so mutations
+                        # remain visible to the enclosing traced frame.
                         tx.output.side_effects.track_cell_existing(
                             None, cell, cell_contents
                         )
