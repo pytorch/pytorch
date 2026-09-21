@@ -894,8 +894,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             fully_shard(mlp)
         fully_shard(model)
 
-        model.load_state_dict(model.state_dict())
-        for param in model.parameters():
+        orig_params = list(model.parameters())
+        model.load_state_dict(model.state_dict(), assign=True)
+        for orig_param, param in zip(orig_params, model.parameters()):
+            self.assertIsNot(param, orig_param)
             self.assertEqual(param.grad_dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
