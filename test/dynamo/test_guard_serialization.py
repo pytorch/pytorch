@@ -4160,6 +4160,101 @@ class TestGuardSerialization(TestGuardSerializationBase):
         state = load_guards_state(self._cached_guards_state).output_graph
         self.assertEqual(next(iter(state.local_scope["d"])).tags, ["t"])
 
+    def test_pickles_by_default_admits_only_dict_only_plain_objects(self):
+        # The predicate the attribute pruner will gate on: an object round-trips
+        # as cls.__new__ plus __dict__ only when no pickle hook and no state
+        # outside __dict__ (slots, container items, C layout) is involved.
+        from torch._dynamo.guards import _is_torch_type, _pickles_by_default
+
+        self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
+        self.assertTrue(_pickles_by_default(_GenericHolder()))
+        for obj in (
+            _PipelineWithSetstate(),
+            _RebuiltFromNewargs([1]),
+            _SlottedHolder(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            torch.nn.Linear(1, 1),
+            torch.randn(1),
+        ):
+            self.assertFalse(_pickles_by_default(obj), type(obj).__name__)
+        self.assertTrue(_is_torch_type(torch.nn.Linear))
+        self.assertTrue(_is_torch_type(type("_Sub", (torch.nn.Linear,), {})))
+        self.assertFalse(_is_torch_type(_HolderWithGenerator))
+        self.assertFalse(_is_torch_type(_ConstantCfg))
+
+    def test_pickles_by_default_is_sound_against_pickle_itself(self):
+        # Soundness, not a list of known holes: whenever the predicate says an
+        # object is rebuilt as cls.__new__ plus __dict__, pickle's own protocol-2
+        # reduce of that object must be exactly that (newobj, no items, state is
+        # the instance dict), for a zoo of shapes it was never written against.
+        import array
+        import collections
+        import decimal
+        import fractions
+        import pathlib
+
+        from torch._dynamo.guards import _pickles_by_default
+
+        def dict_only_reduce(obj):
+            try:
+                r = obj.__reduce_ex__(2)
+            except Exception:
+                return False
+            return (
+                isinstance(r, tuple)
+                and len(r) >= 3
+                and getattr(r[0], "__name__", "") == "__newobj__"
+                and r[1] == (type(obj),)
+                and r[2] == (getattr(obj, "__dict__", None) or None)
+                and all(x is None for x in r[3:5])
+            )
+
+        Point = collections.namedtuple("Point", "x y")
+        zoo = [
+            _HolderWithGenerator(),
+            _GenericHolder(),
+            _OuterHolder(),
+            _ConstantCfg((0, 1), ["a"]),
+            _KeyCfg("a", ["t"]),
+            _PipelineWithSetstate(),
+            _RebuiltFromNewargs([1]),
+            _SlottedHolder(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            types.SimpleNamespace(a=1),
+            Point(1, 2),
+            collections.OrderedDict(a=1),
+            collections.defaultdict(int),
+            collections.deque([1]),
+            collections.Counter("ab"),
+            array.array("i", [1]),
+            decimal.Decimal("1.5"),
+            fractions.Fraction(1, 3),
+            pathlib.PurePosixPath("a/b"),
+            enum.Enum("Color", "RED").RED,
+            functools.partial(len),
+            weakref.WeakValueDictionary(),
+            threading.Lock(),
+            torch.randn(1),
+            torch.nn.Linear(1, 1),
+            torch.Size([1]),
+            torch.float32,
+            torch.device("cpu"),
+            torch.Generator(),
+        ]
+        for obj in zoo:
+            if _pickles_by_default(obj):
+                self.assertTrue(dict_only_reduce(obj), type(obj).__name__)
+        # And the predicate is not vacuous: the plain shapes are admitted (so is
+        # WeakValueDictionary, a pure-Python class whose state is its dict).
+        admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
+        self.assertLessEqual(
+            {"_HolderWithGenerator", "_GenericHolder", "_OuterHolder", "_KeyCfg"},
+            admitted,
+        )
+        self.assertNotIn("SimpleNamespace", admitted)  # a C type: layout differs
+
     def test_a_dict_key_field_shared_with_a_module_attribute_stays_real(self):
         # The module path registers its unguarded list by id, and persistent_id
         # would substitute that list inside the key's own state; the key is
