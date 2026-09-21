@@ -39,6 +39,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
+    _wait_all_gather,
     AllGatherInput,
     AllGatherResult,
     DefaultAllGather,
@@ -52,7 +53,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param import free_storage, ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
@@ -2221,6 +2222,29 @@ class _TestAllGather(DefaultAllGather):
 
 @instantiate_parametrized_tests
 class TestAllGatherLayouts(TestCase):
+    def test_async_write_before_wait_preserves_version(self):
+        output = torch.arange(4.0)
+        parameter = nn.Parameter(output)
+        loss = parameter.square().sum()
+        work = MagicMock(spec=dist.Work)
+        comm = MagicMock(spec=AllGather, return_value=work)
+        comm.reuses_output_storage = True
+        stream = torch.cpu.current_stream()
+        prepared = AllGatherInput(torch.ones(4), output, [], [], [])
+        with unittest.mock.patch(
+            "torch.distributed.fsdp._fully_shard._fsdp_collectives._default_all_gather_input_fn",
+            return_value=prepared,
+        ):
+            result = foreach_all_gather(
+                [], MagicMock(), True, stream, stream, torch.device("cpu"), comm
+            )
+        # An async worker can finish its write before FSDP calls Work.wait().
+        output.copy_(output.clone())
+        _wait_all_gather(result)
+        work.wait.assert_called_once()
+        loss.backward()
+        self.assertEqual(parameter.grad, 2 * output)
+
     @parametrize("failure", ["allocate", "copy_in", "collective"])
     def test_failed_gather_releases_output(self, failure):
         error = RuntimeError("injected failure")
@@ -2334,29 +2358,77 @@ class TestAllGatherLayouts(TestCase):
             )
         self.assertEqual(callback.call_count, 0 if custom or owned else 1)
 
+
+class TestAllGatherLayoutCopyOut(TestCase):
+    def test_param_contiguous_output_versions(self, device):
+        output = torch.arange(10.0, device=device)[2:]
+        views = DefaultAllGatherLayout().param_contiguous_output_views(
+            output, [[4], [4]], 1
+        )
+        first, second = [nn.Parameter(tensors[0]) for tensors in views]
+        loss = first.square().sum()
+        with torch.no_grad():
+            second.add_(1)
+        self.assertEqual(first, torch.arange(2.0, 6.0, device=device))
+        self.assertEqual(first.data_ptr(), output.data_ptr())
+        self.assertEqual(second.data_ptr(), output[4:].data_ptr())
+        loss.backward()
+        self.assertEqual(first.grad, 2 * first.detach())
+
+    @parametrize("shard_dim", [0, 1, 2])
     @parametrize("inference", [False, True])
-    def test_default_copy_out(self, inference):
+    def test_default_copy_out(self, device, shard_dim, inference):
         with torch.inference_mode(inference):
-            fp32 = torch.arange(8.0).view(2, 4)
-            bf16 = torch.arange(4, dtype=torch.bfloat16).view(2, 2)
-            source = torch.cat(
-                [tensor.view(torch.uint8) for row in zip(fp32, bf16) for tensor in row]
-            )
-            params = [
-                AllGatherParamMetadata(
-                    [4], [torch.float32], 1, torch.Size([2, 2]), [], False
-                ),
-                AllGatherParamMetadata(
-                    [2], [torch.bfloat16], 0, torch.Size([2]), [], False
-                ),
+            world_size = 2
+            expected = [
+                torch.arange(48.0, device=device).view(2, 4, 6),
+                torch.arange(8, dtype=torch.bfloat16, device=device).view(4, 2),
             ]
-            result = DefaultAllGatherLayout().finalize_outputs(source, params, 2, None)
-            self.assertFalse(result.backend_owned)
-            self.assertEqual(
-                result.tensors[0][0].view(2, 4),
-                torch.cat([row.view(2, 2) for row in fp32], dim=1),
+            shard_dims = [shard_dim, 0]
+            source = torch.cat(
+                [
+                    tensor.chunk(world_size, dim=dim)[rank]
+                    .contiguous()
+                    .flatten()
+                    .view(torch.uint8)
+                    for rank in range(world_size)
+                    for tensor, dim in zip(expected, shard_dims)
+                ]
             )
-            self.assertEqual(result.tensors[1][0], bf16.flatten())
+            params = []
+            for tensor, dim in zip(expected, shard_dims):
+                shard_size = list(tensor.shape)
+                shard_size[dim] //= world_size
+                params.append(
+                    AllGatherParamMetadata(
+                        [tensor.numel() // world_size],
+                        [tensor.dtype],
+                        dim,
+                        torch.Size(shard_size),
+                        [],
+                        False,
+                    )
+                )
+            layout = DefaultAllGatherLayout()
+            saved = []
+            for iteration in range(2):
+                result = layout.finalize_outputs(source, params, world_size, None)
+                self.assertFalse(result.backend_owned)
+                for param, outputs, tensor in zip(params, result.tensors, expected):
+                    self.assertEqual(outputs[0].view(tensor.shape), tensor)
+                    if iteration == 0:
+                        param.outputs = outputs
+                        if not inference:
+                            parameter = nn.Parameter(outputs[0])
+                            saved.append((parameter, parameter.square().sum()))
+                        free_storage(outputs[0])
+                    else:
+                        self.assertIs(outputs[0], param.outputs[0])
+                        if not inference:
+                            self.assertEqual(outputs[0]._version, 0)
+            for (parameter, loss), tensor in zip(saved, expected):
+                loss.backward()
+                self.assertEqual(parameter.grad, 2 * tensor.flatten())
 
 
 class TestFullyShardLayoutParity(FSDPTest):
@@ -2444,6 +2516,7 @@ class TestFullyShardLayoutParity(FSDPTest):
             self.assertEqual(comm.async_calls > 0, async_op)
 
 
+instantiate_device_type_tests(TestAllGatherLayoutCopyOut, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     TestFullyShardLayoutParity, globals(), only_for=("cuda", "xpu")
 )

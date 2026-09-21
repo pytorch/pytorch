@@ -1,6 +1,6 @@
 import math
 from collections.abc import Callable, Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from itertools import chain
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 
@@ -57,6 +57,7 @@ class AllGatherResult(NamedTuple):
     layout: "AllGatherLayout" = DEFAULT_ALL_GATHER_LAYOUT
     output_metadata: object | None = None
     all_gather_input: torch.Tensor | None = None
+    all_gather_version_ctx: AbstractContextManager[None] | None = None
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -347,6 +348,21 @@ def chunk_cat(
     torch._chunk_cat(tensors, dim, num_chunks, out=out)
 
 
+def _preserve_all_gather_version(
+    all_gather_output: torch.Tensor,
+    fsdp_params: list[FSDPParam],
+    all_gather_comm: AllGather,
+) -> AbstractContextManager[None]:
+    if all_gather_output.is_inference():
+        return nullcontext()
+    # Persistent outputs may share version counters with saved parameters.
+    if all_gather_comm.reuses_output_storage or any(
+        param._keep_all_gather_output_storage for param in fsdp_params
+    ):
+        return torch.autograd._unsafe_preserve_version_counter(all_gather_output)
+    return nullcontext()
+
+
 def _default_all_gather_input_fn(
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
@@ -388,16 +404,7 @@ def _default_all_gather_input_fn(
     all_gather_output = all_gather_comm.allocate(
         (all_gather_input_numel * world_size,), dtype=dtype, device=device
     )
-    # A persistent output can share version counters with saved parameters.
-    preserve_version = (
-        all_gather_comm.reuses_output_storage
-        or any(param._keep_all_gather_output_storage for param in fsdp_params)
-    ) and not all_gather_output.is_inference()
-    with (
-        torch.autograd._unsafe_preserve_version_counter(all_gather_output)
-        if preserve_version
-        else nullcontext()
-    ):
+    with _preserve_all_gather_version(all_gather_output, fsdp_params, all_gather_comm):
         all_gather_input, all_gather_output = copy_in(
             all_gather_inputs,
             all_gather_output,
@@ -433,19 +440,11 @@ def foreach_all_gather(
                 fsdp_params, group, device, all_gather_comm
             )
         all_gather_output = all_gather_input.output_tensor
-        preserve_version = (
-            all_gather_comm.reuses_output_storage
-            or any(param._keep_all_gather_output_storage for param in fsdp_params)
-        ) and not all_gather_output.is_inference()
+        all_gather_version_ctx = _preserve_all_gather_version(
+            all_gather_output, fsdp_params, all_gather_comm
+        )
         all_gather_stream.wait_stream(all_gather_copy_in_stream)
-        with (
-            device_handle.stream(all_gather_stream),
-            (
-                torch.autograd._unsafe_preserve_version_counter(all_gather_output)
-                if preserve_version
-                else nullcontext()
-            ),
-        ):
+        with device_handle.stream(all_gather_stream), all_gather_version_ctx:
             all_gather_work = all_gather_comm(
                 output_tensor=all_gather_input.output_tensor,
                 input_tensor=all_gather_input.input_tensor,
@@ -463,6 +462,7 @@ def foreach_all_gather(
                 all_gather_input.layout,
                 all_gather_input.output_metadata,
                 all_gather_input.input_tensor,
+                all_gather_version_ctx,
             )
     except BaseException:
         # No result reaches the parameter group to drive normal cleanup.
@@ -569,10 +569,14 @@ def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
     if all_gather_event is not None:  # sync op
         device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
-        output = all_gather_result.all_gather_output
-        with torch.autograd._unsafe_preserve_version_counter(
-            () if output.is_inference() else (output,)
-        ):
+        # A worker may have already written the output before wait() begins.
+        version_ctx = all_gather_result.all_gather_version_ctx
+        if version_ctx is None:
+            output = all_gather_result.all_gather_output
+            version_ctx = torch.autograd._unsafe_preserve_version_counter(
+                () if output.is_inference() else (output,)
+            )
+        with version_ctx:
             all_gather_work.wait()
 
 
@@ -620,6 +624,32 @@ def _copy_all_gather_outputs(
         torch.ops.fsdp.split_with_sizes_copy(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
+
+
+def _reassemble_all_gather_outputs(
+    shard_i_copy_infos: list[
+        tuple[AllGatherParamMetadata, list[torch.Tensor], list[torch.Tensor]]
+    ],
+    world_size: int,
+) -> None:
+    for param, param_all_gather_outputs, targets in shard_i_copy_infos:
+        # Chunk-cat from the temporary to the final all-gather output tensors.
+        shard_dim = param.shard_dim
+        with torch.autograd._unsafe_preserve_version_counter(
+            tuple(t for t in targets if not t.is_inference())
+        ):
+            for param_all_gather_output, target_all_gather_output in zip(
+                param_all_gather_outputs, targets
+            ):
+                pre_param_size = list(param.padded_sharded_size)
+                pre_param_size[0] *= world_size
+                chunks = torch.chunk(
+                    param_all_gather_output.view(pre_param_size), world_size, dim=0
+                )
+                post_param_size = list(param.padded_sharded_size)
+                post_param_size[shard_dim] *= world_size
+                cat_out = target_all_gather_output.view(post_param_size)
+                torch.cat(chunks, dim=shard_dim, out=cat_out)
 
 
 def _default_reduce_scatter_input_fn(
