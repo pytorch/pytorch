@@ -418,60 +418,6 @@ def _located(module: object, name: str, stdlib: bool) -> bool | None:
     return None  # namespace package, or exec'd in memory with no loader
 
 
-def _is_library_module(module_name: str | None) -> bool:
-    """
-    Owned by torch or the stdlib, so config on the serving machine does not
-    choose between implementations. NB this trusts the OWNER, not the binding:
-    a third party that monkeypatches ``F.gelu`` at import time still diverges,
-    and that is called out in ``_is_risky_drop``'s KNOWN GAP.
-
-    sys.stdlib_module_names is a list of NAMES, and a waiver keyed on a name is
-    a collision away from being wrong: graphlib, queue, code and distutils are
-    all stdlib names a third party can and does supply. Worse, the name can be
-    right and the code still not be the stdlib's -- in a default setuptools
-    install ``import distutils`` gets site-packages/setuptools/_distutils, and
-    SETUPTOOLS_USE_DISTUTILS picks which one, which is exactly the
-    config-chooses-the-implementation shape this lint exists to catch. So the
-    module has to RESOLVE to code shipped with the interpreter: located under a
-    stdlib root and not under an install root (purelib nests inside stdlib in
-    conda and inside platstdlib in a venv, so the exclusion is what does the
-    work), or with no file at all because it is built in or frozen, which the
-    path finder cannot shadow. That is required of the TOP-LEVEL name: not
-    imported, or without location evidence (a namespace package has none), it
-    is untrusted. An imported inner name only has to not be located ELSEWHERE:
-    the package it was found in is already located, and a real submodule can
-    carry no evidence of its own: pyexpat.errors, which pyexpat's C init
-    registers with neither ``__file__`` nor ``__spec__``, and torch.ops, a
-    ModuleType subclass whose ``__file__`` is a class attribute the module dict
-    never sees. The torch arm alone has an escape hatch: a frozen torch gives
-    ``_torch_roots`` no directory to anchor to, and then every torch name is
-    waived on its name, with no location evidence at all.
-    """
-    if module_name is None:
-        return False
-    top = module_name.partition(".")[0]
-    if top == "torch":
-        if not _torch_roots():
-            return True
-        stdlib = False
-    elif top in sys.stdlib_module_names:
-        stdlib = True
-    else:
-        return False
-    root = sys.modules.get(top)
-    if root is None or _located(root, top, stdlib) is not True:
-        return False
-    parts = module_name.split(".")
-    for i in range(2, len(parts) + 1):
-        name = ".".join(parts[:i])
-        module = sys.modules.get(name)
-        # Unimported or unlocatable, an inner name has nothing to check, and
-        # the package it would have to be found in has already been located.
-        if module is not None and _located(module, name, stdlib) is False:
-            return False
-    return True
-
-
 def _defined_where_read(
     value: object, global_name: str, user_stack: traceback.StackSummary | None
 ) -> bool:
