@@ -4,6 +4,9 @@ Each FX node has metadata on it, and in particular, stores a faketensor represen
 
 Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning.
 
+## Operator arguments
+Passes cannot assume that an operator's arguments have been normalized into `Node.args`, because manually constructed nodes may place schema arguments in `Node.kwargs`. When inspecting a known operator, use `get_arg_value(node, index, kwarg_name)` to handle either representation.
+
 ## Alias analysis
 Passes should determine tensor aliasing from FakeTensor storage identity rather than operator schema alias annotations. To check whether the inputs and outputs have any aliasing, it suffices to check whether the
 storages of the input and the storages of the output have any overlap. See
@@ -69,7 +72,7 @@ Rewrites must still keep the dataflow graph acyclic. The post-grad pipeline runs
 When searching for nodes with a particular operation and target, use `Graph.find_nodes` instead of scanning `Graph.nodes`. It uses the graph's lookup table and avoids visiting unrelated nodes. By default, `find_nodes` sorts matches into current graph-list order, which is not necessarily topological order. Pass `sort=False` when match order does not matter to avoid that sorting cost.
 
 ## Ordering dependencies
-Pass authors do not need to special-case ordering requirements that are not represented by ordinary dataflow. If correctness depends on an implicit execution order, the component responsible for that invariant must encode the order as explicit graph dependencies. Other passes then treat those dependencies like any other graph edges. Graph insertion APIs only choose node position; they do not infer hidden ordering requirements or add the required dependencies automatically.
+Pass authors do not need to special-case ordering requirements that are not represented by ordinary dataflow. If correctness depends on an implicit execution order, the component responsible for that invariant must encode the order as explicit graph dependencies. Other passes then treat those dependencies like any other graph edges.
 
 For example, when `fallback_random=True`, post-grad adds control dependencies between random operations before topological sorting and scheduling. Individual passes do not need to inspect `fallback_random` or reason about random-operation ordering.
 
@@ -79,6 +82,6 @@ The following invariants apply to intermediate tensors when Inductor is the back
 - The exact storage offset of an intermediate tensor is not part of its semantic contract. Passes do not need to preserve it, and operators must not depend on its value.
 - The exact strides of an intermediate tensor are not part of its semantic contract. During lowering, Inductor determines the input strides required by each consumer and ensures that the consumer receives them, restriding or materializing the input as needed.
 
-These invariants do not apply to user-visible graph inputs and outputs, whose externally visible metadata and aliasing relationships must be preserved.
+These invariants do not apply to user-visible graph inputs and outputs, whose externally visible metadata must be preserved.
 
 Saved activations are internal compiler values that appear as inputs to backward graphs, so they follow the intermediate-tensor rules instead. A plain FX graph does not reliably identify saved activations; passes that need this distinction require information propagated from the AOTAutograd graph signature rather than graph-structure heuristics.
