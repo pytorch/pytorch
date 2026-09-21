@@ -50,7 +50,10 @@ forward outputs' own metadata.
 ``guard_filter_fn`` rides on the optimize context rather than on the
 serializer, so the guards it drops leave the live check too and a capture
 recompiles less often than ordinary ``torch.compile`` would, and every dropped
-guard is reported in ``PrecompileSummary.dropped_guards``.
+guard is reported in ``PrecompileSummary.dropped_guards``. If serialization
+drops a guard that told the captured variants apart, the artifact is refused by
+default rather than written with variants whose dispatch would be ambiguous
+after load.
 ``invariants`` writes a readable report that separates, per frame, the guards
 holding in EVERY variant from the ones that differed: the first are
 preconditions the artifact is only valid under, the second are what tell its
@@ -112,6 +115,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import copy
 import dataclasses
 import functools
 import hashlib
@@ -2124,7 +2128,9 @@ class _PrecompileBackend:
     has to count or hold what the inner backend was handed.
     """
 
-    def __init__(self, backend: str, serving: bool = False) -> None:
+    def __init__(
+        self, backend: str, keep_graphs: bool = False, serving: bool = False
+    ) -> None:
         inner = torch._dynamo.lookup_backend(backend)
         self._torchdynamo_orig_backend = inner
         # Named the way get_compiler_fn derives a name, because a wrapper object
@@ -2134,6 +2140,11 @@ class _PrecompileBackend:
         self.backend_ctx_ctor = getattr(
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
+        # Rendering a subgraph as source needs the graph, which only exists
+        # here. Kept only where something will render it (see the caller):
+        # retaining deepcopies every compiled graph for the session.
+        self._keep_graphs = keep_graphs
+        self.graphs: dict[str, tuple[torch.fx.GraphModule, list[Any]]] = {}
         # Serving an INSTALLED artifact answers a guard miss by compiling,
         # because a frame reachable only through the frame evaluator has no
         # other way to run. Counted, and said out loud once per graph: an
@@ -2160,6 +2171,22 @@ class _PrecompileBackend:
                 "measured to. Recapture with an example that covers it.%s",
                 _identify_graph(gm),
             )
+        if self._keep_graphs:
+            backend_id = gm.meta.get("backend_id")
+            if backend_id is not None and str(backend_id) not in self.graphs:
+                # Deep-copy before the inner backend runs: inductor lowering
+                # mutates the graph it is handed, and a rendered copy has to be
+                # the graph Dynamo produced, not the leftovers.
+                placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+                # Render against the placeholders' FAKES, never the real inputs
+                # below: compile_fx re-fakifies real tensors into a fresh symbol
+                # set and dedups by value, which silently unifies a batch dim
+                # with any other dim of the same size.
+                fakes = [
+                    n.meta.get("example_value", n.meta.get("val")) for n in placeholders
+                ]
+                if all(f is not None for f in fakes):
+                    self.graphs[str(backend_id)] = (copy.deepcopy(gm), fakes)
         return self._torchdynamo_orig_backend(gm, inputs, **kwargs)
 
     def get_compiler_config(self) -> Any:
@@ -2305,6 +2332,61 @@ def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
     )
 
 
+def _missing_backends_message(
+    total: int, missing: Sequence[object], backend: str = "inductor"
+) -> str:
+    """Why some compiled subgraphs never reached the artifact.
+
+    Reports the recorded/total split rather than asserting nothing was
+    recorded: a single missing id is fatal here, and saying so as "never
+    recorded" reads as total failure when most of the capture succeeded.
+    """
+    shown = ", ".join(str(b) for b in missing[:8])
+    if len(missing) > 8:
+        shown += f", ... ({len(missing) - 8} more)"
+    if backend not in ("inductor", "eager"):
+        # A session takes any backend Dynamo can resolve, but only these two
+        # leave something a served artifact can run: "eager" keeps the fx
+        # graphs and "inductor" bundles compiled code. Anything else captures
+        # cleanly and records nothing, so say so here rather than let it read
+        # as a defect in the model. aot_eager is the one people reach for,
+        # since it is how you isolate AOTAutograd.
+        return (
+            f"Precompilation recorded {total - len(missing)} of {total} "
+            f"compiled backend(s) because backend={backend!r} does not produce "
+            f"anything serializable; precompile can record only 'inductor' or "
+            f"'eager'. To isolate AOTAutograd without inductor, use plain "
+            f"torch.compile(backend='aot_eager') -- that needs no precompile."
+        )
+    from torch._dynamo.utils import counters
+
+    # Rendering re-enters AOTAutograd outside the pinned bypass_autograd_cache_key
+    # config and bypasses there routinely, so this is a diagnostic, not a diagnosis.
+    bypasses = counters["aot_autograd"].get("autograd_cache_bypass", 0)
+    bypass_note = (
+        f" It bypassed {bypasses} time(s) here, which rendering does for any "
+        "graph the cache cannot key, and which does not by itself explain a gap."
+        if bypasses
+        else ""
+    )
+    return (
+        f"Precompilation recorded {total - len(missing)} of {total} compiled "
+        f"backend(s), so {len(missing)} graph(s) would reach the artifact with "
+        f"no code behind them: {shown}. Capture pins functorch's "
+        "bypass_autograd_cache_key, so AOTAutograd keys every graph it lowers "
+        "and no longer declines to record one it cannot address."
+        + bypass_note
+        + " A gap therefore means a graph whose backward never compiled, which "
+        "is a forward-only capture with grad enabled. Pass training=True to "
+        "lower the backward eagerly (the joint trace synthesizes tangents, so "
+        "no loss is needed), capture under torch.no_grad() / "
+        "torch.inference_mode() for an inference artifact, or run .backward() "
+        "inside the capture block. Re-run with "
+        "TORCH_LOGS=+torch._functorch._aot_autograd to see each graph as it "
+        "lowers."
+    )
+
+
 class PrecompileSession:
     """
     A caller-driven capture in progress. Enter as a context manager to get the
@@ -2323,6 +2405,7 @@ class PrecompileSession:
         recompile_limit: int = 256,
         dynamic: bool | None = None,
         training: bool = False,
+        keep_graphs: bool = False,
         invariants: str | None = None,
     ) -> None:
         self._fn = fn
@@ -2331,7 +2414,11 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
+        # Retaining a graph deepcopies it for the session; the guard probe and
+        # captures whose graphs are never rendered leave it off.
+        self._keep_graphs = keep_graphs
         self._invariants_path = invariants
+        self._backend_obj: _PrecompileBackend | None = None
         # One record per guard-filter call, whether or not that compile went
         # on to land anything; the report covers the ones that did. See
         # _RecordedCompile.
@@ -2600,9 +2687,9 @@ class PrecompileSession:
             # the ambient mode, not the capture's.
             self._entered = True
         try:
-            backend_obj = _PrecompileBackend(self._backend)
+            self._backend_obj = _PrecompileBackend(self._backend, self._keep_graphs)
             optimize_ctx = _optimize_isolated(
-                backend_obj,
+                self._backend_obj,
                 self._package,
                 recompile_limit=self._recompile_limit,
                 dynamic=self._dynamic,
@@ -3129,6 +3216,17 @@ class PrecompileSession:
                     "torch._dynamo.disable looks like. Pass require_complete=False "
                     "to write the guards-only artifact anyway."
                 )
+            if summary.uncovered_frames:
+                raise PackageError(
+                    f"Precompilation exercised frame(s) that produced NO guarded code "
+                    f"at all: {list(summary.uncovered_frames)}. Those paths are absent "
+                    f"from the artifact, and such a frame is skipped at install and runs "
+                    f"eager, so serving() cannot report that gap. This is expected for a "
+                    f"frame that only dispatches to covered submodules; it also looks "
+                    f"exactly like a frame Dynamo gave up on (check "
+                    f"TORCH_LOGS=graph_breaks for gb0124). Pass require_complete=False "
+                    f"once you have confirmed which."
+                )
             if summary.bypassed:
                 raise PackageError(
                     f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
@@ -3137,6 +3235,120 @@ class PrecompileSession:
                     f"require_complete=False to accept a partial artifact."
                 )
         return summary
+
+    def rendered_backends(
+        self, backend_ids: Sequence[str]
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Compiled subgraphs as READABLE source, and the reason each of the rest
+        stayed pickled, both keyed by backend id.
+
+        The pickled bundle is the fallback, not the goal: a subgraph is Inductor
+        output, which has a source form (the make_fx tracer emits exactly this),
+        unlike the guard trees and transformed bytecode beside it. Anything that
+        fails to render -- an effectful op, a graph with no compute, a training
+        shape the composer refuses -- stays pickled, and its reason is warned
+        here and written into the artifact header so the fallback is visible.
+
+        Rendering re-runs AOTAutograd + Inductor on the retained graph, so it is
+        a second lowering, paid once per subgraph that reaches the artifact.
+        """
+        from torch._functorch import aot_autograd
+
+        if self._backend_obj is None or self._backend == "eager":
+            return {}, {}
+        rendered: dict[str, str] = {}
+        refused: dict[str, str] = {}
+        for backend_id in backend_ids:
+            held = self._backend_obj.graphs.get(str(backend_id))
+            if held is None:
+                continue
+            gm, fakes = held
+            try:
+                # grad_enabled is what makes AOTAutograd emit the joint
+                # forward+backward for a training capture; without it the
+                # backward is silently absent and the served output loses its
+                # grad_fn.
+                source, _ = aot_autograd.compile_to_python(gm, fakes)
+            except Exception as e:
+                reason = " ".join(f"{type(e).__name__}: {e}".split())
+                log.warning(
+                    "precompile: subgraph %s stays pickled, not rendered as source: %s",
+                    backend_id,
+                    reason,
+                )
+                refused[str(backend_id)] = reason
+                continue
+            rendered[str(backend_id)] = source
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        keys = list(rendered)
+        namespaced = namespace_module_names([rendered[k] for k in keys])
+        return dict(zip(keys, namespaced)), refused
+
+    def snapshot_artifact(
+        self,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = True,
+        require_no_dropped_guards: bool = False,
+    ) -> tuple[str, bytes]:
+        """Render everything captured SO FAR, leaving this session able to capture more.
+
+        The render reads the package's records without consuming them, which is
+        what lets ``save()`` be called repeatedly within one capture block.
+        """
+        summary = self._gated_summary(
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+        )
+        from torch._precompile import _build_multigraph_artifact
+
+        backends = self._collect_backends()
+        entry = self._package.cache_entry()
+        rendered, refused = self.rendered_backends(list(backends))
+        return _build_multigraph_artifact(
+            entry,
+            backends,
+            summary,
+            self._backend,
+            _entry_fn_of(self._fn),
+            rendered,
+            refused,
+        )
+
+    def _collect_backends(self) -> dict[str, Any]:
+        """The compiled subgraphs this capture produced, keyed by backend id."""
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            PrecompileContext,
+        )
+
+        self._take_backend_artifacts()
+        collected = dict(self._backend_artifacts)
+        if self._backend == "eager":
+            # Eager "backends" are fx graphs with no compiled artifact of their
+            # own, so they have to be gathered explicitly.
+            for backend_id, backend in self._package.cached_backends.items():
+                collected[backend_id] = EagerCacheArtifact(
+                    key=backend_id, content=backend
+                )
+        entry = self._package.cache_entry()
+        for backend_id in entry.backend_ids:
+            if backend_id not in collected:
+                artifact = PrecompileContext.take_artifact(backend_id)
+                if artifact is not None:
+                    collected[backend_id] = artifact
+        missing = [b for b in entry.backend_ids if b not in collected]
+        if missing:
+            raise PackageError(
+                _missing_backends_message(
+                    len(entry.backend_ids), missing, self._backend
+                )
+            )
+        return {str(b): collected[b] for b in entry.backend_ids}
 
 
 def precompile_capture(
@@ -3148,6 +3360,7 @@ def precompile_capture(
     recompile_limit: int = 256,
     dynamic: bool | None = None,
     training: bool = False,
+    keep_graphs: bool = False,
     invariants: str | None = None,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
@@ -3180,5 +3393,6 @@ def precompile_capture(
         recompile_limit=recompile_limit,
         dynamic=dynamic,
         training=training,
+        keep_graphs=keep_graphs,
         invariants=invariants,
     )

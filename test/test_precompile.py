@@ -6044,6 +6044,58 @@ class TestPrecompilePublicSurface(TestCase):
                     cap(x)
             cap.result()
 
+    def test_no_dispatchable_graph_names_the_cause(self):
+        # An entry frame with no variants has two very different causes. If
+        # Dynamo BYPASSED the frame it recorded why, and saying so beats the
+        # thin-wrapper advice, which in that case is simply wrong. Only the
+        # ENTRY's own bypassed codes count: an unrelated bypassed helper frame
+        # must not relabel a thin-wrapper entry as a bypass.
+        from torch._dynamo.package import SerializedCode
+        from torch._precompile import _reject_uninstallable_entry
+
+        def fwd_loss_bwd():
+            pass
+
+        def helper():
+            pass
+
+        def bypassed_code(fn):
+            return types.SimpleNamespace(
+                bypassed=True,
+                bypass_reason="cannot pickle 'generator' object",
+                install_to_global=False,
+                python_code=SerializedCode.from_code_object(fn.__code__),
+            )
+
+        entry = types.SimpleNamespace(
+            fn_name="fwd_loss_bwd", codes=[bypassed_code(fwd_loss_bwd)]
+        )
+        # The state a bypassed ENTRY actually arrives in: _multigraph_frames
+        # DROPS bypassed codes, so there is no entry frame at all -- the
+        # diagnostic must fire from the empty list, not from a variant-less
+        # entry frame it would never see.
+        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
+            _reject_uninstallable_entry([], entry)
+        with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
+            _reject_uninstallable_entry([], entry)
+        # An entry frame that compiled but produced no variants, with a
+        # bypassed sibling code of the same name, reports the bypass too.
+        frames = [{"is_entry": True, "variants": []}]
+        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
+            _reject_uninstallable_entry(frames, entry)
+        foreign = types.SimpleNamespace(
+            fn_name="fwd_loss_bwd", codes=[bypassed_code(helper)]
+        )
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            _reject_uninstallable_entry(frames, foreign)
+        # No entry frame and only a FOREIGN bypassed code: neither diagnostic
+        # applies, so neither may fire as a guess.
+        _reject_uninstallable_entry([], foreign)
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            _reject_uninstallable_entry(
+                frames, types.SimpleNamespace(fn_name="step", codes=[])
+            )
+
     @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
     def test_multigraph_artifact_round_trips_a_graph_break(self):
         from torch._dynamo.package import CompilePackage, SerializedCode
@@ -7411,7 +7463,6 @@ class TestPrecompilePublicSurface(TestCase):
         # Distinct per graph, which is the whole point.
         self.assertEqual(len(set(warnings)), len(warnings))
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
     def test_missing_backend_error_reports_the_recorded_split(self):
         # One missing id is fatal, so the message has to say how many of the
         # capture actually landed. Reading "their compiled backends were never
@@ -8953,8 +9004,9 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_cache_with_a_different_tracer_tag_is_refused(self):
         # The pair carries the tag on both halves -- python_code's TRACER line and the
         # cache envelope's tracer key -- so flipping either one alone is a mismatched
-        # pairing. The tracer check runs before the code_hash one, so editing the
-        # source reports the tracer even though the edit also broke the hash.
+        # pairing. A flipped TRACER line now also selects the dynamo driver's
+        # metadata set, which a make_fx artifact does not carry, so the parser refuses
+        # it before the pairing check gets to compare the tags.
         with self._capture() as cap:
             cap(self.model, self.x)
         blob = torch.load(self.cache, weights_only=True)
@@ -8966,12 +9018,15 @@ class TestPrecompileCaptureFiles(TestCase):
         torch.save(blob, self.cache)
         source = self._read(self.artifact).decode()
         self.assertIn("TRACER = 'make_fx'", source)
-        # Any tag but 'dynamo' from the other side: TRACER also selects which metadata
-        # set _parse_artifact_metadata requires, so writing 'dynamo' onto a make_fx
-        # artifact is refused earlier, for the multi-graph blobs it then lacks.
+        # Any tag but 'dynamo' still parses as the make_fx set, so the pairing check is
+        # what refuses it; 'dynamo' is refused earlier, by the set selection.
         with open(self.artifact, "w", encoding="utf-8") as f:
             f.write(source.replace("TRACER = 'make_fx'", "TRACER = 'other'"))
         with self.assertRaisesRegex(PrecompileError, "python_code tracer 'other'"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+        with open(self.artifact, "w", encoding="utf-8") as f:
+            f.write(source.replace("TRACER = 'make_fx'", "TRACER = 'dynamo'"))
+        with self.assertRaisesRegex(PrecompileError, "missing calling-convention"):
             torch.compiler.precompile.load(self.artifact, self.cache)
 
     def test_a_pair_without_a_tracer_tag_still_loads(self):
