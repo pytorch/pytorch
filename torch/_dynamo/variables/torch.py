@@ -572,8 +572,8 @@ class BaseTorchVariable(VariableTracker):
             value, (types.MethodDescriptorType, types.WrapperDescriptorType)
         ):
             # These live in the owning type's __dict__, so their identity is
-            # stable across lookups and safe to guard on.
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            # stable across lookups. BUILTIN_MATCH also supports serialization.
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif is_wrapper_or_member_descriptor(value) or isinstance(
             value, torch._dynamo.compiled_autograd.Op
         ):
