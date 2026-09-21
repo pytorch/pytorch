@@ -12,6 +12,7 @@ from torch._inductor.fx_passes.reduced_atomic_contention import (
     _accumulation_dtype,
     _compute_num_partitions,
     _evaluate_candidate,
+    _scan_candidates,
     _widen_bytes,
     ScatterCandidate,
     ScatterPassContext,
@@ -411,8 +412,8 @@ class TestPartitionedScatterOpt(TestCase):
             self.assertEqual(e, a.float(), atol=1e-1, rtol=1e-2)
 
     def test_inplace_index_and_scatter_add_graph_inputs(self):
-        """Mutating overloads on graph inputs are eligible, not only functionalized
-        clone-and-mutate forms."""
+        """Mutating a graph input is still covered: functionalization turns the
+        mutation into the functional overload the pass matches, plus a copy_."""
         torch.manual_seed(43)
         B, N, n, D = 2, 8192, 8, 4
 
@@ -437,28 +438,34 @@ class TestPartitionedScatterOpt(TestCase):
             self.assertEqual(e, a, atol=1e-1, rtol=1e-2)
 
     def test_index_add_alpha_not_matched(self):
-        """alpha scales the source, which the rewrite does not carry. Same inputs
-        with the default alpha are matched, so this isolates the guard."""
-        torch.manual_seed(42)
+        """alpha scales the source, which the rewrite does not carry, so an
+        aten.index_add carrying one must not be picked up. Asserted on the scan:
+        a compiled index_add only reaches the pass where its decomposition falls
+        back, and where it does not, alpha is folded into the source and the
+        index_put left behind is matched legitimately."""
         N, n, D = 8192, 8, 4
 
-        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
-        vals = torch.randn(N, D, dtype=torch.bfloat16)
-        out = torch.zeros(n, D, dtype=torch.bfloat16)
+        graph = torch.fx.Graph()
+        out_node = graph.placeholder("out")
+        idx_node = graph.placeholder("idx")
+        vals_node = graph.placeholder("vals")
+        plain = graph.call_function(
+            torch.ops.aten.index_add.default, (out_node, 0, idx_node, vals_node)
+        )
+        scaled = graph.call_function(
+            torch.ops.aten.index_add.default,
+            (out_node, 0, idx_node, vals_node),
+            {"alpha": 2},
+        )
 
-        def run(alpha):
-            counters.clear()
-            torch._dynamo.reset()
+        out_node.meta["val"] = torch.empty(n, D, dtype=torch.bfloat16, device="meta")
+        idx_node.meta["val"] = torch.empty(N, dtype=torch.int64, device="meta")
+        vals_node.meta["val"] = torch.empty(N, D, dtype=torch.bfloat16, device="meta")
 
-            def f(out, idx, vals):
-                return out.index_add(0, idx, vals, alpha=alpha)
-
-            with torch.no_grad():
-                torch.compile(f, backend="inductor", fullgraph=True)(out, idx, vals)
-            return counters["inductor"]["partitioned_scatter_applied"]
-
-        self.assertEqual(run(1), 1)
-        self.assertEqual(run(2), 0)
+        ctx = ScatterPassContext()
+        _scan_candidates(graph, ctx)
+        self.assertIn(plain, ctx.candidates)
+        self.assertNotIn(scaled, ctx.candidates)
 
     def test_partials_widened_only_when_flag_is_set(self):
         """The flag decides the dtype of the partial buffers and nothing else, so
@@ -540,8 +547,14 @@ class TestPartitionedScatterOpt(TestCase):
             self.assertEqual(actual.dtype, torch.bfloat16)
             return ((actual.double() - reference).norm() / reference.norm()).item()
 
-        # Measured 6.2e-1 native against 2.1e-3 promoted on MI308X.
-        self.assertLess(rel_error(True), rel_error(False) / 10)
+        promoted, native = rel_error(True), rel_error(False)
+
+        # How much the promotion buys depends on whether the backend accumulates
+        # bf16 natively: 6.2e-1 against 2.1e-3 on MI308X, no difference at all
+        # where the partials are already computed wider. It must never cost
+        # accuracy, and the promoted result carries only the output's rounding.
+        self.assertLessEqual(promoted, native)
+        self.assertLess(promoted, 1e-2)
 
     def test_accuracy_int32_exact(self):
         """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""

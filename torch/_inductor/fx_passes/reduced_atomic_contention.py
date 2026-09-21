@@ -58,9 +58,10 @@ _SCATTER_ARGS = {
 }
 
 # index_add may reach the post-grad graph intact for bf16 on platforms without
-# native bf16 atomic add, so match it directly.
+# native bf16 atomic add, so match it directly. Mutating call sites arrive here
+# as the functional overload, so only that one is matched.
 #   index_add(self, dim, index, source, *, alpha=1)
-_INDEX_ADD_TARGETS = (aten.index_add.default, aten.index_add_.default)
+_INDEX_ADD_TARGET = aten.index_add.default
 
 # Same atomic_add store via the scatter_reduce_ lowering, but with an explicit
 # dim and a values-shaped index.
@@ -69,11 +70,8 @@ _INDEX_ADD_TARGETS = (aten.index_add.default, aten.index_add_.default)
 #   scatter(self, dim, index, src, *, reduce)
 _SCATTER_REDUCE_TARGETS = (
     aten.scatter_add.default,
-    aten.scatter_add_.default,
     aten.scatter_reduce.two,
-    aten.scatter_reduce_.two,
     aten.scatter.reduce,
-    aten.scatter_.reduce,
 )
 
 
@@ -82,7 +80,7 @@ def _is_summing_scatter(node: fx.Node) -> bool:
     untouched slots at their original value, which scatter-into-zeros cannot."""
     if node.kwargs.get("include_self", True) is not True:
         return False
-    if node.target in (aten.scatter_add.default, aten.scatter_add_.default):
+    if node.target is aten.scatter_add.default:
         return True
     reduce = node.kwargs.get("reduce")
     if reduce is None and len(node.args) > 4:
@@ -181,7 +179,7 @@ def _evaluate_candidate(
     rejection is recorded under its own skip reason."""
     node_name = output_node.name
     is_scatter_reduce = output_node.target in _SCATTER_REDUCE_TARGETS
-    is_index_add = output_node.target in _INDEX_ADD_TARGETS
+    is_index_add = output_node.target is _INDEX_ADD_TARGET
 
     input_node = output_node.args[0]
     if not isinstance(input_node, fx.Node):
@@ -329,7 +327,7 @@ def _scan_candidates(graph: fx.Graph, ctx: ScatterPassContext) -> None:
         elif node.target in _SCATTER_REDUCE_TARGETS:
             if not _is_summing_scatter(node):
                 continue
-        elif node.target in _INDEX_ADD_TARGETS:
+        elif node.target is _INDEX_ADD_TARGET:
             # alpha scales the source; the rewrite adds it unscaled.
             if node.kwargs.get("alpha", 1) != 1:
                 continue
@@ -858,48 +856,26 @@ def _build_pattern_pass(ctx: ScatterPassContext) -> PatternMatcherPass:
         indices = [None] * scatter_dim + [index_node]
         _create_replacement(match, ctx, input_tensor, indices, values)
 
-    for target in _INDEX_ADD_TARGETS:
-        register_graph_pattern(
-            CallFunction(target, Arg(), Ignored(), Ignored(), Arg()),
-            extra_check=extra_check,
-            pass_dict=patterns,  # type: ignore[arg-type]
-        )(index_add_replacement)
+    register_graph_pattern(
+        CallFunction(_INDEX_ADD_TARGET, Arg(), Ignored(), Ignored(), Arg()),
+        extra_check=extra_check,
+        pass_dict=patterns,  # type: ignore[arg-type]
+    )(index_add_replacement)
 
     def scatter_reduce_replacement(match: Match, input_tensor, values) -> None:
         _create_scatter_reduce_replacement(match, ctx, input_tensor, values)
 
     # dim is Ignored() because the replacement needs the normalized dim off the
     # candidate; reduce/include_self were already vetted by _is_summing_scatter.
+    # scatter_reduce carries reduce positionally by the time it reaches post-grad,
+    # scatter.reduce keeps it as a kwarg.
     for scatter_pattern in (
         CallFunction(aten.scatter_add.default, Arg(), Ignored(), Ignored(), Arg()),
-        CallFunction(aten.scatter_add_.default, Arg(), Ignored(), Ignored(), Arg()),
         CallFunction(
             aten.scatter_reduce.two, Arg(), Ignored(), Ignored(), Arg(), Ignored()
         ),
         CallFunction(
-            aten.scatter_reduce.two,
-            Arg(),
-            Ignored(),
-            Ignored(),
-            Arg(),
-            reduce=Ignored(),
-        ),
-        CallFunction(
-            aten.scatter_reduce_.two, Arg(), Ignored(), Ignored(), Arg(), Ignored()
-        ),
-        CallFunction(
-            aten.scatter_reduce_.two,
-            Arg(),
-            Ignored(),
-            Ignored(),
-            Arg(),
-            reduce=Ignored(),
-        ),
-        CallFunction(
             aten.scatter.reduce, Arg(), Ignored(), Ignored(), Arg(), reduce=Ignored()
-        ),
-        CallFunction(
-            aten.scatter_.reduce, Arg(), Ignored(), Ignored(), Arg(), reduce=Ignored()
         ),
     ):
         register_graph_pattern(
