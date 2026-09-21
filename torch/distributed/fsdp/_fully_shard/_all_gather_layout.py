@@ -21,7 +21,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import cast, TYPE_CHECKING
 
 import torch
 
@@ -108,7 +108,7 @@ class AllGatherLayout(ABC):
         """Select input packing and metadata before allocating the output."""
         metadata = self.prepare_output(input_metadata)
         if metadata is None:
-            return torch.ops.fsdp.all_gather_copy_in, DEFAULT_ALL_GATHER_LAYOUT, None
+            return DEFAULT_ALL_GATHER_LAYOUT.prepare(input_metadata)
         return self.copy_in, self, metadata
 
     @abstractmethod
@@ -173,7 +173,8 @@ class AllGatherLayout(ABC):
         outputs: list[list[torch.Tensor]] = []
         for input_numels in param_input_numels:
             output_numel = input_numels[0] * world_size
-            param_output = all_gather_output.narrow(0, output_offset, output_numel)
+            # Parameters share storage, but must have independent version counters.
+            param_output = all_gather_output.narrow(0, output_offset, output_numel).data
             outputs.append([param_output])
             output_offset += output_numel
         if output_offset != all_gather_output.numel():
@@ -194,7 +195,7 @@ class DefaultAllGatherLayout(AllGatherLayout):
     def prepare(
         self, input_metadata: AllGatherInputMetadata
     ) -> tuple[AllGatherCopyIn, AllGatherLayout, object | None]:
-        return torch.ops.fsdp.all_gather_copy_in, self, None
+        return torch.ops.fsdp.all_gather_copy_in, self, input_metadata.input_split_sizes
 
     def prepare_output(self, input_metadata: AllGatherInputMetadata) -> None:
         return None
@@ -222,13 +223,18 @@ class DefaultAllGatherLayout(AllGatherLayout):
         world_size: int,
         output_metadata: object | None,
     ) -> AllGatherOutputs:
-        from ._fsdp_collectives import _copy_all_gather_outputs
+        from ._fsdp_collectives import (
+            _copy_all_gather_outputs,
+            _reassemble_all_gather_outputs,
+        )
         from ._fsdp_param import alloc_storage
 
         outputs = []
         copy_outputs = []
         reorder_infos = []
-        split_sizes = []
+        split_sizes = (
+            [] if output_metadata is None else cast(list[int], output_metadata)
+        )
         for param in param_metadata:
             param_outputs = param.outputs or [
                 torch.empty(
@@ -240,10 +246,11 @@ class DefaultAllGatherLayout(AllGatherLayout):
                 for tensor in param_outputs:
                     alloc_storage(tensor)
             outputs.append(param_outputs)
-            split_sizes.extend(
-                numel * tensor.element_size() // all_gather_output.element_size()
-                for numel, tensor in zip(param.input_numels, param_outputs)
-            )
+            if output_metadata is None:
+                split_sizes.extend(
+                    numel * tensor.element_size() // all_gather_output.element_size()
+                    for numel, tensor in zip(param.input_numels, param_outputs)
+                )
             if param.shard_dim != 0:
                 temporary_outputs = [torch.empty_like(t) for t in param_outputs]
                 reorder_infos.append((param, temporary_outputs, param_outputs))
@@ -265,19 +272,7 @@ class DefaultAllGatherLayout(AllGatherLayout):
         _copy_all_gather_outputs(
             all_gather_output, split_sizes, copy_outputs, world_size
         )
-        for param, temporary_outputs, param_outputs in reorder_infos:
-            pre_param_size = list(param.padded_sharded_size)
-            pre_param_size[0] *= world_size
-            post_param_size = list(param.padded_sharded_size)
-            post_param_size[param.shard_dim] *= world_size
-            with torch.autograd._unsafe_preserve_version_counter(
-                tuple(t for t in param_outputs if not t.is_inference())
-            ):
-                for source, target in zip(temporary_outputs, param_outputs):
-                    chunks = torch.chunk(source.view(pre_param_size), world_size, dim=0)
-                    torch.cat(
-                        chunks, dim=param.shard_dim, out=target.view(post_param_size)
-                    )
+        _reassemble_all_gather_outputs(reorder_infos, world_size)
         return AllGatherOutputs(outputs)
 
 
