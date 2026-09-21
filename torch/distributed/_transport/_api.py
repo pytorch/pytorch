@@ -49,14 +49,13 @@ class Transport(ABC):
     ``read`` and ``write`` return zero on synchronous success. With
     ``async_op=True``, they return a :class:`torch.distributed.Work` whose
     ``wait`` blocks until completion and propagates transfer errors.
-    ``is_completed`` includes failed operations. Completion is backend-driven;
-    NIXL polls native requests without a Python executor. Pending NIXL
-    ``get_future`` calls require a running asyncio loop to drive completion;
-    completed work returns a future containing an empty list.
+    ``is_completed`` includes failed operations. Work futures resolve to an
+    empty list on success. Pending NIXL futures require a running asyncio loop;
+    completed work does not require one.
 
     ``read_async`` and ``write_async`` are asyncio coroutines. Cancellation or
-    timeout may leave transfers pending. Use
-    ``wait_all`` to await batches without blocking the event loop.
+    timeout may leave transfers pending. ``wait_all`` awaits their completion
+    futures without blocking the event loop.
 
     Operations use byte ranges, not tensor shapes or dtypes. One endpoint has
     one outgoing peer; no process group, ranks, or matching receives are needed.
