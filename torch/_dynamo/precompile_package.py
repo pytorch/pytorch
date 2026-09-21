@@ -71,6 +71,7 @@ Know these before relying on an artifact in production:
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import functools
 import hashlib
@@ -1158,8 +1159,111 @@ def _normalize(text: str) -> str:
     return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
 
 
+# A guard that pins a string pins it BY VALUE, so guards.py writes the value
+# into the check it renders: an EQUALS_MATCH on a system prompt renders as
+# L['self'].prompt == 'you are ...', and a dict keyed by a checkpoint path
+# renders the path inside the guard's own name. The report those renderings go
+# into is meant to be committed to a file and diffed, so every literal is masked
+# by type where the fact is recorded. What makes the report auditable is the
+# SHAPE of the check and the slot it names; that a value told two variants apart
+# is reported as a varying slot, never by printing the value.
+#
+# A key that reads as a name is not data: L['x'], G['CFG'] and ___dict__['act']
+# are how this module spells a source, so <> is allowed in it as well -- a
+# normalized global keeps its _<id>_c<n> placeholder inside the brackets.
+_SLOT_KEY = re.compile(r"\A[A-Za-z_][\w<>]*\Z")
+_QUOTED_KEY = re.compile(r"""\[(b?)('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\]""")
+_QUOTED_RUN = re.compile(r"""(b?)('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")""")
+# ___check_type_id renders as "<expr>, type=<class 'int'>", which is not one
+# expression, so the annotation comes off before the parse and goes back after.
+_CHECK_ANNOTATION = re.compile(r", type=<class '[^']*'>\Z")
+
+
+def _mask_keys(name: str) -> str:
+    """Mask the data keys a source name interpolates (cfg['/home/me/w.pt'])."""
+
+    def mask(match: re.Match[str]) -> str:
+        if not match.group(1) and _SLOT_KEY.match(match.group(2)[1:-1]):
+            return match.group(0)
+        return "[<bytes>]" if match.group(1) else "[<str>]"
+
+    return _QUOTED_KEY.sub(mask, name)
+
+
+class _MaskValues(ast.NodeTransformer):
+    """Replace the values a rendered check embeds with their type."""
+
+    def __init__(self) -> None:
+        self.masked = False
+
+    def _mask(self, node: ast.expr, kind: str) -> ast.AST:
+        self.masked = True
+        return ast.copy_location(ast.Name(id=f"<{kind}>", ctx=ast.Load()), node)
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if isinstance(node.value, str):
+            return self._mask(node, "str")
+        if isinstance(node.value, bytes):
+            return self._mask(node, "bytes")
+        # A number, a bool and None stay: the number IS the check for a length
+        # or a shape, and neither is a value a report can leak.
+        return node
+
+    def _mask_display(self, node: ast.expr) -> ast.AST:
+        # The whole display goes, not its elements: the length of a pinned list
+        # of names is as much of the value as the names are.
+        return self._mask(node, type(node).__name__.lower())
+
+    visit_List = visit_Set = visit_Dict = visit_Tuple = _mask_display
+
+    def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+        key = node.slice
+        if (
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and _SLOT_KEY.match(key.value)
+        ):
+            node.value = self.visit(node.value)  # type: ignore[assignment]
+            return node
+        return self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        name = node.func.id if isinstance(node.func, ast.Name) else ""
+        if name in ("getattr", "hasattr") and len(node.args) > 1:
+            # HASATTR renders hasattr(L['x'], 'act'): the attribute name is
+            # part of the source being read, not a value being compared.
+            node.args = [self.visit(node.args[0]), *node.args[1:]]
+            return node
+        return self.generic_visit(node)
+
+
+def _mask_values(text: str) -> str:
+    annotation = _CHECK_ANNOTATION.search(text)
+    body = text[: annotation.start()] if annotation else text
+    tail = annotation.group(0) if annotation else ""
+    try:
+        tree = ast.parse(body, mode="eval")
+    except SyntaxError:
+        # Not an expression: the saved-tensors-hooks guard renders prose
+        # ("... top_saved_tensors_hooks ids == (11, 12)"), so a quoted run is
+        # all there is to go on. Masking more than a value is the safe way to
+        # be wrong here.
+        masked = _QUOTED_RUN.sub(lambda m: "<bytes>" if m.group(1) else "<str>", body)
+        return masked + tail
+    mask = _MaskValues()
+    tree = mask.visit(tree)
+    if not mask.masked:
+        # Unparsing rewrites a check it has nothing to hide in -- it drops
+        # redundant parentheses and respells a string -- so a check without a
+        # literal is returned exactly as guards.py wrote it.
+        return text
+    return ast.unparse(tree) + tail
+
+
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
-    return tuple(_normalize(part) for part in (code_list or ()))
+    # Masked BEFORE normalizing: _normalize interpolates <id> and <n>
+    # placeholders that no longer parse as Python.
+    return tuple(_normalize(_mask_values(part)) for part in (code_list or ()))
 
 
 def _hash_text(text: str) -> str:

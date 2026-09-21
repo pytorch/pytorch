@@ -28,9 +28,16 @@ class GuardFact:
             ``PrecompileSummary``: ``"x"``, ``"self.eps"``, ``"G['CFG'].width"``.
             Empty for a guard checked against no source.
         code: The rendered check parts, with the addresses Dynamo interpolates
-            scrubbed by the producer, e.g.
-            ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``; empty
-            when the guard renders none.
+            scrubbed by the producer and the values the check embeds masked by
+            type, e.g. ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``
+            and ``("L['self'].prompt == <str>",)``; empty when the guard renders
+            none. A guard that pins a string pins it BY VALUE, so the check
+            guards.py renders carries the string itself, and these reports are
+            written to a file to be committed and diffed: what a check compares
+            is named by type, and that it differed between variants is reported
+            by the slot (``PrecompileSummary.risky_dropped_guards``) rather than
+            by printing the value. The attribute name a ``hasattr`` reads is part
+            of the source and stays.
         value: A rendered fragment for what the check compares that its code does
             not show: a tensor's dtype and shape line, or ``"is <callable>"`` for
             an identity guard. Empty when the code says it all.
