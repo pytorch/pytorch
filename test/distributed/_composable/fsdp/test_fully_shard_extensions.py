@@ -28,8 +28,13 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 device_type = torch.device(get_devtype())
@@ -225,9 +230,117 @@ class TestFullyShardAllGatherExtensionsCommon:
         return model
 
 
+@instantiate_parametrized_tests
 class TestFullyShardAllGatherExtensionsMultiProcess(
     TestFullyShardAllGatherExtensionsCommon, FSDPTest
 ):
+    @skip_if_lt_x_gpu(2)
+    @parametrize("shard_dim", [1, 2])
+    @parametrize("invalid_payload", [False, True])
+    def test_legacy_all_gather_direct_copy(self, shard_dim: int, invalid_payload: bool):
+        expected = torch.arange(48, device=device_type).float().view(2, 4, 6) / 64
+        post_out_ids: list[int | None] = []
+
+        class Scale(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(expected.clone())
+
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                return self.weight * input
+
+        class CopyCounter(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.copies = 0
+                self.reorders = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func == torch.ops.fsdp._all_gather_copy_out_.default:
+                    self.copies += 1
+                elif func == torch.ops.aten.cat.out:
+                    self.reorders += 1
+                return func(*args, **(kwargs or {}))
+
+        def fsdp_pre_all_gather(
+            local_tensor,
+            mesh: DeviceMesh,
+            outer_size: torch.Size,
+            outer_stride: tuple[int, ...],
+            module: nn.Module,
+            mp_policy: MixedPrecisionPolicy,
+        ) -> tuple[tuple[torch.Tensor, ...], Any]:
+            del outer_stride, module, mp_policy
+            auxiliary = (local_tensor.to(torch.bfloat16) + 1).view(6, 4)
+            if invalid_payload:
+                auxiliary = auxiliary[:3]
+            return (
+                local_tensor.view(3, 8),
+                auxiliary,
+            ), (outer_size, mesh.size())
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor,
+            all_gather_outputs: tuple[torch.Tensor, ...],
+            metadata: Any,
+            param_dtype: torch.dtype,
+            *,
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+            del local_tensor
+            weight, auxiliary = all_gather_outputs
+            self.assertEqual(metadata, (expected.size(), self.world_size))
+            self.assertEqual(weight.dtype, param_dtype)
+            self.assertEqual(weight.size(), (self.world_size * 3, 8))
+            self.assertEqual(weight, expected.view(6, 8), atol=0, rtol=0)
+            self.assertEqual(auxiliary.dtype, torch.bfloat16)
+            self.assertEqual(auxiliary.size(), (self.world_size * 6, 4))
+            self.assertEqual(
+                auxiliary, (expected + 1).to(torch.bfloat16).view(12, 4), atol=0, rtol=0
+            )
+            post_out_ids.append(None if out is None else id(out))
+            weight = weight.view(expected.size())
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(weight)
+                return None
+            return weight, (weight,)
+
+        model = Scale()
+        ref_model = copy.deepcopy(model)
+        fully_shard(
+            model,
+            shard_placement_fn=lambda _: Shard(shard_dim),
+            reshard_after_forward=True,
+        )
+        local_weight = model.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
+        inp = torch.arange(48, device=device_type).float().view_as(expected) / 32
+        if invalid_payload:
+            with self.assertRaisesRegex(
+                (RuntimeError, ValueError),
+                "invalid for input of size|same number of elements",
+            ):
+                model(inp)
+            return
+        for _ in range(2):
+            model.zero_grad(set_to_none=True)
+            ref_model.zero_grad(set_to_none=True)
+            with CopyCounter() as counter:
+                output = model(inp)
+            ref_output = ref_model(inp)
+            self.assertEqual(output, ref_output, atol=0, rtol=0)
+            self.assertEqual(counter.copies, 1)
+            self.assertEqual(counter.reorders, 0)
+            output.sum().backward()
+            ref_output.sum().backward()
+            check_sharded_parity(self, ref_model, model)
+        self.assertEqual(len(post_out_ids), 4)
+        self.assertIsNotNone(post_out_ids[1])
+        self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
+
     @skip_if_lt_x_gpu(2)
     def test_all_gather_extensions_train_parity(self):
         with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
