@@ -1515,12 +1515,11 @@ def reuse_dtype_conversions(graph: torch.fx.Graph) -> None:
             # Two identical conversions detected.
             replacement = base_conversion
         else:
-            view_target = source.target
-            if not callable(view_target):
-                raise AssertionError("expected call_function target")
+            view_target = cast(Callable[..., Any], source.target)
             base_conversion_val = cast(torch.Tensor, base_conversion.meta["val"])
-            # Replay view_op(base_conversion) and require its metadata to match
-            # the conversion being replaced, since it will replace it.
+            # Replay view_op(base_conversion) to:
+            # 1. Verify that the view is valid for the converted base.
+            # 2. Produce FakeTensor metadata for the compatibility check below.
             try:
                 replacement_val = _replay_view(source, base_source, base_conversion_val)
             except (RuntimeError, ValueError):

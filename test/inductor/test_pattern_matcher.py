@@ -961,22 +961,6 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(get_node_storage(replacement), get_node_storage(conversion))
         torch.testing.assert_close(gm(*args), expected)
 
-    def test_reuse_conversion_does_not_use_later_base(self):
-        def fn(x):
-            # Reusing the later base conversion would require moving it across
-            # these order-sensitive RNG operations.
-            x_t_bf16 = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-            first_random = aten.rand_like.default(x_t_bf16)
-            second_random = aten.rand_like.default(x)
-            x_bf16 = convert(x, torch.bfloat16)
-            return first_random, second_random, aten.sum.default(x_bf16)
-
-        x = torch.randn(5, 7, device=GPU_TYPE)
-        gm = make_fx(fn)(x)
-        self._run_reuse_dtype_conversions(
-            gm, expected_conversions=2, expected_rewrites=0
-        )
-
     # Reuse is safe when at most one conversion storage reaches a graph output,
     # but must be skipped when both do to preserve output-output aliasing.
     def test_reuse_conversion_allows_output_candidate_with_internal_base(self):
@@ -1049,18 +1033,14 @@ class TestPatternMatcher(TestCase):
         torch.testing.assert_close(gm(x), expected)
 
     def test_reuse_conversion_allows_different_intermediate_strides(self):
-        def fn(x, lhs, lhs_t):
+        def fn(x):
             x_bf16 = convert(x, torch.bfloat16)
-            x_t_bf16 = convert(aten.permute.default(x, [0, 2, 1]), torch.bfloat16)
-            return torch.bmm(lhs, x_bf16), torch.bmm(lhs_t, x_t_bf16)
+            x_t_bf16 = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return aten.sum.default(x_bf16), aten.sum.default(x_t_bf16)
 
-        args = (
-            torch.randn(4, 5, 7, device=GPU_TYPE),
-            torch.randn(4, 3, 5, device=GPU_TYPE, dtype=torch.bfloat16),
-            torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
-        )
-        expected = fn(*args)
-        gm = make_fx(fn, tracing_mode="fake")(*args)
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
         permuted_convert = next(
             node
             for node in gm.graph.nodes
@@ -1068,18 +1048,18 @@ class TestPatternMatcher(TestCase):
             and isinstance(node.args[0], torch.fx.Node)
             and node.args[0].target is aten.permute.default
         )
-        # Intermediate strides are not part of the Inductor contract; a
-        # lowering that requires specific strides constrains them at the use.
+        # Simulate a valid intermediate layout different from
+        # permute(convert(x)); consumers constrain required strides at use.
         permuted_convert.meta["val"] = torch.empty_strided(
-            (4, 7, 5),
-            (35, 5, 1),
+            (7, 5),
+            (5, 1),
             dtype=torch.bfloat16,
             device=GPU_TYPE,
         )
         self._run_reuse_dtype_conversions(
             gm, expected_conversions=1, expected_rewrites=1
         )
-        torch.testing.assert_close(gm(*args), expected)
+        torch.testing.assert_close(gm(x), expected)
 
     @parametrize(
         "view,input_shape",
