@@ -26,7 +26,15 @@ class GuardFact:
             the ``Guard.name`` with local scope stripped (``L['x']`` -> ``x``),
             the same spelling as the ``(guard_type, source)`` slots of
             ``PrecompileSummary``: ``"x"``, ``"self.eps"``, ``"G['CFG'].width"``.
-            Empty for a guard checked against no source.
+            Empty for a guard checked against no source. A data key the name
+            interpolates is masked by type, exactly as the values in ``code``
+            below are and for the same reason, so a dict slot reads
+            ``"self.cfg['<str>']"``; a key that names a scope or an nn.Module
+            name dict is kept (``"G['CFG']"``, ``"self._modules['lin']"``), since
+            that one spells the source rather than a value. A name that is not a
+            Python expression -- the ``<ephemeral: ...>`` source of a symbol
+            Dynamo expects to simplify away is one -- is reported as
+            ``"<unparsed source>"``, so two such sources read as one slot.
         code: The rendered check parts, with the addresses Dynamo interpolates
             scrubbed by the producer and the values the check embeds masked by
             type, e.g. ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``
@@ -43,11 +51,13 @@ class GuardFact:
             becomes ``"<unparsed check>"``, since nothing can be masked in a
             shape the producer cannot read -- which makes two such checks on one
             slot read alike, a digest of the text being a fingerprint of what the
-            masking exists to hide. The attribute name a ``hasattr``
-            reads stays, as does a key that names a scope or an nn.Module
-            attribute (``L['x']``, ``self._modules['lin']``); every other
-            subscript key is masked, its shape notwithstanding, since the check
-            is parsed rather than pattern-matched.
+            masking exists to hide. An attribute NAME a call reads stays -- a
+            ``hasattr`` or ``getattr``, and the ``___dict_contains`` an absent
+            attribute renders -- as does a key that names a scope or an
+            nn.Module attribute (``L['x']``, ``self._modules['lin']``); every
+            other argument and every other subscript key is masked, its shape
+            notwithstanding, since the check is parsed rather than
+            pattern-matched.
         value: A rendered fragment for what the check compares that its code does
             not show: the ``check_tensor`` line for a tensor guard (python type,
             dispatch keys, dtype, size and stride), ``"is <callable>"`` for an
@@ -84,14 +94,23 @@ class PrecompileSummary:
 
     The guard fields hold ``(guard_type, source)`` slots, the source spelled as
     ``GuardFilterEntry.name``, i.e. the ``Guard.name`` with local scope stripped
-    (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged). Each list
+    (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged) and its
+    data keys masked as ``GuardFact.source`` describes (``self.cfg['<str>']``,
+    or ``"<unparsed source>"`` for a name that is not an expression). Each list
     holds a slot once, however many frames or variants carried it, so
     ``dropped_guard_types`` counts distinct slots, not occurrences. The relations
     between the lists hold within one frame variant, where the producer applies
     them, and are stated here rather than checked:
 
     * ``kept_guards`` and ``dropped_guards`` are disjoint: the filter gives a
-      slot one verdict, keep or reject.
+      slot one verdict, keep or reject. A slot nothing checks however the filter
+      voted -- a guard type whose ``GuardBuilder`` method is ``pass`` -- is in
+      NEITHER list, since no verdict took it away; ``GuardFact.enforced`` is
+      where a report says that guard is not checked.
+    * the guards of a compile that BYPASSED are in neither list either: a bypass
+      installs no guarded code, so nothing enforces what its filter kept and no
+      serving artifact was widened by what it dropped. ``bypassed`` is where the
+      report names those frames.
     * ``risky_dropped_guards`` is drawn from ``dropped_guards``.
     * ``policy_dropped_guards`` is disjoint from both: a policy drop is taken
       out of the serialized copy the filter kept, once the slot held
