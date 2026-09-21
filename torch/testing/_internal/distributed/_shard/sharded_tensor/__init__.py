@@ -52,8 +52,17 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         # Bind the per-rank device for accelerator backends. gloo is excluded: it
         # is the default backend for cpu and mps, which have no per-rank
         # accelerator device index.
-        if torch.accelerator.is_available() and backend != dist.Backend.GLOO:
-            torch.accelerator.set_device_index(self.rank)
+        device_type = getattr(self, "device_type", None)
+        device_module = (
+            torch.accelerator
+            if device_type is None
+            else torch.get_device_module(device_type)
+        )
+        if device_module.is_available() and backend != dist.Backend.GLOO:
+            if device_type is None:
+                device_module.set_device_index(self.rank)
+            else:
+                device_module.set_device(self.rank)
 
     def init_rpc(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
@@ -115,7 +124,13 @@ def with_comms(func=None, init_rpc=True, backend=None):
     def wrapper(self, *args, **kwargs):
         # Skip test if backend requires accelerator but not enough devices available
         if (backend or self.backend) != dist.Backend.GLOO:
-            if torch.accelerator.device_count() < self.world_size:
+            device_type = getattr(self, "device_type", None)
+            device_module = (
+                torch.accelerator
+                if device_type is None
+                else torch.get_device_module(device_type)
+            )
+            if device_module.device_count() < self.world_size:
                 sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
