@@ -58,8 +58,7 @@ from .source import (
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-    from typing import NoReturn
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
 
     from torch._guards import Source
     from torch.compiler._precompile_types import GuardFact as _GuardFact
@@ -67,7 +66,6 @@ if TYPE_CHECKING:
     from .convert_frame import ConvertFrameReturn
     from .hooks import Hooks
     from .package import _DynamoCacheEntry
-    from .repro.after_dynamo import WrapBackendDebug
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
 
@@ -143,46 +141,8 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
     rather than replacing it: frames its skipfile checks reject never pay the
     patch, and this frame stays out of the user stack dynamo_start reports.
     A frame under DistributedDataParallel with optimize_ddp="ddp_optimizer" is
-    refused by name when a package is attached; _clone_with_backend below, the
-    hook CatchErrorsWrapper calls only for that frame, says why. Without a
-    package the DDP clone keeps this subclass, so the flag survives it.
+    handled by the next commit in this stack, which overrides _clone_with_backend.
     """
-
-    @property
-    def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
-        # CatchErrorsWrapper asks for this clone only for a frame under an
-        # active DDP module in ddp_optimizer mode (the default, optimize_ddp=True);
-        # the other optimize_ddp modes never reach it. DDPOptimizer compiles the
-        # graph one bucket at a time and no bucket carries the backend id the
-        # package records, so the artifact could never be completed; the base
-        # clone would drop the package silently instead. The wrapper probes the
-        # attribute with hasattr before calling it, and hasattr swallows only
-        # AttributeError, so a getter that raised would raise PackageError out of
-        # the probe itself; raising from the returned callable puts the error at
-        # the call the wrapper actually makes. A package-less converter is what
-        # the tests build, and what a capture session may build before it
-        # attaches a package; its clone keeps the subclass, hooks and limit. The
-        # stance path (eval_frame._create_wrapped_callback, behind set_stance)
-        # rebuilds a plain ConvertFrame with no package and is outside a capture
-        # session's contract.
-        if self._inner_convert._package is None:
-            return lambda backend: type(self)(
-                backend, self._hooks, recompile_limit=self._recompile_limit
-            )
-
-        def refuse(backend: WrapBackendDebug) -> NoReturn:
-            raise PackageError(
-                "Cannot precompile a DistributedDataParallel forward with "
-                f"torch._dynamo.config.optimize_ddp={torch._dynamo.config.optimize_ddp!r}: "
-                "DDPOptimizer compiles the graph one bucket at a time and no bucket "
-                "records a backend under the id the package saves. Set "
-                'torch._dynamo.config.optimize_ddp="no_optimization" to precompile '
-                "a DDP forward (this disables DDPOptimizer's comm/compute overlap); "
-                'the "python_reducer" and "python_reducer_without_compiled_forward" '
-                "modes bypass DDPOptimizer as well"
-            )
-
-        return refuse
 
     def __call__(
         self,
