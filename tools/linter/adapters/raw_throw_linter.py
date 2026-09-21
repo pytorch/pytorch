@@ -83,6 +83,10 @@ ALLOWED_EXCEPTION_TYPES = {
     # Carries the delegated backend's debug handle alongside the message, and
     # is caught by name in mobile/module.cpp and mobile/interpreter.cpp.
     "c10::BackendRuntimeException": "torch/csrc/jit/",
+    # Shape propagation's own bail-out signal, caught by name in
+    # shape_analysis.cpp to fall back to running the op. It carries no message
+    # at all, so it is a signal rather than an error report.
+    "propagation_error": "torch/csrc/jit/passes/",
 }
 
 
