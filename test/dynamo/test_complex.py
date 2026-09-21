@@ -13,12 +13,13 @@ class ComplexDynamoTestCase(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls._old_enable_complex_wrapper = torch._functorch.config.enable_complex_wrapper
         torch._functorch.config.enable_complex_wrapper = True
 
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
-        torch._functorch.config.enable_complex_wrapper = False
+        torch._functorch.config.enable_complex_wrapper = cls._old_enable_complex_wrapper
 
 
 def sample_function(a: torch.Tensor, b: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
