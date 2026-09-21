@@ -481,9 +481,7 @@ test_python_smoke() {
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
-  # TODO(#189590): Re-enable CUTLASS API after NVGEMM migrates to
-  # cutlass.operators. The preview package pins apache-tvm-ffi==0.1.7, which
-  # is incompatible with CuTeDSL 4.6.2 used by the rest of this job.
+  install_cutlass_operators
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -518,6 +516,21 @@ test_python_smoke_b200() {
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running \
     --pytest-xdist-workers 32
+
+  # The CuTeDSL linear_cross_entropy overrides: the routing test, and the OpInfo
+  # variants that only exist where the CuTeDSL runtime does, so they are
+  # collected nowhere else.
+  time python test/run_test.py --include python_native/test_linear_cross_entropy_override $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The variants' expectations live outside test_ops too: two xfails in
+  # test_ops_gradients.py and nine TestOperators entries in the shared skip
+  # tuple. An expectation that never runs rots into an unexpected success
+  # without anyone noticing, so collect those suites here as well -- a handful
+  # of tests each once restricted to this op.
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops_gradients -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # functorch selects its variants with -k instead: restricting op_db trips
+  # `opsToleranceOverride`, which asserts that every op it names is present.
+  time python test/run_test.py --include functorch/test_ops -k "linear_cross_entropy and cutedsl" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # Dynamically discover the DSL override tests so new ones are picked up. This
@@ -743,6 +756,11 @@ test_inductor_core() {
               inductor/test_torchinductor \
               inductor/test_mkldnn_pattern_matcher \
               inductor/test_torchinductor_codegen_dynamic_shapes \
+              inductor/test_max_autotune_blackwell \
+              inductor/test_torchinductor_codegen_config_overrides \
+              inductor/test_torchinductor_opinfo \
+              inductor/test_torchinductor_opinfo_properties \
+              inductor/test_torchinductor_strided_blocks \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -784,6 +802,35 @@ test_inductor_aoti_cpp() {
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+}
+
+test_inductor_aoti_fallback_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
+  # Re-run the AOTInductor suites under Inductor lite / all-fallback mode: every
+  # op goes to ATen unless it sits inside a regional-inductor annotation.
+  # TORCHINDUCTOR_LITE_MODE is read once when torch._inductor.config is imported,
+  # so it also reaches the model-generation subprocess behind the C++ tests --
+  # which is why those can be reused as-is rather than reimplemented.
+  export TORCHINDUCTOR_LITE_MODE=1
+
+  # --upload-artifacts-while-running is load bearing here, not cosmetic: this mode
+  # can abort the interpreter mid-file (a proxy-executor CHECK failure), and an
+  # aborted process writes no junit XML at exit. Streaming the reports out keeps
+  # the failure visible on HUD instead of leaving a shard that is red with no
+  # per-test record of why.
+  python test/run_test.py \
+    --include inductor/test_inductor_lite_mode \
+              inductor/test_aot_inductor \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_aot_inductor_custom_ops \
+              inductor/test_aot_inductor_package \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose \
+    --upload-artifacts-while-running
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
@@ -1704,6 +1751,33 @@ test_libtorch_profiler() {
 
   # Tests for torch/csrc/profiler/util.h GlobalStateManager.
   python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
+
+  # Kineto's own unit tests, vendored under third_party/kineto. The binaries
+  # are globbed rather than listed so a test added to Kineto runs here without
+  # a matching change to this script.
+  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+    # Kineto's xpu tests compile SYCL device code through an ExternalProject,
+    # so the PyTorch build leaves them out. See cmake/Dependencies.cmake.
+    echo "Skipping Kineto C++ tests on XPU"
+  else
+    echo "Testing Kineto C++ tests"
+    local kineto_bin_dir="${BUILD_BIN_DIR}/kineto"
+    local kineto_tests=()
+    local kineto_test
+    for kineto_test in "${kineto_bin_dir}"/*; do
+      [[ -x "${kineto_test}" ]] || continue
+      kineto_tests+=("cpp/$(basename "${kineto_test}")")
+    done
+    if [[ ${#kineto_tests[@]} -eq 0 ]]; then
+      echo "ERROR: no Kineto test binaries found in ${kineto_bin_dir}"
+      return 1
+    fi
+    echo "Running ${#kineto_tests[@]} Kineto tests: ${kineto_tests[*]}"
+    # A single -i takes the whole list. Repeating the flag keeps only the last
+    # name, because run_test.py declares -i with nargs="+" and no append.
+    CPP_TESTS_DIR="${kineto_bin_dir}" python test/run_test.py --cpp --verbose \
+      -i "${kineto_tests[@]}"
+  fi
 }
 
 test_libtorch_api() {
@@ -2595,6 +2669,18 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
     test_inductor_aoti_cpp
   fi
   collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == *inductor_aoti_fallback* ]]; then
+  setup_torch_trace
+  # This config is expected to be red while the all-fallback bugs are triaged, and
+  # test.sh runs under `set -e`. Guard each leg so a red Python shard still lets the
+  # C++ leg run and still uploads tlparse, then report the first failure at the end.
+  aoti_fallback_status=0
+  test_inductor_aoti_fallback_shard "$SHARD_NUMBER" || aoti_fallback_status=$?
+  if [[ "$SHARD_NUMBER" -eq "1" ]]; then
+    TORCHINDUCTOR_LITE_MODE=1 test_inductor_aoti_cpp || aoti_fallback_status=$?
+  fi
+  collect_tlparse_output
+  exit "$aoti_fallback_status"
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
   setup_torch_trace
   test_inductor_core

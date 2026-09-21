@@ -56,6 +56,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     patch_post_backward,
@@ -235,6 +236,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         if type(reshard_after_forward) is not int:
             return
         fsdp_param_group._to_sharded_post_forward()
+        # The post-forward shards were just cloned on the current stream; the
+        # all-gather streams must wait for them, as unshard() does after reshard().
+        current_stream = device_module.current_stream()
+        all_gather_copy_in_stream.wait_stream(current_stream)
+        all_gather_stream.wait_stream(current_stream)
         all_gather(
             fsdp_param_group,
             fsdp_param_group.post_forward_mesh_info.shard_process_group,
@@ -284,7 +290,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
         # Run the foreach reduce-scatter (including copy-in and view-out)
         torch.manual_seed(42)
-        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        # Keep sequential fp16 sums exactly representable in the threaded PG.
+        unsharded_grads = [
+            torch.ones_like(param) * (self.rank % 8) for param in orig_params
+        ]
+        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
@@ -324,7 +334,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             _,
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, reduce_scatter_dtype)
-        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
             _div_if_needed(grad, predivide_factor)
             dist.all_reduce(
@@ -339,7 +348,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
 
 
-class TestFullyShardCommunication(FSDPTest):
+class TestFullyShardCommunication(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -1841,7 +1850,6 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
 )
-@skipCUDAIf(TEST_WITH_ROCM, "requires NVIDIA GPUs")
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
@@ -2048,7 +2056,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
 
 @instantiate_parametrized_tests
-class TestFullyShardReduceOpWorldSize1(FSDPTest):
+class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return 1
