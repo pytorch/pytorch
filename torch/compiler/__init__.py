@@ -11,20 +11,16 @@ from torch._higher_order_ops.invoke_subgraph import (
     NestedCompileRegionOptions,
 )
 
-# ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
-# plus an acceleration cache. Re-exported from the private impl module, whose
-# ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the single
-# public location. Distinct from ``torch._dynamo.config.caching_precompile`` (a
-# ``torch.compile`` guard-serialization caching mode), despite the shared word.
-# ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
-# conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
-# forced to "torch.compiler" in the impl module, matching this public location.
-from torch._precompile import (
-    precompile as precompile,
-    PrecompileError as PrecompileError,
-)
+# ``torch.compiler.precompile`` is the prototype ahead-of-time capture API: a submodule
+# (torch/compiler/precompile.py) that re-exports its public types from the private impl
+# modules and re-homes their ``__module__`` to itself. Distinct from
+# ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` guard-serialization
+# caching mode), despite the shared word. ``PrecompileError`` is re-exported here as
+# ``torch.compiler.PrecompileError`` so the conventional ``except`` spelling works; its
+# ``__module__`` is set to "torch.compiler" in the impl module to match.
+from torch._precompile import PrecompileError as PrecompileError
 
-from . import config
+from . import config, precompile
 from ._cache import CacheInfo
 
 
