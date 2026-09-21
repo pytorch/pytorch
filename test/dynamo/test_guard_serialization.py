@@ -1184,6 +1184,17 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         self.assertEqual(ref.check(inputs), loaded.check(inputs))
 
 
+if torch.distributed.is_available():
+
+    class _PyBackend(torch._C._distributed_c10d.Backend):
+        # A Python backend, as torch/distributed/_nccl4py/backend.py defines one.
+        # Module-level: a <locals> class would hit the local-scope refusal that
+        # sits behind the unsupported-types branch even without this change.
+        def __init__(self):
+            super().__init__(0, 1)
+            self.calls = []
+
+
 class _ModuleWithDtypeAttr(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1256,6 +1267,45 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.local_scope["cfg"]["cls"], torch.Tensor)
         self.assertIsInstance(out.local_scope["cfg"]["local"], _Missing)
         self.assertEqual(out.local_scope["t"].dtype, torch.float32)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_unsupported_types_prune_unless_a_guard_reads_them(self):
+        # A c10d Backend is not a ProcessGroup, so an unguarded one failed the
+        # dump instead of pruning to the sentinel; a Python subclass of the C++
+        # Backend (the backend extension point) cannot be pickled either. A
+        # GUARDED unsupported value (a TYPE_MATCH on a stream local, a
+        # FAKE_SCRIPT_TYPE_MATCH on a process-group local) must not prune, or
+        # the rebuilt guard compares against the sentinel forever: it
+        # is refused by name, and pickle_guards_state re-raises that
+        # PackageError unchanged as the bypass reason.
+        from torch._C._distributed_c10d import Backend, FakeProcessGroup, ProcessGroup
+
+        pg = FakeProcessGroup._create_internal(0, world_size=2)
+        self.assertIsInstance(pg, Backend)
+        self.assertNotIsInstance(pg, ProcessGroup)
+        referent = _ModuleWithDtypeAttr()
+        objs = (pg, _PyBackend(), ProcessGroup(0, 1), torch.Stream(device="cpu"))
+        for obj in (*objs, weakref.ref(referent)):
+            with self.subTest(type(obj).__name__):
+                buf = io.BytesIO()
+                GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
+                self.assertIsInstance(load_guards_state(buf.getvalue())["o"], _Missing)
+                graph = types.SimpleNamespace(
+                    guards=[],
+                    local_scope={"o": obj},
+                    global_scope={},
+                    guard_on_key_order=set(),
+                )
+                builder = types.SimpleNamespace(
+                    guard_tree_values={id(obj): obj}, value_guarded_containers={}
+                )
+                with self.assertRaisesRegex(
+                    PackageError,
+                    f"^a guard reads a {type(obj).__name__}, which cannot be",
+                ):
+                    pickle_guards_state(
+                        types.SimpleNamespace(output_graph=graph), builder
+                    )
 
     def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
