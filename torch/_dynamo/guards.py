@@ -4279,12 +4279,15 @@ def _pickles_by_default(obj: Any) -> bool:
     __slots__, a dict or list subclass (whose items ride the reduce tuple, not
     __dict__) and a C extension type with an instance dict all have a larger
     instance size than a plain Python class, and a copyreg registration means
-    someone declared the default protocol wrong for the type.
+    someone declared the default protocol wrong for the type. The explicit
+    __slots__ scan covers 3.10 and 3.11, where ``("a", "__dict__")`` has the
+    plain size; an EMPTY __slots__ (abc.ABC, typing.Generic, Protocol) adds no
+    state and does not count.
     """
     cls = type(obj)
     return (
         cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
-        and not any("__slots__" in vars(c) for c in cls.__mro__)
+        and not any(vars(c).get("__slots__") for c in cls.__mro__)
         and cls not in copyreg.dispatch_table
         and cls.__reduce_ex__ is object.__reduce_ex__
         and cls.__reduce__ is object.__reduce__
@@ -4956,6 +4959,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             and _pickles_by_default(obj)
             and not pytree.is_constant_class(type(obj))
             and not is_opaque_constant_type(type(obj))
+            and id(obj) not in self._verbatim_elements
         ):
             # Any object the guard tree reached, not only an nn.Module, so one
             # unguarded attribute several levels down (a live generator, a
@@ -5013,7 +5017,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
         What the object itself reads back at load stays: for a module, the
-        containers in _NN_MODULE_STATE_ATTRS.
+        containers in _NN_MODULE_STATE_ATTRS. Callables stay too, as they always
+        did for modules (hooks, forward references), so a partial or C callable
+        closing over unpicklable state still fails the dump loudly.
         """
         if isinstance(attr, (torch.Tensor, torch.nn.Module)):
             return True
@@ -5054,7 +5060,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         return {
             name: attr
             if self._keeps_attribute(obj, name, attr)
-            else _Missing("unguarded attribute")
+            else self._missing("unguarded attribute")
             for name, attr in (_instance_dict(obj) or {}).items()
         }
 
