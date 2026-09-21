@@ -1234,6 +1234,17 @@ class _KeyWithSub:
         return hash(self.name)
 
 
+class _KeyWithBystanders:
+    # A by-value key whose fields are the shapes the verbatim walk stops at.
+    def __init__(self, t, net, mod):
+        self.t = t
+        self.net = net
+        self.mod = mod
+
+    def __hash__(self):
+        return 0
+
+
 class _NetWithTags(torch.nn.Module):
     def __init__(self, tags):
         super().__init__()
@@ -2486,6 +2497,54 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(type(out.__func__), RaisingNameProxy)
         self.assertIs(type(out.__self__), GetattrProxy)
         self.assertEqual(out(3), 3)
+
+    def test_a_key_field_that_is_an_empty_rebuilt_receiver_stays_whole(self):
+        # A bound method's receiver is normally rebuilt empty (empty_values); when
+        # it is also a field of a by-value key the comparison would read the
+        # empty object, so verbatim outranks the empty rebuild in both hooks.
+        sub = _SubCfg(2.0, ["t"])
+        key = _KeyWithSub("a", sub)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {id(sub): sub}, {}, {id(key): key}, buf).dump(
+            {"k": key, "g": sub.__hash__}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertEqual(out["k"].sub, sub)
+        self.assertEqual(out["k"].sub.tags, ["t"])
+
+    def test_a_by_value_field_that_is_a_tensor_or_module_is_a_known_limit(self):
+        # The verbatim walk stops at a tensor, an nn.Module and a module. The
+        # module is pickled by name; the other two are the documented limit: the
+        # mark does not reach their branches, and a loaded copy could not
+        # compare equal to the run-time object anyway.
+        key = _KeyWithBystanders(torch.ones(1), torch.nn.Linear(1, 1), pickle)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {id(key): key}, buf).dump({"k": key})
+        out = load_guards_state(buf.getvalue())["k"]
+        self.assertIsInstance(out.t, _Missing)
+        self.assertIsInstance(out.net, _Missing)
+        self.assertIs(out.mod, pickle)
+
+    def test_a_dict_key_held_by_a_by_value_key_is_marked_too(self):
+        # missing_values prunes hashable objects, so a dict a by-value key holds
+        # can have one as a KEY; the walk marks keys as well as values.
+        sub = _SubCfg(2.0, ["t"])
+        key = _KeyWithSub("a", {sub: 1})
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {id(sub): sub}, {id(key): key}, buf).dump({"k": key})
+        out = load_guards_state(buf.getvalue())["k"]
+        self.assertEqual(out.sub, {sub: 1})
+        self.assertEqual(next(iter(out.sub)).tags, ["t"])
+
+    def test_a_by_value_field_that_cannot_pickle_fails_the_dump_loudly(self):
+        # The mark switches pruning off for the key's whole closure, by design:
+        # an empty comparand is a silent forever-miss, so a field pickle cannot
+        # carry fails the dump instead of being replaced by the sentinel.
+        key = _KeyCfg("a", [(i for i in range(3))])
+        missing = {id(key.tags[0]): key.tags[0]}
+        pickler = GuardsStatePickler({}, {}, missing, {id(key): key}, io.BytesIO())
+        with self.assertRaisesRegex(TypeError, "cannot pickle 'generator' object"):
+            pickler.dump({"k": key})
 
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
@@ -3913,20 +3972,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
         state = load_guards_state(self._cached_guards_state).output_graph
         self.assertEqual(next(iter(state.local_scope["d"])).sub, sub)
-
-    def test_a_key_field_that_is_an_empty_rebuilt_receiver_stays_whole(self):
-        # A bound method's receiver is normally rebuilt empty (empty_values); when
-        # it is also a field of a by-value key the comparison would read the
-        # empty object, so verbatim outranks the empty rebuild in both hooks.
-        sub = _SubCfg(2.0, ["t"])
-        key = _KeyWithSub("a", sub)
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {id(sub): sub}, {}, {id(key): key}, buf).dump(
-            {"k": key, "g": sub.__hash__}
-        )
-        out = load_guards_state(buf.getvalue())
-        self.assertEqual(out["k"].sub, sub)
-        self.assertEqual(out["k"].sub.tags, ["t"])
 
     def test_grad_mode(self):
         def fn(x):
