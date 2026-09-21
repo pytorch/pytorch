@@ -443,11 +443,15 @@ def _unpack_flash_attention_nested_shapes(
             raise AssertionError("sdpa_flop_count: expected key.shape to be 3-dimensional")
         if len(value.shape) != 3:
             raise AssertionError("sdpa_flop_count: expected value.shape to be 3-dimensional")
-        if grad_out is not None and grad_out.shape != query.shape:
-            raise AssertionError("sdpa_flop_count: grad_out.shape must match query.shape when provided")
-        _, h_q, d_q = query.shape
+        t_q, h_q, d_q = query.shape
         _, h_k, d_k = key.shape
         _, h_v, d_v = value.shape
+        expected_grad_out_shape = (t_q, h_q, d_v)
+        if grad_out is not None and tuple(grad_out.shape) != expected_grad_out_shape:
+            raise AssertionError(
+                "sdpa_flop_count: grad_out has shape "
+                f"{tuple(grad_out.shape)}, expected {expected_grad_out_shape}"
+            )
         if cum_seq_q is None:
             raise AssertionError("sdpa_flop_count: cum_seq_q must not be None")
         if cum_seq_k is None:
@@ -460,7 +464,7 @@ def _unpack_flash_attention_nested_shapes(
             new_query_shape = (1, h_q, seq_q_len, d_q)
             new_key_shape = (1, h_k, seq_k_len, d_k)
             new_value_shape = (1, h_v, seq_k_len, d_v)
-            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            new_grad_out_shape = (1, h_q, seq_q_len, d_v) if grad_out is not None else None
             yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
         return
 
@@ -497,11 +501,15 @@ def _unpack_efficient_attention_nested_shapes(
             raise AssertionError("_unpack_efficient_attention_nested_shapes: expected key.shape to be 4-dimensional")
         if len(value.shape) != 4:
             raise AssertionError("_unpack_efficient_attention_nested_shapes: expected value.shape to be 4-dimensional")
-        if grad_out is not None and grad_out.shape != query.shape:
-            raise AssertionError("_unpack_efficient_attention_nested_shapes: grad_out.shape must match query.shape when provided")
-        _, _, h_q, d_q = query.shape
+        b, m, h_q, d_q = query.shape
         _, _, h_k, d_k = key.shape
         _, _, h_v, d_v = value.shape
+        expected_grad_out_shape = (b, m, h_q, d_v)
+        if grad_out is not None and tuple(grad_out.shape) != expected_grad_out_shape:
+            raise AssertionError(
+                "_unpack_efficient_attention_nested_shapes: grad_out has shape "
+                f"{tuple(grad_out.shape)}, expected {expected_grad_out_shape}"
+            )
         if cu_seqlens_q is None:
             raise AssertionError("_unpack_efficient_attention_nested_shapes: cu_seqlens_q must not be None")
         if cu_seqlens_k is None:
@@ -515,7 +523,7 @@ def _unpack_efficient_attention_nested_shapes(
             new_query_shape = (1, h_q, len_q, d_q)
             new_key_shape = (1, h_k, len_k, d_k)
             new_value_shape = (1, h_v, len_k, d_v)
-            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            new_grad_out_shape = (1, h_q, len_q, d_v) if grad_out is not None else None
             yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
         return
 
