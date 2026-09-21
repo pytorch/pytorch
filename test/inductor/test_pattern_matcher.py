@@ -3426,6 +3426,31 @@ class TestPatternMatcher(TestCase):
             self.assertNotIn(torch.ops._test_pm_e8m0.original_op.default, op_targets)
             self.assertIn(torch.ops._test_pm_e8m0.replacement_op.default, op_targets)
 
+    @inductor_config.patch(enable_auto_functionalized_v2=True)
+    @parametrize("scale_dtype", [torch.float32, torch.float8_e8m0fnu, torch.complex64])
+    def test_mutable_custom_op_with_unsupported_input_dtype(self, scale_dtype):
+        with torch.library._scoped_library("_test_pm_mutable", "FRAGMENT") as lib:
+            lib.define("mutate(Tensor(a!) out, Tensor scale) -> ()")
+
+            def mutate(out, scale):
+                out.add_(1.0)
+
+            lib.impl("mutate", mutate, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("_test_pm_mutable::mutate", lib=lib)
+            def _mutate_fake(out, scale):
+                return None
+
+            def fn(x, scale):
+                y = x.clone()
+                torch.ops._test_pm_mutable.mutate.default(y, scale)
+                return y * 2
+
+            x = torch.randn(4, 4)
+            scale = torch.empty(4, dtype=scale_dtype)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x, scale), fn(x, scale))
+
 
 @inductor_config.patch(fx_graph_cache=False)
 class TestPatternMatcherLogging(LoggingTestCase):
