@@ -1598,7 +1598,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
 
   string(REGEX REPLACE " +" ";" SOURCE_FILES_LIST "${SOURCE_FILES}")
 
-  # Set the COMPILE_OPTIONS property for each source file
+  # Set the COMPILE_FLAGS property for each source file
   foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
@@ -1611,7 +1611,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     endif()
     set_source_files_properties(
       ${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
-      PROPERTIES COMPILE_OPTIONS "-g")
+      PROPERTIES COMPILE_FLAGS "-g")
   endforeach()
 
   # Link everything with debug info when any file is in debug mode
