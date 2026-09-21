@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import gc
+import importlib
 import unittest
 from dataclasses import FrozenInstanceError
 from unittest import mock
@@ -19,6 +20,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfTorchDynamo,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
 from torch.testing._internal.triton_utils import (
@@ -1142,7 +1144,12 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
                 lambda: torch.compile(fn, backend="inductor", fullgraph=True)(*inputs)
             )
 
-        self.assertEqual(result, expected)
+        # Triton GEMM and hipBLAS sum fp32 products in different orders; both are
+        # equally close to fp64, but differ by up to ~4e-4 relative on ROCm.
+        if TEST_WITH_ROCM:
+            self.assertEqual(result, expected, atol=1e-5, rtol=1e-3)
+        else:
+            self.assertEqual(result, expected)
         self.assertEqual(len(codes), 2)
         fw_code, bw_code = codes
         regions_and_settings = (
@@ -1432,8 +1439,15 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
 
         x = torch.randn(16, 16, device="cuda", requires_grad=True)
         compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        with mock.patch(
-            "torch._higher_order_ops.invoke_subgraph."
+        # Patch the module object, not the dotted string: the package re-exports
+        # the HOP under the submodule's own name, so on Python < 3.12 mock's
+        # getattr-first resolution of "torch._higher_order_ops.invoke_subgraph"
+        # lands on InvokeSubgraphHOP and the patch fails with AttributeError.
+        invoke_subgraph_module = importlib.import_module(
+            "torch._higher_order_ops.invoke_subgraph"
+        )
+        with mock.patch.object(
+            invoke_subgraph_module,
             "_specialize_nested_region_configs_for_backward",
             specialize_then_stale_mirror,
         ):
