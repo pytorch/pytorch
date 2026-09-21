@@ -214,6 +214,9 @@ class B2BGEMMTest(TestCase):
             A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
             B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
             C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+            # The original bug hard-errors in ceildiv via load_ratio_left with
+            # an AssertionError for SymInt versus int; this must not be weakened
+            # to only check that shapes do not specialize.
             self.assertEqual(f_32(A, B, C), f_opt(A, B, C), atol=0.1, rtol=0.01)
 
         self.assertEqual(backend.frame_count, 1)

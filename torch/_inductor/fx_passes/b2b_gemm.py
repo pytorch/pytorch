@@ -402,6 +402,9 @@ def is_b2b_gemm_good_on(
     # The load ratio is only a profitability heuristic, so do not guard on the
     # representative values of backed symbolic dimensions.
     M, N, B_N, B_O, O, P = map(optimization_hint, (M, N, B_N, B_O, O, P))
+    # The templates use B's strides but derive its extents from A and C. Keep
+    # this check so a future epilogue with external inputs cannot turn an extent
+    # mismatch into an out-of-bounds B load.
     if N != B_N or B_O != O:
         return False
     ratios = []
