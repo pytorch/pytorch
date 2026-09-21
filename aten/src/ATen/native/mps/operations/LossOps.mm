@@ -3,6 +3,7 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
+#include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -224,6 +225,16 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
   loss.resize_((reduction == Reduction::None || grad_output.defined()) ? target.sizes() : IntArrayRef({}));
   TORCH_CHECK(loss.is_mps());
 
+  // A zero-sized input has no Metal buffer to bind, so the graph below cannot run
+  // on it at all. CPU returns an empty tensor for Reduction::None, 0 for Sum and
+  // NaN for Mean; reproduce that rather than tripping the placeholder assert.
+  if (input.numel() == 0) {
+    if (loss.numel() != 0) {
+      loss.fill_(reduction == at::Reduction::Mean ? std::numeric_limits<double>::quiet_NaN() : 0.0);
+    }
+    return loss;
+  }
+
   @autoreleasepool {
     std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
 
@@ -363,13 +374,18 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                   getMTLBufferStorage(target),
                   getMTLBufferStorage(weight),
                   getMTLBufferStorage(total_weight_cast));
+      // For 1D (no batch dim) input the loss has a single element and only
+      // target[0] is used; dispatching target.numel() threads would read
+      // grad_output (a single element) out of bounds and scatter garbage into
+      // grad_input. See https://github.com/pytorch/pytorch/issues/195391.
+      const int64_t num_outputs = input_arg.dim() == 1 ? 1 : target.numel();
       // Chunk only when the target exceeds Metal's uint32 thread-grid limit.
       constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
       auto dispatch_params = params;
-      for (auto offset = int64_t{0}; offset < target.numel(); offset += max_threads) {
+      for (auto offset = int64_t{0}; offset < num_outputs; offset += max_threads) {
         dispatch_params.tid_offset = offset;
         mtl_setArgs<5>(encoder, dispatch_params, stream->getErrorBuffer());
-        mtl_dispatch1DJob(encoder, pso, std::min(max_threads, target.numel() - offset));
+        mtl_dispatch1DJob(encoder, pso, std::min(max_threads, num_outputs - offset));
       }
     }
   });
