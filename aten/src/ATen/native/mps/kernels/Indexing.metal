@@ -425,6 +425,62 @@ REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(bool);
 REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(float2);
 REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(half2);
 
+template <typename T>
+kernel void flip_direct(
+    device void* output [[buffer(0)]],
+    const device void* input [[buffer(1)]],
+    constant int* output_strides [[buffer(2)]],
+    constant int* input_strides [[buffer(3)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  const int output_offset = int(tid.x) * output_strides[0] +
+      int(tid.y) * output_strides[1] + int(tid.z) * output_strides[2];
+  const int input_offset = int(tid.x) * input_strides[0] +
+      int(tid.y) * input_strides[1] + int(tid.z) * input_strides[2];
+  ref_at_offs<T>(output, long(output_offset)) =
+      val_at_offs<T>(input, long(input_offset));
+}
+
+template <typename T>
+kernel void flip(
+    device void* output [[buffer(0)]],
+    const device void* input [[buffer(1)]],
+    constant uint* sizes [[buffer(2)]],
+    constant int* output_strides [[buffer(3)]],
+    constant int* input_strides [[buffer(4)]],
+    constant uint& ndim [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint linear_idx = tid;
+  int output_offset = 0;
+  int input_offset = 0;
+
+  for (uint dim = 0; dim < ndim; dim++) {
+    const uint size = sizes[dim];
+    const uint coord = safe_mod(linear_idx, size);
+    linear_idx /= size;
+    output_offset += coord * output_strides[dim];
+    input_offset += coord * input_strides[dim];
+  }
+
+  ref_at_offs<T>(output, output_offset) = val_at_offs<T>(input, input_offset);
+}
+
+#define REGISTER_FLIP_OP(SUFFIX, T)                                           \
+  template [[host_name("flip_direct_" #SUFFIX)]] kernel void flip_direct<T>(  \
+      device void*, const device void*, constant int*, constant int*, uint3); \
+  template [[host_name("flip_" #SUFFIX)]] kernel void flip<T>(                \
+      device void*,                                                           \
+      const device void*,                                                     \
+      constant uint*,                                                         \
+      constant int*,                                                          \
+      constant int*,                                                          \
+      constant uint&,                                                         \
+      uint);
+
+REGISTER_FLIP_OP(8bit, char);
+REGISTER_FLIP_OP(16bit, short);
+REGISTER_FLIP_OP(32bit, int);
+REGISTER_FLIP_OP(64bit, long);
+
 // Dim-based index_select gather: output[..., j, ...] = input[..., index[j],
 // ...] along reduce_dim. One thread per output element; templated by element
 // bit-size (T) so a single set of kernels covers every dtype, complex included.
@@ -561,39 +617,6 @@ kernel void index_select_dim_dense(
 
 REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(int);
 REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(long);
-
-template <typename StridesT, typename DataT>
-kernel void kernel_index_offsets(
-    constant StridesT* strides [[buffer(0)]],
-    device DataT* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  data_offsets[thread_index] = 0;
-  uint32_t idx = thread_index;
-  for (uint32_t dim = 0; dim < num_dimensions; dim++) {
-    uint32_t remainder = idx % iter_shape[dim];
-    idx /= iter_shape[dim];
-
-    data_offsets[thread_index] += remainder * DataT(strides[dim]);
-  }
-}
-
-template [[host_name("kernel_index_offsets_32")]] kernel void
-kernel_index_offsets<packed_uint3, uint3>(
-    constant packed_uint3* strides [[buffer(0)]],
-    device uint3* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("kernel_index_offsets_64")]] kernel void
-kernel_index_offsets<packed_uint3, ulong3>(
-    constant packed_uint3* strides [[buffer(0)]],
-    device ulong3* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]);
 
 template <typename T>
 kernel void masked_fill_scalar_dense(
