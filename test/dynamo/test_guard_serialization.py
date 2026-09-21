@@ -2008,6 +2008,22 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         ):
             pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
 
+    def test_a_deep_scope_value_is_named_despite_a_wide_state(self):
+        # The scopes get a budget of their own: a wide container directly on
+        # the state used to consume the shared pool before a deep scope value
+        # was reached, and the report came back empty.
+        from torch._dynamo.guards import _offending_value_path
+
+        holder = types.SimpleNamespace(
+            a=types.SimpleNamespace(b=types.SimpleNamespace(lock=threading.Lock()))
+        )
+        graph = types.SimpleNamespace(local_scope={"h": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph, big=[0] * 30000)
+        self.assertEqual(
+            _offending_value_path(state, holder.a.b.lock),
+            "\n  reached via: local_scope['h'].a.b.lock",
+        )
+
     def test_offending_value_path_never_masks_the_real_error(self):
         # It is a diagnostic appended to an error already being raised, so any
         # failure inside it must stay silent.
