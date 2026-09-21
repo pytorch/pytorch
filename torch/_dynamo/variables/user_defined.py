@@ -1258,6 +1258,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 hints=graph_break_hints.SUPPORTABLE,
             )
 
+        # Unbound C method call on a builtin iterator type: the pure-Python
+        # Lib/operator.py::length_hint resolves `type(obj).__length_hint__` and
+        # calls it with the instance.  The class VT has no per-type method table,
+        # while the instance VT owns the slot implementation.
+        #
+        # `Base.method(instance)` runs Base's C slot, so only an instance whose
+        # type is exactly that class may reach here: obj.call_method resolves
+        # from type(obj) and would run a subclass override instead.
+        if name == "__length_hint__" and args:
+            descriptor = inspect.getattr_static(self.value, name, None)
+            if (
+                isinstance(descriptor, types.MethodDescriptorType)
+                and descriptor.__objclass__ is self.value
+            ):
+                try:
+                    obj_type = args[0].python_type()
+                except NotImplementedError:
+                    obj_type = None
+                if obj_type is self.value:
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
         # Dispatch dunder methods defined on the metaclass (e.g., EnumType.__contains__).
         # In Python, `x in Color` calls `type(Color).__contains__(Color, x)`.
         metaclass = type(self.value)
