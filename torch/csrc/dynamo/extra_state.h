@@ -3,7 +3,6 @@
 #include <Python.h>
 
 #include <torch/csrc/dynamo/framelocals_mapping.h>
-#include <torch/csrc/dynamo/guarded_code.h>
 
 #ifdef __cplusplus
 
@@ -222,7 +221,7 @@ bool try_lookup_without_guard_eval(
 //  - cache_entry: Borrowed reference
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
-    GuardedCode* guarded_code,
+    PyObject* guraded_code,
     PyObject* callback);
 
 // Extracts the backend fn from the callback.
@@ -247,6 +246,6 @@ void _load_precompile_entry(
     py::object guard_manager,
     py::object dynamo_code);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
-void _set_lru_cache(const py::object& boolean);
+void _set_lru_cache(py::object boolean);
 
 #endif

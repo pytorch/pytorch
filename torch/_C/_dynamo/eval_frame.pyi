@@ -4,12 +4,7 @@ from collections.abc import Callable
 from typing import overload
 
 from torch._dynamo.guards import GuardManagerWrapper
-from torch._dynamo.types import (
-    DynamoCallback,
-    DynamoGuardCompleteHook,
-    DynamoGuardHook,
-    GuardFn,
-)
+from torch._dynamo.types import DynamoCallback, DynamoGuardCompleteHook, DynamoGuardHook
 from torch._guards import CompileId
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
@@ -28,19 +23,6 @@ def raise_sigtrap() -> None: ...
 def get_method_ml_flags(fn: object) -> int | None: ...
 def set_c_recursion_limit(limit: int) -> None: ...
 def get_c_recursion_limit() -> int: ...
-
-class _GuardedCode:
-    def __init__(
-        self,
-        code: types.CodeType,
-        guard_manager: GuardFn,
-        compile_id: CompileId,
-        trace_annotation: str = ...,
-    ) -> None: ...
-    code: types.CodeType
-    guard_manager: GuardFn
-    compile_id: CompileId
-    trace_annotation: str
 
 class _CacheEntry:
     def check_fn(self, *args: object, **kwargs: object) -> bool: ...
