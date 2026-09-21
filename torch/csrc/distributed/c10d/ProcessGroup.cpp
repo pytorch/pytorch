@@ -102,8 +102,9 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
-  if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
-    return deviceTypeToBackend_.at(deviceType);
+  if (auto it = deviceTypeToBackend_.find(deviceType);
+      it != deviceTypeToBackend_.end()) {
+    return it->second;
   }
 
   // Get the backend type associated with the device
@@ -116,8 +117,9 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Check if the backend has already been initialized
-  if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
-    auto backend = backendTypeToBackend_.at(backendType);
+  if (auto it = backendTypeToBackend_.find(backendType);
+      it != backendTypeToBackend_.end()) {
+    auto backend = it->second;
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
   }
@@ -222,6 +224,19 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
         defaultBackendIt != deviceTypeToBackendType_.end() &&
             deviceTypeFilter.contains(defaultBackendIt->first),
         "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
+  }
+  std::unordered_set<BackendType> validatedBackendTypes;
+  for (const auto& [deviceType, backendType] : deviceTypeToBackendType_) {
+    if (!deviceTypeFilter.empty() && !deviceTypeFilter.contains(deviceType)) {
+      continue;
+    }
+    if (!validatedBackendTypes.insert(backendType).second) {
+      continue;
+    }
+    TORCH_CHECK(
+        getBackend(deviceType)->isInitialized(),
+        "Parent process group backend is not initialized; pass device_id "
+        "when creating it or run a collective before split_group");
   }
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
@@ -483,7 +498,10 @@ void register_work(
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
-at::Tensor wait_tensor(const at::Tensor& tensor) {
+namespace {
+
+std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
+    const at::Tensor& tensor) {
   // First try to find work in the current thread's registry (fast path)
   auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
 
@@ -504,11 +522,35 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
       works = std::move(result.value());
     }
   }
+  return works;
+}
+
+} // namespace
+
+at::Tensor wait_tensor(const at::Tensor& tensor) {
+  auto works = pop_works(tensor);
 
   for (const auto& work : works) {
     work->wait();
   }
   return tensor;
+}
+
+std::vector<at::Tensor> wait_tensors(at::TensorList tensors) {
+  TORCH_CHECK(!tensors.empty(), "wait_tensors requires at least one tensor");
+  std::vector<c10::intrusive_ptr<c10d::Work>> works;
+  std::unordered_set<c10d::Work*> seen;
+  for (const auto& tensor : tensors) {
+    for (auto& work : pop_works(tensor)) {
+      if (seen.insert(work.get()).second) {
+        works.push_back(std::move(work));
+      }
+    }
+  }
+  for (const auto& work : works) {
+    work->wait();
+  }
+  return tensors.vec();
 }
 
 void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
