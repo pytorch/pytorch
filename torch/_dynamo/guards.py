@@ -4303,21 +4303,30 @@ def _pickles_by_default(obj: Any) -> bool:
     A copyreg registration means someone declared the default protocol wrong
     for the type. The explicit __slots__ scan covers 3.10 and 3.11, where
     ``("a", "__dict__")`` has the plain size; an EMPTY __slots__ (abc.ABC,
-    typing.Generic, Protocol) adds no state and does not count.
+    typing.Generic, Protocol) adds no state and does not count. A __new__ of
+    the class's own is refused as well: the load side calls ``cls.__new__(cls)``
+    with no arguments, which a __new__ that takes any fails. A metaclass hook
+    that raises on any of these reads is answered with False: not pruning is
+    always safe, and the failure it would turn into is the one being avoided.
     """
     cls = type(obj)
-    return (
-        cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
-        and all(c.__itemsize__ == 0 for c in cls.__mro__)
-        and not any(vars(c).get("__slots__") for c in cls.__mro__)
-        and cls not in copyreg.dispatch_table
-        and cls.__reduce_ex__ is object.__reduce_ex__
-        and cls.__reduce__ is object.__reduce__
-        and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
-        and not hasattr(cls, "__setstate__")
-        and not hasattr(cls, "__getnewargs__")
-        and not hasattr(cls, "__getnewargs_ex__")
-    )
+    default_getstate = getattr(object, "__getstate__", None)
+    try:
+        return (
+            cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
+            and all(c.__itemsize__ == 0 for c in cls.__mro__)
+            and not any(vars(c).get("__slots__") for c in cls.__mro__)
+            and cls not in copyreg.dispatch_table
+            and cls.__new__ is object.__new__
+            and cls.__reduce_ex__ is object.__reduce_ex__
+            and cls.__reduce__ is object.__reduce__
+            and getattr(cls, "__getstate__", None) is default_getstate
+            and not hasattr(cls, "__setstate__")
+            and not hasattr(cls, "__getnewargs__")
+            and not hasattr(cls, "__getnewargs_ex__")
+        )
+    except Exception:
+        return False
 
 
 def _is_torch_type(cls: type) -> bool:
@@ -5011,8 +5020,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             # Any object the guard tree reached, not only an nn.Module, so one
             # unguarded attribute several levels down (a live generator, a
             # process group) no longer takes the frame with it. LAST, so every
-            # specific reducer above gets first refusal (a by-name function
-            # never gets here: its __dict__ does not travel). Rebuilt from a
+            # specific reducer above gets first refusal; a by-name function
+            # falls through to here and is excluded by name, since pickle
+            # writes it as a global and its __dict__ never travels. Rebuilt from a
             # filtered copy of its own __dict__ rather than by registering the
             # values globally, so the sentinel never reaches another receiver
             # that shares one of them and reads it back at load. USER objects
