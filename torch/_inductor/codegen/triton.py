@@ -8581,6 +8581,12 @@ class TritonScheduling(SIMDScheduling):
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
+        self._template_local_reduction_plan_cache: dict[
+            tuple[Any, ...], _TemplateLocalReductionPlan | None
+        ] = {}
+        self._template_local_reduction_analysis_cache: dict[
+            tuple[Any, ...], ReductionEpilogueFusion | None
+        ] = {}
         if scheduler is None or not hasattr(scheduler, "nodes"):
             return
         for node in scheduler.nodes:
@@ -8778,12 +8784,40 @@ class TritonScheduling(SIMDScheduling):
                 return None
         return OrderedSet(), index_equivalent, OrderedSet(local_dep_counts)
 
-    @classmethod
+    @staticmethod
+    def _template_local_reduction_plan_cache_key(
+        template: ir.TritonTemplateBuffer,
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> tuple[Any, ...]:
+        node_states = tuple(
+            (
+                node,
+                getattr(node, "_loop_state_gen", None),
+                node._read_writes_gen,
+            )
+            for node in nodes
+        )
+        return id(template), tuple(template.get_size()), node_states
+
     def _template_local_reduction_plan(
+        self,
+        template: ir.TritonTemplateBuffer,
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> _TemplateLocalReductionPlan | None:
+        cache_key = self._template_local_reduction_plan_cache_key(template, nodes)
+        if cache_key not in self._template_local_reduction_plan_cache:
+            self._template_local_reduction_plan_cache[cache_key] = (
+                self._compute_template_local_reduction_plan(template, nodes)
+            )
+        return self._template_local_reduction_plan_cache[cache_key]
+
+    @classmethod
+    def _compute_template_local_reduction_plan(
         cls,
         template: ir.TritonTemplateBuffer,
         nodes: Sequence[BaseSchedulerNode],
     ) -> _TemplateLocalReductionPlan | None:
+        """Compute a plan after the graph-scoped cache has missed."""
         if len(template.get_size()) != 2:
             return None
         blocks = OrderedSet[tuple[int, int]]()
@@ -8808,28 +8842,28 @@ class TritonScheduling(SIMDScheduling):
         for node in nodes:
             if not isinstance(node, SchedulerNode):
                 return None
-            if (
-                cls._template_local_node_numels(
-                    template,
-                    block,
-                    node,
-                )
-                is None
-            ):
+            if cls._template_local_node_numels(template, block, node) is None:
                 return None
         return plan
 
-    def analyze_reduction_epilogue(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    @staticmethod
+    def _template_local_reduction_choice_key(
+        template: ir.TritonTemplateBuffer,
+    ) -> tuple[tuple[int, tuple[int, int] | None], ...]:
+        if isinstance(template, ir.MultiTemplateBuffer):
+            return tuple(
+                (id(choice), getattr(choice, "template_local_reduction_tile", None))
+                for choice in template.choices
+            )
+        return ((id(template), template.template_local_reduction_tile),)
+
+    def _analyze_template_local_reduction_epilogue(
+        self,
+        template: ir.TritonTemplateBuffer,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        nodes: Sequence[BaseSchedulerNode],
     ) -> ReductionEpilogueFusion | None:
-        template = node1.get_template_node()
-        if (
-            not isinstance(template, ir.TritonTemplateBuffer)
-            or node2.has_aliasing_or_mutation()
-        ):
-            return None
-        nodes = [node for node in node1.get_nodes() if not node.is_template()]
-        nodes.extend(node2.get_nodes())
         plan = self._template_local_reduction_plan(template, nodes)
         if plan is None:
             return None
@@ -8877,6 +8911,31 @@ class TritonScheduling(SIMDScheduling):
             frozenset(prevalidated),
             frozenset(index_equivalent),
         )
+
+    def analyze_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> ReductionEpilogueFusion | None:
+        template = node1.get_template_node()
+        if (
+            not isinstance(template, ir.TritonTemplateBuffer)
+            or node2.has_aliasing_or_mutation()
+        ):
+            return None
+        nodes = [node for node in node1.get_nodes() if not node.is_template()]
+        nodes.extend(node2.get_nodes())
+        cache_key = (
+            node1,
+            node2,
+            self._template_local_reduction_plan_cache_key(template, nodes),
+            self._template_local_reduction_choice_key(template),
+        )
+        if cache_key not in self._template_local_reduction_analysis_cache:
+            self._template_local_reduction_analysis_cache[cache_key] = (
+                self._analyze_template_local_reduction_epilogue(
+                    template, node1, node2, nodes
+                )
+            )
+        return self._template_local_reduction_analysis_cache[cache_key]
 
     def can_fuse_reduction_epilogue_choice(
         self,

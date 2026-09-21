@@ -2767,12 +2767,14 @@ class BaseSchedulerNode:
     outputs: list[SchedulerBuffer]
     outputs_by_name: dict[str, SchedulerBuffer]
     override_estimated_runtime: float | None = None
+    _read_writes_gen: int
     read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
     written: bool = False
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
+        self._read_writes_gen = 0
         self.debug_device_str: Callable[[BaseSchedulerNode], list[str]] = (
             lambda *args, **kwargs: []
         )
@@ -2884,6 +2886,7 @@ class BaseSchedulerNode:
         )
 
     def set_read_writes(self, rw: dependencies.ReadWrites) -> None:
+        self._read_writes_gen += 1
         self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
         self.clear_read_writes_dependent_caches()
@@ -5032,7 +5035,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 for name in node.get_operation_names():
                     self.name_to_node[name] = node
         else:
-            self.scheduler = scheduler
+            BaseSchedulerNode.__init__(self, scheduler)
             self.snodes = snodes
             self.node = None
             self.users: list[NodeUser] = []

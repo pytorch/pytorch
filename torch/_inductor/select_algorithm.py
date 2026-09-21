@@ -766,13 +766,13 @@ class TritonTemplateKernel(TritonKernel):
         return ordered + [tree for tree in range_trees if tree.is_reduction]
 
     def _template_local_reduction_plan_for_epilogues(
-        self, epilogue_nodes: Sequence[Any]
+        self, scheduling: TritonScheduling, epilogue_nodes: Sequence[Any]
     ) -> _TemplateLocalReductionPlan | None:
         if self.template_local_reduction_tile is None:
             return None
 
         nodes = [node for epilogue in epilogue_nodes for node in epilogue.get_nodes()]
-        return TritonScheduling._template_local_reduction_plan(self.output_node, nodes)
+        return scheduling._template_local_reduction_plan(self.output_node, nodes)
 
     def _template_local_range_trees(
         self,
@@ -2279,7 +2279,9 @@ class TritonTemplateKernel(TritonKernel):
         for per-output routing.
         """
         self.template_local_reduction_plan = None
-        plan = self._template_local_reduction_plan_for_epilogues(epilogue_nodes)
+        plan = self._template_local_reduction_plan_for_epilogues(
+            scheduling, epilogue_nodes
+        )
         if plan is not None:
             if not TritonScheduling._template_local_reduction_tile_is_compatible(
                 self.template_local_reduction_tile, plan.block

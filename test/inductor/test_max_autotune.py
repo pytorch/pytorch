@@ -411,6 +411,7 @@ class TestMaxAutotune(TestCase):
             "unsplit",
             "nondividing_split",
             "non_power_of_two_chain",
+            "non_power_of_two_untransposed_chain",
             "smaller_tile",
             "non_power_of_two_block",
             "disabled_epilogue",
@@ -450,9 +451,15 @@ class TestMaxAutotune(TestCase):
                 return (blocked + blocked.flip(-1)).amax((1, 3))
             if case in ("relu", "larger_tile_relu"):
                 return blocked.relu().amax((1, 3))
-            if case in ("chain", "non_power_of_two_chain"):
+            if case in (
+                "chain",
+                "non_power_of_two_chain",
+                "non_power_of_two_untransposed_chain",
+            ):
                 reduced = blocked.amax((1, 3))
-                extent = 12 if case == "non_power_of_two_chain" else 8
+                extent = 8 if case == "chain" else 12
+                if case == "non_power_of_two_untransposed_chain":
+                    return reduced.unsqueeze(-1).expand(2, 2, extent).amax(-1)
                 return reduced.T.unsqueeze(-1).expand(2, 2, extent).amax(-1)
             return blocked.amax((1, 3))
 
@@ -469,6 +476,12 @@ class TestMaxAutotune(TestCase):
         }
         if case == "disabled_epilogue":
             patches["epilogue_fusion"] = False
+        if case in (
+            "nondividing_split",
+            "non_power_of_two_chain",
+            "non_power_of_two_untransposed_chain",
+        ):
+            patches["benchmark_epilogue_fusion"] = False
         stack = contextlib.ExitStack()
         tile = {
             "larger_tile_m": (256, 128),
@@ -524,7 +537,7 @@ class TestMaxAutotune(TestCase):
             "non_power_of_two_chain",
         ):
             FileCheck().check("block_local_").run(code[0])
-        else:
+        elif case != "non_power_of_two_untransposed_chain":
             FileCheck().check_not("block_local_").run(code[0])
         if case == "sum":
             FileCheck().check("to(tl.float32)").run(code[0])
@@ -551,7 +564,10 @@ class TestMaxAutotune(TestCase):
             FileCheck().check_regex(
                 r"tl\.store\([^\n]*block_local_xindex_mask & block_local_yindex_mask"
             ).run(code[0])
-        if case == "non_power_of_two_chain":
+        if case in (
+            "non_power_of_two_chain",
+            "non_power_of_two_untransposed_chain",
+        ):
             FileCheck().check_not("tl.arange(0, 12)").run(code[0])
 
     def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
@@ -5924,6 +5940,79 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 (192, 128), (128, 128)
             )
         )
+
+    def test_template_local_reduction_plan_cache(self):
+        from torch._inductor import ir
+        from torch._inductor.codegen.triton import TritonScheduling
+
+        scheduling = TritonScheduling(None)
+        template = mock.Mock(spec=ir.TritonTemplateBuffer)
+        template.get_size.return_value = (256, 256)
+        template.template_local_reduction_tile = (128, 128)
+        node = mock.Mock()
+        node._loop_state_gen = 0
+        node._read_writes_gen = 0
+        plan = mock.sentinel.plan
+
+        with mock.patch.object(
+            scheduling,
+            "_compute_template_local_reduction_plan",
+            return_value=plan,
+        ) as compute:
+            self.assertIs(
+                scheduling._template_local_reduction_plan(template, [node]), plan
+            )
+            self.assertIs(
+                scheduling._template_local_reduction_plan(template, [node]), plan
+            )
+            self.assertEqual(compute.call_count, 1)
+
+            node._loop_state_gen += 1
+            self.assertIs(
+                scheduling._template_local_reduction_plan(template, [node]), plan
+            )
+            self.assertEqual(compute.call_count, 2)
+
+            node._read_writes_gen += 1
+            self.assertIs(
+                scheduling._template_local_reduction_plan(template, [node]), plan
+            )
+            self.assertEqual(compute.call_count, 3)
+
+    def test_template_local_reduction_analysis_cache(self):
+        from torch._inductor import ir
+        from torch._inductor.codegen.triton import TritonScheduling
+
+        scheduling = TritonScheduling(None)
+        template = mock.Mock(spec=ir.TritonTemplateBuffer)
+        template.get_size.return_value = (256, 256)
+        template.template_local_reduction_tile = (128, 128)
+        node1 = mock.Mock()
+        node1.get_template_node.return_value = template
+        node1.get_nodes.return_value = []
+        node2 = mock.Mock()
+        node2.has_aliasing_or_mutation.return_value = False
+        node2.get_nodes.return_value = [node2]
+        node2._loop_state_gen = 0
+        node2._read_writes_gen = 0
+        analysis = mock.sentinel.analysis
+
+        with mock.patch.object(
+            scheduling,
+            "_analyze_template_local_reduction_epilogue",
+            return_value=analysis,
+        ) as compute:
+            self.assertIs(scheduling.analyze_reduction_epilogue(node1, node2), analysis)
+            self.assertIs(scheduling.analyze_reduction_epilogue(node1, node2), analysis)
+            self.assertEqual(compute.call_count, 1)
+
+            node2._loop_state_gen += 1
+            self.assertIs(scheduling.analyze_reduction_epilogue(node1, node2), analysis)
+            self.assertEqual(compute.call_count, 2)
+
+            node2._read_writes_gen += 1
+            self.assertIs(scheduling.analyze_reduction_epilogue(node1, node2), analysis)
+            self.assertEqual(compute.call_count, 3)
 
     @unittest.skipIf(
         not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
