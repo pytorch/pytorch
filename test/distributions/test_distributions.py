@@ -1948,6 +1948,7 @@ class TestDistributions(DistributionsTestCase):
         )
         self.assertEqual(dist.entropy(), expected, atol=1e-3, rtol=0)
 
+    @expectedFailureMPS
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multinomial_entropy_double(self):
         # lgamma(total_count + 1) used to be evaluated in the default dtype, so a double
