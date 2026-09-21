@@ -399,6 +399,9 @@ def is_b2b_gemm_good_on(
     M, N, B_N, B_O, O, P = (
         optimization_hint(d, fallback=0) for d in (M, N, B_N, B_O, O, P)
     )
+    # The templates use B's strides but derive its extents from A and C. Keep
+    # this check so a future epilogue with external inputs cannot turn an extent
+    # mismatch into an out-of-bounds B load.
     if 0 in (M, N, O, P) or N != B_N or B_O != O:
         return False
     ratios = []
