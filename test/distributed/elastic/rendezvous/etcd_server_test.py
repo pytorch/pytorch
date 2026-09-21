@@ -106,9 +106,7 @@ class EtcdServerTerminationHandlerTest(unittest.TestCase):
                 server.start(num_retries=1)
 
         mock_register.assert_not_called()
-        mock_rmtree.assert_called_once_with(
-            server._base_data_dir, ignore_errors=True
-        )
+        mock_rmtree.assert_called_once_with(server._base_data_dir, ignore_errors=True)
 
 
 class FindFreePortTest(unittest.TestCase):
