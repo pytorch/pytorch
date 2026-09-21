@@ -344,8 +344,8 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
 
     def test_scatter_reduce_sum(self):
-        """The scatter_reduce family reaches the same atomic_add through its own
-        lowering, carrying an explicit dim and a values-shaped index."""
+        """The scatter_reduce family reaches the same atomic_add, with an
+        explicit dim and a values-shaped index."""
         torch.manual_seed(42)
         N, n, D = 8192, 8, 4
 
@@ -366,8 +366,8 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
 
     def test_scatter_reduce_int32_index(self):
-        """An int32 index is legal here and the rewrite widens it before adding the
-        partition offset. Sizes stay in int32 range, so this covers only the lowering."""
+        """An int32 index is legal and must be widened before the partition
+        offset is added."""
         torch.manual_seed(42)
         N, n, D = 8192, 8, 4
 
@@ -383,8 +383,8 @@ class TestPartitionedScatterOpt(TestCase):
 
     @config.patch(partitioned_scatter_fp32_accumulation=True)
     def test_index_add_low_precision(self):
-        """On platforms without bf16 atomic add, index_add reaches the pass
-        directly. Other platforms still exercise the equivalent index_put path."""
+        """index_add reaches the pass directly where bf16 atomic add is not
+        native, and as index_put everywhere else."""
         torch.manual_seed(42)
         B, N, n, D = 2, 8192, 8, 4
 
@@ -412,8 +412,8 @@ class TestPartitionedScatterOpt(TestCase):
             self.assertEqual(e, a.float(), atol=1e-1, rtol=1e-2)
 
     def test_inplace_index_and_scatter_add_graph_inputs(self):
-        """Mutating a graph input is still covered: functionalization turns the
-        mutation into the functional overload the pass matches, plus a copy_."""
+        """Mutating a graph input is still covered: functionalization leaves the
+        functional overload the pass matches."""
         torch.manual_seed(43)
         B, N, n, D = 2, 8192, 8, 4
 
@@ -439,10 +439,9 @@ class TestPartitionedScatterOpt(TestCase):
 
     def test_index_add_alpha_not_matched(self):
         """alpha scales the source, which the rewrite does not carry, so an
-        aten.index_add carrying one must not be picked up. Asserted on the scan:
-        a compiled index_add only reaches the pass where its decomposition falls
-        back, and where it does not, alpha is folded into the source and the
-        index_put left behind is matched legitimately."""
+        aten.index_add holding one must not be picked up. Asserted on the scan:
+        where the decomposition fires instead, alpha is folded into the source
+        and the index_put left behind is matched legitimately."""
         N, n, D = 8192, 8, 4
 
         graph = torch.fx.Graph()
@@ -468,8 +467,8 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertNotIn(scaled, ctx.candidates)
 
     def test_partials_widened_only_when_flag_is_set(self):
-        """The flag decides the dtype of the partial buffers and nothing else, so
-        either way the result has to agree with the unpartitioned bf16 scatter."""
+        """The flag decides the partial buffers' dtype and nothing else, so
+        either way the result must agree with the unpartitioned bf16 scatter."""
         torch.manual_seed(42)
         N, n, D = 8192, 64, 8
 
@@ -549,10 +548,9 @@ class TestPartitionedScatterOpt(TestCase):
 
         promoted, native = rel_error(True), rel_error(False)
 
-        # How much the promotion buys depends on whether the backend accumulates
-        # bf16 natively: 6.2e-1 against 2.1e-3 on MI308X, no difference at all
-        # where the partials are already computed wider. It must never cost
-        # accuracy, and the promoted result carries only the output's rounding.
+        # What promotion buys depends on whether the backend accumulates bf16
+        # natively: 6.2e-1 against 2.1e-3 on MI308X, nothing where the partials
+        # are already computed wider. It must never cost accuracy.
         self.assertLessEqual(promoted, native)
         self.assertLess(promoted, 1e-2)
 
@@ -738,8 +736,8 @@ class TestPartitionedScatterOpt(TestCase):
         partitioned_scatter_min_contention_ratio=0.0,
     )
     def test_scatter_widening_uses_full_source_size(self):
-        """scatter permits src to be larger than index, and the rewrite widens all
-        of src even though only the index-shaped prefix participates."""
+        """scatter permits src to be larger than index, and the rewrite widens
+        all of it, so the charge cannot be derived from the index."""
         graph = torch.fx.Graph()
         input_node = graph.placeholder("input")
         index_node = graph.placeholder("index")
@@ -762,8 +760,8 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertEqual(candidate.values_numel, values_node.meta["val"].numel())
 
     def test_compute_num_partitions_traffic_cap(self):
-        """P <= writes_per_slot caps each expanded-buffer phase at the scatter's
-        traffic. The min partition count takes precedence below that floor."""
+        """P <= writes_per_slot caps each buffer phase at the scatter's own
+        traffic; min_p wins below that floor."""
         available = 10**12  # effectively unlimited
 
         # writes_per_slot=256 → cap=256, min(256, max_p=128) = 128
