@@ -3863,6 +3863,30 @@ def linear_cross_entropy(
 
         The reference path (``options=None``) supports all of the above.
 
+    .. note::
+        **Out-of-range class indices on a fused backend.** A ``target``
+        outside :math:`[0, C)` is a caller error. Where the path indexes
+        with it -- the reference path, and the chunked path whenever no
+        fused backend kernel is selected -- it surfaces as an indexing
+        error. A fused backend kernel, selected automatically when one is
+        available for the shapes and dtypes at hand, does not index
+        through the dispatcher and does not pay for a device-to-host check
+        on every call, so it reports the error as ``nan`` instead of
+        raising.
+
+        That ``nan`` is not confined to the offending row.
+        ``grad_input`` is the one output that stays row-local;
+        ``grad_linear_weight`` and ``grad_linear_bias`` are reductions over
+        rows, so a single out-of-range target makes both of them, and the
+        returned loss, entirely ``nan`` for the whole call. A class
+        ``weight`` is the exception: that path indexes ``weight`` with the
+        target and raises as it always did.
+
+        Because the failure is silent, it is worth running a new program
+        once with the fused backends off -- ``TORCH_DISABLE_NATIVE_JIT=1``
+        in the environment, no source change -- where an out-of-range
+        target raises instead.
+
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
         - Linear weight: :math:`(C, in\_features)` or :math:`(C, d_1,
