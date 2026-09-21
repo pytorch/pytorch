@@ -5,12 +5,16 @@ Each FX node has metadata on it, and in particular, stores a faketensor represen
 Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning.
 
 ## Alias analysis
-Passes should determine tensor aliasing from FakeTensor storage identity rather than operator schema alias annotations. Two tensor nodes with the same non-`None` storage ID alias. A `None` storage ID means aliasing is unknown and must not be used to establish an alias relationship.
+Passes should determine tensor aliasing from FakeTensor storage identity rather than operator schema alias annotations. To check whether the inputs and outputs have any aliasing, it suffices to check whether the
+storages of the input and the storages of the output have any overlap. See
+`remove_noop_ops` for an example of how to do this.
 
-## Aliasing
-Although these graphs are mutation-free, they may still contain aliasing. Passes may change aliasing relationships among intermediate tensors because internal storage identity is not part of the functional operator contract. In particular, functional custom operators cannot rely on whether two intermediate inputs share storage; there is no schema or tag for declaring such a dependency.
+ A `None` storage ID means aliasing is unknown and must not be used to establish an alias relationship.
 
-Passes must preserve aliasing relationships that escape through user-visible inputs and outputs. They must neither introduce nor remove user-visible input-output or output-output aliases. Saved activations that appear as inputs to backward graphs are internal compiler values and are not subject to these boundary aliasing constraints.
+## Altering Aliasing
+- Passes may change aliasing relationships among intermediate tensors because internal storage identity is not part of the functional operator contract. In particular, functional custom operators cannot rely on whether two intermediate inputs share storage; there is no schema or tag for declaring such a dependency.
+
+- Passes must preserve aliasing relationships that escape through user-visible inputs and outputs. They must neither introduce nor remove user-visible input-output or output-output aliases.
 
 For example
 ```python
@@ -29,13 +33,13 @@ def f(x: Tensor):
 In this case, we are also not allowed to eliminate `x.clone()`. Luckily, the
 condition for when this can cause problems is the same as with aliasing,
 which is that **our passes are not allowed to cause the input and output to
-alias if they did not alias in the original graph**. To check whether the
-inputs and outputs have any aliasing, it suffices to check whether the
-storages of the input and the storages of the output have any overlap. See
-`remove_noop_ops` for an example of how to do this.
+alias if they did not alias in the original graph**.
+
+- Saved activations that appear as inputs to backward graphs are internal compiler values and are not subject to these boundary aliasing constraints.
+
 
 ## Graph outputs
-After AOTDispatch, joint and post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes.
+Post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes.
 
 ## Mutations throughout the stack
 The invariant about mutation we have is:
