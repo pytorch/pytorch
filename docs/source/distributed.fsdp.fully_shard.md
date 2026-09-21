@@ -175,13 +175,18 @@ for module in [*model.layers, model]:
     module.set_custom_all_gather(MyAllGather())
 ```
 
-An all-gather backend may set `AllGather.layout` to an `AllGatherLayout` to
-customize input packing and output views. Returning `None` from
-`prepare_output` uses the default rank-major copy path.
+For custom all-gather backends, create a separate stateful instance for each
+FSDP parameter group, as shown above. Sharing storage through a backend pool does
+not permit sharing a stateful instance. The stateless default layout has no
+ownership restriction.
+Install the backend before the first unshard. Replacement is rejected while an
+all-gather is pending, while parameters are unsharded, or after they adopt backend-owned output storage;
+those parameters must keep their original storage owner and reuse coordination.
 
-Layout metadata and aliased buffers must remain valid while in use. A backend
-with a layout must use a separate instance per parameter group. FSDP does not
-free layout-owned storage.
+Custom backends may retain registered output storage after reshard. Consult the
+backend's documentation for its memory usage, supported execution modes, and
+compatibility requirements. Backend authoring interfaces remain private and
+experimental; they are not part of the public FSDP API.
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.fsdp

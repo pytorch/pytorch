@@ -336,7 +336,10 @@ class FSDPMemTracker(MemTracker):
             fsdp_state = fsdp_mod._get_fsdp_state()
             if fsdp_param_group := fsdp_state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
-                    unsharded_grad = fsdp_param._unsharded_param.grad
+                    unsharded_param = fsdp_param._unsharded_param
+                    if unsharded_param is None:
+                        continue
+                    unsharded_grad = unsharded_param.grad
                     if unsharded_grad is not None:
                         self._update_and_maybe_create_winfos(
                             unsharded_grad,
