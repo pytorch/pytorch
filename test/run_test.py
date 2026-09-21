@@ -293,6 +293,23 @@ S390X_BLOCKLIST = [
 XPU_BLOCKLIST = [
     # Not applicable to XPU, tracked by
     # https://github.com/intel/torch-xpu-ops/issues/5205
+    "distributed/rpc/cuda/test_tensorpipe_agent",
+    "distributed/rpc/test_faulty_agent",
+    "distributed/rpc/test_share_memory",
+    "distributed/rpc/test_tensorpipe_agent",
+    "distributed/test_c10d_fault_tolerance",
+    "distributed/test_c10d_gloo",
+    "distributed/test_c10d_nccl2",
+    "distributed/test_c10d_spawn_gloo",
+    "distributed/test_c10d_spawn_ucc",
+    "distributed/test_c10d_window",
+    "distributed/test_ce_colls",
+    "distributed/test_cupy_as_tensor",
+    "distributed/test_nccl",
+    "distributed/test_nvshmem",
+    "distributed/test_p2p_ipc",
+    "distributed/test_shmem_triton",
+    "distributed/test_token_switch",
     "functorch/test_control_flow_cuda_initialization",
     "inductor/test_ck_backend",
     "inductor/test_cudagraph_trees",
@@ -312,6 +329,9 @@ XPU_BLOCKLIST = [
     "python_native/test_quack_vendor",
     "python_native/test_topk_cutedsl",
     "quantization/core/test_quantized_tensor",
+    "quantization/core/test_workflow_module",
+    "quantization/core/test_workflow_ops",
+    "quantization/fx/test_numeric_suite_fx",
     "test_cpp_extensions_mtia_backend",
     "test_cpp_extensions_stream_and_event",
     "test_cuda",
@@ -323,6 +343,7 @@ XPU_BLOCKLIST = [
     "test_cuda_primary_ctx",
     "test_cuda_sanitizer",
     "test_jiterator",
+    "test_stateless_rng",
 ]
 
 XPU_TEST = [
