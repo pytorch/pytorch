@@ -1544,22 +1544,18 @@ class _SubParentRelationDescriptor:
 
 
 @dataclasses.dataclass(frozen=True)
-class _TranslatedProjectionGeometry:
-    """Backend geometry for projecting a logical child from a padded tile."""
-
-    logical_domain_factor: int
-    logical_child_width: int
-    physical_parent_block: int
-    physical_split_factor: int
-
-
-@dataclasses.dataclass(frozen=True)
 class _SubParentReplayContext:
     """The output group and lane currently being replayed."""
 
     output_group: int
     output_lanes: int
     output_lane: int
+
+
+class _SubParentFusion(enum.Enum):
+    DEFER = enum.auto()
+    REJECT = enum.auto()
+    FUSE = enum.auto()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1576,12 +1572,6 @@ class _LaneProjection:
     parent: CSEVariable
     lane: int | None
     split: bool
-
-
-class _SubParentFusion(enum.Enum):
-    DEFER = enum.auto()
-    REJECT = enum.auto()
-    FUSE = enum.auto()
 
 
 def _select_lane(
@@ -1985,28 +1975,15 @@ class _GroupedReductionLayout:
     def child_block(self, factor: int) -> str:
         return str(FloorDiv(self.group_tree.block_size(), factor))
 
-    def make_sub_parent_family(
-        self,
-        logical_domain_factor: int,
-        *,
-        logical_child_block: sympy.Expr | None = None,
-    ) -> _DerivedIterationFamily:
+    def make_sub_parent_family(self, factor: int) -> _DerivedIterationFamily:
         if not self.local_reduction_in_r:
             raise AssertionError("sub-parent iteration requires a reduction in R")
-        child_numel = FloorDiv(self.group_tree.numel, logical_domain_factor)
-        child_block = (
-            FloorDiv(self.group_tree.block_size(), logical_domain_factor)
-            if logical_child_block is None
-            else logical_child_block
-        )
         derived_tree = DerivedIterationRangesRoot(
             self.group_tree,
-            numel=child_numel,
-            block_size=child_block,
-            block_offset=FloorDiv(
-                self.group_tree.block_offset(), logical_domain_factor
-            ),
-            name_suffix=f"lane{logical_domain_factor}",
+            numel=FloorDiv(self.group_tree.numel, factor),
+            block_size=FloorDiv(self.group_tree.block_size(), factor),
+            block_offset=FloorDiv(self.group_tree.block_offset(), factor),
+            name_suffix=f"lane{factor}",
             named_constants=self._grouped_axis_named_constants(self.group_tree),
         )
         # Usually the flattened extent directly proves divisibility by the
@@ -2014,7 +1991,7 @@ class _GroupedReductionLayout:
         # extent, so expose its known num_groups * group_size structure. The
         # planner has already proved that group_size is divisible by factor.
         lane_index_subs = scheduler.NestedReduction.try_get_sub_parent_extent_subs(
-            self.group_tree.numel, logical_domain_factor
+            self.group_tree.numel, factor
         )
         if lane_index_subs is None:
             grouped_extent = V.graph.sizevars.simplify(
@@ -2160,8 +2137,7 @@ class _GroupedReductionLayout:
         translation: tuple[sympy.Expr, ...],
         output_lanes: int,
         output_lane: int,
-        projection_metadata: _SubParentRelationDescriptor,
-        projection_geometry: _TranslatedProjectionGeometry,
+        factor: int,
     ) -> CSEVariable:
         """Project one proven contiguous child interval from a parent tile."""
         if value.dtype is None:
@@ -2191,43 +2167,43 @@ class _GroupedReductionLayout:
 
         sizevars = V.graph.sizevars
         parent_width = sizevars.guard_int(parent_shape[1])
-        child_width = sizevars.guard_int(child_shape[1])
-        if child_width <= 0 or child_width % output_lanes != 0:
+        if parent_width <= 0 or parent_width % factor != 0:
+            raise AssertionError("translated parent extent is not divisible by factor")
+        child_width = parent_width // factor
+        consumer_width = sizevars.guard_int(child_shape[1])
+        if (
+            child_width <= 0
+            or consumer_width <= 0
+            or consumer_width != child_width * output_lanes
+        ):
             raise AssertionError(
                 "translated child extent is incompatible with output lanes"
             )
-        lane_width = child_width // output_lanes
         translation_r = sizevars.guard_int(translation[1])
-        offset = translation_r + output_lane * lane_width
-        if translation_r < 0 or offset < 0 or offset + lane_width > parent_width:
+        offset = translation_r + output_lane * child_width
+        if translation_r < 0 or offset < 0 or offset + child_width > parent_width:
             raise AssertionError(
                 "translated child interval is outside its parent frame"
             )
-        if offset % lane_width != 0:
+        if offset % child_width != 0:
             raise AssertionError("translated child interval is not lane aligned")
 
-        # The first Triton slice uses a power-of-two padded parent block. The
-        # logical relation remains the source of the offset; padding is only
-        # used to expose contiguous chunks to Triton's existing splitter.
-        if lane_width != projection_geometry.logical_child_width:
-            raise AssertionError(
-                "translated relation disagrees with its logical child width"
-            )
-        physical_parent_width = projection_geometry.physical_parent_block
-        split_factor = projection_geometry.physical_split_factor
-        if physical_parent_width != lane_width * split_factor:
-            raise AssertionError("invalid translated physical projection geometry")
-        part_shape = (*value.shape[:-1], str(lane_width))
+        # Keep the replayed value's block shape in the derived family's
+        # vocabulary.  The concrete relation width and the derived Triton
+        # block width are equivalent, but shape propagation compares symbolic
+        # dimensions textually (for example, ``64`` vs ``R0_BLOCK//4``).
+        child_block = family.sub_parent_tree().block_size_str()
+        part_shape = (*value.shape[:-1], child_block)
         parts = tuple(
             kernel.cse.newvar(bounds=value.bounds, dtype=value.dtype, shape=part_shape)
-            for _ in range(split_factor)
+            for _ in range(factor)
         )
-        reshape_shape = (*value.shape[:-1], split_factor, lane_width)
+        reshape_shape = (*value.shape[:-1], factor, child_block)
         kernel.emit_contiguous_split_via_reshape(
             value, reshape_shape, tuple(map(str, parts))
         )
         family.set_value_masks(kernel, parts)
-        part_index = offset // lane_width
+        part_index = translation_r // child_width + output_lane
         if part_index >= len(parts):
             raise AssertionError("translated projection selected an unavailable part")
         return parts[part_index]
@@ -2575,26 +2551,17 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         output_groups: tuple[scheduler.SubParentOutputGroup, ...] = (),
         parent_numel: sympy.Expr | None = None,
         parent_rnumel: sympy.Expr | None = None,
-        translated_projection: _TranslatedProjectionGeometry | None = None,
     ):
         super().__init__(inner)
         self._kernel = kernel
         self._layout = layout
         self._sub_parent_family = sub_parent_family
         self._sub_parent_factor = sub_parent_factor
-        self._translated_projection = translated_projection
         if any(relation.translation is not None for relation in access_relations) and (
-            parent_numel is None
-            or parent_rnumel is None
-            or translated_projection is None
+            parent_numel is None or parent_rnumel is None
         ):
             raise AssertionError(
-                "translated sub-parent replay requires logical and physical geometry"
-            )
-        if translated_projection is not None:
-            kernel.compute.writeline(
-                f"tl.static_assert({layout.parent_block} == "
-                f"{translated_projection.physical_parent_block})"
+                "translated sub-parent replay requires parent extents"
             )
         # Fusion checks each access. Replay only needs their consistent per-name
         # consequences: capture role and any permitted parent lanes. Translated
@@ -2943,8 +2910,6 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
     ) -> CSEVariable | None:
         if not self._kernel.cse.contains_value(cast("TritonCSEVariable", source)):
             return None
-        if self._translated_projection is None:
-            raise AssertionError("translated projection geometry was lost")
         key = (id(source), descriptor_index, output_lane)
         if key in self._translated_materialized:
             return self._translated_materialized[key]
@@ -2957,8 +2922,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             translation=descriptor.relation.translation or (),
             output_lanes=descriptor.output_lanes,
             output_lane=output_lane,
-            projection_metadata=descriptor,
-            projection_geometry=self._translated_projection,
+            factor=self._sub_parent_factor,
         )
         self._translated_materialized[key] = value
         return value
@@ -3222,10 +3186,6 @@ class SIMDScheduling(BaseScheduling):
                 reduction_can_fuse = MixOrderReduction.can_fuse(node1, node2)
 
             if not reduction_can_fuse:
-                # Scheduler legality creates the fused nested node, but SIMD
-                # still runs this backend fusion gate. The regular
-                # numel/rnumel checks reject nested reductions because the two
-                # reductions intentionally use different iteration spaces.
                 from torch._inductor.scheduler import NestedReduction
 
                 reduction_can_fuse = NestedReduction._is_dependent_reduction_pair(
@@ -3269,8 +3229,7 @@ class SIMDScheduling(BaseScheduling):
                     return False
 
             if reduction_can_fuse and any(
-                isinstance(node, scheduler.FusedStagedReduction)
-                and not isinstance(node, scheduler.FusedNestedReductions)
+                self._is_standalone_staged_reduction(node)
                 for node in (node1, node2)
             ):
                 nodes = [*node1.get_nodes(), *node2.get_nodes()]
@@ -3387,6 +3346,7 @@ class SIMDScheduling(BaseScheduling):
                     return False
                 if sub_parent_fusion is _SubParentFusion.FUSE:
                     return True
+
             if self._is_standalone_staged_reduction(node2):
                 why("staged reduction plan would be lost")
                 return False
@@ -3408,12 +3368,7 @@ class SIMDScheduling(BaseScheduling):
         parent_numel: sympy.Expr,
         parent_rnumel: sympy.Expr,
     ) -> bool:
-        """Whether ``node`` runs at a fraction of the parent tile.
-
-        A group member is normally reduced ``(parent_numel, 1)``, full resolution
-        ``(parent_numel * parent_rnumel, 1)``, or the reduction itself. Anything
-        else only has meaning under a sub-parent plan.
-        """
+        """Whether ``node`` runs at a fraction of the parent tile."""
         if node.is_reduction():
             return False
         _, (node_numel, node_rnumel) = node.group
@@ -3431,7 +3386,7 @@ class SIMDScheduling(BaseScheduling):
         node1: scheduler.BaseSchedulerNode,
         node2: scheduler.BaseSchedulerNode,
     ) -> _SubParentFusion:
-        """Decide whether sub-parent planning fuses, rejects, or defers."""
+        """Map scheduler proof and SIMD admission to DEFER/REJECT/FUSE."""
         if (
             not self.supports_sub_parent_epilogue
             or not torch._inductor.config.triton.nested_reduction
@@ -3439,32 +3394,29 @@ class SIMDScheduling(BaseScheduling):
             return _SubParentFusion.DEFER
         if node1.is_reduction() == node2.is_reduction():
             return _SubParentFusion.DEFER
+
         reduction_node = node1 if node1.is_reduction() else node2
         consumer_node = node2 if node1.is_reduction() else node1
         _, (parent_numel, parent_rnumel) = reduction_node.group
         nodes = [*reduction_node.get_nodes(), *consumer_node.get_nodes()]
-        plan = self._sub_parent_epilogue_plan(nodes, parent_numel, parent_rnumel)
-        if plan is None:
-            # No sub-parent plan covers the combined set, so a sub-parent-shaped
-            # member would reach generic tiling and scheduling, neither of which
-            # models a fraction of the parent tile. Keep it out of the group.
-            # The nested append path owns its own sub-parent stage, so leave
-            # those pairs to FusedNestedReductions.can_fuse_with.
+        fusion_result = scheduler.NestedReduction.sub_parent_epilogue_result(
+            nodes, parent_numel, parent_rnumel
+        )
+        if not fusion_result.is_candidate:
+            return _SubParentFusion.DEFER
+        if fusion_result.plan is None:
             if isinstance(node1, scheduler.FusedNestedReductions) or isinstance(
                 node2, scheduler.FusedNestedReductions
             ):
                 return _SubParentFusion.DEFER
-            return (
-                _SubParentFusion.REJECT
-                if any(
-                    self._is_sub_parent_shaped(node, parent_numel, parent_rnumel)
-                    for node in nodes
-                )
-                else _SubParentFusion.DEFER
-            )
-        stage = plan.sub_parent_stages[0]
-        epilogue_nodes = stage.epilogue_nodes
-        epilogue_node_set = OrderedSet(epilogue_nodes)
+            return _SubParentFusion.REJECT
+
+        plan = fusion_result.plan
+        if plan is None or not self._sub_parent_tiling_is_2d(
+            nodes, parent_numel, plan.parent_rnumel
+        ):
+            return _SubParentFusion.REJECT
+        epilogue_node_set = OrderedSet(plan.sub_parent_stages[0].epilogue_nodes)
         if self._is_standalone_staged_reduction(reduction_node):
             return _SubParentFusion.FUSE
         return (
@@ -3479,127 +3431,21 @@ class SIMDScheduling(BaseScheduling):
         parent_numel: sympy.Expr,
         parent_rnumel: sympy.Expr,
     ) -> scheduler.StagedReductionPlan | None:
-        """The scheduler's plan, gated on this backend being able to emit it.
-
-        The backend gates (config, ``supports_sub_parent_epilogue``, 2D tiling)
-        belong here rather than in the scheduler, which has no view of them. See
-        Note [Sub-parent reduction epilogues].
-        """
+        """Return a proven logical plan when this SIMD backend can emit it."""
         if (
             not self.supports_sub_parent_epilogue
             or not torch._inductor.config.triton.nested_reduction
         ):
             return None
-        plan = scheduler.NestedReduction.sub_parent_epilogue_plan(
+        result = scheduler.NestedReduction.sub_parent_epilogue_result(
             nodes, parent_numel, parent_rnumel
         )
+        plan = result.plan
         if plan is None:
             return None
-        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
-            return None
-        if any(
-            relation.translation is not None
-            for stage in plan.sub_parent_stages
-            for relation in stage.access_relations
-        ) and self._translated_projection_geometry(plan) is None:
-            # The scheduler proof establishes semantic legality, but the first
-            # Triton slice supports only a narrower physical projection.  Keep
-            # this decline before a staged identity is committed; codegen still
-            # revalidates the committed plan and treats a mismatch as an ICE.
+        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, plan.parent_rnumel):
             return None
         return plan
-
-    @staticmethod
-    def _translated_projection_geometry(
-        plan: scheduler.StagedReductionPlan,
-    ) -> _TranslatedProjectionGeometry | None:
-        """Return the supported Triton geometry for translated projections.
-
-        Scheduler extents and translations remain logical.  This backend gate
-        separately requires a power-of-two physical tile that can be split into
-        equally sized, aligned logical chunks.
-        """
-        if plan.nested_stage is not None or len(plan.sub_parent_stages) != 1:
-            return None
-        stage = plan.sub_parent_stages[0]
-        translated_relations = tuple(
-            relation
-            for relation in stage.access_relations
-            if relation.translation is not None
-        )
-        if not translated_relations:
-            return None
-
-        sizevars = V.graph.sizevars
-        parent_width_expr = sizevars.simplify(plan.parent_rnumel)
-        logical_child_expr = sizevars.simplify(
-            FloorDiv(parent_width_expr, stage.factor)
-        )
-        if not isinstance(parent_width_expr, (int, sympy.Integer)) or not isinstance(
-            logical_child_expr, (int, sympy.Integer)
-        ):
-            return None
-        parent_width = int(parent_width_expr)
-        logical_child_width = int(logical_child_expr)
-        if (
-            parent_width <= 0
-            or logical_child_width <= 0
-            or logical_child_width * stage.factor != parent_width
-            or logical_child_width & (logical_child_width - 1)
-        ):
-            return None
-
-        physical_parent_block = next_power_of_2(parent_width)
-        physical_split_factor, remainder = divmod(
-            physical_parent_block, logical_child_width
-        )
-        if (
-            remainder
-            or physical_split_factor <= 1
-            or physical_split_factor & (physical_split_factor - 1)
-        ):
-            return None
-
-        for relation in translated_relations:
-            translation = relation.translation
-            if (
-                translation is None
-                or len(translation) != 2
-                or not sizevars.statically_known_equals(translation[0], 0)
-            ):
-                return None
-            translation_r_expr = sizevars.simplify(translation[1])
-            consumer_extent = sizevars.simplify(
-                sympy_product(relation.consumer_access.size)
-            )
-            if not sizevars.statically_known_multiple_of(
-                consumer_extent, plan.parent_numel
-            ):
-                return None
-            consumer_width_expr = sizevars.simplify(
-                FloorDiv(consumer_extent, plan.parent_numel)
-            )
-            if not isinstance(
-                translation_r_expr, (int, sympy.Integer)
-            ) or not isinstance(consumer_width_expr, (int, sympy.Integer)):
-                return None
-            translation_r = int(translation_r_expr)
-            consumer_width = int(consumer_width_expr)
-            if (
-                translation_r < 0
-                or consumer_width <= 0
-                or translation_r % logical_child_width
-                or consumer_width % logical_child_width
-                or translation_r + consumer_width > parent_width
-            ):
-                return None
-
-        return _TranslatedProjectionGeometry(
-            logical_domain_factor=stage.factor,
-            logical_child_width=logical_child_width,
-            physical_parent_block=physical_parent_block,
-            physical_split_factor=physical_split_factor,
-        )
 
     def _sub_parent_tiling_is_2d(
         self,
@@ -3621,35 +3467,33 @@ class SIMDScheduling(BaseScheduling):
         )
         return len(tiling) == 2
 
-    def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
+    def has_sub_parent_epilogue(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> bool:
         return self._find_sub_parent_epilogue_plan(list(nodes)) is not None
-
-    def validate_staged_reduction(self, node: scheduler.FusedStagedReduction) -> None:
-        """Reconstruct a committed standalone staged plan from final nodes."""
-        if not self._is_standalone_staged_reduction(node):
-            return
-        nodes = [
-            sn
-            for sn in node.get_nodes()
-            if not self.scheduler or sn.get_name() not in self.scheduler.removed_ops
-        ]
-        if self._find_sub_parent_epilogue_plan(nodes) is None:
-            raise AssertionError(
-                "committed sub-parent reduction plan was lost after scheduling"
-            )
 
     def _find_sub_parent_epilogue_plan(
         self,
         nodes: Sequence[BaseSchedulerNode],
     ) -> scheduler.StagedReductionPlan | None:
-        """Return the first valid standalone sub-parent plan for ``nodes``."""
+        """Return the first SIMD-representable standalone plan for ``nodes``."""
         for node in nodes:
             if not node.is_reduction():
                 continue
             _, (parent_numel, parent_rnumel) = node.group
-            plan = self._sub_parent_epilogue_plan(nodes, parent_numel, parent_rnumel)
+            result = scheduler.NestedReduction.sub_parent_epilogue_result(
+                nodes, parent_numel, parent_rnumel
+            )
+            plan = self._sub_parent_epilogue_plan(
+                nodes,
+                parent_numel,
+                parent_rnumel,
+            )
             if plan is not None:
                 return plan
+            if result.is_candidate:
+                break
         return None
 
     def generate_node_schedule(
@@ -4631,26 +4475,17 @@ class SIMDScheduling(BaseScheduling):
         if plan.nested_stage is not None or len(plan.sub_parent_stages) != 1:
             raise AssertionError("expected one standalone sub-parent stage")
         stage = plan.sub_parent_stages[0]
-        has_translated_projection = any(
+        has_translated_relations = any(
             relation.translation is not None for relation in stage.access_relations
         )
-        translated_projection = (
-            self._translated_projection_geometry(plan)
-            if has_translated_projection
-            else None
-        )
-        if has_translated_projection and translated_projection is None:
-            raise AssertionError(
-                "committed translated projection has unsupported Triton geometry"
-            )
-        if has_translated_projection:
+        if has_translated_relations:
             metrics.codegen_translated_staged_reduction += 1
         numel = plan.parent_numel
         rnumel = plan.parent_rnumel
         sub_parent_epilogue_nodes = stage.epilogue_nodes
         parent_nodes = list(plan.parent_nodes)
         group_extent_subs = {}
-        if has_translated_projection:
+        if has_translated_relations:
             # The scheduler specializes the canonical parent width, while the
             # final SchedulerNode groups may still spell it with the backed
             # symbolic dimension.  Normalize only this committed translated
@@ -4724,8 +4559,8 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             kernel.min_rblock = (
                 sub_parent_factor
-                if translated_projection is None
-                else translated_projection.physical_parent_block
+                if not has_translated_relations
+                else V.graph.sizevars.guard_int(parent_rnumel)
             )
             if len(kernel.range_trees) != 2:
                 raise AssertionError("sub-parent codegen requires a 2D kernel")
@@ -4736,11 +4571,6 @@ class SIMDScheduling(BaseScheduling):
             )
             sub_parent_family = layout.make_sub_parent_family(
                 sub_parent_factor,
-                logical_child_block=(
-                    None
-                    if translated_projection is None
-                    else sympy.Integer(translated_projection.logical_child_width)
-                ),
             )
             with kernel:
                 value_resolver = _SubParentValueResolver(
@@ -4753,14 +4583,16 @@ class SIMDScheduling(BaseScheduling):
                     output_groups=stage.output_groups,
                     parent_numel=plan.parent_numel,
                     parent_rnumel=plan.parent_rnumel,
-                    translated_projection=translated_projection,
                 )
                 with V.set_ops_handler(value_resolver):
                     self._codegen_node_schedule_body(parent_schedule, kernel)
-                if not required_replay_relations:
-                    kernel.codegen_body()
-                else:
+                if required_replay_relations:
                     value_resolver.materialize_sources(required_replay_relations)
+                # Materialize the outer reduction result before replaying the
+                # epilogue.  Keep reduction mode enabled: the epilogue needs a
+                # second reduction loop to cover every parent R tile, while
+                # the first loop produces the values it consumes.
+                kernel.codegen_body()
                 self._codegen_sub_parent_output_groups(
                     kernel,
                     stage,
