@@ -25,7 +25,6 @@ from typing import Any, Literal
 import torch
 from torch.utils._pallas import has_torch_tpu
 
-
 get_cuda_stream: Callable[[int], int] | None
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -255,6 +254,25 @@ class DeviceInterface:
                 "This device is not capable of supporting Triton"
             )
 
+    @staticmethod
+    def is_fp32_attention_fusion_safe(dtype) -> bool:
+        return True
+
+    @staticmethod
+    def maybe_warn_tf32_disabled() -> bool:
+        return False
+
+    @staticmethod
+    def is_fp32_softmax_attention_fusion_safe(device_type) -> bool:
+        return True
+
+    @staticmethod
+    def keep_attention_on_math_path() -> bool:
+        # Whether this device should stay on the explicit attention math path
+        # (matmul/div/add/softmax/dropout) instead of fused SDPA, whose
+        # scaling/dropout numerics fail tight checks for some patterns.
+        return False
+
 
 class DeviceGuard:
     """
@@ -385,6 +403,30 @@ class CudaInterface(DeviceInterface):
                 raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
+
+    @staticmethod
+    def is_fp32_attention_fusion_safe(dtype) -> bool:
+        if dtype != torch.float32:
+            return True
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
+            return True
+        return False
+
+    @staticmethod
+    def maybe_warn_tf32_disabled() -> bool:
+        if torch.backends.cuda.matmul.fp32_precision == "bfx9":
+            return False
+        return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+
+    @staticmethod
+    def is_fp32_softmax_attention_fusion_safe(device_type) -> bool:
+        return "cuda" not in str(device_type)
+
+    @staticmethod
+    def keep_attention_on_math_path() -> bool:
+        # Keep Bert-style patterns on their original math path; generic SDPA can
+        # pick fused backends whose scaling/dropout numerics fail tight checks.
+        return torch.version.hip is None
 
 
 get_mtia_stream: Callable[[int], int] | None
