@@ -879,6 +879,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # abspath: drive-qualified on Windows, where 3.13's isabs rejects \x
         bogus = os.path.abspath(os.path.join(os.sep, "elsewhere", "torch"))
         stub = types.SimpleNamespace(__path__=[None, bogus])
+        # The package directory has two spellings, both roots: the one torch's
+        # __path__ names and two levels up from where this file resolves. They
+        # are one directory on a plain checkout and two in a per-file symlink
+        # farm (a Buck link-tree), so the expectation carries both.
+        resolved = norm(precompile_package.__file__)
+        anchored = {own, os.path.dirname(os.path.dirname(resolved))}
         self._clear_root_caches()
         with mock.patch.dict(sys.modules, {"torch": stub}):
             # A substituted torch's __path__ is ignored until it lists the torch
@@ -887,13 +893,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # relies on, and a relative one, which realpath would resolve into
             # the process cwd, is not. A __path__ that is no sequence at all is
             # ignored as well.
-            self.assertEqual(torch_roots(), (own,))
+            self.assertEqual(set(torch_roots()), anchored)
             stub.__path__ += [os.path.dirname(torch.__file__), "", "relative"]
             torch_roots.cache_clear()
-            self.assertEqual(set(torch_roots()), {own, norm(bogus)})
+            self.assertEqual(set(torch_roots()), anchored | {norm(bogus)})
             stub.__path__ = None
             torch_roots.cache_clear()
-            self.assertEqual(torch_roots(), (own,))
+            self.assertEqual(set(torch_roots()), anchored)
         with mock.patch.object(precompile_package, "__file__", None):
             torch_roots.cache_clear()
             self.assertEqual(torch_roots(), ())  # frozen: no directory to anchor to
