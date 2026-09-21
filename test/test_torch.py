@@ -3455,7 +3455,8 @@ class TestTorchDeviceType(TestCase):
         h, w = (2052, 2060) if layout == "word_aligned" else (2064, 2096)
         if layout == "grid_stride":
             vec = 4 // torch.empty((), dtype=dtype).element_size()
-            h, w = (32 * 65535 + 4) * vec, 4 * vec
+            tile_size = 64 if dtype == torch.float32 else 32 * vec
+            h, w = tile_size * 65535 + 4 * vec, 4 * vec
         src_offset = int(layout == "src_offset")
         dst_offset = int(layout == "dst_offset")
         src_pad = 1 if layout == "src_pitch" else 16
