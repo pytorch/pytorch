@@ -2806,11 +2806,15 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             session.__enter__()
 
     def test_an_interrupted_drain_still_closes_the_session(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
         # The drain is the only place __exit__ blocks. An interrupt out of it
-        # must propagate AND leave the session closed: otherwise cap() stays
-        # callable past the block, the artifacts stay staged in
-        # PrecompileContext and the optimize context leaks to process exit.
-        session = self._session(_session_breaks)
+        # must propagate and still close the session -- otherwise cap() stays
+        # callable past the block and the optimize context leaks to process
+        # exit -- while claiming nothing on behalf of the calls it abandons,
+        # which may still be compiling against the package.
+        self.addCleanup(PrecompileContext.clear)
+        session = self._session(_session_breaks, backend="inductor")
 
         def interrupted(*args, **kwargs):
             raise KeyboardInterrupt
@@ -2821,6 +2825,8 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
                 # One call left in flight is what makes __exit__ wait at all.
                 session._active_calls += 1
                 session._state.wait = interrupted
+        # Closed, and the optimize context released with it: _compiled is the
+        # only thing holding that context.
         self.assertTrue(session._finished)
         self.assertFalse(session._entered)
         self.assertFalse(session._closing)
@@ -2829,6 +2835,16 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             cap(torch.ones(3))
         with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
             session.__enter__()
+        # Nothing claimed: the artifacts of the abandoned call stay staged in
+        # PrecompileContext and its backends stay on the package, rather than
+        # being taken and cleared under a compile that is still running.
+        backend_ids = session._package.cache_entry().backend_ids
+        self.assertTrue(backend_ids)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(set(session._package.cached_backends), set(backend_ids))
+        for backend_id in backend_ids:
+            staged = PrecompileContext.serialize_artifact_by_key(backend_id)
+            self.assertIsNotNone(staged)
 
     def test_an_error_inside_the_block_is_recorded_once_and_propagates(self):
         session = self._session(_session_raises)
@@ -2847,8 +2863,10 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         reached = threading.Event()
 
         class AnnouncingLock:
-            # Only the lock protocol the recording path uses: nothing here waits
-            # or notifies on the condition built over it.
+            # A complete Condition lock, not just acquire/release: Condition
+            # probes for these three private hooks and otherwise installs
+            # plain-Lock defaults, whose _is_owned reports a reentrant lock the
+            # caller already holds as unowned and makes wait()/notify() raise.
             def __init__(self):
                 self._lock = threading.RLock()
 
@@ -2860,11 +2878,19 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
                 self._lock.release()
 
             def __enter__(self):
-                self.acquire()
-                return self
+                return self.acquire()
 
             def __exit__(self, *exc):
                 self.release()
+
+            def _is_owned(self):
+                return self._lock._is_owned()
+
+            def _release_save(self):
+                return self._lock._release_save()
+
+            def _acquire_restore(self, state):
+                self._lock._acquire_restore(state)
 
         session = self._session(_session_raises)
         session._state = threading.Condition(AnnouncingLock())
@@ -2875,6 +2901,10 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             done.set()
 
         with session._state:
+            # The substitute is a valid Condition lock, not just acquire and
+            # release: notify_all is what the plain-Lock default _is_owned would
+            # refuse on a reentrant lock this thread is holding.
+            session._state.notify_all()
             reached.clear()
             worker = threading.Thread(target=record)
             worker.start()
@@ -2896,12 +2926,14 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         for backend in session._package.cached_backends.values():
             self.assertTrue(callable(backend))
 
-    def test_the_eager_family_keeps_its_backends_like_eager_does(self):
-        # The exemption is a property of the resolved backend, not of the name:
-        # eager_noexcept files nothing either, so clearing its backends would
-        # drop the only copy the render has and the empty artifact dict would
-        # read as a capture that recorded nothing.
-        session = self._session(_session_breaks, backend="eager_noexcept")
+    @parametrize("backend", ("eager_noexcept", "ts"))
+    def test_a_backend_that_files_nothing_keeps_its_backends(self, backend):
+        # Keeping them is a property of the resolved backend, not a list of
+        # names: neither eager_noexcept nor ts (torch.jit.script) files anything
+        # under the backend id, so clearing their backends would drop the only
+        # copy the render has, and the empty artifact dict would read as a
+        # capture that recorded nothing.
+        session = self._session(_session_breaks, backend=backend)
         with session as cap:
             cap(torch.ones(3))
         entry = session._package.cache_entry()
