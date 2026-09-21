@@ -1480,6 +1480,13 @@ class GuardBuilder(GuardBuilderBase):
                 guard_manager_enum=guard_manager_enum,
             )
 
+    def _compared_by_value(self, val: object) -> None:
+        # See Note [Reconstructing a function a guard is rooted at] in
+        # GuardsStatePickler: what a guard compares by value at run time must
+        # travel verbatim, so the serializer never prunes or substitutes it.
+        if self.save_guards:
+            self.value_guarded_containers[id(val)] = val
+
     def guard_on_dict_keys_and_order(self, value: dict[Any, Any], guard: Guard) -> None:
         # Add key managers for the DictGuardManager. Then add either an
         # ID_MATCH or EQUALS_MATCH guard on the key.
@@ -1516,6 +1523,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
             else:
                 # Install EQUALS_MATCH guard
+                self._compared_by_value(key)
                 key_manager.add_equals_match_guard(
                     key,
                     get_verbose_code_parts(f"{key_source} == {key!r}", guard),
@@ -1582,6 +1590,7 @@ class GuardBuilder(GuardBuilderBase):
 
                 # Install the key manager and add equals match guard
                 key_source = f"list(dict.keys({source_name}))[{index!r}]"
+                self._compared_by_value(key)
                 mgr.get_key_manager(
                     index=index,
                     source=key_source,
@@ -1942,6 +1951,8 @@ class GuardBuilder(GuardBuilderBase):
                     example_value,
                     guard_manager_enum,
                 )
+                if not isinstance(source.index, ConstDictKeySource):
+                    self._compared_by_value(source.index)
             else:
                 if isinstance(source.index, ConstDictKeySource):
                     raise RuntimeError(
@@ -4348,19 +4359,20 @@ class GuardsStatePickler(FunctionPicklerBase):
         # Elements of a container carried verbatim (a value-guarded __defaults__
         # tuple, see _keep_container_verbatim) must stay real even when an
         # unguarded attribute is the very same object and registers it mid-dump.
+        # So must an object a guard compares by value itself (a dict key).
         self._verbatim_elements: set[int] = set()
         stack = list(value_guarded_containers.values())
         while stack:
-            for element in stack.pop():
-                if id(element) in self._verbatim_elements:
-                    continue
-                self._verbatim_elements.add(id(element))
-                if isinstance(element, (list, tuple, set, frozenset)):
-                    stack.append(element)
-                elif isinstance(element, dict):
-                    # Values only: no pruned type is hashable, so a key can
-                    # neither be one nor contain one.
-                    stack.append(list(element.values()))
+            value = stack.pop()
+            if id(value) in self._verbatim_elements:
+                continue
+            self._verbatim_elements.add(id(value))
+            if isinstance(value, (list, tuple, set, frozenset)):
+                stack.extend(value)
+            elif isinstance(value, dict):
+                # Values only: no pruned type is hashable, so a key can
+                # neither be one nor contain one.
+                stack.extend(value.values())
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -5032,7 +5044,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         every unguarded attribute replaced by the sentinel. Scoped to this one
         receiver, so a value it shares with an object that is pickled whole (one
         with its own __setstate__, say) stays real where that object reads it
-        back at load."""
+        back at load. Names and their order are preserved and only values are
+        substituted: a guard rooted at the receiver's __dict__ re-bakes its keys
+        and length at load."""
         return {
             name: attr
             if self._keeps_attribute(obj, name, attr)
