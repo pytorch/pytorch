@@ -1149,6 +1149,12 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::host MIOpen hiprtc::hiprtc)
 
+    # intra_node_comm.cpp is the only consumer, and -Wl,--no-as-needed would
+    # stamp the DT_NEEDED on even when it is not built.
+    if(USE_DISTRIBUTED AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0" AND amd_smi_FOUND)
+      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS amd_smi)
+    endif()
+
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
@@ -1504,6 +1510,12 @@ if(NOT INTERN_BUILD_MOBILE)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
+        # third_party/cutlass is included as a plain (non-SYSTEM) include dir
+        # for torch_cuda (caffe2/CMakeLists.txt), so -Wunused-function fires on
+        # cutlass header-only helpers (e.g. cutlassGetStatusString, cute's
+        # prefetch) that a given translation unit's CUDA-version-gated
+        # instantiation path happens not to reference.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=unused-function ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
@@ -1725,12 +1737,35 @@ if(USE_KINETO)
 
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
   set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
-  set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+
+  # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.
+  # The xpu backend is excluded because its tests compile SYCL device code
+  # through an ExternalProject, which does not fit inside this build.
+  if(BUILD_TEST AND NOT KINETO_BACKEND STREQUAL "xpu")
+    set(KINETO_BUILD_TESTS ON CACHE BOOL "" FORCE)
+  else()
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  endif()
+  # Install alongside PyTorch's own test binaries, where the Windows CI
+  # runner looks for C++ tests.
+  set(KINETO_INSTALL_TESTS ${INSTALL_TEST} CACHE BOOL "" FORCE)
+  set(KINETO_TEST_INSTALL_DIR "test" CACHE STRING "" FORCE)
+
+  # Kineto's tests link nlohmann_json. Create the target from PyTorch's copy
+  # so Kineto skips adding its own; both pin the same version. This mirrors
+  # how fmt is already shared with Kineto above.
+  if(KINETO_BUILD_TESTS AND NOT TARGET nlohmann_json)
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    set(JSON_Install OFF CACHE INTERNAL "")
+    add_subdirectory("${CAFFE2_THIRD_PARTY_ROOT}/nlohmann"
+                     "${CMAKE_BINARY_DIR}/third_party/nlohmann")
+  endif()
 
   message(STATUS "Configuring Kineto dependency:")
   message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+  message(STATUS "  KINETO_INSTALL_TESTS = ${KINETO_INSTALL_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
   message(STATUS "  KINETO_BACKEND = ${KINETO_BACKEND}")
 
@@ -1741,7 +1776,23 @@ if(USE_KINETO)
   endif()
 
   if(NOT TARGET kineto)
+    # Send Kineto's test binaries to their own subdirectory of build/bin so
+    # the CI runner can glob them without sweeping up PyTorch's tests too.
+    set(_kineto_saved_runtime_output_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/kineto")
+    # Kineto registers its tests with gtest_discover_tests, which defaults to
+    # running every test binary during the build to enumerate its cases. Those
+    # binaries link CUPTI, whose DLL is not on PATH while a Windows build runs,
+    # so each one fails to start and takes the build down with it. Defer
+    # discovery to test time instead. Nothing is lost: PyTorch finds these
+    # tests by listing the built binaries rather than through CTest.
+    set(_kineto_saved_discovery_mode "${CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
     add_subdirectory("${KINETO_SOURCE_DIR}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE "${_kineto_saved_discovery_mode}")
+    unset(_kineto_saved_discovery_mode)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${_kineto_saved_runtime_output_dir}")
+    unset(_kineto_saved_runtime_output_dir)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
