@@ -16,6 +16,7 @@ import functools
 import inspect
 import weakref
 from collections.abc import MutableMapping
+from dataclasses import dataclass
 from typing import Any
 
 import torch.nn
@@ -74,13 +75,11 @@ def ensure_patched(cls: Any) -> None:
         cls.__setattr__ = custom_setattr
 
 
+@dataclass(slots=True)
 class _GenerationTracker:
-    __slots__ = ("dynamic_classes", "generation", "generation_values")
-
-    def __init__(self):
-        self.dynamic_classes: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
-        self.generation: int = 0
-        self.generation_values: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
+    dynamic_classes: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
+    generation: int = 0
+    generation_values: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
 
     def tag(self, obj: Any) -> None:
         self.generation_values[obj] = self.generation

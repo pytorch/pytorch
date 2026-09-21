@@ -91,14 +91,8 @@ _SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
 # family builds no Source (the codegen-only installs) or a guard type in
 # UNSUPPORTED_SERIALIZATION_GUARD_TYPES, which ___unnamed_scope's was not -- so
 # moving a type off that list means re-checking this one.
-_IMPORT_ALIAS_PREFIX = "__import_"
-_BUILTINS_DICT_PREFIX = "__builtins_dict__"
 _UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
-_MINTED_GLOBAL_PREFIXES = (
-    _IMPORT_ALIAS_PREFIX,
-    _BUILTINS_DICT_PREFIX,
-    _UNNAMED_SCOPE_PREFIX,
-)
+_MINTED_GLOBAL_PREFIXES = ("__import_", "__builtins_dict__", _UNNAMED_SCOPE_PREFIX)
 
 
 def _picklable_unnamed_scope(scope: dict[str, Any]) -> dict[str, Any]:
