@@ -20,45 +20,88 @@ def _validate_timeout(timeout: float | None) -> None:
         raise ValueError("timeout must be finite and nonnegative")
 
 
+def _asyncio_future(work: Work) -> asyncio.Future[None]:
+    loop = asyncio.get_running_loop()
+    completion: asyncio.Future[None] = loop.create_future()
+
+    def settle(error: BaseException | None) -> None:
+        if completion.done():
+            return
+        if error is None:
+            completion.set_result(None)
+        else:
+            completion.set_exception(error)
+
+    def complete(future: torch.futures.Future[Any]) -> None:
+        error: BaseException | None = None
+        try:
+            future.wait()
+        except BaseException as failure:
+            error = failure
+        # Backend completion callbacks may run on a different thread. The
+        # caller may also have closed its loop after cancellation or timeout.
+        try:
+            loop.call_soon_threadsafe(settle, error)
+        except RuntimeError:
+            if not loop.is_closed():
+                raise
+
+    future = work.get_future()
+    if future.done():
+        try:
+            future.wait()
+        except BaseException as error:
+            settle(error)
+        else:
+            settle(None)
+    else:
+        future.add_done_callback(complete)
+    return completion
+
+
 async def wait_all(works: Iterable[Work], *, timeout: float | None = None) -> None:
-    """Poll Work completion without an executor or blocking the asyncio loop.
+    """Await Work futures without blocking the asyncio loop.
 
     Timeout and cancellation stop waiting, not transfers. Retain buffers and
     wait again (or close the transport) before reusing them. Transfer errors and
     iterable errors are reported after draining submitted work, unless this wait
-    is timed out or cancelled first. Polling checks must be nonblocking.
+    is timed out or cancelled first. Each Work must support ``get_future``.
     """
     _validate_timeout(timeout)
-    deadline = None if timeout is None else time.monotonic() + timeout
     pending = []
+    retained = []  # Keep each Work alive until its future has been awaited.
     error: BaseException | None = None
     try:
-        pending.extend(works)
+        for work in works:
+            retained.append(work)
+            pending.append(_asyncio_future(work))
     except BaseException as dispatch_error:
         error = dispatch_error
-    while pending:
-        remaining = []
-        for work in pending:
-            if not work.is_completed():
-                remaining.append(work)
-                continue
-            try:
-                work.wait()
-            except BaseException as work_error:
-                if error is None:
-                    error = work_error
-        pending = remaining
-        if not pending:
-            break
-        if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError("transport wait timed out; operations remain pending")
-        await asyncio.sleep(0.001)
-    if error is not None:
-        raise error
+    try:
+        if pending:
+            _, unfinished = await asyncio.wait(pending, timeout=timeout)
+            if unfinished:
+                raise TimeoutError(
+                    "transport wait timed out; operations remain pending"
+                )
+        errors = [future.exception() for future in pending]
+        if error is not None:
+            raise error
+        for failure in errors:
+            if failure is not None:
+                raise failure
+    finally:
+        # These are local waiters, not backend futures. Retrieve any exceptions
+        # already delivered, including when the caller stopped waiting early.
+        for future in pending:
+            if future.done():
+                future.exception()
+            else:
+                future.cancel()
 
 
 class _PollingWork(Work):
-    """Work driven by native status checks, never a Python worker thread.
+    """Work that resolves a future from backend status checks.
 
     Subclasses implement a nonblocking, thread-safe ``_poll`` and record a
     terminal error in ``_error``. A failed status query must not report completion
