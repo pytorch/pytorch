@@ -84,8 +84,9 @@ Know these before relying on an artifact in production:
   that a guarded object was rebound. ``summary().dropped_guards`` is the
   authoritative list. ``risky_dropped_guards`` includes every drop observed to
   distinguish captured variants plus the ones a custom filter added; it is still
-  not a proof for unobserved deployments.
-  Refusing every drop is opt-in: every model drops the identity guards
+  not a proof for unobserved deployments. The
+  public ``torch.compiler.precompile`` facade rejects the RISKY subset by
+  default. Refusing every drop is opt-in: every model drops the identity guards
   precompile cannot serialize, so ``require_no_dropped_guards=True`` refuses
   essentially every real artifact. Audit the list before relying on the relaxed
   dropped-guard default, and before relaxing the risky-drop rail on top of it.
@@ -2390,9 +2391,10 @@ def _missing_backends_message(
 class PrecompileSession:
     """
     A caller-driven capture in progress. Enter as a context manager to get the
-    callable to exercise and invoke it with real inputs inside the block. The
-    compiled region stays alive for the whole block, so every call reuses the
-    variants the earlier ones produced.
+    callable to exercise, invoke it with real inputs inside the block, and
+    ``save()`` to write the artifact -- repeatedly to checkpoint mid-block, and
+    once more on exit. The compiled region stays alive for the whole block, so
+    every call reuses the variants the earlier ones produced.
     """
 
     def __init__(
@@ -3384,7 +3386,9 @@ def precompile_capture(
     an exception.
 
     ``guard_filter_fn`` narrows ``default_guard_filter_fn``, and the guards it
-    drops leave the live check as well as the serialized copy.
+    drops leave the live check as well as the serialized copy. ``save()``
+    refuses the risky subset by default rather than every drop, and a drop a
+    custom filter adds beyond the default's counts as risky.
     """
     return PrecompileSession(
         fn,
