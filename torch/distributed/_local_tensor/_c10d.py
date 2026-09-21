@@ -115,8 +115,6 @@ def _prepare_collective_groups(
         raise AssertionError(
             f"ranks {ranks} are not a fiber of the global mesh {group_offsets}"
         )
-    if len(group_offsets) * len(ranks) != global_pg.size():
-        raise AssertionError(f"ranks {ranks} do not tile world size {global_pg.size()}")
 
     return [r - offset for r in ranks], group_offsets
 
