@@ -435,8 +435,8 @@ def _default_all_gather_output_fn(
 ) -> None:
     r"""Copy all-gather outputs into their final layout.
 
-    Supported nonzero-dimension shards copy directly into the final outputs.
-    Nonzero-dimension extensions use temporary outputs and reassembly.
+    Nonzero-dimension extensions copy directly when their payload element counts
+    match the padded local parameter. Other extension layouts use reassembly.
     Empty outputs and flat post-forward shards copy directly.
     """
     all_gather_output = all_gather_result.all_gather_output
@@ -461,13 +461,13 @@ def _default_all_gather_output_fn(
             and fsdp_param.sharded_state == ShardedState.SHARDED
             and any(all_gather_input_numels)
         ):
+            prefix_count = math.prod(fsdp_param.padded_sharded_param_size[:shard_dim])
             if hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather"):
-                outputs = [torch.empty_like(t) for t in outputs]
-                reorder_infos.append((fsdp_param, outputs))
-            else:
-                prefix_count = math.prod(
-                    fsdp_param.padded_sharded_param_size[:shard_dim]
-                )
+                padded_numel = fsdp_param.padded_sharded_param_size.numel()
+                if any(numel != padded_numel for numel in all_gather_input_numels):
+                    outputs = [torch.empty_like(t) for t in outputs]
+                    reorder_infos.append((fsdp_param, outputs))
+                    prefix_count = 1
         copy_outputs.extend(outputs)
         num_prefixes.extend([prefix_count] * len(outputs))
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())

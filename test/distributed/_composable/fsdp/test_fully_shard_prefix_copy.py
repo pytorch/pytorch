@@ -202,8 +202,7 @@ class TestPrefixCopy(TestCase):
             counter.counts[torch.ops.fsdp.split_with_sizes_copy.default],
             0,
         )
-        num_reorders = sum(kind == "extension" for kind in layouts)
-        self.assertEqual(counter.counts[torch.ops.aten.cat.out], num_reorders)
+        self.assertEqual(counter.counts[torch.ops.aten.cat.out], 0)
 
     @parametrize("num_chunks", [1, 4])
     @parametrize("num_prefixes", [1, 128])
