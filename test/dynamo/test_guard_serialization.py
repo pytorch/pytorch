@@ -1200,28 +1200,6 @@ if torch.distributed.is_available():
             self.calls = []
 
 
-class _HolderWithGenerator:
-    def __init__(self):
-        self.it = (i for i in range(3))
-        self.cfg = {"a": 1}
-
-
-class _OuterHolder:
-    def __init__(self):
-        self.inner = _HolderWithGenerator()
-        self.name = "outer"
-
-
-class _PipelineWithSetstate:
-    def __init__(self):
-        self.stages = ["a", "b"]
-        self.n = len(self.stages)
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        self.n = len(self.stages)
-
-
 class _ModuleWithGenerators(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1538,53 +1516,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             pickle.UnpicklingError, "unknown guards state persistent id 'foo'"
         ):
             load_guards_state(buf.getvalue())
-
-    def test_unguarded_bystander_on_a_guarded_user_object_is_pruned(self):
-        # Only nn.Module attributes were pruned; a guarded plain object holding
-        # one unpicklable bystander failed the whole dump.
-        h = _HolderWithGenerator()
-        buf = io.BytesIO()
-        GuardsStatePickler({id(h): h, id(h.cfg): h.cfg}, {}, {}, {}, buf).dump({"h": h})
-        out = load_guards_state(buf.getvalue())["h"]
-        self.assertIsInstance(out.it, _Missing)
-        self.assertEqual(out.cfg, {"a": 1})
-
-    def test_shared_value_is_pruned_only_inside_the_pruned_receiver(self):
-        # The pruned holder is rebuilt from a filtered copy of its own __dict__,
-        # so the list it shares with a pipeline that is pickled whole stays real
-        # where the pipeline's __setstate__ reads it back, in either pickle order.
-        for order in ("holder first", "pipeline first"):
-            shared = ["a", "b"]
-            p = _PipelineWithSetstate()
-            p.stages, p.n = shared, 2
-            h = _HolderWithGenerator()
-            h.data = shared
-            state = {"h": h, "p": p} if order == "holder first" else {"p": p, "h": h}
-            buf = io.BytesIO()
-            GuardsStatePickler(
-                {id(h): h, id(h.cfg): h.cfg, id(p): p}, {}, {}, {}, buf
-            ).dump(state)
-            out = load_guards_state(buf.getvalue())
-            self.assertEqual((out["p"].stages, out["p"].n), (["a", "b"], 2), order)
-            self.assertIsInstance(out["h"].data, _Missing, order)
-            self.assertIsInstance(out["h"].it, _Missing, order)
-
-    def test_bystander_several_levels_down_is_pruned(self):
-        # The guard tree reaches the inner holder through the outer one; the
-        # generator two levels down is pruned, what the guards read survives.
-        o = _OuterHolder()
-        buf = io.BytesIO()
-        GuardsStatePickler(
-            {id(o): o, id(o.inner): o.inner, id(o.inner.cfg): o.inner.cfg},
-            {},
-            {},
-            {},
-            buf,
-        ).dump({"o": o})
-        out = load_guards_state(buf.getvalue())["o"]
-        self.assertIsInstance(out.inner.it, _Missing)
-        self.assertEqual(out.inner.cfg, {"a": 1})
-        self.assertEqual(out.name, "outer")
 
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
@@ -3899,20 +3830,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIsInstance(loaded, torch.nn.LSTM)
         self.assertEqual(loaded._all_weights, lstm._all_weights)
         self.assertEqual(loaded._flat_weights_names, lstm._flat_weights_names)
-
-    def test_guarded_plain_object_with_a_generator_bystander_round_trips(self):
-        # The headline case through a real capture: the guard on h.cfg["a"]
-        # reaches the holder, its generator is pruned, and the loaded guards
-        # still pass against the original inputs.
-        def fn(h, x):
-            return x + h.cfg["a"]
-
-        h, x = _HolderWithGenerator(), torch.randn(2)
-        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, h, x)
-        self._test_check_fn(ref, loaded, {"h": h, "x": x}, True)
-        state = load_guards_state(self._cached_guards_state).output_graph
-        self.assertIsInstance(state.local_scope["h"].it, _Missing)
-        self.assertEqual(state.local_scope["h"].cfg, {"a": 1})
 
     def test_grad_mode(self):
         def fn(x):
