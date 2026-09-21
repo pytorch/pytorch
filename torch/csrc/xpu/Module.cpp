@@ -505,13 +505,8 @@ static void registerXpuPluggableAllocator(PyObject* module) {
     }
     auto* allocator = c10::xpu::XPUCachingAllocator::get();
     return storage_impl->data_ptr().get_deleter() == allocator->raw_deleter();
-<<<<<<< HEAD
   });
   m.def("_xpu_free_and_remove_deleter", [](size_t storage_impl_ptr) {
-=======
-    });
-  m.def("xpu_free_and_remove_deleter", [](size_t storage_impl_ptr) {
->>>>>>> ae611786b1d (update xpu graph trees support)
     auto* storage_impl = reinterpret_cast<c10::StorageImpl*>(storage_impl_ptr);
     TORCH_CHECK(
         storage_impl->device_type() == c10::DeviceType::XPU,
@@ -522,11 +517,7 @@ static void registerXpuPluggableAllocator(PyObject* module) {
         allocator->raw_deleter(), c10::detail::deleteNothing);
     TORCH_CHECK(succeeded, "Expected standard deleter");
     allocator->raw_delete(data_ptr);
-<<<<<<< HEAD
   });
-=======
-    });
->>>>>>> ae611786b1d (update xpu graph trees support)
   m.def(
       "_xpu_checkPoolLiveAllocations",
       [](c10::DeviceIndex device,
