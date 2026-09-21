@@ -28,7 +28,6 @@ from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCPU,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -415,20 +414,15 @@ class TestCheckpoint(TestCase):
 class TestCheckpointAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator")
-    def test_checkpointing_without_reentrant_early_free(self):
-        _acc = torch.accelerator.current_accelerator()
-        if _acc is None:
-            self.skipTest("current_accelerator() not supported")
-
-        _device_type = _acc.type
-
+    @onlyAccelerator
+    def test_checkpointing_without_reentrant_early_free(self, device):
         # Functional check: verify memory tracking actually works on this backend
-        test_tensor = torch.zeros(1024, device=_device_type)
-        torch.accelerator.synchronize()
-        if torch.accelerator.memory_allocated() == 0:
+        device_module = torch.get_device_module(device)
+        test_tensor = torch.zeros(1024, device=device)
+        device_module.synchronize()
+        if device_module.memory_allocated() == 0:
             del test_tensor
-            self.skipTest(f"{_device_type} does not support memory_allocated tracking")
+            self.skipTest(f"{device} does not support memory_allocated tracking")
         del test_tensor
 
         def _do_test(fn, should_free):
@@ -437,8 +431,8 @@ class TestCheckpointAccelerator(TestCase):
             def track(x, idx):
                 def hook(_unused):
                     self.assertEqual(len(stats), idx)
-                    torch.accelerator.synchronize()
-                    stats.append(torch.accelerator.memory_allocated())
+                    device_module.synchronize()
+                    stats.append(device_module.memory_allocated())
                     if idx > 0:
                         if should_free:
                             self.assertLess(stats[idx], stats[idx - 1])
@@ -461,7 +455,7 @@ class TestCheckpointAccelerator(TestCase):
 
             return stats
 
-        x = torch.zeros(10, device=_device_type, requires_grad=True)
+        x = torch.zeros(10, device=device, requires_grad=True)
         x.grad = torch.zeros_like(x)
 
         non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
@@ -483,6 +477,11 @@ class TestCheckpointAccelerator(TestCase):
 
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
         self.assertEqual(non_retain_stats, checkpoint_retain_stats)
+
+
+instantiate_device_type_tests(
+    TestCheckpointAccelerator, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 
 class TestCheckpointDeviceType(TestCase):
@@ -969,7 +968,6 @@ class TestDeviceUtilsAccelerator(TestCase):
 class TestDeviceModeOps(TestCase):
     hw_classification = HardwareClassification.CPU
 
-    @onlyCPU
     @ops(op_db)
     def test_device_mode_ops(self, device, dtype, op):
         func = op.get_op()
@@ -1295,7 +1293,7 @@ class TestTryImport(TestCase):
 
 
 class TestUtilsInternal(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def test_max_clock_rate_uses_requested_device(self):
         properties = types.SimpleNamespace(clock_rate=1_980_000)
