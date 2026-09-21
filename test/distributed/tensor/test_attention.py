@@ -59,6 +59,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorContinuousTestBase,
     DTensorTestBase,
     map_local_tensor_for_rank,
     with_comms,
@@ -901,12 +902,10 @@ class TestSharding(DTensorTestBase):
                 self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])
 
 
-class TestContextParallelStyle(DTensorTestBase):
+class TestContextParallelStyle(DTensorContinuousTestBase):
     """Test suite for _ContextParallel.flex_input_fn argument handling"""
 
-    @property
-    def world_size(self) -> int:
-        return 2
+    world_size = 2
 
     def _create_test_tensors(self):
         """Helper to create test query, key, value tensors"""
@@ -1070,12 +1069,10 @@ class TestContextParallelStyle(DTensorTestBase):
         self.assertEqual(out_kwargs["enable_gqa"], False)
 
 
-class TestContextParallelStyleSDPA(DTensorTestBase):
+class TestContextParallelStyleSDPA(DTensorContinuousTestBase):
     """Test suite for _ContextParallel.sdpa_input_fn argument handling"""
 
-    @property
-    def world_size(self) -> int:
-        return 2
+    world_size = 2
 
     def _create_test_tensors(self):
         """Helper to create test query, key, value tensors"""
