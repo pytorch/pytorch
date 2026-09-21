@@ -7556,7 +7556,7 @@ static PyObject* _torchinductor_get_thp_memory_format(int memory_format) {
 
 void* convert_to_root_guard_manager(py::object root) {
   // For invalidated guards, return nullptr
-  if (root.is_none()) {
+  if (root.is(py::none())) {
     return nullptr;
   }
   RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();

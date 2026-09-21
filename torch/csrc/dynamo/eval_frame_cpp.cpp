@@ -8,7 +8,6 @@
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
-#include <torch/csrc/dynamo/guarded_code.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
 
 #include <algorithm>
@@ -37,35 +36,26 @@ struct DebugContextGuard {
   ~DebugContextGuard() {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type{}, *exc_value{}, *exc_tb{};
+    PyObject *exc_type, *exc_value, *exc_tb;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
     } catch (py::error_already_set& e) {
-      try {
-        e.restore();
-        // NOLINTNEXTLINE(bugprone-empty-catch)
-      } catch (...) {
-      }
+      e.restore();
       PyErr_Clear();
-      // Catch all other errors and silently discard, due to a lack of logging
-      // here. NOLINTNEXTLINE(bugprone-empty-catch)
-    } catch (...) {
     }
     if (exc_type != nullptr) {
       PyErr_Restore(exc_type, exc_value, exc_tb);
     }
   }
 
-  DebugContextGuard(DebugContextGuard&&) noexcept = default;
-  DebugContextGuard& operator=(DebugContextGuard&&) noexcept = default;
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
 };
 
 } // namespace
 
-void set_bytecode_debugger_callback(const py::object& callback) {
+void set_bytecode_debugger_callback(py::object callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -629,7 +619,7 @@ PyObject* dynamo__custom_eval_frame(
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
-  py::object guarded_code_obj;
+  PyObject* guarded_code = nullptr;
   try {
     CRecursionLimitRAII tmp(tstate); // increase C recursion limit to the given
                                      // value during compilation
@@ -644,7 +634,7 @@ PyObject* dynamo__custom_eval_frame(
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
-    guarded_code_obj = callback_result.attr("guarded_code");
+    guarded_code = callback_result.attr("guarded_code").ptr();
   } catch (py::error_already_set& e) {
     // internal exception, returning here will leak the exception into user
     // code this is useful for debugging -- but we don't want it to happen
@@ -678,15 +668,15 @@ PyObject* dynamo__custom_eval_frame(
         extra, isolate_recompiles_id, new_strategy);
   }
 
-  if (!guarded_code_obj.is_none()) {
+  if (!Py_IsNone(guarded_code)) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
     // NB: We could use extract_cache_entry to get the cache_entry, but
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra won't be NULL here.
-    CacheEntry* new_cache_entry = create_cache_entry(
-        extra, std::move(guarded_code_obj).cast<GuardedCode*>(), backend);
+    CacheEntry* new_cache_entry =
+        create_cache_entry(extra, guarded_code, backend);
 
     // Update the existing cache_entry on the extra object. This extra object
     // is sitting on the extra scratch space, we are just changing the

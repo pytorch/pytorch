@@ -4,7 +4,6 @@
 
 #ifdef __cplusplus
 
-#include <torch/csrc/dynamo/guarded_code.h>
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
@@ -64,7 +63,7 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   // Reference to string representation of the CompileContext
   std::string trace_annotation;
 
-  CacheEntry(const GuardedCode& guarded_code, PyObject* backend);
+  CacheEntry(const py::handle& guarded_code, PyObject* backend);
   CacheEntry(const CacheEntry&) = default;
   CacheEntry(CacheEntry&&) = default;
   CacheEntry& operator=(const CacheEntry&) = default;
