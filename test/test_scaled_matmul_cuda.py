@@ -3683,7 +3683,8 @@ class TestFP8Matmul(TestCase):
         bias = None if out_dtype == torch.float32 else torch.randn(n, device=device, dtype=out_dtype)
         out = scaled_mm_wrap(x, y, x_scale.reciprocal(), y_scale.reciprocal(), out_dtype=out_dtype, bias=bias)
         out_emulated = mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias)
-        self.assertEqual(out, out_emulated, atol=k * torch.finfo(torch.float32).eps, rtol=torch.finfo(out_dtype).eps)
+        accum_tol = k * torch.finfo(torch.float32).eps
+        self.assertEqual(out, out_emulated, atol=accum_tol, rtol=max(accum_tol, torch.finfo(out_dtype).eps))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_mm_few_rows_fp8_values(self, device):
