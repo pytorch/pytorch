@@ -13,7 +13,11 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code, triton_type
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
@@ -314,6 +318,115 @@ class TestCase(InductorTestCase):
 
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
         self.assertEqual(fn(x, y), out)
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("cpu_tensor", (False, True))
+    @parametrize("emulate_precision_casts", (False, True))
+    def test_truncdiv_scalar_matches_eager(
+        self, device, dtype, cpu_tensor, emulate_precision_casts
+    ):
+        if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported(
+            including_emulation=False
+        ):
+            self.skipTest("Requires native bfloat16 support")
+
+        def fn(a, b):
+            return torch.div(a, b, rounding_mode="trunc")
+
+        # This divisor exposes rounding differences between division and
+        # reciprocal multiplication, which eager CUDA uses for scalar divisors.
+        divisor = 49.0 if dtype == torch.float64 else 41.0
+        values = [divisor * n for n in (-4, -3, -2, -1, 1, 2, 3, 4)]
+        a = torch.tensor(values, device=device, dtype=dtype)
+        b = torch.tensor(divisor, device="cpu", dtype=dtype) if cpu_tensor else divisor
+        with config.patch(emulate_precision_casts=emulate_precision_casts):
+            result = torch.compile(fn, fullgraph=True)(a, b)
+        self.assertEqual(result, fn(a, b), atol=0, rtol=0)
+
+    @onlyCUDA
+    @parametrize("emulate_precision_casts", (False, True))
+    def test_truncdiv_tensor_accuracy(self, device, emulate_precision_casts):
+        def fn(a, b):
+            return torch.div(a, b, rounding_mode="trunc")
+
+        a = torch.tensor(
+            [14.999999, 26.999999, 13.999999, 148.0, 1073.0, 2112.0],
+            device=device,
+            dtype=torch.float32,
+        )
+        b = torch.tensor(
+            [3.0, 3.0, 7.0, 37.0, 37.0, 33.0], device=device, dtype=torch.float32
+        )
+        a, b = torch.cat((a, -a)), torch.cat((b, b))
+        with config.patch(emulate_precision_casts=emulate_precision_casts):
+            result = torch.compile(fn, fullgraph=True)(a, b)
+        self.assertEqual(result, fn(a, b), atol=0, rtol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("scalar_dtype", (None, torch.float32, torch.float64))
+    @parametrize("scalar_on_left", (False, True))
+    @config.patch("emulate_precision_casts", True)
+    def test_truncdiv_scalar_opmath(self, device, dtype, scalar_dtype, scalar_on_left):
+        if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported(
+            including_emulation=False
+        ):
+            self.skipTest("Requires native bfloat16 support")
+
+        def fn(a, b):
+            return torch.div(a, b, rounding_mode="trunc")
+
+        a = torch.tensor([3.0, -3.0, 6.0, -6.0], device=device, dtype=dtype)
+        b = 3.0001
+        if scalar_on_left:
+            b, divisor = (3073.1, 1025.0) if dtype == torch.float16 else (385.1, 129.0)
+            a = torch.tensor([divisor, -divisor], device=device, dtype=dtype)
+        if scalar_dtype is not None:
+            b = torch.tensor(b, device="cpu", dtype=scalar_dtype)
+        if scalar_on_left:
+            a, b = b, a
+        result = torch.compile(fn, fullgraph=True)(a, b)
+        self.assertEqual(result, fn(a, b), atol=0, rtol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("divisor_kind", ("scalar", "tensor", "constant"))
+    @parametrize("emulate_precision_casts", (False, True))
+    @parametrize("upcast", (False, True))
+    def test_truncdiv_tensor_matches_eager(
+        self, device, dtype, divisor_kind, emulate_precision_casts, upcast
+    ):
+        if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported(
+            including_emulation=False
+        ):
+            self.skipTest("Requires native bfloat16 support")
+
+        # Low-precision tensor division rounds the quotient to 3 before truncation.
+        divisor, dividend = {
+            torch.float16: (1025.0, 3074.0),
+            torch.bfloat16: (129.0, 386.0),
+            torch.float32: (41.0, 41.0),
+            torch.float64: (49.0, 49.0),
+        }[dtype]
+
+        def fn(a, b):
+            if divisor_kind == "constant":
+                b = torch.full_like(a, divisor)
+            return torch.div(a, b, rounding_mode="trunc")
+
+        a = torch.tensor([dividend, -dividend], device=device, dtype=dtype)
+        b = torch.tensor(divisor, device=device, dtype=dtype)
+        if divisor_kind == "tensor":
+            b = b.expand_as(a).clone()
+        with config.patch(
+            {
+                "emulate_precision_casts": emulate_precision_casts,
+                "triton.codegen_upcast_to_fp32": upcast,
+            }
+        ):
+            result = torch.compile(fn, fullgraph=True)(a, b)
+        self.assertEqual(result, fn(a, b), atol=0, rtol=0)
 
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
