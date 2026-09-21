@@ -5,7 +5,6 @@ import copy
 import functools
 import math
 import threading
-import unittest
 from typing import Any
 
 import torch
@@ -635,9 +634,6 @@ class TestFullyShardAllGatherExtensionsWorldSize1(
     def device(self) -> torch.device:
         return torch.device(device_type)
 
-    # xfail: the world-size-1 unshard copies only all_gather_inputs[0], so the
-    # TwoTensor post-hook raises unpacking `a, b` from a 1-tuple
-    @unittest.expectedFailure
     @skip_if_lt_x_gpu(1, allow_cpu=True)
     def test_all_gather_extensions_train_parity(self):
         for pre_all_gather_version in (1, 2):
@@ -673,9 +669,6 @@ class TestFullyShardAllGatherExtensionsWorldSize1(
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             check_sharded_parity(self, ref_model, model)
 
-    # xfail: the world-size-1 unshard copies only all_gather_inputs[0], so the
-    # TwoTensor post-hook raises unpacking `a, b` from a 1-tuple
-    @unittest.expectedFailure
     @skip_if_lt_x_gpu(1, allow_cpu=True)
     def test_all_gather_extensions_meta_init_mixed_precision(self):
         for pre_all_gather_version in (1, 2):
@@ -708,9 +701,6 @@ class TestFullyShardAllGatherExtensionsWorldSize1(
             optim.step()
             optim.zero_grad()
 
-    # xfail: the world-size-1 unshard copies only all_gather_inputs[0], so the
-    # in-hook length check sees 1 all-gather output instead of 2
-    @unittest.expectedFailure
     @skip_if_lt_x_gpu(1, allow_cpu=True)
     def test_post_all_gather_receives_all_inputs(self):
         for pre_all_gather_version in (1, 2):
@@ -762,9 +752,6 @@ class TestFullyShardAllGatherExtensionsWorldSize1(
             optim.zero_grad()
         self.assertGreater(num_post_all_gather_calls, 0)
 
-    # xfail: the world-size-1 unshard copies only all_gather_inputs[0], so the
-    # fp32 scale is never allocated and the hook sees 1 output instead of 2
-    @unittest.expectedFailure
     @skip_if_lt_x_gpu(1, allow_cpu=True)
     def test_post_all_gather_mixed_dtype_and_numel(self):
         self.run_subtests(
