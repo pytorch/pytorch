@@ -164,14 +164,14 @@ REGISTER_SCALED_MM_WITH_OUT_T(half);
 REGISTER_SCALED_MM_WITH_OUT_T(bfloat);
 REGISTER_SCALED_MM_WITH_OUT_T(float8_e4m3fn);
 
-
 inline float4 scaled_mm_decode_scaled(uint bytes) {
   // mask the sign bit
   const uint magnitude = bytes & 0x7f7f7f7f;
   const uint nan_mask = 0x80808080;
   const uint nan_flags = (magnitude + 0x01010101) & nan_mask;
   // payload to detect nans here, all nans will be 11111111
-  // this is done this way because 0 1111 111 and 1 1111 111 are both Nans in fp8
+  // this is done this way because 0 1111 111 and 1 1111 111 are both Nans in
+  // fp8
   const uint payload = magnitude | nan_flags;
   // Reusing E4M3FN exponent bits avoids per-value bias adjustment. FP16's
   // bias is 15 instead of 7, so the decoded value is x * 2^(7 - 15) = x / 256.
