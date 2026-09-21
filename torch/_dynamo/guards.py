@@ -5184,114 +5184,124 @@ def _offending_value_path(
             return ""
         if roots is None:
             roots = _scope_roots(state.output_graph)
-        queue = collections.deque([*roots, ("state", state)])
         seen: set[int] = set()
-        budget = _WALK_BUDGET
-        for _ in range(_WALK_BUDGET):
-            if not queue:
-                break
-            path, value = queue.popleft()
-            if id(value) in seen:
-                continue
-            seen.add(id(value))
-            if value is target:
-                return f"\n  reached via: {path}"
-            if inspect.ismodule(value):
-                # Pickled by name, so nothing inside it is in the artifact; its
-                # dict leads to sys.modules and would saturate the walk.
-                continue
-            children: list[tuple[str, Any]] = []
-            # Per node: one object whose container read raises (a dict subclass,
-            # a container mutated concurrently) must not end the whole walk nor
-            # lose its __dict__ children, so each read has its own try. Fan-out
-            # draws on the shared budget BEFORE any path string is built.
-            try:
-                if isinstance(value, (list, tuple)):
-                    items = itertools.islice(enumerate(value), budget)
-                    children = [(f"{path}[{i}]", v) for i, v in items]
-                elif isinstance(value, OrderedSet):
-                    # GuardsSet.inner; not subscriptable, so spell the accessor.
-                    items = itertools.islice(enumerate(value), budget)
-                    children = [(f"list({path})[{i}]", v) for i, v in items]
-                elif isinstance(value, (set, frozenset)):
-                    members = itertools.islice(value, budget)
-                    children = [(f"{path}[<a member>]", v) for v in members]
-                elif isinstance(value, dict):
-                    for k, v in itertools.islice(value.items(), budget):
-                        if type(k) in (str, int):
-                            children.append((f"{path}[{k!r}]", v))
-                        else:
-                            children.append((f"{path}[<a key>]", k))
-                            children.append((f"{path}[<that key>]", v))
-                elif isinstance(value, functools.partial):
-                    # Guard.create_fn is a partial whose arguments the pickler walks.
-                    children.append((f"{path}.func", value.func))
-                    children += [
-                        (f"{path}.args[{i}]", v) for i, v in enumerate(value.args)
-                    ]
-                    children += [
-                        (f"{path}.keywords[{k!r}]", v)
-                        for k, v in value.keywords.items()
-                    ]
-                elif isinstance(value, types.FunctionType):
-                    # A function a guard is rooted at is pickled by value,
-                    # defaults, kwdefaults and closure cells included (its
-                    # __dict__ is walked below like any other), so a failure
-                    # behind one of those has to be reachable from here.
-                    children += [
-                        (f"{path}.__defaults__[{i}]", v)
-                        for i, v in enumerate(value.__defaults__ or ())
-                    ]
-                    children += [
-                        (f"{path}.__kwdefaults__[{k!r}]", v)
-                        for k, v in (value.__kwdefaults__ or {}).items()
-                    ]
-                    for i, (name, cell) in enumerate(
-                        zip(value.__code__.co_freevars, value.__closure__ or ())
-                    ):
-                        try:
-                            contents = cell.cell_contents
-                        except ValueError:  # an empty cell
-                            continue
-                        # A pasteable accessor, annotated with the variable name.
-                        accessor = f"{path}.__closure__[{i}].cell_contents  # {name}"
-                        children.append((accessor, contents))
-                elif isinstance(value, types.MethodType):
-                    # A guard can be rooted at a bound method; the reducer
-                    # carries its function and receiver.
-                    children.append((f"{path}.__func__", value.__func__))
-                    children.append((f"{path}.__self__", value.__self__))
-            except Exception:
-                pass
-            try:
-                instance_dict = _instance_dict(value)
-                if instance_dict is not None:
-                    children += [
-                        (f"{path}.{name}", child)
-                        for name, child in instance_dict.items()
-                        if not name.startswith("__")
-                    ]
-                # A slotted object (Guard is a slots dataclass) keeps its state
-                # in the slots along the MRO, with or without a __dict__ beside
-                # them; read like _instance_dict, so no user __getattr__ runs.
-                for klass in type(value).__mro__:
-                    slots = klass.__dict__.get("__slots__", ())
-                    for name in (slots,) if isinstance(slots, str) else slots:
-                        if name.startswith("__"):
-                            continue
-                        try:
-                            child = object.__getattribute__(value, name)
-                        except Exception:  # an unset slot, a raising descriptor
-                            continue
-                        children.append((f"{path}.{name}", child))
-            except Exception:
-                pass
-            children = children[:budget]
-            budget -= len(children)
-            queue.extend(children)
+
+        def walk(queue: collections.deque[tuple[str, Any]]) -> str:
+            budget = _WALK_BUDGET
+            for _ in range(_WALK_BUDGET):
+                if not queue:
+                    break
+                path, value = queue.popleft()
+                if id(value) in seen:
+                    continue
+                seen.add(id(value))
+                if value is target:
+                    return f"\n  reached via: {path}"
+                if inspect.ismodule(value):
+                    # Pickled by name, so nothing inside it is in the artifact; its
+                    # dict leads to sys.modules and would saturate the walk.
+                    continue
+                children: list[tuple[str, Any]] = []
+                # Per node: one object whose container read raises (a dict subclass,
+                # a container mutated concurrently) must not end the whole walk nor
+                # lose its __dict__ children, so each read has its own try. Fan-out
+                # draws on the shared budget BEFORE any path string is built.
+                try:
+                    if isinstance(value, (list, tuple)):
+                        items = itertools.islice(enumerate(value), budget)
+                        children = [(f"{path}[{i}]", v) for i, v in items]
+                    elif isinstance(value, OrderedSet):
+                        # GuardsSet.inner; not subscriptable, so spell the accessor.
+                        items = itertools.islice(enumerate(value), budget)
+                        children = [(f"list({path})[{i}]", v) for i, v in items]
+                    elif isinstance(value, (set, frozenset)):
+                        members = itertools.islice(value, budget)
+                        children = [(f"{path}[<a member>]", v) for v in members]
+                    elif isinstance(value, dict):
+                        for k, v in itertools.islice(value.items(), budget):
+                            if type(k) in (str, int):
+                                children.append((f"{path}[{k!r}]", v))
+                            else:
+                                children.append((f"{path}[<a key>]", k))
+                                children.append((f"{path}[<that key>]", v))
+                    elif isinstance(value, functools.partial):
+                        # Guard.create_fn is a partial whose arguments the pickler walks.
+                        children.append((f"{path}.func", value.func))
+                        children += [
+                            (f"{path}.args[{i}]", v) for i, v in enumerate(value.args)
+                        ]
+                        children += [
+                            (f"{path}.keywords[{k!r}]", v)
+                            for k, v in value.keywords.items()
+                        ]
+                    elif isinstance(value, types.FunctionType):
+                        # A function a guard is rooted at is pickled by value,
+                        # defaults, kwdefaults and closure cells included (its
+                        # __dict__ is walked below like any other), so a failure
+                        # behind one of those has to be reachable from here.
+                        children += [
+                            (f"{path}.__defaults__[{i}]", v)
+                            for i, v in enumerate(value.__defaults__ or ())
+                        ]
+                        children += [
+                            (f"{path}.__kwdefaults__[{k!r}]", v)
+                            for k, v in (value.__kwdefaults__ or {}).items()
+                        ]
+                        for i, (name, cell) in enumerate(
+                            zip(value.__code__.co_freevars, value.__closure__ or ())
+                        ):
+                            try:
+                                contents = cell.cell_contents
+                            except ValueError:  # an empty cell
+                                continue
+                            # A pasteable accessor, annotated with the variable name.
+                            accessor = (
+                                f"{path}.__closure__[{i}].cell_contents  # {name}"
+                            )
+                            children.append((accessor, contents))
+                    elif isinstance(value, types.MethodType):
+                        # A guard can be rooted at a bound method; the reducer
+                        # carries its function and receiver.
+                        children.append((f"{path}.__func__", value.__func__))
+                        children.append((f"{path}.__self__", value.__self__))
+                except Exception:
+                    pass
+                try:
+                    instance_dict = _instance_dict(value)
+                    if instance_dict is not None:
+                        children += [
+                            (f"{path}.{name}", child)
+                            for name, child in instance_dict.items()
+                            if not name.startswith("__")
+                        ]
+                    # A slotted object (Guard is a slots dataclass) keeps its state
+                    # in the slots along the MRO, with or without a __dict__ beside
+                    # them; read like _instance_dict, so no user __getattr__ runs.
+                    for klass in type(value).__mro__:
+                        slots = klass.__dict__.get("__slots__", ())
+                        for name in (slots,) if isinstance(slots, str) else slots:
+                            if name.startswith("__"):
+                                continue
+                            try:
+                                child = object.__getattribute__(value, name)
+                            except Exception:  # an unset slot, a raising descriptor
+                                continue
+                            children.append((f"{path}.{name}", child))
+                except Exception:
+                    pass
+                children = children[:budget]
+                budget -= len(children)
+                queue.extend(children)
+            return ""
+
+        # Two passes with a budget each: the scopes first, so a value a user can
+        # name is reported by that name and a wide state cannot starve a deep
+        # scope path, then the state, for what is reachable only through it.
+        return walk(collections.deque(roots)) or walk(
+            collections.deque([("state", state)])
+        )
     except Exception:
         return ""
-    return ""
 
 
 def pickle_guards_state(
