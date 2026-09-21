@@ -353,10 +353,7 @@ def requires_world_size(n: int):
 
     def decorator(func):
         func._required_world_size = n
-        acc = torch.accelerator.current_accelerator(check_available=True)
-        available = (
-            torch.get_device_module(acc.type).device_count() if acc is not None else 0
-        )
+        available = torch.accelerator.device_count()
         return unittest.skipUnless(
             available >= n, f"requires {n} accelerators, found {available}"
         )(func)
