@@ -1594,7 +1594,6 @@ class GuardBuilder(GuardBuilderBase):
 
                 # Install the key manager and add equals match guard
                 key_source = f"list(dict.keys({source_name}))[{index!r}]"
-                self._compared_by_value(key)
                 mgr.get_key_manager(
                     index=index,
                     source=key_source,
@@ -1955,15 +1954,12 @@ class GuardBuilder(GuardBuilderBase):
                     example_value,
                     guard_manager_enum,
                 )
-                if not isinstance(source.index, ConstDictKeySource):
-                    self._compared_by_value(source.index)
             else:
                 if isinstance(source.index, ConstDictKeySource):
                     raise RuntimeError(
                         "Expecting clean index here. Likely Dynamo forgot to mark"
                         " a dict as guard_on_key_order"
                     )
-                self._compared_by_value(source.index)
                 out = base_guard_manager.dict_getitem_manager(
                     key=source.index,
                     source=source_name,
@@ -2926,10 +2922,11 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard)
         # See Note [Reconstructing a function a guard is rooted at] in
-        # GuardsStatePickler: a plain tuple this guard compares whole must be
-        # carried verbatim by the serializer.
-        if self.save_guards and type(val) is tuple:
-            self.value_guarded_containers[id(val)] = val
+        # GuardsStatePickler: what this guard compares whole (a tuple, a
+        # torch.Size, a registered constant) must be carried verbatim by the
+        # serializer. The original, not the deepcopy below: the state holds
+        # this object, and the loaded guards re-bake from it.
+        self._compared_by_value(val)
         if np:
             np_types: tuple[type[Any], ...] = (
                 np.int8,
@@ -4400,16 +4397,20 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(value, (list, tuple, set, frozenset)):
                 stack.extend(value)
             elif isinstance(value, dict):
-                # Values only: no pruned type is hashable, so a key can
-                # neither be one nor contain one.
+                # Keys too: missing_values prunes hashable objects (a frozen
+                # dataclass), so a key can be one or hold one.
+                stack.extend(value)
                 stack.extend(value.values())
             elif inspect.ismodule(value) or isinstance(
                 value, (torch.Tensor, torch.nn.Module)
             ):
                 # A module is pickled by name and its dict leads into every other
-                # namespace; a tensor or an nn.Module is compared by identity or
-                # pickled whole either way. Descending would only switch pruning
-                # off for everything they hold.
+                # namespace. A tensor or an nn.Module field is a known limit,
+                # like __slots__ (see the Note above _keep): their branches below
+                # do not consult the mark, and a loaded copy could not compare
+                # equal to the run-time object anyway (an nn.Module compares by
+                # identity). Descending would only switch pruning off for
+                # everything they hold.
                 pass
             elif (fields := _instance_dict(value)) is not None:
                 # A by-value comparison reads every field, so the protection
@@ -4569,8 +4570,10 @@ class GuardsStatePickler(FunctionPicklerBase):
     # as a required argument. A non-const dict key is recorded there too
     # (_compared_by_value): the key managers bake it and compare it by value at
     # run time, and that comparison reads every field, so the protection extends
-    # through the key's instance dict (not through __slots__: a slotted key's
-    # slot values are not marked, a known limit). A dict/tuple SUBCLASS is verbatim whenever
+    # through the key's instance dict. Two known limits: a slotted key's slot
+    # values are not marked, and a tensor or nn.Module field still goes through
+    # its own guard_tree_values check (a loaded copy could not compare equal to
+    # the run-time object anyway). A dict/tuple SUBCLASS is verbatim whenever
     # kept, since its type must survive for the guard reading the slot
     # (_keep_container_verbatim).
 
