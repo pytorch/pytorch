@@ -5,6 +5,7 @@ import gc
 import logging
 import os
 import weakref
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from model_registry import (
@@ -397,7 +398,7 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @skip_if_lt_x_gpu(4)
-    def test_interleaved_schedule_passes_pipeline_stage_info(self):
+    def test_interleaved_schedule_forward_context(self):
         stages_per_rank = 2
         num_stages = stages_per_rank * self.world_size
         num_microbatches = 2 * self.world_size
@@ -410,7 +411,7 @@ class ScheduleTest(MultiProcContinuousTest):
         ]
         sample = x.chunk(num_microbatches)[0].detach().requires_grad_(True)
         stages = []
-        received: dict[int, list[PipelineStageInfo]] = {
+        observed: dict[int, list[PipelineStageInfo]] = {
             stage_index: [] for stage_index in stage_indices
         }
 
@@ -426,11 +427,12 @@ class ScheduleTest(MultiProcContinuousTest):
                 output_args=output,
             )
 
-            def consume_stage_info(module, args, kwargs, *, index=stage_index):
-                received[index].append(kwargs.pop("pipeline_stage_info"))
-                return args, kwargs
+            @contextmanager
+            def forward_context(info, *, index=stage_index):
+                observed[index].append(info)
+                yield
 
-            stage_module.register_forward_pre_hook(consume_stage_info, with_kwargs=True)
+            stage.register_forward_context(forward_context)
             stages.append(stage)
 
         schedule = ScheduleInterleaved1F1B(
@@ -438,7 +440,6 @@ class ScheduleTest(MultiProcContinuousTest):
             num_microbatches,
             loss_fn=loss_fn,
             scale_grads=False,
-            pass_pipeline_stage_info=True,
         )
         step_with_optional_pre_split(
             schedule,
@@ -450,7 +451,7 @@ class ScheduleTest(MultiProcContinuousTest):
         for stage_index in stage_indices:
             self.assertEqual(
                 sorted(
-                    received[stage_index],
+                    observed[stage_index],
                     key=lambda info: (info.stage_index, info.microbatch_index),
                 ),
                 [
