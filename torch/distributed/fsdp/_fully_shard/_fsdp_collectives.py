@@ -425,13 +425,11 @@ def foreach_all_gather(
     all_gather_stream: torch.Stream,
     device: torch.device,
     all_gather_comm: AllGather,
-    *,
-    all_gather_input_fn: Callable = _default_all_gather_input_fn,
 ) -> AllGatherResult | None:
     device_handle = _get_device_handle(device.type)
     try:
         with device_handle.stream(all_gather_copy_in_stream):
-            all_gather_input = all_gather_input_fn(
+            all_gather_input = _default_all_gather_input_fn(
                 fsdp_params, group, device, all_gather_comm
             )
         all_gather_output = all_gather_input.output_tensor
@@ -622,37 +620,6 @@ def _copy_all_gather_outputs(
         torch.ops.fsdp.split_with_sizes_copy(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
-
-
-def _reassemble_all_gather_outputs(
-    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]], world_size: int
-) -> None:
-    for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
-        # Chunk-cat from the temporary to the final all-gather output tensors
-        shard_dim = fsdp_param.fsdp_placement.dim
-
-        with torch.autograd._unsafe_preserve_version_counter(
-            tuple(t for t in fsdp_param.all_gather_outputs if not t.is_inference())
-        ):
-            for param_all_gather_output, target_all_gather_output in zip(
-                param_all_gather_outputs, fsdp_param.all_gather_outputs
-            ):
-                padded_sharded_size = (
-                    fsdp_param.padded_sharded_param_size
-                    if fsdp_param.sharded_state == ShardedState.SHARDED
-                    else cast(
-                        torch.Tensor, fsdp_param._sharded_post_forward_param_data
-                    ).size()
-                )
-                pre_param_size = list(padded_sharded_size)
-                pre_param_size[0] *= world_size
-                chunks = torch.chunk(
-                    param_all_gather_output.view(pre_param_size), world_size, dim=0
-                )
-                post_param_size = list(padded_sharded_size)
-                post_param_size[shard_dim] *= world_size
-                cat_out = target_all_gather_output.view(post_param_size)
-                torch.cat(chunks, dim=shard_dim, out=cat_out)
 
 
 def _default_reduce_scatter_input_fn(

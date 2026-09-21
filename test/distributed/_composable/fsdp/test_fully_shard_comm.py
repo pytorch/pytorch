@@ -2236,7 +2236,13 @@ class TestAllGatherLayouts(TestCase):
             return AllGatherInput(torch.ones(2), output, [[torch.float32]], [[2]], [2])
 
         stream = torch.cpu.current_stream()
-        with self.assertRaisesRegex(RuntimeError, "injected failure"):
+        with (
+            unittest.mock.patch(
+                "torch.distributed.fsdp._fully_shard._fsdp_collectives._default_all_gather_input_fn",
+                prepare,
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected failure"),
+        ):
             foreach_all_gather(
                 [],
                 MagicMock(),
@@ -2245,7 +2251,6 @@ class TestAllGatherLayouts(TestCase):
                 stream,
                 torch.device("cpu"),
                 comm,
-                all_gather_input_fn=prepare,
             )
         comm.release_output.assert_called_once()
 
