@@ -26,7 +26,6 @@ from torch.cuda._graph_annotations import (
     clear_kernel_annotations,
     get_kernel_annotations,
     register_fqn_annotation_hooks,
-    remap_to_exec_graph,
     save_kernel_annotations,
 )
 from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
@@ -335,7 +334,6 @@ class TestCudagraphFqnAnnotations(TestCase):
             static_output = model(static_input)
         for h in handles:
             h.remove()
-        remap_to_exec_graph(g)
 
         for _ in range(3):
             g.replay()
