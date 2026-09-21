@@ -16,6 +16,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import traceback
 import types
 import typing
@@ -2351,6 +2352,87 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(summary.wont_generalize, ("mode",))
         self.assertEqual(summary.capture_errors, ("boom",))
+
+    def test_capture_config_is_scoped_per_entry_and_per_thread(self):
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.precompile_package import _capture_config
+
+        def flags():
+            return (
+                functorch_config.bundled_autograd_cache,
+                functorch_config.bypass_autograd_cache_key,
+                functorch_config.force_non_lazy_backward_lowering,
+                torch._dynamo.config.allow_empty_graphs,
+            )
+
+        ambient = (False, False, False, False)
+        with (
+            functorch_config.patch(
+                bundled_autograd_cache=False,
+                bypass_autograd_cache_key=False,
+                force_non_lazy_backward_lowering=False,
+            ),
+            torch._dynamo.config.patch(allow_empty_graphs=False),
+        ):
+            self.assertEqual(flags(), ambient)
+            with _capture_config(training=False):
+                self.assertEqual(flags(), (True, True, False, True))
+                # The inner scope's training wins while it is open, and the
+                # outer scope's setting comes back when it closes.
+                with _capture_config(training=True):
+                    self.assertEqual(flags(), (True, True, True, True))
+                self.assertEqual(flags(), (True, True, False, True))
+            self.assertEqual(flags(), ambient)
+
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with _capture_config(training=True):
+                    raise RuntimeError("boom")
+            self.assertEqual(flags(), ambient)
+
+            # Config values are per thread, so a worker entering the scope
+            # patches only itself and the main thread stays ambient.
+            entered, release = threading.Event(), threading.Event()
+            seen = []
+
+            def hold():
+                seen.append(flags())
+                with _capture_config(training=False):
+                    seen.append(flags())
+                    entered.set()
+                    release.wait(10)
+                seen.append(flags())
+
+            worker = threading.Thread(target=hold)
+            worker.start()
+            self.assertTrue(entered.wait(10))
+            self.assertEqual(flags(), ambient)
+            release.set()
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(seen[1], (True, True, False, True))
+            self.assertEqual(seen[0], seen[2])
+            self.assertNotEqual(seen[0], seen[1])
+
+    def test_capture_config_refuses_disabled_caches_and_honours_strict(self):
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.exc import PackageError
+        from torch._dynamo.precompile_package import _capture_config
+
+        # Backends reach the artifact through the bundled AOTAutograd cache, so
+        # a capture with caches forced off would record nothing; say so up front.
+        with torch.compiler.config.patch(force_disable_caches=True):
+            with self.assertRaisesRegex(PackageError, "force_disable_caches"):
+                with _capture_config(training=False):
+                    pass
+
+        with functorch_config.patch(strict_autograd_cache=False):
+            with torch._dynamo.config.patch(strict_precompile=False):
+                with _capture_config(training=False):
+                    self.assertFalse(functorch_config.strict_autograd_cache)
+            with torch._dynamo.config.patch(strict_precompile=True):
+                with _capture_config(training=False):
+                    self.assertTrue(functorch_config.strict_autograd_cache)
+            self.assertFalse(functorch_config.strict_autograd_cache)
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)
