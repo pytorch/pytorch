@@ -377,7 +377,7 @@ static void check_mps_shape(MPSShape* shape) {
   }
 }
 
-bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI) {
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool checkLinearOffset) {
   static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI && is_macOS_15_0_or_newer) {
     auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
@@ -385,10 +385,21 @@ bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI) {
       return true;
     }
   }
-  for (auto size : tensor.sizes()) {
+  // checkLinearOffset also requires the largest linear offset
+  // sum(stride[d] * (size[d] - 1)) to fit in int32, for kernels indexing in int32.
+  const bool check_offset = checkLinearOffset && tensor.numel() > 0;
+  int64_t max_linear_offset = 0;
+  for (const auto dim : c10::irange(tensor.dim())) {
+    const auto size = tensor.size(dim);
     if (size > std::numeric_limits<int32_t>::max()) {
       return true;
     }
+    if (check_offset) {
+      max_linear_offset += tensor.stride(dim) * (size - 1);
+    }
+  }
+  if (check_offset && max_linear_offset > std::numeric_limits<int32_t>::max()) {
+    return true;
   }
   return false;
 }
@@ -765,6 +776,7 @@ MetalShaderLibrary::~MetalShaderLibrary() {
 }
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
+  std::lock_guard guard(cache_mutex);
   if (C10_UNLIKELY(!library)) {
     TORCH_INTERNAL_ASSERT(nparams == 0);
     library = compileLibrary(shaderSource);
@@ -774,6 +786,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary() {
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::string>& params) {
   TORCH_INTERNAL_ASSERT(nparams == params.size());
+  std::lock_guard guard(cache_mutex);
   std::string key;
   for (const auto& p : params) {
     key += ':';
@@ -845,6 +858,7 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
     id<MTLLibrary> lib,
     const std::string& fname) {
   auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
+  std::lock_guard guard(cache_mutex);
   auto found_cpl = cplMap.find(key);
   if (found_cpl != cplMap.end()) {
     return found_cpl->second;
@@ -860,6 +874,7 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 }
 
 bool MetalShaderLibrary::hasFunction(const std::string& fname) {
+  std::lock_guard guard(cache_mutex);
   // Lazily build a set of all kernel names exposed by the library. The library is immutable post-load, so the set is
   // computed once per library instance. Used by exec_unary_kernel to decide whether to take the direct per-(in,out)
   // kernel or fall back to the `_dense_cast_` cast variant.
@@ -872,6 +887,7 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
+  std::lock_guard guard(cache_mutex);
   if (C10_UNLIKELY(!library && nparams > 0)) {
     throw std::runtime_error("Library must be initialized first");
   }
@@ -892,6 +908,7 @@ std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const
 }
 
 MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::string& name) {
+  std::lock_guard guard(cache_mutex);
   // Check if kernel is already cached
   auto it = kernelCache.find(name);
   if (it != kernelCache.end()) {
@@ -910,6 +927,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
 
  protected:
   id<MTLLibrary> getLibrary() override {
+    std::lock_guard guard(cache_mutex);
     if (C10_UNLIKELY(!library)) {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
@@ -1633,7 +1651,17 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
                        iter.ndim(),
                        types);
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      if (iter.is_contiguous()) {
+        mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      } else {
+        // Strided kernels take a 3D dispatch: the first three (coalesced) dims map straight onto the grid, so the
+        // kernel reads their coordinates from thread_position_in_grid rather than dividing for them. Only dims past
+        // the third pay for a div/mod, and TensorIterator has already coalesced whatever it could.
+        const auto ndim = iter.ndim();
+        const auto dim0 = static_cast<NSUInteger>(iter.shape()[0]);
+        const auto dim1 = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
+        mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1));
+      }
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
   });
