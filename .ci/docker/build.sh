@@ -317,6 +317,7 @@ case "$tag" in
     CUDA_VERSION=13.0.3
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
+    ACL=yes
     KATEX=yes
     TRITON=yes
     ;;
@@ -324,6 +325,7 @@ case "$tag" in
     CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
+    ACL=yes
     KATEX=yes
     TRITON=yes
     ;;
@@ -331,6 +333,7 @@ case "$tag" in
     CUDA_VERSION=13.4.1
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
+    ACL=yes
     KATEX=yes
     TRITON=yes
     ;;
