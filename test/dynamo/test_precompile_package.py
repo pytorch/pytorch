@@ -11,6 +11,7 @@ import itertools
 import os
 import re
 import site
+import subprocess
 import sys
 import sysconfig
 import tempfile
@@ -1839,6 +1840,86 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         }
         for text, expected in cases.items():
             self.assertEqual(_normalize(text), expected, text)
+
+    def test_code_fingerprint_recurses_into_container_and_nested_consts(self):
+        # _code_fingerprint names a callable by its body so an ACT2FN-style table
+        # can be told apart. Two lambdas can differ ONLY inside a constant the
+        # outer co_code does not distinguish: a tuple, a frozenset, or a nested
+        # code object. Filtering those out whole -- rather than recursing -- gives
+        # both the same digest, _object_identity names them identically, and the
+        # guard that split the two compilations is reported as an invariant of
+        # each.
+        from torch._dynamo.precompile_package import _code_fingerprint, _stable_consts
+
+        pairs = {
+            "tuple const": (lambda x: x * (1, 2), lambda x: x * (1, 3)),
+            "frozenset const": (lambda x: x in {1, 2}, lambda x: x in {1, 3}),
+            # Not called: what matters is the nested code object in co_consts.
+            "nested code": (lambda x: (lambda y: y + 1), lambda x: (lambda y: y + 2)),
+            # A subscript with Ellipsis folds to ONE const tuple at one index, so
+            # a const type outside the stable set must keep its slot.
+            "ellipsis const": (lambda x: x[..., 0], lambda x: x[0, ...]),
+        }
+        for label, (left, right) in pairs.items():
+            self.assertEqual(
+                left.__code__.co_code,
+                right.__code__.co_code,
+                f"{label}: the pair must differ only in co_consts",
+            )
+            self.assertNotEqual(
+                _code_fingerprint(left.__code__),
+                _code_fingerprint(right.__code__),
+                f"{label}: two different bodies share a fingerprint",
+            )
+        # An unrenderable const keeps its position as a type marker.
+        self.assertEqual(_stable_consts((object(), 1)), ("<object>", 1))
+        # And the digest is a function of the body, not of the code object:
+        # the same source compiled twice must agree.
+        src = "lambda x: (x * 2, 'a', (lambda y: y + 1))"
+        self.assertEqual(
+            _code_fingerprint(compile(src, "<a>", "eval")),
+            _code_fingerprint(compile(src, "<b>", "eval")),
+        )
+
+    def test_code_fingerprint_is_stable_across_processes(self):
+        # The digest goes into a file meant to be committed and diffed, so it
+        # has to agree in a fresh interpreter; within one process any two calls
+        # trivially agree, which is why the positive case above cannot catch a
+        # regression that puts an address back (repr of an arbitrary const).
+        from torch._dynamo.precompile_package import _code_fingerprint
+
+        src = "lambda x: (x * 2, 'a', (lambda y: y + 1), x in {1, 2})"
+        probe = (
+            "from torch._dynamo.precompile_package import _code_fingerprint;"
+            f"print(_code_fingerprint(compile({src!r}, '<p>', 'eval')))"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+        )
+        self.assertEqual(
+            out.stdout.strip(), _code_fingerprint(compile(src, "<p>", "eval"))
+        )
+
+    def test_object_identity_puts_the_digest_before_the_truncation_point(self):
+        from torch._dynamo.precompile_package import _code_fingerprint, _object_identity
+
+        self.assertEqual(
+            _object_identity(torch.nn.functional), "is module torch.nn.functional"
+        )
+        self.assertEqual(_object_identity(object()), "is a builtins.object")
+
+        def fn():
+            pass
+
+        # A qualname that alone exceeds the 160-character bound: the site and
+        # digest must survive the cut and the qualname tail is what goes.
+        fn.__qualname__ = "Outer." * 40 + "fn"
+        rendered = _object_identity(fn)
+        code = fn.__code__
+        prefix = f"is @{os.path.basename(code.co_filename)}:{code.co_firstlineno}#{_code_fingerprint(code)} "
+        self.assertEqual(len(rendered), 160)
+        self.assertTrue(rendered.startswith(prefix), rendered)
+        self.assertNotIn("#", rendered[len(prefix) :])
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)
