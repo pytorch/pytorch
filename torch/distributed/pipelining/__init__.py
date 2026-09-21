@@ -4,7 +4,6 @@ from .schedules import (
     _ScheduleForwardOnly,
     analyze_pipeline_activation_liveness,
     PipelineActivationLiveness,
-    PipelineStageInfo,
     Schedule1F1B,
     ScheduleDualPipeV,
     ScheduleGPipe,
@@ -13,7 +12,7 @@ from .schedules import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from .stage import build_stage, PipelineStage
+from .stage import build_stage, PipelineStage, PipelineStageInfo
 
 
 __all__ = [
