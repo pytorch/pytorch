@@ -201,9 +201,9 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    # The capture's casts are already baked into the graph, so re-dispatching it under
-    # the serving process's ambient autocast would cast a second time. One dispatch-key
-    # guard, the same one AOTAutograd emits into its own generated runtime source.
+    # The casts the capture ran under are baked into the graph, which still
+    # re-dispatches here, so ambient autocast must not cast a second time. Like
+    # the no_grad, this pins autocast off regardless of capture or serve state.
     with _torch._C._DisableAutocast(), _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
@@ -315,8 +315,9 @@ def _inductor_forward(*args):
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
     try:
-        # As in the eager driver: the casts are baked into the kernels, and anything
-        # inductor did not fuse re-dispatches through extern_kernels under autocast.
+        # A fallback op re-dispatches through its autocast-registered overload
+        # (e.g. aten.addbmm.default on CPU), so ambient autocast must not cast
+        # a second time over the casts the capture baked into the kernels.
         with _torch._C._DisableAutocast():
             out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
