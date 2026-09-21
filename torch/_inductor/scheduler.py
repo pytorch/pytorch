@@ -3402,6 +3402,8 @@ class BaseSchedulerNode:
             return ret
 
         dtype = buf.node.maybe_get_dtype()
+        if dtype is None:
+            return 0
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
@@ -5528,7 +5530,31 @@ def get_scheduler_node_symbol_uses(
     free_symbol_uses.update(
         *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
     )
-    return free_symbol_uses
+    expanded_symbol_uses = OrderedSet[sympy.Symbol]()
+    for symbol in free_symbol_uses:
+        expanded_symbol_uses.update(
+            V.graph.sizevars.remove_precomputed_replacements(symbol).free_symbols
+        )
+    return expanded_symbol_uses
+
+
+def filter_graph_level_symbols(
+    symbols: OrderedSet[sympy.Symbol],
+) -> OrderedSet[sympy.Symbol]:
+    """Remove symbols that are always internal to generated kernels."""
+    return OrderedSet(
+        s
+        for s in symbols
+        if symbol_is_type(
+            s,
+            (
+                SymT.SIZE,
+                SymT.FLOAT,
+                SymT.UNBACKED_INT,
+                SymT.UNBACKED_FLOAT,
+            ),
+        )
+    )
 
 
 def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
@@ -11223,7 +11249,7 @@ class Scheduler:
 
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
-            if get_scheduler_node_symbol_uses(node):
+            if filter_graph_level_symbols(get_scheduler_node_symbol_uses(node)):
                 return "dynamic shape ops"
 
         return None
@@ -11369,28 +11395,6 @@ class Scheduler:
                 # read_writes does not contain sympy.Expr
                 raise NotImplementedError(f"Unsupported input node type: {type(node)}")
 
-        def filter_symbols(
-            symbols: OrderedSet[sympy.Symbol],
-        ) -> OrderedSet[sympy.Symbol]:
-            """
-            Filters a set of symbols that are required for codegen. Skip symbols
-            that are always internal to kernels, such as SymT.TMP, SymT.INDEX,
-            and SymT.R0_INDEX.
-            """
-            return OrderedSet(
-                s
-                for s in symbols
-                if symbol_is_type(
-                    s,
-                    (
-                        SymT.SIZE,
-                        SymT.FLOAT,
-                        SymT.UNBACKED_INT,
-                        SymT.UNBACKED_FLOAT,
-                    ),
-                )
-            )
-
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
@@ -11398,7 +11402,7 @@ class Scheduler:
             *(get_input_node_symbols(node) for node in input_nodes.values())
         )
 
-        candidate_symbols = filter_symbols(candidate_symbols)
+        candidate_symbols = filter_graph_level_symbols(candidate_symbols)
 
         res: OrderedSet[sympy.Symbol] = OrderedSet()
         for s in candidate_symbols:
