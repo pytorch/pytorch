@@ -381,7 +381,14 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
             f"sdpa_flop_count: query/key/value shapes are incompatible: "
             f"q={query_shape}, k={key_shape}, v={value_shape}"
         )
-    if h_q < h_kv or h_q % h_kv != 0:
+    if h_kv == 0:
+        # No kv heads means nothing to broadcast; the bmms below already give
+        # zero flops, as they do for a zero sequence length or head dim.
+        if h_q != 0:
+            raise AssertionError(
+                f"sdpa_flop_count: query has {h_q} heads but key/value have none"
+            )
+    elif h_q < h_kv or h_q % h_kv != 0:
         raise AssertionError(
             f"sdpa_flop_count: query heads ({h_q}) must be a multiple of "
             f"key/value heads ({h_kv})"
@@ -574,6 +581,15 @@ def _efficient_attention_forward_flop(
 ) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
+    # _efficient_attention_forward takes its tensors in BMHK layout, but
+    # sdpa_flop_count unpacks BHSD. Transpose the dense case first, otherwise
+    # heads and sequence length are swapped and the count is off by a factor of
+    # seq_len / n_heads. The varlen path builds its own shapes from cu_seqlens
+    # and is already correct, so it is left alone.
+    if cu_seqlens_q is None and query.ndim == 4:
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     sizes = _unpack_efficient_attention_nested_shapes(
@@ -600,7 +616,13 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
         raise AssertionError(
             "sdpa_backward_flop_count: batch/heads mismatch among tensors"
         )
-    if h_q < h_kv or h_q % h_kv != 0:
+    if h_kv == 0:
+        # See sdpa_flop_count: no kv heads is zero flops, not a division.
+        if h_q != 0:
+            raise AssertionError(
+                f"sdpa_backward_flop_count: query has {h_q} heads but key/value have none"
+            )
+    elif h_q < h_kv or h_q % h_kv != 0:
         raise AssertionError(
             f"sdpa_backward_flop_count: query heads ({h_q}) must be a multiple of "
             f"key/value heads ({h_kv})"
@@ -689,6 +711,12 @@ def _efficient_attention_backward_flop(
     *args,
     **kwargs,
 ) -> int:
+    # BMHK in, BHSD expected: see _efficient_attention_forward_flop above.
+    if cu_seqlens_q is None and query.ndim == 4:
+        grad_out = grad_out.transpose(-2, -3)
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     shapes = _unpack_efficient_attention_nested_shapes(

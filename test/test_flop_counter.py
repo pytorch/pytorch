@@ -77,6 +77,21 @@ class TestFlopCounter(TestCase):
         with self.assertRaises(AssertionError):
             sdpa_flop_count(q_shape, k_bad, v_bad)
 
+    def test_sdpa_flop_count_zero_heads(self):
+        """A tensor with no heads is zero flops, not a division by zero."""
+        shape = (2, 0, 128, 64)
+        self.assertEqual(sdpa_flop_count(shape, shape, shape), 0)
+        self.assertEqual(sdpa_backward_flop_count(shape, shape, shape, shape), 0)
+
+    def test_sdpa_flop_count_query_heads_without_kv_heads(self):
+        """Query heads against no kv heads is incompatible, not a division by zero."""
+        q_shape = (2, 8, 128, 64)
+        kv_shape = (2, 0, 128, 64)
+        with self.assertRaises(AssertionError):
+            sdpa_flop_count(q_shape, kv_shape, kv_shape)
+        with self.assertRaises(AssertionError):
+            sdpa_backward_flop_count(q_shape, q_shape, kv_shape, kv_shape)
+
     def test_flop_counter_variety(self):
         mod = torch.nn.Linear(9, 10)
         with FlopCounterMode() as mode:
@@ -408,6 +423,103 @@ class TestFlopCounter(TestCase):
             (B, H, S, D),
         )
         self.assertEqual(bwd_flops, expected)
+
+    def test_efficient_attention_forward_flop_layout(self):
+        # _efficient_attention_forward takes BMHK; sdpa_flop_count expects BHSD.
+        # S != H so a swap is visible.
+        B, S, H, D = 2, 128, 8, 64
+        q = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        k = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        v = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+
+        with FlopCounterMode() as mode:
+            torch.ops.aten._efficient_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0.0,
+                0,
+                False,
+            )
+
+        flops = int(get_total_flops(mode))
+        expected = sdpa_flop_count((B, H, S, D), (B, H, S, D), (B, H, S, D))
+        self.assertEqual(flops, expected)
+
+    def test_efficient_attention_backward_flop_layout(self):
+        B, S, H, D = 2, 128, 8, 64
+        q = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        k = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        v = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        out = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        grad_out = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        logsumexp = torch.randn(B, H, S, device="meta", dtype=torch.float32)
+
+        with FlopCounterMode() as mode:
+            torch.ops.aten._efficient_attention_backward(
+                grad_out,
+                q,
+                k,
+                v,
+                None,
+                out,
+                None,
+                None,
+                S,
+                S,
+                logsumexp,
+                0.0,
+                torch.tensor(0),
+                torch.tensor(0),
+                0,
+                False,
+            )
+
+        flops = int(get_total_flops(mode))
+        expected = sdpa_backward_flop_count(
+            (B, H, S, D),
+            (B, H, S, D),
+            (B, H, S, D),
+            (B, H, S, D),
+        )
+        self.assertEqual(flops, expected)
+
+    def test_efficient_attention_varlen_flop_unchanged(self):
+        # the cu_seqlens path builds its shapes separately and must not be
+        # transposed; cu_seqlens has to carry real values, so it is not meta
+        H, D = 8, 64
+        lengths = [4, 6]
+        total = sum(lengths)
+        cu_seqlens = torch.tensor([0, 4, 10], dtype=torch.int32)
+        q = torch.randn(1, total, H, D, device="meta", dtype=torch.float16)
+        k = torch.randn(1, total, H, D, device="meta", dtype=torch.float16)
+        v = torch.randn(1, total, H, D, device="meta", dtype=torch.float16)
+
+        with FlopCounterMode() as mode:
+            torch.ops.aten._efficient_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                cu_seqlens,
+                cu_seqlens,
+                max(lengths),
+                max(lengths),
+                0.0,
+                0,
+                False,
+            )
+
+        flops = int(get_total_flops(mode))
+        expected = sum(
+            sdpa_flop_count((1, H, n, D), (1, H, n, D), (1, H, n, D)) for n in lengths
+        )
+        self.assertEqual(flops, expected)
 
     def test_addmm_out(self):
         def f(x):
