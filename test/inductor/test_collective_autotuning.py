@@ -16,7 +16,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
@@ -31,6 +31,7 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
+    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5462")
     @skip_if_lt_x_gpu(2)
     def test_equivalent_allreduce_strategies(self):
         """
@@ -39,9 +40,8 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         Strategy 1: sum all_reduce
         Strategy 2: avg all_reduce * world_size
         """
-
         device = f"{GPU_TYPE}:{self.rank}"
-        backend = dist.get_default_backend_for_device(device)
+        backend = dist.get_default_backend_for_device(GPU_TYPE)
 
         dist.init_process_group(
             backend=backend,
@@ -114,6 +114,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
+    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5462")
     @skip_if_lt_x_gpu(4)
     def test_vllm_style_allreduce(self):
         """
@@ -134,9 +135,6 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         )
 
         dist.barrier()
-
-        rank = dist.get_rank()
-        device = f"{GPU_TYPE}:{rank}"
 
         from torch._C._distributed_c10d import _register_process_group
 
@@ -192,7 +190,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
 
         model = torch.compile(VLLMAllReduceModel()).to(device)
 
-        torch.manual_seed(42 + rank)
+        torch.manual_seed(42 + self.rank)
         x = torch.randn(128, 256, device=device)
 
         y = model(x)
