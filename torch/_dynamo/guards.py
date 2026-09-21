@@ -5132,8 +5132,9 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-# One budget for the diagnostic walk: objects visited and children queued in
-# total, so a huge state cannot turn a bypass into a stall or an allocation.
+# The budget of each pass of the diagnostic walk: objects visited and children
+# queued in total, so a huge state cannot turn a bypass into a stall or an
+# allocation. Two passes, so the walk costs at most twice this.
 _WALK_BUDGET = 20000
 
 
@@ -5150,9 +5151,13 @@ def _offending_value_path(state: Any, target: Any) -> str:
     the two scopes searched a handful of objects on a real capture while the
     pickler walked the whole output graph, its guards and its guard-tree
     values, so a value living anywhere else -- a lock on a compiler internal,
-    say -- was unreachable however well the scopes were preserved. The scopes
-    stay as SEEDS, ahead of ``state`` in the queue, so the common case still
-    reports the short readable path rather than a long one through the graph.
+    say -- was unreachable however well the scopes were preserved. The walk runs
+    in two passes with a budget each: the scopes first, so the common case still
+    reports the short readable path and a wide state cannot starve a deep scope
+    value, then ``state`` for what is reachable only through it, with the scope
+    dicts already marked seen so a wide scope cannot starve the guards in turn.
+    The cap stays at 20,000 because the module skip is what makes the whole
+    state fit: a module's dict leads to all of sys.modules.
     Guards are slotted dataclasses whose create_fn is a functools.partial, so
     slots and partials are descended too; modules are not, since they pickle
     by name and their dicts lead to the whole of sys.modules.
@@ -5178,7 +5183,6 @@ def _offending_value_path(state: Any, target: Any) -> str:
                 path, value = queue.popleft()
                 if id(value) in seen:
                     continue
-                seen.add(id(value))
                 if value is target:
                     return f"\n  reached via: {path}"
                 if inspect.ismodule(value):
@@ -5273,9 +5277,14 @@ def _offending_value_path(state: Any, target: Any) -> str:
                             children.append((f"{path}.{name}", child))
                 except Exception:
                     pass
-                children = children[:budget]
-                budget -= len(children)
-                queue.extend(children)
+                children = [c for c in children if id(c[1]) not in seen]
+                kept = children[:budget]
+                # A node whose children did not all fit stays unseen, so the
+                # next pass, with a budget of its own, can expand it.
+                if len(kept) == len(children):
+                    seen.add(id(value))
+                budget -= len(kept)
+                queue.extend(kept)
             return ""
 
         # Two passes with a budget each: the scopes first, so a value a user can
@@ -5283,9 +5292,13 @@ def _offending_value_path(state: Any, target: Any) -> str:
         # scope path, then the state, for what is reachable only through it.
         scopes = [(f"local_scope[{k!r}]", v) for k, v in graph.local_scope.items()]
         scopes += [(f"global_scope[{k!r}]", v) for k, v in graph.global_scope.items()]
-        return walk(collections.deque(scopes)) or walk(
-            collections.deque([("state", state)])
-        )
+        if path := walk(collections.deque(scopes)):
+            return path
+        # Pass one covered the scopes' contents; charging the dicts again
+        # would let a wide scope starve the guards, which is what this pass
+        # exists to reach.
+        seen.update((id(graph.local_scope), id(graph.global_scope)))
+        return walk(collections.deque([("state", state)]))
     except Exception:
         return ""
 

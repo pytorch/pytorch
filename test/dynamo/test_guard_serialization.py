@@ -2024,6 +2024,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             "\n  reached via: local_scope['h'].a.b.lock",
         )
 
+    def test_a_guards_only_value_is_named_despite_a_wide_scope(self):
+        # The converse: pass two must not be charged for the scope dicts pass
+        # one already covered, or a wide scope starves the guards subtree.
+        from torch._dynamo.guards import _offending_value_path
+        from torch._guards import Guard, GuardsSet
+
+        class _Node:
+            pass
+
+        internal = _Node()
+        internal.lock = threading.RLock()
+        graph = types.SimpleNamespace(
+            local_scope={f"k{i}": i for i in range(30000)}, global_scope={}
+        )
+        graph._guards = GuardsSet()
+        guard = Guard(LocalSource("x"), functools.partial(lambda *a: None, internal))
+        graph._guards.inner.add(guard)
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn("._guards", _offending_value_path(state, internal.lock))
+
     def test_offending_value_path_never_masks_the_real_error(self):
         # It is a diagnostic appended to an error already being raised, so any
         # failure inside it must stay silent.
