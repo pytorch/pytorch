@@ -72,7 +72,18 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
   const size_t groups = 1;
   const size_t group_input_channels = input_channels;
   const size_t group_output_channels = output_channels;
-  const uint32_t mr = pytorch_qnnp_params.q8conv.mr;
+  // Tiling by mr = batch_size is what guarantees an exact-size kernel only ever
+  // sees the size it was built for: the whole batch becomes one tile.
+  const size_t max_exact_mr =
+      sizeof(pytorch_qnnp_params.q8conv.gemm_dq_exact) /
+      sizeof(pytorch_qnnp_params.q8conv.gemm_dq_exact[0]);
+  const bool exact_batch = batch_size >= 1 && batch_size <= max_exact_mr &&
+      pytorch_qnnp_params.q8conv.gemm_dq_exact[batch_size - 1] != nullptr;
+  const uint32_t mr = exact_batch ? (uint32_t)batch_size
+                                  : pytorch_qnnp_params.q8conv.mr;
+  const pytorch_q8gemm_dq_ukernel_function gemm_dq = exact_batch
+      ? pytorch_qnnp_params.q8conv.gemm_dq_exact[batch_size - 1]
+      : pytorch_qnnp_params.q8conv.gemm_dq;
   const uint32_t nr = pytorch_qnnp_params.q8conv.nr;
   const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
   const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
@@ -97,7 +108,7 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
       .c = output,
       .c_stride = output_stride,
       .quantization_params = quantizationParams,
-      .ukernel = pytorch_qnnp_params.q8conv.gemm_dq,
+      .ukernel = gemm_dq,
   };
 
   if (output_size == 0) {

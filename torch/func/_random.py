@@ -9,6 +9,25 @@ from collections.abc import Sequence
 import torch
 
 
+# Inclusive lower and exclusive upper bound of each dtype randint() supports.
+_RANDINT_DTYPE_RANGE = {
+    torch.uint8: (0, 2**8),
+    torch.uint16: (0, 2**16),
+    torch.uint32: (0, 2**32),
+    torch.uint64: (0, 2**64),
+    torch.int8: (-(2**7), 2**7),
+    torch.int16: (-(2**15), 2**15),
+    torch.int32: (-(2**31), 2**31),
+    torch.int64: (-(2**63), 2**63),
+}
+
+
+def _as_int64(value: int) -> int:
+    # Bounds are passed to ATen as int64; reinterpret wider values so the
+    # kernel's unsigned arithmetic recovers the intended range.
+    return ((value + 2**63) % 2**64) - 2**63
+
+
 def key(
     seed: int, *, device: torch.device | None = None, impl: str = "philox4x32-10"
 ) -> torch.Tensor:
@@ -282,3 +301,306 @@ def uniform(
     # pyrefly: ignore [no-matching-overload]
     result = torch.empty(shape, dtype=dtype, device=key.device)
     return uniform_(key, result, low=low, high=high)
+
+
+def randint_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    *,
+    low: int | None = 0,
+    high: int | None = None,
+) -> torch.Tensor:
+    r"""Fill ``result`` in-place with uniform random integers in ``[low, high)``.
+
+    ``low`` defaults to ``0`` and ``high`` to the dtype's largest value plus one.
+    Passing ``None`` for either selects the corresponding limit of the dtype, so
+    ``randint_(key, result, low=None, high=None)`` draws from the dtype's full
+    range.
+
+    .. warning::
+
+        The two in-place analogues in core PyTorch both take bounds
+        positionally, while these are keyword-only. Versus
+        :func:`torch.randint` with ``out=``, which needs the size even though
+        ``out`` already fixes it::
+
+            torch.randint(10, (2, 3), out=result)  # -> [0, 10)
+            randint_(key, result, high=10)  # size comes from result
+
+            torch.randint(1, 5, (2, 3), out=result)  # -> [1, 5)
+            randint_(key, result, low=1, high=5)
+
+        Versus :meth:`torch.Tensor.random_`, which names the bounds ``from`` /
+        ``to`` and treats a lone bound as the upper one::
+
+            result.random_(10)  # -> [0, 10)
+            randint_(key, result, high=10)
+
+            result.random_(1, 5)  # -> [1, 5)
+            randint_(key, result, low=1, high=5)
+
+            result.random_()  # -> [0, DTYPE_MAX]
+            randint_(key, result)
+
+            result.random_(DTYPE_MIN, None)  # whole dtype range
+            randint_(key, result, low=None, high=None)
+
+        The bound defaults agree: both fill ``[0, DTYPE_MAX]`` when given no
+        bounds, and both need an explicit lower bound to reach negative values.
+        The spelling differs in that ``None`` here means the dtype's limit for
+        either bound, so ``low=None`` replaces ``random_``'s ``DTYPE_MIN``.
+
+    The output is fully determined by the key, so calling with the same key
+    always produces the same result.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
+    dimensions of ``result`` must be broadcastable with ``*batch`` and each key
+    independently generates its slice of the output.
+
+    Args:
+        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
+            :func:`fold_in`.
+        result (Tensor): The output tensor to fill in-place. Must have an
+            integer dtype other than ``torch.bool``.
+        low (int, optional): Lower bound (inclusive) of the range. ``None`` means
+            the dtype's smallest value. Default: ``0``.
+        high (int, optional): Upper bound (exclusive) of the range. ``None`` means
+            the dtype's largest value plus one. For 32-bit dtypes,
+            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            Default: ``None``.
+
+    Returns:
+        ``result``, filled with random integers.
+
+    .. note::
+
+        Values are reduced into ``[low, high)`` with a modulo, which is exactly
+        uniform only when ``high - low`` is a power of two. Ranges of ``2 ** 28``
+        or more are rejected for 32-bit dtypes; use a 64-bit dtype if you need a
+        range that large. See :func:`randint` for the bias in detail.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> result = torch.empty(1000, dtype=torch.int64, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.randint_(key, result, high=10)  # doctest: +SKIP
+    """
+    dtype_range = _RANDINT_DTYPE_RANGE.get(result.dtype)
+    if dtype_range is None:
+        # Unsupported dtype; let the kernel report it.
+        return torch.ops.aten._philox_randint_(result, key)
+    dtype_low, dtype_high = dtype_range
+    lo = dtype_low if low is None else low
+    hi = dtype_high if high is None else high
+    if hi <= lo:
+        raise ValueError(
+            f"randint: high must be greater than low, got low={lo}, high={hi}"
+        )
+    if lo < dtype_low or hi > dtype_high:
+        raise ValueError(
+            f"randint: [low, high) = [{lo}, {hi}) is out of range for dtype "
+            f"{result.dtype}, which covers [{dtype_low}, {dtype_high})"
+        )
+    # The dtype's exclusive upper limit is not always representable as int64, so
+    # the kernel takes it as None.
+    high_arg = None if hi == dtype_high else _as_int64(hi)
+    return torch.ops.aten._philox_randint_(result, key, _as_int64(lo), high_arg)
+
+
+def randint(
+    key: torch.Tensor,
+    *shape: tuple[int, ...],
+    low: int | None = 0,
+    high: int | None = None,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    r"""Generate uniform random integers in ``[low, high)`` from a PRNG key.
+
+    Produces a tensor of the given shape filled with integers drawn uniformly
+    from ``[low, high)``. The output is fully determined by the key, so calling
+    with the same key always returns the same result. The output is placed on the
+    same device as ``key``.
+
+    ``low`` defaults to ``0`` and ``high`` to the dtype's largest value plus
+    one. Passing ``None`` for either selects the corresponding limit of
+    ``dtype``, so ``low=None`` with no ``high`` draws from the full range.
+
+    .. warning::
+
+        The signature differs from :func:`torch.randint`. Bounds are
+        keyword-only and follow the shape, matching :func:`uniform` and
+        :func:`normal` in this module, whereas :func:`torch.randint` takes them
+        positionally before the size::
+
+            torch.randint(10, (2, 3))  # -> [0, 10)
+            randint(key, (2, 3), high=10)
+
+            torch.randint(1, 5, (2, 3))  # -> [1, 5)
+            randint(key, (2, 3), low=1, high=5)
+
+        Note that a positional integer is a shape dimension here, not a bound,
+        so ``randint(key, 10, high=5)`` produces ten values in ``[0, 5)`` rather
+        than the ``[0, 10)`` that :func:`torch.randint` would give.
+
+        This function also accepts ``None`` bounds for the dtype's limits, which
+        :func:`torch.randint` does not.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
+    dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
+    independently generates its slice of the output.
+
+    Args:
+        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
+            :func:`fold_in`.
+        *shape (int): The desired output shape.
+        low (int, optional): Lower bound (inclusive) of the range. ``None`` means
+            the dtype's smallest value. Default: ``0``.
+        high (int, optional): Upper bound (exclusive) of the range. ``None`` means
+            the dtype's largest value plus one. For 32-bit dtypes,
+            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            Default: ``None``.
+        dtype (:class:`torch.dtype`, optional): The desired dtype: any integer
+            dtype other than ``torch.bool``. Default: ``torch.int32``.
+
+    Returns:
+        A tensor of the given shape filled with random integers.
+
+    .. note::
+
+        **Sampling width.** Each element draws a fixed ``nbits`` of randomness:
+        64 for the 8-byte dtypes (``torch.int64`` / ``torch.uint64``) and 32 for
+        every narrower one. Dtypes smaller than 32 bits are *not* packed several
+        to a word; each element still consumes a full 32-bit sample, the range
+        reduction is done at 32 bits, and only the final store narrows to the
+        output dtype (keeping the low bits). Sampling ``torch.int8`` therefore
+        matches sampling ``torch.int32`` and casting down with
+        :meth:`~torch.Tensor.to`, and its bias is measured against ``2 ** 32``
+        rather than ``2 ** 8``.
+
+        **Sampling bias.** The ``nbits`` sample is reduced into ``[low, high)``
+        with a modulo. That is exactly uniform only when ``high - low`` divides ``2 ** nbits``,
+        i.e. when the range is a power of two; otherwise the lowest
+        ``2 ** nbits % (high - low)`` values of the range are returned slightly
+        more often than the rest.
+
+        With ``q = 2 ** nbits // (high - low)``, the most frequent value occurs
+        ``1 + 1 / q`` times as often as the least frequent, so the worst case
+        grows with the range::
+
+            q = 2**nbits // (high - low)
+            bias = 0.0 if 2**nbits % (high - low) == 0 else 1.0 / q
+
+        Away from the exact cases this is close to ``(high - low) / 2 ** nbits``.
+        It is a step function of the range, changing only where ``q`` does.
+        Exact powers of two are unbiased, so the figures below bound every range
+        up to the listed size, for a 32-bit dtype:
+
+        ==============  ==================
+        Range up to     Max relative bias
+        ==============  ==================
+        ``2 ** 8``      0.000006%
+        ``2 ** 16``     0.0015%
+        ``2 ** 20``     0.024%
+        ``2 ** 24``     0.39%
+        ``2 ** 26``     1.6%
+        ``2 ** 27``     3.1%
+        ``2 ** 28``     6.25%
+        ==============  ==================
+
+        Ranges of ``2 ** 28`` or more are rejected for dtypes sampled at 32 bits,
+        to keep the bias under roughly 6%; use a 64-bit dtype if you need a range
+        that large. Ranges that divide ``2 ** 32`` evenly (powers of two) are
+        exact at any size and are always allowed. Dtypes narrower than 32 bits can never reach that limit, since
+        their ranges cap at ``2 ** 16``, so their bias stays below 0.0015%.
+        64-bit dtypes are not restricted, since the same formula over
+        ``2 ** 64`` keeps the bias near ``2e-10`` even at a range of ``2 ** 32``.
+
+        Using the dtype's full range (omitting both bounds) is always exactly
+        uniform, since that range is a power of two and no reduction is applied.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> r = torch.func._random
+        >>> key = r.key(42, device="cuda")
+        >>> r.randint(key, (1000,), high=10)  # [0, 10)
+        >>> r.randint(key, (1000,), low=-5, high=5)  # [-5, 5)
+        >>> r.randint(key, 2, 3, high=10, dtype=torch.int64)  # shape (2, 3)
+        >>> r.randint(key, (1000,), low=None)  # the dtype's full range
+    """
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
+        # pyrefly: ignore [bad-argument-type]
+        shape = tuple(shape[0])
+    if dtype is None:
+        dtype = torch.int32
+    # pyrefly: ignore [no-matching-overload]
+    result = torch.empty(shape, dtype=dtype, device=key.device)
+    return randint_(key, result, low=low, high=high)
+
+
+def bits_(key: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    r"""Fill ``result`` in-place with raw random bits from a PRNG key.
+
+    Equivalent to :func:`randint_` over the full range of ``result``'s dtype.
+    That range is a power of two, so unlike a bounded draw this is exactly
+    uniform. Signed dtypes receive negative values as well.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
+    dimensions of ``result`` must be broadcastable with ``*batch`` and each key
+    independently generates its slice of the output.
+
+    Args:
+        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
+            :func:`fold_in`.
+        result (Tensor): The output tensor to fill in-place. Must have an
+            integer dtype other than ``torch.bool``.
+
+    Returns:
+        ``result``, filled with raw random bits.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> result = torch.empty(1000, dtype=torch.uint32, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.bits_(key, result)  # doctest: +SKIP
+    """
+    return randint_(key, result, low=None, high=None)
+
+
+def bits(
+    key: torch.Tensor,
+    *shape: tuple[int, ...],
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    r"""Generate raw random bits from a PRNG key.
+
+    Equivalent to :func:`randint` over the full range of ``dtype``. That range
+    is a power of two, so unlike a bounded draw this is exactly uniform. Signed
+    dtypes receive negative values as well.
+
+    Dtypes narrower than 32 bits take the low bits of a full 32-bit sample, so
+    ``bits(key, shape, dtype=torch.int8)`` matches ``bits(key, shape,
+    dtype=torch.int32).to(torch.int8)``.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
+    dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
+    independently generates its slice of the output.
+
+    Args:
+        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
+            :func:`fold_in`.
+        *shape (int): The desired output shape.
+        dtype (:class:`torch.dtype`, optional): The desired dtype: any integer
+            dtype other than ``torch.bool``. Default: ``torch.int32``.
+
+    Returns:
+        A tensor of the given shape filled with raw random bits.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.bits(key, (1000,), dtype=torch.uint64)  # doctest: +SKIP
+    """
+    if dtype is None:
+        dtype = torch.int32
+    return randint(key, *shape, low=None, high=None, dtype=dtype)
