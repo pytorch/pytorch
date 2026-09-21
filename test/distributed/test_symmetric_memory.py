@@ -2523,6 +2523,279 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
         with _enable_multicast_for_test(self, self.device.index):
             self._run_low_contention_all_gather_ce_multicast_cuda_graph()
 
+    # ---- CUDA graph capture hardening ----------------------------------------
+    #
+    # Allocation and the first rendezvous of a buffer synchronize the stream,
+    # which is not permitted during capture, so the CUDA backend refuses both
+    # with an actionable error instead of failing inside the driver. Once a
+    # buffer has been rendezvoused and the collective has run once eagerly,
+    # capturing it and replaying must match eager results on every replay.
+
+    _CAPTURE_MSG = "capturing a graph"
+
+    def _skip_unless_cuda_backend(self) -> None:
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("the capture guard is implemented in the CUDA backend")
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_alloc_during_capture_raises(self) -> None:
+        self._init_process()
+        self._skip_unless_cuda_backend()
+
+        graph = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(RuntimeError, self._CAPTURE_MSG):
+            with torch.cuda.graph(graph):
+                symm_mem.empty(64, dtype=torch.float32, device=self.device)
+
+        # The refused allocation must leave the process usable.
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        symm_mem.rendezvous(t, group=dist.group.WORLD)
+        torch.cuda.synchronize()
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_first_rendezvous_during_capture_raises(self) -> None:
+        self._init_process()
+        self._skip_unless_cuda_backend()
+        group_name = dist.group.WORLD.group_name
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        graph = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(RuntimeError, self._CAPTURE_MSG):
+            with torch.cuda.graph(graph):
+                # No rendezvous before capture: the collective rendezvous the
+                # buffer lazily, and that first rendezvous must be refused.
+                torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+
+        # Rendezvous eagerly afterwards and run the same collective to prove
+        # the refused capture left the process and the buffer usable.
+        t.fill_(float(self.rank))
+        symm_mem.rendezvous(t, group=group_name)
+        res = torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+        expected = float(sum(range(self.world_size)))
+        self.assertEqual(res, torch.full_like(res, expected))
+
+    def _sum_of_ranks_plus(self, step: float) -> float:
+        # Every rank holds rank + step before the reduction.
+        return float(sum(range(self.world_size)) + step * self.world_size)
+
+    def _check_capture_replay(self, numel, run_op, expected_last, replays=4):
+        """Warm up ``run_op`` eagerly on a rendezvoused symmetric buffer,
+        capture it, replay ``replays`` times and compare the last replay with
+        ``expected_last(step)``. Inside the graph the buffer is refilled with
+        rank + step and step is incremented, so every replay reduces different
+        values and a skipped or stale replay is detected. Rank 0 is delayed so
+        replay also exercises the in-kernel peer synchronization."""
+        group_name = dist.group.WORLD.group_name
+        t = symm_mem.empty(numel, dtype=torch.float32, device=self.device)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+        step = torch.zeros((), dtype=torch.float32, device=self.device)
+
+        def fill_and_run() -> torch.Tensor:
+            t.fill_(float(self.rank)).add_(step)
+            step.add_(1.0)
+            if self.rank == 0:
+                torch.cuda._sleep(20_000_000)
+            return run_op(t)
+
+        warmup = fill_and_run()
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        observed = torch.empty_like(warmup)
+        with torch.cuda.graph(graph):
+            observed.copy_(fill_and_run())
+
+        for _ in range(replays):
+            graph.replay()
+        torch.cuda.synchronize()
+
+        # Capture does not execute, so step counts the warm-up plus replays,
+        # and the last replay reduced rank + replays.
+        self.assertEqual(step.item(), 1.0 + replays)
+        self.assertEqual(observed, expected_last(float(replays)))
+        # Every replay must leave the signal pad back at zero.
+        self.assertTrue(symm_mem_hdl.get_signal_pad(self.rank).eq(0).all().item())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_one_shot_all_reduce_cuda_graph(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        self._check_capture_replay(
+            numel,
+            lambda t: torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name),
+            lambda step: torch.full(
+                (numel,), self._sum_of_ranks_plus(step), device=self.device
+            ),
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_one_shot_all_reduce_out_cuda_graph(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        out = torch.empty(numel, dtype=torch.float32, device=self.device)
+        self._check_capture_replay(
+            numel,
+            lambda t: torch.ops.symm_mem.one_shot_all_reduce_out(
+                t, "sum", group_name, out
+            ),
+            lambda step: torch.full(
+                (numel,), self._sum_of_ranks_plus(step), device=self.device
+            ),
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_two_shot_all_reduce_cuda_graph(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        self._check_capture_replay(
+            numel,
+            lambda t: torch.ops.symm_mem.two_shot_all_reduce_(t, "sum", group_name),
+            lambda step: torch.full(
+                (numel,), self._sum_of_ranks_plus(step), device=self.device
+            ),
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    # The out-of-place two-shot kernels are only instantiated for world
+    # sizes 2, 4 and 8 (DISPATCH_WORLD_SIZES_NO_DEFAULT), matching the eager
+    # tests above.
+    @skip_if_lt_x_gpu(4)
+    def test_two_shot_all_reduce_out_cuda_graph(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        out = torch.empty(numel, dtype=torch.float32, device=self.device)
+        self._check_capture_replay(
+            numel,
+            lambda t: torch.ops.symm_mem.two_shot_all_reduce_out(
+                t, "sum", group_name, out
+            ),
+            lambda step: torch.full(
+                (numel,), self._sum_of_ranks_plus(step), device=self.device
+            ),
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    # The out-of-place two-shot kernels are only instantiated for world
+    # sizes 2, 4 and 8 (DISPATCH_WORLD_SIZES_NO_DEFAULT), matching the eager
+    # tests above.
+    @skip_if_lt_x_gpu(4)
+    def test_reduce_scatter_cuda_graph(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        out = torch.empty(
+            numel // self.world_size, dtype=torch.float32, device=self.device
+        )
+        self._check_capture_replay(
+            numel,
+            lambda t: torch.ops.symm_mem.reduce_scatter_out(t, group_name, False, out),
+            lambda step: torch.full(
+                (numel // self.world_size,),
+                self._sum_of_ranks_plus(step),
+                device=self.device,
+            ),
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    def test_multimem_all_reduce_cuda_graph(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        with _enable_multicast_for_test(self, self.device.index):
+            self._check_capture_replay(
+                numel,
+                lambda t: torch.ops.symm_mem.multimem_all_reduce_(t, "sum", group_name),
+                lambda step: torch.full(
+                    (numel,), self._sum_of_ranks_plus(step), device=self.device
+                ),
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    def test_multimem_one_shot_all_reduce_cuda_graph(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        with _enable_multicast_for_test(self, self.device.index):
+            self._check_capture_replay(
+                numel,
+                lambda t: torch.ops.symm_mem.multimem_one_shot_all_reduce(
+                    t, "sum", group_name
+                ),
+                lambda step: torch.full(
+                    (numel,), self._sum_of_ranks_plus(step), device=self.device
+                ),
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_and_signals_cuda_graph(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+        dst = (self.rank + 1) % self.world_size
+        src = (self.rank - 1) % self.world_size
+        counter = torch.zeros((), dtype=torch.float32, device=self.device)
+
+        def run() -> None:
+            symm_mem_hdl.barrier(channel=0)
+            if self.rank == 0:
+                torch.cuda._sleep(20_000_000)
+            # Ring: signal the next rank, then wait for the previous one.
+            symm_mem_hdl.put_signal(dst_rank=dst, channel=1)
+            symm_mem_hdl.wait_signal(src_rank=src, channel=1)
+            counter.add_(1.0)
+
+        run()
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            run()
+
+        replays = 4
+        for _ in range(replays):
+            graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(counter.item(), 1.0 + replays)
+        # Barrier and the put/wait pair must leave every flag back at zero.
+        self.assertTrue(symm_mem_hdl.get_signal_pad(self.rank).eq(0).all().item())
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
