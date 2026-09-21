@@ -124,6 +124,16 @@ _FLATTENED_READ_VAR = sympy.Dummy("flattened_read", integer=True, nonnegative=Tr
 _REINDEXING_FUSION_LAUNCH_OVERHEAD_NS = 1_000
 
 
+@functools.cache
+def _cache_clearers_for_type(node_type: type[Any]) -> tuple[Callable[[Any], None], ...]:
+    clearers = []
+    for cls in node_type.__mro__:
+        for value in cls.__dict__.values():
+            if clear_cache := getattr(value, "clear_cache", None):
+                clearers.append(clear_cache)
+    return tuple(clearers)
+
+
 @dataclasses.dataclass
 class FusionResult:
     should_fuse: bool | None = None
@@ -156,6 +166,75 @@ class PendingFusion:
 
     def get_fusion_nodes(self) -> tuple[BaseSchedulerNode, BaseSchedulerNode]:
         return (self.node1, self.node2)
+
+
+@dataclasses.dataclass(eq=False)
+class _FusionGroup:
+    """Stable identity for a group while the fusion search replaces its node."""
+
+    current_node: BaseSchedulerNode
+    parent: _FusionGroup | None = None
+
+    def root(self) -> _FusionGroup:
+        group = self
+        path: list[_FusionGroup] = []
+        while group.parent is not None:
+            path.append(group)
+            group = group.parent
+        for child in path:
+            child.parent = group
+        return group
+
+
+class _FusionGroupRegistry:
+    """Resolve stale scheduler nodes without rewriting every operation entry."""
+
+    def __init__(self, name_to_node: dict[str, BaseSchedulerNode]) -> None:
+        self.name_to_group: dict[str, _FusionGroup] = {}
+        self.node_to_group: dict[BaseSchedulerNode, _FusionGroup] = {}
+        for name, node in name_to_node.items():
+            group = self.node_to_group.get(node)
+            if group is None:
+                group = _FusionGroup(node)
+                self.node_to_group[node] = group
+            self.name_to_group[name] = group
+
+    def resolve_node(self, node: BaseSchedulerNode) -> BaseSchedulerNode:
+        group = self.node_to_group.get(node)
+        if group is None:
+            group = self.name_to_group[node.get_first_name()]
+            self.node_to_group[node] = group
+        return group.root().current_node
+
+    def resolve_name(self, name: str) -> BaseSchedulerNode:
+        return self.name_to_group[name].root().current_node
+
+    def get(self, name: str) -> BaseSchedulerNode | None:
+        group = self.name_to_group.get(name)
+        return None if group is None else group.root().current_node
+
+    def merge(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        fused_node: BaseSchedulerNode,
+    ) -> None:
+        group1 = self.node_to_group[node1].root()
+        group2 = self.node_to_group[node2].root()
+        if group1 is group2:
+            raise AssertionError("cannot merge a fusion group with itself")
+
+        if fused_node is node2:
+            group1, group2 = group2, group1
+        group2.parent = group1
+        group1.current_node = fused_node
+        self.node_to_group[fused_node] = group1
+
+    def materialize(self) -> dict[str, BaseSchedulerNode]:
+        return {
+            name: group.root().current_node
+            for name, group in self.name_to_group.items()
+        }
 
 
 @dataclasses.dataclass(slots=True)
@@ -2634,12 +2713,14 @@ class BaseSchedulerNode:
     outputs: list[SchedulerBuffer]
     outputs_by_name: dict[str, SchedulerBuffer]
     override_estimated_runtime: float | None = None
+    _read_writes_version: int
     read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
     written: bool = False
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
+        self._read_writes_version = 0
         self.debug_device_str: Callable[[BaseSchedulerNode], list[str]] = (
             lambda *args, **kwargs: []
         )
@@ -2752,9 +2833,14 @@ class BaseSchedulerNode:
 
     def set_read_writes(self, rw: dependencies.ReadWrites) -> None:
         self.read_writes = rw
+        self._read_writes_version += 1
         self.unmet_dependencies = self.read_writes.reads
         self.clear_read_writes_dependent_caches()
         self.prune_deps()
+
+    def clear_cached_methods(self) -> None:
+        for clear_cache in _cache_clearers_for_type(type(self)):
+            clear_cache(self)
 
     @cache_on_self
     def read_write_deps(self) -> OrderedSet[Dep]:
@@ -3603,7 +3689,7 @@ def _prune_redundant_deps(
     node: BaseSchedulerNode,
     name_to_fused_node: dict[str, BaseSchedulerNode],
     name_to_buf: dict[str, SchedulerBuffer],
-) -> None:
+) -> OrderedSet[Dep]:
     """
     Prunes weakdeps intended for mutation ordering
     on an upstream fused node if after fusion there is another dependency
@@ -3642,6 +3728,7 @@ def _prune_redundant_deps(
     if deps_to_prune:
         node.unmet_dependencies = node.unmet_dependencies - deps_to_prune
         node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
+    return deps_to_prune
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
@@ -4718,6 +4805,196 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     has no data dependencies among them and can be executed in parallel.
     """
 
+    _buffer_names: OrderedSet[str]
+    _has_strict_reduction: bool
+    _is_reduction: bool
+    _operation_names: OrderedSet[str]
+    _subnode_read_writes_versions: list[int]
+    _template_node: ir.TemplateBuffer | None
+
+    def get_operation_names(self) -> OrderedSet[str]:
+        return self._operation_names
+
+    def get_buffer_names(self) -> OrderedSet[str]:
+        return self._buffer_names
+
+    def has_strict_reduction(self) -> bool:
+        return self._has_strict_reduction
+
+    def is_reduction(self) -> bool:
+        return self._is_reduction
+
+    def is_template(self) -> bool:
+        return self._template_node is not None
+
+    def get_template_node(self) -> ir.TemplateBuffer | None:
+        return self._template_node
+
+    def _refresh_indexes_from_snodes(self) -> None:
+        self._subnode_read_names = []
+        self._readers_by_name: dict[str, dict[int, BaseSchedulerNode]] = defaultdict(
+            dict
+        )
+        self.name_to_node = {}
+        for index, node in enumerate(self.snodes):
+            read_names = OrderedSet(read.name for read in node.read_writes.reads)
+            self._subnode_read_names.append(read_names)
+            for name in read_names:
+                self._readers_by_name[name][index] = node
+            for name in node.get_operation_names():
+                self.name_to_node[name] = node
+        self.read_to_node = {
+            name: readers[max(readers)]
+            for name, readers in self._readers_by_name.items()
+        }
+
+        self._unmet_dependencies_by_name: dict[str, OrderedSet[Dep]] = defaultdict(
+            OrderedSet
+        )
+        for dep in self.unmet_dependencies:
+            self._unmet_dependencies_by_name[dep.name].add(dep)
+
+        self._has_strict_reduction = any(
+            node.has_strict_reduction() for node in self.snodes
+        )
+        self._is_reduction = any(node.is_reduction() for node in self.snodes)
+        self._template_node = next(
+            (node.get_template_node() for node in self.snodes if node.is_template()),
+            None,
+        )
+        self._subnode_read_writes_versions = [
+            node._read_writes_version for node in self.snodes
+        ]
+
+    def _rebuild_metadata_from_snodes(self) -> None:
+        self._operation_names = OrderedSet.union(
+            *[node.get_operation_names() for node in self.snodes]
+        )
+        self._buffer_names = OrderedSet.union(
+            *[node.get_buffer_names() for node in self.snodes]
+        )
+        init_group_node(self, self.scheduler, self.snodes)
+        self._refresh_indexes_from_snodes()
+        self.clear_cached_methods()
+
+    def _ensure_metadata_is_current(
+        self,
+        replacements: Sequence[tuple[int, BaseSchedulerNode, BaseSchedulerNode]],
+    ) -> None:
+        if any(
+            old_node._read_writes_version != self._subnode_read_writes_versions[index]
+            for index, old_node, _ in replacements
+        ):
+            self._rebuild_metadata_from_snodes()
+
+    def _discard_unmet_dependency(self, dep: Dep) -> None:
+        self.unmet_dependencies.discard(dep)
+        deps = self._unmet_dependencies_by_name.get(dep.name)
+        if deps is None:
+            return
+        deps.discard(dep)
+        if not deps:
+            del self._unmet_dependencies_by_name[dep.name]
+
+    def _replace_subnodes(
+        self,
+        replacements: Sequence[tuple[int, BaseSchedulerNode, BaseSchedulerNode]],
+    ) -> None:
+        self._ensure_metadata_is_current(replacements)
+
+        new_snodes = list(self.snodes)
+        for index, old_node, new_node in replacements:
+            if new_snodes[index] is not old_node:
+                raise AssertionError("foreach fusion plan no longer matches the group")
+            if not old_node.get_operation_names() <= new_node.get_operation_names():
+                raise AssertionError("foreach fusion cannot remove operations")
+            if not old_node.get_buffer_names() <= new_node.get_buffer_names():
+                raise AssertionError("foreach fusion cannot remove buffers")
+            new_snodes[index] = new_node
+
+        new_nodes = []
+        for _, _, new_node in replacements:
+            new_nodes.append(new_node)
+
+        self.snodes = new_snodes
+        self.users = []
+        self.per_subkernel_blocks = False
+
+        for node in new_nodes:
+            new_buffer_names = node.get_buffer_names()
+            self._operation_names.update(node.get_operation_names())
+            self._buffer_names.update(new_buffer_names)
+            self.outputs_by_name.update(node.outputs_by_name)
+            self.ancestors.update(node.ancestors)
+
+            reads = self.read_writes.reads
+            writes = self.read_writes.writes
+            new_writes = node.read_writes.writes
+            reads.difference_update(new_writes)
+            reads.update(node.read_writes.reads - writes - new_writes)
+            writes.update(new_writes)
+            self.read_writes.index_exprs.update(node.read_writes.index_exprs)
+
+            for name in new_buffer_names:
+                for dep in tuple(self._unmet_dependencies_by_name.get(name, ())):
+                    self._discard_unmet_dependency(dep)
+            for dep in new_writes:
+                self._discard_unmet_dependency(dep)
+            for dep in node.unmet_dependencies:
+                if dep.name not in self._buffer_names and dep not in writes:
+                    self.unmet_dependencies.add(dep)
+                    self._unmet_dependencies_by_name[dep.name].add(dep)
+
+            for name in node.get_operation_names():
+                self.name_to_node[name] = node
+
+        changed_read_names = OrderedSet[str]()
+        for index, _, new_node in replacements:
+            old_read_names = self._subnode_read_names[index]
+            new_read_names = OrderedSet(dep.name for dep in new_node.read_writes.reads)
+            changed_read_names.update(old_read_names)
+            changed_read_names.update(new_read_names)
+            for name in old_read_names - new_read_names:
+                readers = self._readers_by_name[name]
+                del readers[index]
+                if not readers:
+                    del self._readers_by_name[name]
+            for name in new_read_names:
+                self._readers_by_name[name][index] = new_node
+            self._subnode_read_names[index] = new_read_names
+            self._subnode_read_writes_versions[index] = new_node._read_writes_version
+
+        for name in changed_read_names:
+            readers = self._readers_by_name.get(name)
+            if readers is None:
+                self.read_to_node.pop(name, None)
+            else:
+                self.read_to_node[name] = readers[max(readers)]
+
+        self.min_order = min(self.min_order, *(node.min_order for node in new_nodes))
+        self.max_order = max(self.max_order, *(node.max_order for node in new_nodes))
+        self.min_input_distance = min(
+            self.min_input_distance,
+            *(node.min_input_distance for node in new_nodes),
+        )
+        self.max_input_distance = max(
+            self.max_input_distance,
+            *(node.max_input_distance for node in new_nodes),
+        )
+        self._has_strict_reduction = self._has_strict_reduction or any(
+            node.has_strict_reduction() for node in new_nodes
+        )
+        self._is_reduction = self._is_reduction or any(
+            node.is_reduction() for node in new_nodes
+        )
+        if self._template_node is None:
+            self._template_node = next(
+                (node.get_template_node() for node in new_nodes if node.is_template()),
+                None,
+            )
+        self._read_writes_version += 1
+        self.clear_cached_methods()
+
     def get_consumer_subnode_for(
         self, producer: BaseSchedulerNode
     ) -> BaseSchedulerNode | None:
@@ -4799,143 +5076,57 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     ) -> ForeachKernelSchedulerNode:
         if not (producer.is_foreach() or consumer.is_foreach()):
             raise AssertionError("expected producer or consumer to be foreach")
-        if producer.is_foreach():
-            producer = typing.cast(ForeachKernelSchedulerNode, producer)
-            use_custom_partition_algo = producer.use_custom_partition_algo
-            enable_autotune = producer.enable_autotune
-        else:
-            consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
-            use_custom_partition_algo = consumer.use_custom_partition_algo
-            enable_autotune = consumer.enable_autotune
-        prev_node_1 = None
-        prev_node_2 = None
-        fused_nodes: list[BaseSchedulerNode]
         if producer.is_foreach() and consumer.is_foreach():
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
             consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
-            fused_nodes = [
-                FusedSchedulerNode.fuse(l, r)
-                for l, r in zip(producer.snodes, consumer.snodes)
+            replacements = [
+                (index, left, FusedSchedulerNode.fuse(left, right))
+                for index, (left, right) in enumerate(
+                    zip(producer.snodes, consumer.snodes, strict=True)
+                )
             ]
+            producer._replace_subnodes(replacements)
+            return producer
         elif producer.is_foreach():
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
             producer_subnode = producer.get_producer_subnode_for(consumer)
-            fused_nodes = []
-            prev_node_1 = producer
-            prev_node_2 = None
-            for node in producer.snodes:
-                if node is producer_subnode:
-                    new_node = FusedSchedulerNode.fuse(node, consumer)
-                    prev_node_2 = new_node
-                    fused_nodes.append(new_node)
-                else:
-                    fused_nodes.append(node)
+            if producer_subnode is None:
+                raise AssertionError("expected a producer foreach subnode")
+            index = producer.snodes.index(producer_subnode)
+            new_node = FusedSchedulerNode.fuse(producer_subnode, consumer)
+            producer._replace_subnodes([(index, producer_subnode, new_node)])
+            return producer
 
         elif consumer.is_foreach():
             consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
             consumer_subnode = consumer.get_consumer_subnode_for(producer)
-            fused_nodes = []
-            prev_node_1 = consumer
-            prev_node_2 = None
-
-            for node in consumer.snodes:
-                if node is consumer_subnode:
-                    new_node = FusedSchedulerNode.fuse(producer, node)
-                    prev_node_2 = new_node
-                    fused_nodes.append(new_node)
-                else:
-                    fused_nodes.append(node)
+            if consumer_subnode is None:
+                raise AssertionError("expected a consumer foreach subnode")
+            index = consumer.snodes.index(consumer_subnode)
+            new_node = FusedSchedulerNode.fuse(producer, consumer_subnode)
+            consumer._replace_subnodes([(index, consumer_subnode, new_node)])
+            return consumer
         else:
             raise AssertionError(
                 "At least one node passed to ForeachKernelSchedulerNode.fuse should be a foreach node"
             )
-
-        return cls(
-            producer.scheduler,
-            fused_nodes,
-            use_custom_partition_algo=use_custom_partition_algo,
-            prev_node_1=prev_node_1,
-            prev_node_2=prev_node_2,
-            enable_autotune=enable_autotune,
-        )
 
     def __init__(
         self,
         scheduler: Scheduler,
         snodes: list[BaseSchedulerNode],
         use_custom_partition_algo: bool,
-        prev_node_1: BaseSchedulerNode | None = None,
-        prev_node_2: BaseSchedulerNode | None = None,
         enable_autotune: bool = False,
         per_subkernel_blocks: bool = False,
     ) -> None:
-        self.read_to_node = {}
-        self.name_to_node = {}
-
-        if prev_node_1 is None or prev_node_2 is None:
-            super().__init__(scheduler, snodes)
-
-            for node in snodes:
-                for read in node.read_writes.reads:
-                    self.read_to_node[read.name] = node
-
-                for name in node.get_operation_names():
-                    self.name_to_node[name] = node
-        else:
-            self.scheduler = scheduler
-            self.snodes = snodes
-            self.node = None
-            self.users: list[NodeUser] = []
-
-            self.set_read_writes(
-                dependencies.ReadWrites.merge_list(
-                    [prev_node_1.read_writes, prev_node_2.read_writes]
-                )
-            )
-
-            self.unmet_dependencies = (
-                OrderedSet(
-                    dep
-                    for dep in OrderedSet.union(
-                        prev_node_1.unmet_dependencies, prev_node_2.unmet_dependencies
-                    )
-                    if dep.name not in self.get_buffer_names()
-                )
-                - self.read_writes.writes
-            )
-
-            self.min_order = min([prev_node_1.min_order, prev_node_2.min_order])
-            self.max_order = max([prev_node_1.max_order, prev_node_2.max_order])
-            self.min_input_distance = min(
-                prev_node_1.min_input_distance, prev_node_2.min_input_distance
-            )
-            self.max_input_distance = max(
-                prev_node_1.max_input_distance, prev_node_2.max_input_distance
-            )
-
-            if prev_node_1.is_foreach():
-                if not isinstance(prev_node_1, ForeachKernelSchedulerNode):
-                    raise AssertionError(
-                        "expected prev_node_1 to be a ForeachKernelSchedulerNode"
-                    )
-                foreach_node, other_node = prev_node_1, prev_node_2
-            else:
-                if not isinstance(prev_node_2, ForeachKernelSchedulerNode):
-                    raise AssertionError(
-                        "expected prev_node_2 to be a ForeachKernelSchedulerNode"
-                    )
-                foreach_node, other_node = prev_node_2, prev_node_1
-
-            self.ancestors = foreach_node.ancestors
-            self.ancestors.update(other_node.ancestors)
-
-            self.name_to_node = foreach_node.name_to_node
-            for name in other_node.get_operation_names():
-                self.name_to_node[name] = other_node
-
-            self.outputs_by_name: dict[str, SchedulerBuffer] = {
-                k: v for snode in self.snodes for k, v in snode.outputs_by_name.items()
-            }
+        self._operation_names = OrderedSet.union(
+            *[node.get_operation_names() for node in snodes]
+        )
+        self._buffer_names = OrderedSet.union(
+            *[node.get_buffer_names() for node in snodes]
+        )
+        super().__init__(scheduler, snodes)
+        self._refresh_indexes_from_snodes()
 
         self.use_custom_partition_algo = use_custom_partition_algo
         device = snodes[0].get_device()
@@ -4945,6 +5136,14 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.origins = OrderedSet[torch.fx.Node]()
         self.enable_autotune = enable_autotune
         self.per_subkernel_blocks = per_subkernel_blocks
+
+    def reorder_loops_by_dep_pair(
+        self, self_dep: MemoryDep, other_dep: MemoryDep
+    ) -> bool:
+        reordered = super().reorder_loops_by_dep_pair(self_dep, other_dep)
+        if reordered:
+            self._refresh_indexes_from_snodes()
+        return reordered
 
     @classmethod
     def combinable_nodes(
@@ -5200,7 +5399,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def prune_redundant_deps(
         self, name_to_fused_node: dict[str, BaseSchedulerNode]
     ) -> None:
-        _prune_redundant_deps(self, name_to_fused_node, self.scheduler.name_to_buf)
+        deps_to_prune = _prune_redundant_deps(
+            self, name_to_fused_node, self.scheduler.name_to_buf
+        )
+        for dep in deps_to_prune:
+            self._discard_unmet_dependency(dep)
 
         for node in self.snodes:
             node.prune_redundant_deps(name_to_fused_node)
@@ -5689,6 +5892,8 @@ class _LoopStateSnapshot:
         for node, group in self.fused_node_groups.items():
             node.group = group
             refresh_group_node_dependencies(node)
+            if isinstance(node, ForeachKernelSchedulerNode):
+                node._refresh_indexes_from_snodes()
 
 
 @dataclasses.dataclass
@@ -5769,6 +5974,8 @@ class Scheduler:
     optimizations such as fusion, reorder, and graph partition.
     """
 
+    _active_fusion_groups: _FusionGroupRegistry | None = None
+
     def __init__(self, nodes: list[ir.Operation]) -> None:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
@@ -5817,6 +6024,7 @@ class Scheduler:
             buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
         }
         self.name_to_fused_node: dict[str, BaseSchedulerNode] = self.name_to_node.copy()
+        self._active_fusion_groups = None
 
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
@@ -6763,7 +6971,7 @@ class Scheduler:
                 f"get_unmet_dep_nodes is not implemented for {type(snode)}."
             )
         unmet_dep_ops = (self.name_to_buf[dep].defining_op_name() for dep in unmet_deps)
-        return list(OrderedSet(self.name_to_fused_node[n] for n in unmet_dep_ops))
+        return list(OrderedSet(self.get_fused_node_by_name(n) for n in unmet_dep_ops))
 
     def _topological_sort_nodes(self) -> list[list[BaseSchedulerNode]]:
         """
@@ -7768,7 +7976,14 @@ class Scheduler:
 
     def get_fused_node(self, node: BaseSchedulerNode) -> BaseSchedulerNode:
         "Look up the node in Scheduler name_to_fused_node"
+        if (groups := self._active_fusion_groups) is not None:
+            return groups.resolve_node(node)
         return self.name_to_fused_node[node.get_first_name()]
+
+    def get_fused_node_by_name(self, name: str) -> BaseSchedulerNode:
+        if (groups := self._active_fusion_groups) is not None:
+            return groups.resolve_name(name)
+        return self.name_to_fused_node[name]
 
     def fuse_two_nodes(
         self,
@@ -7787,7 +8002,12 @@ class Scheduler:
         fused_nodes.remove(node1)
         fused_nodes.remove(node2)
         fused_nodes.add(node3)
-        self.name_to_fused_node.update({n.get_name(): node3 for n in node3.get_nodes()})
+        if (groups := self._active_fusion_groups) is not None:
+            groups.merge(node1, node2, node3)
+        else:
+            self.name_to_fused_node.update(
+                {n.get_name(): node3 for n in node3.get_nodes()}
+            )
 
         # Propagate stream assignment to the fused node so that subsequent
         # fusion rounds still respect stream boundaries.
@@ -8040,6 +8260,10 @@ class Scheduler:
             - self.score_fusion(): assigns priority to a given fusion
         """
         self.prune_redundant_deps(nodes)
+        if self._active_fusion_groups is not None:
+            raise AssertionError("fusion group registry is already active")
+        groups = _FusionGroupRegistry(self.name_to_fused_node)
+        self._active_fusion_groups = groups
         fused_nodes = OrderedSet(nodes)
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
@@ -8094,6 +8318,8 @@ class Scheduler:
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
+        self.name_to_fused_node = groups.materialize()
+        self._active_fusion_groups = None
         return nodes
 
     def _combo_kernel_context_key(
@@ -8715,7 +8941,7 @@ class Scheduler:
                 else:
                     # continue DFS of new ancestors introduced by the fusion
                     return bool(combined_names & node.ancestors) or any(
-                        found_path(self.name_to_fused_node[n])
+                        found_path(self.get_fused_node_by_name(n))
                         for n in node.ancestors - combined_ancestors
                     )
             return False
@@ -8728,7 +8954,9 @@ class Scheduler:
         combined_ancestors = (
             node1.ancestors._dict.keys() | node2.ancestors._dict.keys()
         ) - combined_names
-        cycle = any(found_path(self.name_to_fused_node[n]) for n in combined_ancestors)
+        cycle = any(
+            found_path(self.get_fused_node_by_name(n)) for n in combined_ancestors
+        )
         if cycle:
             WhyNoFuse(node1, node2)("will create cycle")
         return cycle
@@ -10412,7 +10640,7 @@ class Scheduler:
         node1_op_names = node1.get_operation_names()
         for name in remaining_deps:
             op_name = self.name_to_buf[name].defining_op_name()
-            if node1_op_names & self.name_to_fused_node[op_name].ancestors:
+            if node1_op_names & self.get_fused_node_by_name(op_name).ancestors:
                 why("intermediate nodes between node1 & node2")
                 return False
 
@@ -10951,7 +11179,12 @@ class Scheduler:
 
             for node in (node1, node2):
                 for dep in node.read_writes.reads:
-                    producer = self.name_to_fused_node.get(dep.name)
+                    groups = self._active_fusion_groups
+                    producer = (
+                        groups.get(dep.name)
+                        if groups is not None
+                        else self.name_to_fused_node.get(dep.name)
+                    )
                     if (
                         producer is not None
                         and producer.is_template()

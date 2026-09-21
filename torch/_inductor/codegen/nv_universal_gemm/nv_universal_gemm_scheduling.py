@@ -713,7 +713,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         if scheduler is None:
             return 2
         for read in node1.read_writes.reads:
-            producer = scheduler.name_to_fused_node.get(read.name)
+            producer = (
+                scheduler.get_fused_node_by_name(read.name)
+                if read.name in scheduler.name_to_fused_node
+                else None
+            )
             try:
                 producer_buffer = V.graph.get_buffer(read.name)
             except RuntimeError:
