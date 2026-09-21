@@ -2186,7 +2186,6 @@ torch.{device_type}.synchronize()
                         x, (2, 2, 2), output_size=output_size, _random_samples=samples
                     )
 
-    @expectedFailureMPS  # Not implemented
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float)

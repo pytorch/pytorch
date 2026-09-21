@@ -5335,6 +5335,8 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_size=2,
                 return_indices=return_indices,
+                _random_samples=make_tensor((*input_shape[:2], 2), device=device, dtype=dtype,
+                                            low=0, high=1, requires_grad=False),
             )
 
             # test case passing a tuple output size
@@ -5343,6 +5345,8 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_size=(2, 3),
                 return_indices=return_indices,
+                _random_samples=make_tensor((*input_shape[:2], 2), device=device, dtype=dtype,
+                                            low=0, high=1, requires_grad=False),
             )
 
             # test case passing an output ratio
@@ -5351,6 +5355,8 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_ratio=(0.5, 0.5),
                 return_indices=return_indices,
+                _random_samples=make_tensor((*input_shape[:2], 2), device=device, dtype=dtype,
+                                            low=0, high=1, requires_grad=False),
             )
 
     yield SampleInput(
@@ -5358,7 +5364,7 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
         (1, 1),
         output_ratio=(0.5, 0.5),
         return_indices=True,
-        _random_samples=make_tensor((1, 1, 2), device=device, dtype=dtype, requires_grad=False),
+        _random_samples=make_tensor((1, 1, 2), device=device, dtype=dtype, low=0, high=1, requires_grad=False),
     )
 
 def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
@@ -5382,6 +5388,8 @@ def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_size=2,
                 return_indices=return_indices,
+                _random_samples=make_tensor((*input_shape[:2], 3), device=device, dtype=dtype,
+                                            low=0, high=1, requires_grad=False),
             )
 
             # test case passing a tuple output size
@@ -5390,6 +5398,8 @@ def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_size=(2, 3, 2),
                 return_indices=return_indices,
+                _random_samples=make_tensor((*input_shape[:2], 3), device=device, dtype=dtype,
+                                            low=0, high=1, requires_grad=False),
             )
 
             # test case passing an output ratio
@@ -5398,6 +5408,8 @@ def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_ratio=(0.5, 0.5, 0.5),
                 return_indices=return_indices,
+                _random_samples=make_tensor((*input_shape[:2], 3), device=device, dtype=dtype,
+                                            low=0, high=1, requires_grad=False),
             )
 
 def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
@@ -16820,8 +16832,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')),
            skips=(
-               # Exception: The operator 'aten::fractional_max_pool2d.output' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),)),
     OpInfo('nn.functional.fractional_max_pool3d',
            supports_autograd=True,
@@ -16845,8 +16855,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')),
            skips=(
-               # Exception: The operator 'aten::fractional_max_pool3d.output' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),)),
     OpInfo('nn.functional.max_pool1d',
            aten_name='max_pool1d',
