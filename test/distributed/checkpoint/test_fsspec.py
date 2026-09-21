@@ -1,10 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import shutil
-import tempfile
-from collections.abc import Callable
-from functools import wraps
-from typing import Any
 from unittest.mock import patch
 
 import fsspec
@@ -32,43 +27,11 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 BACKEND = torch.distributed.get_default_backend_for_device(device_type)
-
-
-def with_temp_dir(
-    func: Callable | None = None,
-) -> Callable | None:
-    """
-    Wrapper to initialize temp directory for distributed checkpoint.
-    """
-    if func is None:
-        raise AssertionError("Expected func to not be None")
-
-    @wraps(func)
-    def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
-        # Only create temp_dir when rank is 0 (or no pg)
-        if not dist.is_initialized() or dist.get_rank() == 0:
-            temp_dir = tempfile.mkdtemp()
-            print(f"Using temp directory: {temp_dir}")
-        else:
-            temp_dir = ""
-        object_list = [temp_dir]
-
-        # Broadcast temp_dir to all the other ranks
-        if dist.is_initialized():
-            dist.broadcast_object_list(object_list)
-        self.temp_dir = object_list[0]
-
-        try:
-            func(self, *args, **kwargs)
-        finally:
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    return wrapper
 
 
 class MyTestModule(torch.nn.Module):
