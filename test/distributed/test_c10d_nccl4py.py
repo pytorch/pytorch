@@ -7,6 +7,7 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
@@ -55,7 +56,232 @@ class TestNCCL4PyBackendUnit(TestCase):
 
 
 @skip_unless_nccl4py
-class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
+@unittest.skipIf(torch.cuda.device_count() < 2, "2 CUDA GPUs required")
+class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
+    world_size = 2
+    timeout = dist.default_pg_timeout
+
+    @classmethod
+    def backend_str(cls):
+        dist.Backend.register_backend(
+            "nccl4py", _create_nccl4py_backend, devices=["cuda"]
+        )
+        return "nccl4py"
+
+    @skip_if_lt_x_gpu(2)
+    def test_allreduce(self):
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        dist.all_reduce(t)
+        # SUM of [1,1,1,1] and [2,2,2,2] = [3,3,3,3]
+        expected = torch.full((4,), 3.0, device=device)
+        torch.cuda.synchronize(device)
+        self.assertEqual(t, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_allreduce_async(self):
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        work = dist.all_reduce(t, async_op=True)
+        self.assertIsNotNone(work)
+        work.wait()
+        expected = torch.full((4,), 3.0, device=device)
+        torch.cuda.synchronize(device)
+        self.assertEqual(t, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast(self):
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        dist.broadcast(t, src=0)
+        expected = torch.ones(4, device=device)
+        torch.cuda.synchronize(device)
+        self.assertEqual(t, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce(self):
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        dist.reduce(t, dst=0)
+        torch.cuda.synchronize(device)
+        if self.rank == 0:
+            expected = torch.full((4,), 3.0, device=device)
+            self.assertEqual(t, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_allgather(self):
+        device = torch.device(f"cuda:{self.rank}")
+        inp = torch.ones(4, device=device) * (self.rank + 1)
+        out = [torch.zeros(4, device=device) for _ in range(self.world_size)]
+        dist.all_gather(out, inp)
+        torch.cuda.synchronize(device)
+        self.assertEqual(out[0], torch.ones(4, device=device))
+        self.assertEqual(out[1], torch.full((4,), 2.0, device=device))
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_into_tensor(self):
+        device = torch.device(f"cuda:{self.rank}")
+        inp = torch.ones(4, device=device) * (self.rank + 1)
+        out = torch.zeros(8, device=device)
+        dist.all_gather_into_tensor(out, inp)
+        torch.cuda.synchronize(device)
+        expected = torch.cat(
+            [torch.ones(4, device=device), torch.full((4,), 2.0, device=device)]
+        )
+        self.assertEqual(out, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_tensor(self):
+        device = torch.device(f"cuda:{self.rank}")
+        inp = torch.ones(8, device=device) * (self.rank + 1)
+        out = torch.zeros(4, device=device)
+        dist.reduce_scatter_tensor(out, inp)
+        torch.cuda.synchronize(device)
+        # SUM: each rank gets chunk of (1+2)=3
+        expected = torch.full((4,), 3.0, device=device)
+        self.assertEqual(out, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_scatter(self):
+        device = torch.device(f"cuda:{self.rank}")
+        out = torch.zeros(4, device=device)
+        if self.rank == 0:
+            inp = [
+                torch.ones(4, device=device),
+                torch.full((4,), 2.0, device=device),
+            ]
+            dist.scatter(out, inp, src=0)
+        else:
+            dist.scatter(out, src=0)
+        torch.cuda.synchronize(device)
+        expected = torch.full((4,), float(self.rank + 1), device=device)
+        self.assertEqual(out, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_gather(self):
+        device = torch.device(f"cuda:{self.rank}")
+        inp = torch.ones(4, device=device) * (self.rank + 1)
+        if self.rank == 0:
+            out = [torch.zeros(4, device=device) for _ in range(self.world_size)]
+            dist.gather(inp, out, dst=0)
+        else:
+            dist.gather(inp, dst=0)
+        torch.cuda.synchronize(device)
+        if self.rank == 0:
+            self.assertEqual(out[0], torch.ones(4, device=device))
+            self.assertEqual(out[1], torch.full((4,), 2.0, device=device))
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_single(self):
+        device = torch.device(f"cuda:{self.rank}")
+        inp = torch.ones(8, device=device) * (self.rank + 1)
+        out = torch.zeros(8, device=device)
+        dist.all_to_all_single(out, inp)
+        torch.cuda.synchronize(device)
+        expected = torch.cat(
+            [torch.ones(4, device=device), torch.full((4,), 2.0, device=device)]
+        )
+        self.assertEqual(out, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_send_recv(self):
+        device = torch.device(f"cuda:{self.rank}")
+        peer = (self.rank + 1) % self.world_size
+        send_t = torch.ones(4, device=device) * (self.rank + 1)
+        recv_t = torch.zeros(4, device=device)
+
+        works = dist.batch_isend_irecv(
+            [
+                dist.P2POp(dist.isend, send_t, peer),
+                dist.P2POp(dist.irecv, recv_t, peer),
+            ]
+        )
+        for w in works:
+            w.wait()
+        torch.cuda.synchronize(device)
+        expected = torch.full((4,), float(peer + 1), device=device)
+        self.assertEqual(recv_t, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_barrier(self):
+        dist.barrier()
+
+    @skip_if_lt_x_gpu(2)
+    def test_alltoall(self):
+        device = torch.device(f"cuda:{self.rank}")
+        inp = [
+            torch.full((4,), float(self.rank + 1), device=device)
+            for _ in range(self.world_size)
+        ]
+        out = [torch.zeros(4, device=device) for _ in range(self.world_size)]
+        dist.all_to_all(out, inp)
+        torch.cuda.synchronize(device)
+        for i in range(self.world_size):
+            self.assertEqual(out[i], torch.full((4,), float(i + 1), device=device))
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter(self):
+        device = torch.device(f"cuda:{self.rank}")
+        inp = [
+            torch.ones(4, device=device) * (self.rank + 1)
+            for _ in range(self.world_size)
+        ]
+        out = torch.zeros(4, device=device)
+        dist.reduce_scatter(out, inp)
+        torch.cuda.synchronize(device)
+        expected = torch.full((4,), 3.0, device=device)
+        self.assertEqual(out, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_single_uneven(self):
+        device = torch.device(f"cuda:{self.rank}")
+        if self.rank == 0:
+            inp = torch.tensor([1.0, 2.0, 3.0], device=device)
+            out = torch.zeros(2, device=device)
+            in_splits = [1, 2]
+            out_splits = [1, 1]
+        else:
+            inp = torch.tensor([4.0, 5.0, 6.0], device=device)
+            out = torch.zeros(4, device=device)
+            in_splits = [1, 2]
+            out_splits = [2, 2]
+        dist.all_to_all_single(out, inp, out_splits, in_splits)
+        torch.cuda.synchronize(device)
+        if self.rank == 0:
+            self.assertEqual(out, torch.tensor([1.0, 4.0], device=device))
+        else:
+            self.assertEqual(out, torch.tensor([2.0, 3.0, 5.0, 6.0], device=device))
+
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing(self):
+        device = torch.device(f"cuda:{self.rank}")
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device(device))
+        t1 = torch.ones(4, device=device) * (self.rank + 1)
+        t2 = torch.ones(4, device=device) * (self.rank + 1) * 10
+        backend.start_coalescing()
+        backend.allreduce([t1], dist.AllreduceOptions())
+        backend.allreduce([t2], dist.AllreduceOptions())
+        work = backend.end_coalescing()
+        work.wait()
+        torch.cuda.synchronize(device)
+        self.assertEqual(t1, torch.full((4,), 3.0, device=device))
+        self.assertEqual(t2, torch.full((4,), 30.0, device=device))
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_future(self):
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        work = dist.all_reduce(t, async_op=True)
+        fut = work.get_future()
+        fut.wait()
+        torch.cuda.synchronize(device)
+        expected = torch.full((4,), 3.0, device=device)
+        self.assertEqual(t, expected)
+
+
+@skip_unless_nccl4py
+class TestNCCL4PyBackendLifecycle(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -86,238 +312,6 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
 
     def _destroy_pg(self):
         dist.destroy_process_group()
-
-    @skip_if_lt_x_gpu(2)
-    def test_allreduce(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        t = torch.ones(4, device=device) * (self.rank + 1)
-        dist.all_reduce(t)
-        # SUM of [1,1,1,1] and [2,2,2,2] = [3,3,3,3]
-        expected = torch.full((4,), 3.0, device=device)
-        torch.cuda.synchronize(device)
-        self.assertEqual(t, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_allreduce_async(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        t = torch.ones(4, device=device) * (self.rank + 1)
-        work = dist.all_reduce(t, async_op=True)
-        self.assertIsNotNone(work)
-        work.wait()
-        expected = torch.full((4,), 3.0, device=device)
-        torch.cuda.synchronize(device)
-        self.assertEqual(t, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_broadcast(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        t = torch.ones(4, device=device) * (self.rank + 1)
-        dist.broadcast(t, src=0)
-        expected = torch.ones(4, device=device)
-        torch.cuda.synchronize(device)
-        self.assertEqual(t, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_reduce(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        t = torch.ones(4, device=device) * (self.rank + 1)
-        dist.reduce(t, dst=0)
-        torch.cuda.synchronize(device)
-        if self.rank == 0:
-            expected = torch.full((4,), 3.0, device=device)
-            self.assertEqual(t, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_allgather(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        inp = torch.ones(4, device=device) * (self.rank + 1)
-        out = [torch.zeros(4, device=device) for _ in range(self.world_size)]
-        dist.all_gather(out, inp)
-        torch.cuda.synchronize(device)
-        self.assertEqual(out[0], torch.ones(4, device=device))
-        self.assertEqual(out[1], torch.full((4,), 2.0, device=device))
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_all_gather_into_tensor(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        inp = torch.ones(4, device=device) * (self.rank + 1)
-        out = torch.zeros(8, device=device)
-        dist.all_gather_into_tensor(out, inp)
-        torch.cuda.synchronize(device)
-        expected = torch.cat(
-            [torch.ones(4, device=device), torch.full((4,), 2.0, device=device)]
-        )
-        self.assertEqual(out, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_tensor(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        inp = torch.ones(8, device=device) * (self.rank + 1)
-        out = torch.zeros(4, device=device)
-        dist.reduce_scatter_tensor(out, inp)
-        torch.cuda.synchronize(device)
-        # SUM: each rank gets chunk of (1+2)=3
-        expected = torch.full((4,), 3.0, device=device)
-        self.assertEqual(out, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_scatter(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        out = torch.zeros(4, device=device)
-        if self.rank == 0:
-            inp = [
-                torch.ones(4, device=device),
-                torch.full((4,), 2.0, device=device),
-            ]
-            dist.scatter(out, inp, src=0)
-        else:
-            dist.scatter(out, src=0)
-        torch.cuda.synchronize(device)
-        expected = torch.full((4,), float(self.rank + 1), device=device)
-        self.assertEqual(out, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_gather(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        inp = torch.ones(4, device=device) * (self.rank + 1)
-        if self.rank == 0:
-            out = [torch.zeros(4, device=device) for _ in range(self.world_size)]
-            dist.gather(inp, out, dst=0)
-        else:
-            dist.gather(inp, dst=0)
-        torch.cuda.synchronize(device)
-        if self.rank == 0:
-            self.assertEqual(out[0], torch.ones(4, device=device))
-            self.assertEqual(out[1], torch.full((4,), 2.0, device=device))
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_all_to_all_single(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        inp = torch.ones(8, device=device) * (self.rank + 1)
-        out = torch.zeros(8, device=device)
-        dist.all_to_all_single(out, inp)
-        torch.cuda.synchronize(device)
-        expected = torch.cat(
-            [torch.ones(4, device=device), torch.full((4,), 2.0, device=device)]
-        )
-        self.assertEqual(out, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_send_recv(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        peer = (self.rank + 1) % self.world_size
-        send_t = torch.ones(4, device=device) * (self.rank + 1)
-        recv_t = torch.zeros(4, device=device)
-
-        works = dist.batch_isend_irecv(
-            [
-                dist.P2POp(dist.isend, send_t, peer),
-                dist.P2POp(dist.irecv, recv_t, peer),
-            ]
-        )
-        for w in works:
-            w.wait()
-        torch.cuda.synchronize(device)
-        expected = torch.full((4,), float(peer + 1), device=device)
-        self.assertEqual(recv_t, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_barrier(self):
-        self._init_pg()
-        dist.barrier()
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_alltoall(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        inp = [
-            torch.full((4,), float(self.rank + 1), device=device)
-            for _ in range(self.world_size)
-        ]
-        out = [torch.zeros(4, device=device) for _ in range(self.world_size)]
-        dist.all_to_all(out, inp)
-        torch.cuda.synchronize(device)
-        for i in range(self.world_size):
-            self.assertEqual(out[i], torch.full((4,), float(i + 1), device=device))
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        inp = [
-            torch.ones(4, device=device) * (self.rank + 1)
-            for _ in range(self.world_size)
-        ]
-        out = torch.zeros(4, device=device)
-        dist.reduce_scatter(out, inp)
-        torch.cuda.synchronize(device)
-        expected = torch.full((4,), 3.0, device=device)
-        self.assertEqual(out, expected)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_all_to_all_single_uneven(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        if self.rank == 0:
-            inp = torch.tensor([1.0, 2.0, 3.0], device=device)
-            out = torch.zeros(2, device=device)
-            in_splits = [1, 2]
-            out_splits = [1, 1]
-        else:
-            inp = torch.tensor([4.0, 5.0, 6.0], device=device)
-            out = torch.zeros(4, device=device)
-            in_splits = [1, 2]
-            out_splits = [2, 2]
-        dist.all_to_all_single(out, inp, out_splits, in_splits)
-        torch.cuda.synchronize(device)
-        if self.rank == 0:
-            self.assertEqual(out, torch.tensor([1.0, 4.0], device=device))
-        else:
-            self.assertEqual(out, torch.tensor([2.0, 3.0, 5.0, 6.0], device=device))
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_coalescing(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        pg = dist.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device(device))
-        t1 = torch.ones(4, device=device) * (self.rank + 1)
-        t2 = torch.ones(4, device=device) * (self.rank + 1) * 10
-        backend.start_coalescing()
-        backend.allreduce([t1], dist.AllreduceOptions())
-        backend.allreduce([t2], dist.AllreduceOptions())
-        work = backend.end_coalescing()
-        work.wait()
-        torch.cuda.synchronize(device)
-        self.assertEqual(t1, torch.full((4,), 3.0, device=device))
-        self.assertEqual(t2, torch.full((4,), 30.0, device=device))
-        self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
     def test_split(self):
@@ -391,19 +385,6 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         _, child = self._split_pg(device, timeout=timeout)
         self.assertEqual(child.options._timeout, timeout)
-        self._destroy_pg()
-
-    @skip_if_lt_x_gpu(2)
-    def test_get_future(self):
-        self._init_pg()
-        device = torch.device(f"cuda:{self.rank}")
-        t = torch.ones(4, device=device) * (self.rank + 1)
-        work = dist.all_reduce(t, async_op=True)
-        fut = work.get_future()
-        fut.wait()
-        torch.cuda.synchronize(device)
-        expected = torch.full((4,), 3.0, device=device)
-        self.assertEqual(t, expected)
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
