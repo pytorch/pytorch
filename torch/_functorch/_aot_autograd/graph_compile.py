@@ -2065,7 +2065,7 @@ def _categorize_saved_tensors_for_backward(
 
     def aliased_tensor_inputs(node: torch.fx.Node) -> list[torch.fx.Node]:
         op_node = node
-        return_indices = None
+        return_index = None
         if (
             node.target is operator.getitem
             and isinstance(node.args[0], torch.fx.Node)
@@ -2073,31 +2073,46 @@ def _categorize_saved_tensors_for_backward(
             and isinstance(node.args[1], int)
         ):
             op_node = node.args[0]
-            return_indices = (node.args[1],)
+            return_index = node.args[1]
 
         if not isinstance(op_node.target, torch._ops.OpOverload):
             return []
 
         schema = op_node.target._schema
-        returns = (
-            schema.returns
-            if return_indices is None
-            else [schema.returns[i] for i in return_indices]
-        )
+        if return_index is None:
+            returns = schema.returns
+        elif len(schema.returns) == 1 and schema.returns[0].type.kind() == "ListType":
+            # For a list-valued return, getitem indexes into the returned list,
+            # not into schema.returns.
+            returns = schema.returns
+        elif -len(schema.returns) <= return_index < len(schema.returns):
+            returns = [schema.returns[return_index]]
+        else:
+            return []
         return_aliases = set()
+        has_list_element_alias = False
         for schema_return in returns:
             if schema_return.alias_info is not None:
                 return_aliases.update(schema_return.alias_info.before_set)
+                # Alias annotations on list elements, such as Tensor(a)[], are
+                # not exposed in AliasInfo's before/after sets.
+                has_list_element_alias |= (
+                    schema_return.type.kind() == "ListType"
+                    and not schema_return.alias_info.before_set
+                    and not schema_return.alias_info.after_set
+                )
 
-        if not return_aliases:
+        if not return_aliases and not has_list_element_alias:
             return []
 
         aliased_inputs = []
         for idx, schema_arg in enumerate(schema.arguments):
-            if (
-                schema_arg.alias_info is None
-                or schema_arg.alias_info.before_set.isdisjoint(return_aliases)
-            ):
+            if schema_arg.alias_info is None:
+                continue
+            aliases_return = not schema_arg.alias_info.before_set.isdisjoint(
+                return_aliases
+            ) or (has_list_element_alias and "*" in schema_arg.alias_info.after_set)
+            if not aliases_return:
                 continue
             arg = (
                 op_node.args[idx]

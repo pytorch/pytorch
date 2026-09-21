@@ -2661,24 +2661,25 @@ class _AutogradSavedState:
                 f"got {len(input_alias_indices)} != {len(is_graph_input)}"
             )
 
-        def regenerate_input_alias(idx: int, tensor: torch.Tensor) -> torch.Tensor:
-            input_idx = input_alias_indices[idx]
-            if input_idx is None:
-                return tensor
-            aliased_input = graph_inputs[input_idx]
-            if not isinstance(aliased_input, torch.Tensor):
-                raise AssertionError(
-                    "expected the aliased graph input to be a Tensor, "
-                    f"got {type(aliased_input)}"
-                )
-            return gen_alias_from_base(
-                aliased_input,
-                tensor,
-                tensor.requires_grad,
-                replay_views=False,
-            )
-
         if any(idx is not None for idx in input_alias_indices[:num_vc_check]):
+
+            def regenerate_input_alias(idx: int, tensor: torch.Tensor) -> torch.Tensor:
+                input_idx = input_alias_indices[idx]
+                if input_idx is None:
+                    return tensor
+                aliased_input = graph_inputs[input_idx]
+                if not isinstance(aliased_input, torch.Tensor):
+                    raise AssertionError(
+                        "expected the aliased graph input to be a Tensor, "
+                        f"got {type(aliased_input)}"
+                    )
+                return gen_alias_from_base(
+                    aliased_input,
+                    tensor,
+                    tensor.requires_grad,
+                    replay_views=False,
+                )
+
             tensors_saved_with_vc_check = [
                 regenerate_input_alias(i, x)
                 for i, x in enumerate(tensors_saved_with_vc_check)

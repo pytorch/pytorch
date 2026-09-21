@@ -3421,6 +3421,27 @@ class CommonTemplate:
         ):
             out.sum().backward()
 
+    def test_saved_list_view_of_input_keeps_version_counter(self):
+        def fn(x, weight):
+            return torch.split(x, 2, dim=0)[1] * weight
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.arange(18.0, device=self.device).reshape(6, 3) / 7
+        weight = torch.ones(2, 3, device=self.device, requires_grad=True)
+        expected_grad = x[2:4].clone()
+        compiled_fn(x, weight).sum().backward()
+        self.assertEqual(weight.grad, expected_grad)
+
+        x = torch.arange(18.0, device=self.device).reshape(6, 3) / 7
+        weight = torch.ones(2, 3, device=self.device, requires_grad=True)
+        out = compiled_fn(x, weight)
+        x.add_(1)
+        with self.assertRaisesRegex(
+            RuntimeError, "modified by an inplace operation"
+        ):
+            out.sum().backward()
+
     def test_cumprod_backward(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/136263
         # torch.compile used O(n^2) algorithm for cumprod backward with tensor
