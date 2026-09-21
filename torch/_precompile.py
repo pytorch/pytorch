@@ -1,23 +1,27 @@
 """Ahead-of-time precompilation (``make_fx`` tracer by default; Dynamo planned).
 
-    python_code, cache = torch.compiler.precompile(fn, model, *example_inputs)
-    f_c = torch.compiler.precompile.load(python_code, cache)
-    out = f_c(model, *example_inputs)   # pass the model again at runtime
+    with torch.compiler.precompile.capture(
+        fn, artifact_path="m.py", cache_path="m.cache"
+    ) as cap:
+        out = cap(model, *inputs)       # runs fn(model, *inputs) for real
+    f_c = torch.compiler.precompile.load("m.py", "m.cache")
+    out = f_c(model, *inputs)           # pass the model again at runtime
 
 precompile captures your computation with ``make_fx`` -- a NON-STRICT trace of the ATen
-ops that run when ``fn`` executes once on FAKE tensors derived from the example inputs
-(the example tensors themselves are never computed on). It does not analyze your Python,
-so it comes with an explicit contract (the programming model): stay inside it and the
-artifact faithfully reproduces ``fn``; step outside it and you get an artifact that
-computes the wrong thing.
+ops that run when ``fn`` executes once on FAKE tensors derived from the call made
+inside the block (the call's own tensors are never computed on by the trace). It does
+not analyze your Python, so it comes with an explicit contract (the programming model):
+stay inside it and the artifact faithfully reproduces ``fn``; step outside it and you
+get an artifact that computes the wrong thing.
 
-``precompile`` returns a self-contained, executable ``python_code`` string plus a
-companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
-captured graph is lowered through the AOT backend contract
+The block writes a matched pair of files: a self-contained, executable ``python_code``
+artifact and a companion integrity-tagged ``cache``. With ``backend="inductor"`` (the
+default) the captured graph is lowered through the AOT backend contract
 (``torch._functorch.aot_autograd.compile_to_python``, AOTAutograd + Inductor);
 ``python_code`` JIT-compiles kernels on first call and the cache primes them so a warm
 reload skips JIT. With ``backend="eager"`` ``python_code`` inlines the captured graph and
-runs on its own. Reload with ``torch.compiler.precompile.load(python_code, cache)``.
+runs on its own. Reload the pair with
+``torch.compiler.precompile.load(artifact_path, cache_path)``.
 
 The full contract, the calling convention, and the cache / code_hash design all live in
 Note [precompile programming model] below; every public entry point and guard references
@@ -239,7 +243,7 @@ it.
 #    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
 #    run. The code_hash binds the cache to its python_code:
-#    load() rejects a (code, cache) pair from different precompile captures (same
+#    load() rejects a (code, cache) pair from different capture() calls (same
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
 # self-contained: ``python_code`` runs on its own -- it inlines the composed graph
@@ -257,7 +261,7 @@ it.
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair from different precompile captures.
+# (python_code, cache) pair that did not come from the same capture() call.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -285,11 +289,11 @@ it.
 # build is covered at once. Invariant 7 still holds: torch._C._DisableAutocast is a name
 # in the artifact's text, not an import.
 #
-# tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
-# non-strict trace and is the only tracer implemented today -- everything above (the
-# invariants, the contract) describes its behavior. "dynamo" is planned (a Dynamo-based
-# front-end that analyzes Python rather than specializing to one traced path) and
-# currently raises NotImplementedError.
+# tracer: the capture front-end, orthogonal to backend, passed to capture() as a tracer
+# object. MakeFxTracer() (the default) is a non-strict trace and is the only tracer
+# implemented today -- everything above (the invariants, the contract) describes its
+# behavior. A Dynamo-based front-end that analyzes Python rather than specializing to one
+# traced path is planned, and arrives with a tracer of its own.
 
 from __future__ import annotations
 
@@ -326,10 +330,11 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
-# ``precompile`` and ``PrecompileError`` are exposed under the compiler namespace as
-# ``torch.compiler.precompile`` / ``torch.compiler.precompile.PrecompileError``
-# (re-exported from torch/compiler/__init__.py and registered in
-# ``torch.compiler.__all__``); they are deliberately kept out of this private module's
+# This module's public surface is re-exported under the compiler namespace: ``capture``,
+# ``load`` and the tracer / capture classes as ``torch.compiler.precompile``
+# (torch/compiler/precompile.py), and ``PrecompileError`` and ``PrecompiledRunnable``
+# as ``torch.compiler.*`` (torch/compiler/__init__.py, registered
+# in ``torch.compiler.__all__``); they are deliberately kept out of this private module's
 # ``__all__`` so test_public_bindings sees a consistent single public location.
 __all__: list[str] = []
 
@@ -386,6 +391,9 @@ class PrecompileError(RuntimeError):
     See Note [precompile programming model] in this module for the full contract.
     """
 
+    # Reported under its public home; see the __all__ comment above.
+    __module__ = "torch.compiler"
+
 
 @dataclasses.dataclass(frozen=True)
 class MakeFxTracer:
@@ -407,7 +415,7 @@ class MakeFxTracer:
 
 
 class PrecompiledRunnable:
-    """What :func:`load` returns.
+    """What :func:`torch.compiler.precompile.load` returns.
 
     A callable with the captured ``fn``'s calling convention that can also be entered as
     a context manager and unloaded. A standalone artifact installs nothing, so for it
@@ -417,6 +425,8 @@ class PrecompiledRunnable:
     without a deprecation cycle.
     """
 
+    __module__ = "torch.compiler"
+
     installed: bool = False
     """Whether calling this handle installs onto the captured code objects.
 
@@ -425,6 +435,8 @@ class PrecompiledRunnable:
     nothing to take back out. A subclass that installs sets it ``True``.
     """
 
+    # The public protocol every loaded artifact answers; each shape (standalone,
+    # installing) supplies the call itself.
     def __call__(self, *args: object) -> object:
         raise NotImplementedError
 
@@ -448,23 +460,30 @@ class Capture:
 
     Part of the prototype ``torch.compiler.precompile`` API, so it may change
     without a deprecation cycle. Enter it as a context manager to arm the
-    capture, call it with the positional arguments ``fn`` takes inside the block
-    (keyword arguments are refused) -- each call runs for real, is folded into the
-    capture, and returns what serving the artifact produces (:func:`capture` has
+    capture, call it as you would ``fn`` inside the block (a :class:`MakeFxTracer`
+    capture takes positional arguments only) -- each call runs for real, is folded into
+    the capture, and returns what serving the artifact produces (:func:`capture` has
     the ``requires_grad`` and autocast contracts of that served value) -- and the
-    artifact is written to the ``artifact_path`` / ``cache_path`` files when the block
-    exits CLEANLY and an in-block :meth:`save` has not already written it: the files a
-    :meth:`save` wrote stay as they are, whether the block then raised or exited
-    cleanly, and a clean exit that never called the capture raises instead of
-    writing. Call :meth:`save` inside the block to
-    checkpoint everything captured so far to those same files without ending the
-    capture. The object is single-shot: the block is entered once, and calling,
-    entering, saving and a CLEAN exit are all refused after it (an exit carrying
-    the block's own exception is a no-op) -- except that :meth:`save` stays OPEN
-    while the LAST write attempt is one that FAILED, as the retry of that write,
-    and closes again once a retry SUCCEEDS.
+    artifact is written to the ``artifact_path`` / ``cache_path`` files when the
+    block exits CLEANLY having captured at least one call: a block that raised
+    writes nothing further (files a :meth:`save` already wrote stay), and a clean
+    exit with nothing captured -- no call
+    made, or the only call raised and was caught -- raises ``PrecompileError``
+    rather than writing. Call :meth:`save` inside the
+    block to write those same files without ending the capture; a
+    :class:`MakeFxTracer` capture records a single call, so after a ``save()``
+    that succeeded the block exit writes nothing more. The object is single-shot:
+    the block is entered once, and calling, entering, saving and a CLEAN exit are
+    all refused after it (an exit carrying the block's own exception is a no-op)
+    -- except that :meth:`save` stays OPEN while the LAST write attempt is one
+    that FAILED, as the retry of that write, and closes again once a retry
+    SUCCEEDS.
     """
 
+    __module__ = "torch.compiler.precompile"
+
+    # The public protocol of a capture, carrying no behavior of its own: each tracer's
+    # capture implements all four (_MakeFxCapture below is the only one in this build).
     def __enter__(self) -> Self:
         raise NotImplementedError
 
@@ -536,7 +555,7 @@ class _MakeFxCapture(Capture):
                 "arguments; a partial binding only non-tensor arguments is fine."
             )
         self._module = PrecompiledModule(
-            fn, backend=backend, tracer="make_fx", decompositions=decompositions
+            fn, backend=backend, decompositions=decompositions
         )
         self._artifact_path = artifact_path
         self._cache_path = cache_path
@@ -728,7 +747,9 @@ class _MakeFxCapture(Capture):
             self._traced = True
             try:
                 return _runnable_from_pair(
-                    *self._rendered, who="torch._precompile.capture", _trusted=True
+                    *self._rendered,
+                    who="torch.compiler.precompile.capture",
+                    _trusted=True,
                 )(*args)
             except BaseException:
                 # The serve is where the driver's own runtime checks run, so a serve that
@@ -1552,8 +1573,8 @@ def _capture(
         return [*result_flat, *grad_flat]
 
     # The trace runs in the ambient grad mode, which the entry point sets: the
-    # callable API keeps grad enabled around it, as it always did, while capture()
-    # lets ``training=`` select it (grad on for a backward in ``fn``, off for an
+    # transitional callable alias keeps grad enabled around it, as it always did, while
+    # capture() lets ``training=`` select it (grad on for a backward in ``fn``, off for an
     # inference capture) -- so a capture can reach here with grad OFF.
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
@@ -1913,10 +1934,10 @@ _GENERATED_HEADER = """\
 #      caller's autocast neutralized, and scatters any harvested gradients onto the
 #      model's .grad fields. No model weights are embedded (you bring the model).
 #
-# The companion ``cache`` returned by precompile is purely an ACCELERATION used by
-# torch.compiler.precompile.load: it primes the inductor kernel caches so exec'ing this
-# file loads its kernels from the precompiled binaries (no JIT). This file does not read
-# it; running this file alone just JITs.
+# The companion ``cache`` written beside this file by torch.compiler.precompile.capture
+# is purely an ACCELERATION used by torch.compiler.precompile.load: it primes the
+# inductor kernel caches so exec'ing this file loads its kernels from the precompiled
+# binaries (no JIT). This file does not read it; running this file alone just JITs.
 """
 
 
@@ -2285,15 +2306,15 @@ class PrecompiledModule(PrecompiledRunnable):
         fn: Callable[..., object],
         *,
         backend: str = "inductor",
-        tracer: str = "make_fx",
         decompositions: dict | None = None,
     ) -> None:
+        # This class renders the make_fx capture only (a dynamo front-end would be
+        # routed elsewhere before it gets here), so it takes no tracer parameter.
         # ``fn`` is the whole computation: an nn.Module, or a callable that closes
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
         # step that computes a loss and torch.autograd.grad).
         self._fn = fn
         self._backend = backend
-        self._tracer = tracer
         self._decompositions = decompositions
         self._artifact: object = None
         self._module_positions: list[int] = []
@@ -2358,14 +2379,8 @@ class PrecompiledModule(PrecompiledRunnable):
         return obj
 
     def _compile(self, args: tuple[object, ...]) -> None:
-        # make_fx is the only implemented tracer; "dynamo" is a planned alternative
-        # capture front-end. Reject it here (the single capture-dispatch point) before
-        # running fn, so the failure is clear rather than a wrong default.
-        if self._tracer != "make_fx":
-            raise NotImplementedError(
-                f"precompile tracer={self._tracer!r} is not implemented yet; use "
-                "tracer='make_fx' (the default)."
-            )
+        # PrecompiledModule is the make_fx path only: a dynamo front-end would be routed
+        # to its own capture before it gets here.
         if self._backend == "eager" and _has_unbacked_marks(args):
             raise NotImplementedError(
                 "precompile: mark_unbacked (dynamic shapes) is only supported with "
@@ -2465,7 +2480,7 @@ class PrecompiledModule(PrecompiledRunnable):
         if self._loaded_forward is None:
             raise PrecompileError(
                 "this object is not runnable; build one with "
-                "torch.compiler.precompile.load(python_code, cache)."
+                "torch.compiler.precompile.load(artifact_path, cache_path)."
             )
         return self._loaded_forward(*args)
 
@@ -2484,8 +2499,8 @@ class PrecompiledModule(PrecompiledRunnable):
         if self._loaded_forward is not None:
             raise PrecompileError(
                 "this object was produced by torch.compiler.precompile.load(); the "
-                "python_code you passed in is the source artifact (load() does not "
-                "re-capture, so there is no python_code to re-emit from this object)."
+                "artifact file it read is the source (load() does not re-capture, so "
+                "there is no python_code to re-emit from this object)."
             )
         if self._backend == "eager":
             if self._gm is None:
@@ -2504,9 +2519,10 @@ class PrecompiledModule(PrecompiledRunnable):
         primes the kernel caches with it, so a warm reload skips JIT); for the eager
         backend it is None. See Note [precompile programming model], invariant 7.
 
-        ``python_code`` defaults to what ``to_python_code()`` would emit; ``__call__``
-        threads in the exact string it already built so code_hash matches the bytes
-        returned to the user and the metadata is not rebuilt.
+        ``python_code`` defaults to what ``to_python_code()`` would emit;
+        ``_MakeFxCapture.__call__`` threads in the exact string it already built so
+        code_hash matches the ``python_code`` written to ``artifact_path`` and the
+        metadata is not rebuilt.
         """
         # _artifact_bytes is the inductor cache bundle (None if uncacheable, and always
         # None for eager); the envelope is a plain str/int/bytes dict (weights_only-safe)
@@ -2514,8 +2530,8 @@ class PrecompiledModule(PrecompiledRunnable):
         if self._loaded_forward is not None:
             raise PrecompileError(
                 "this object was produced by torch.compiler.precompile.load(); the cache "
-                "you passed in is the source artifact (load() does not re-capture, so "
-                "there is no cache to re-emit from this object)."
+                "file it read is the source (load() does not re-capture, so there is no "
+                "cache to re-emit from this object)."
             )
         if python_code is None:
             python_code = self.to_python_code()
@@ -2535,7 +2551,7 @@ class PrecompiledModule(PrecompiledRunnable):
 
 
 def _make_inlined_forward(
-    python_code: str, who: str, *, warn: bool = True
+    python_code: str, who: str, *, warn: bool
 ) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -2841,9 +2857,10 @@ def _check_path_pair(
     load() could in fact degrade its way through such a pair, and refuses it so that the
     two entry points accept exactly the same pairs.
     """
-    if os.path.normcase(os.path.realpath(artifact_path)) == os.path.normcase(
-        os.path.realpath(cache_path)
-    ):
+    # fsdecode first: realpath is type-preserving, so a bytes spelling and a str
+    # spelling of one file would never compare equal.
+    artifact_resolved = os.path.normcase(os.path.realpath(os.fsdecode(artifact_path)))
+    if artifact_resolved == os.path.normcase(os.path.realpath(os.fsdecode(cache_path))):
         raise ValueError(
             f"{who} got the same file for artifact_path and cache_path "
             f"({os.fspath(artifact_path)!r}); the two halves are separate files."
@@ -2865,10 +2882,11 @@ def _runnable_from_pair(
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
-    The shared core of :func:`load`, ``_PrecompileApi.load`` and the capture-time
-    self-load in :class:`_MakeFxCapture`, so ``who`` names the entry point the caller
-    actually called rather than one of the other two. ``_trusted`` suppresses the exec
-    warning, and is set only for that self-load: its source was produced in-process.
+    The shared core of :func:`load` (which reads the pair off disk first), the
+    transitional ``_PrecompileApi.load`` and the capture-time self-load in
+    :class:`_MakeFxCapture`, so ``who`` names the entry point the caller actually called
+    rather than one of the other two. ``_trusted`` is set only for that self-load, where
+    the source was just produced in-process, to suppress the exec warning.
     """
     # Unpickling the cache references classes in AOTAutograd's runtime; import
     # dynamo first so that import completes in a non-circular order (otherwise
@@ -2969,7 +2987,7 @@ def capture(
     backend: str = "inductor",
     training: bool = False,
 ) -> Capture:
-    """Capture ``fn`` across YOUR loop's calls; the pair is written on block exit.
+    """Capture ``fn`` across calls YOUR loop makes, writing the artifact on a clean exit.
 
     .. warning::
 
@@ -2977,30 +2995,48 @@ def capture(
         format may change between releases without a deprecation cycle.
 
     Capture is caller-driven: this returns a capture object rather than running
-    anything. Enter it as a context manager, call it with the positional arguments
-    ``fn`` takes inside the block (keyword arguments are refused) -- the call runs
-    for real, is folded into the capture, and returns what serving the artifact
+    anything. Enter it as a context manager, call it as you would ``fn`` inside the
+    block (a :class:`MakeFxTracer` capture takes positional arguments only) -- the call
+    runs for real, is folded into the capture, and returns what serving the artifact
     produces -- and the ``(python_code, cache)`` artifact is written to
-    ``artifact_path`` / ``cache_path`` when the block exits CLEANLY and an in-block
-    ``cap.save()`` has not already written it: the files such a ``save()`` wrote stay as
-    they are, whether the block then raised or exited cleanly, and a clean exit that
-    never called the capture raises instead of writing. These names will be exported
-    from ``torch.compiler.precompile``; until then import them from here::
+    ``artifact_path`` / ``cache_path`` when the block exits cleanly having captured at
+    least one call (a block that raised writes nothing further -- files an in-block
+    ``cap.save()`` already wrote stay, and a clean exit after a ``save()`` that
+    succeeded writes nothing more -- and so does a clean exit with nothing captured
+    -- no call made, or the only call raised and was caught -- which raises instead)::
 
-        from torch._precompile import capture, load
-
-        with capture(fn, artifact_path="m.py", cache_path="m.cache") as cap:
+        with torch.compiler.precompile.capture(
+            fn, artifact_path="m.py", cache_path="m.cache"
+        ) as cap:
             y = cap(model, x)
-        f = load("m.py", "m.cache")
+        f = torch.compiler.precompile.load("m.py", "m.cache")
 
-    :class:`MakeFxTracer` is one non-strict ATen trace, so the capture takes
-    exactly ONE call and refuses a second; ``MakeFxTracer.decompositions``
-    forwards a decomposition table to ``make_fx``. ``training`` selects the grad
-    mode of the captured call, whatever the ambient mode: ``training=True`` runs
-    it under ``torch.enable_grad()`` so a ``.backward()`` in ``fn`` is captured
-    and the artifact scatters the gradients onto the model's ``.grad`` fields;
-    ``training=False`` runs it under ``torch.no_grad()``. Either way the value
-    ``cap(...)`` returns is the served result: a computed output does not require
+    Because the caller makes the calls, inputs flow through naturally and return
+    values stay available, so the capture drops into an ordinary training or
+    pipeline loop where intermediate values are needed. Call ``cap.save()`` inside
+    the block to write the artifact without ending the capture; a
+    :class:`MakeFxTracer` capture records a single call, so a clean exit after a
+    ``save()`` that succeeded writes nothing more; while the LAST write attempt is one
+    that FAILED -- the exit's or a ``save()``'s -- call it again to retry that write,
+    from outside the block too.
+
+    Gradients and return values keep their normal eager/``torch.compile``
+    semantics: precompile snapshots and clears the example tensors' ``.grad`` around
+    the trace -- so that a live ``.grad`` is not baked into the trace as a constant --
+    restoring the same objects afterwards, so your gradients survive a capture
+    unchanged; ``fn`` must not read a pre-existing ``.grad`` during the captured call.
+
+    ``tracer`` picks the capture front-end and carries its tracer-specific
+    configuration. :class:`MakeFxTracer` is one non-strict ATen trace, so the
+    capture takes exactly ONE call and refuses a second;
+    ``MakeFxTracer.decompositions`` forwards a decomposition table to
+    ``make_fx``, and it is the only front-end in this build.
+    ``training`` selects the grad mode of the captured call, whatever the
+    ambient mode: ``training=True`` runs it under ``torch.enable_grad()`` so a
+    ``.backward()`` in ``fn`` is captured, lowered eagerly, and scattered onto the
+    model's ``.grad`` fields when the artifact runs; ``training=False`` runs it under
+    ``torch.no_grad()``. Either way the value ``cap(...)`` returns is the served result:
+    a computed output does not require
     grad, and an output that IS an input or parameter comes back as that same tensor,
     hence with its own ``requires_grad``. An output that ALIASES an INPUT -- a view of
     it, ``t.detach()`` included, which the trace records as a view -- is instead REBUILT
@@ -3010,11 +3046,17 @@ def capture(
     self-contained source plus an acceleration cache) or ``"eager"`` (inline the captured
     ATen graph as readable source). A call served from the artifact IGNORES the serving
     process's ambient autocast, since the casts the capture ran under are already baked
-    in, so capture under the autocast you want baked in. Call ``cap.save()`` inside the
-    block to write the files before it exits; while the LAST write attempt is one that
-    FAILED -- the exit's or a ``save()``'s -- call it again to retry that write, from
-    outside the block too. The contract is Note [precompile programming model] in this
-    module; see :func:`load` for reading the pair back.
+    in, so capture under the autocast you want baked in.
+
+    THREADING: the inductor lowering step drives process-global compiler state and
+    is serialized by an internal lock, so concurrent ``backend="inductor"``
+    captures lower one at a time. The make_fx capture phase and the
+    ``backend="eager"`` path are NOT serialized -- and since a :class:`Capture`
+    spans a block your loop controls, that lock is taken inside the calls you make,
+    not held for the block.
+
+    The contract is Note [precompile programming model] in this module; see
+    :func:`load` for reading the pair back.
 
     Raises ``ValueError`` for a ``backend`` outside ``{"inductor", "eager"}`` and for a
     path pair no entry point accepts (one file named for both halves, a path that is not
@@ -3032,14 +3074,13 @@ def capture(
     that failed out of the block exit or ``cap.save()`` -- the one to catch for the retry
     above.
     """
-    # Keyed on the module these live in TODAY; the module switch moves both keys to
-    # the public torch.compiler.precompile.* spelling.
-    torch._C._log_api_usage_once("torch._precompile.capture")
+    # The telemetry key names the public spelling the module switch installs.
+    torch._C._log_api_usage_once("torch.compiler.precompile.capture")
     if backend not in ("inductor", "eager"):
         raise ValueError(
             f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
         )
-    _check_path_pair("torch._precompile.capture", artifact_path, cache_path)
+    _check_path_pair("torch.compiler.precompile.capture", artifact_path, cache_path)
     if isinstance(tracer, MakeFxTracer):
         return _MakeFxCapture(
             fn,
@@ -3054,9 +3095,10 @@ def capture(
     )
 
 
-# This ``load`` takes two PATHS; ``_PrecompileApi.load`` (the one reachable today as
-# torch.compiler.precompile.load) takes the in-memory (python_code, cache) pair -- same
-# name, same arity. The in-memory one retires with the callable API at the module switch.
+# This ``load`` takes two PATHS and is the public one; the transitional
+# ``_PrecompileApi.load`` at the bottom of this file (reachable as
+# torch.compiler._precompile_callable.load) still takes the in-memory (python_code, cache)
+# pair -- same name, same arity.
 def load(
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
@@ -3091,9 +3133,9 @@ def load(
     programming model], the runtime model must match the example model's parameter/buffer
     structure; precompile re-derives the param/buffer list from it (same order).
 
-    The result is a :class:`PrecompiledRunnable`: a make_fx artifact is standalone, so it
-    installs nothing, its ``with`` / ``unload()`` are no-ops and ``installed`` is
-    ``False``.
+    The result is a :class:`torch.compiler.PrecompiledRunnable`: a make_fx artifact
+    is standalone, so it installs nothing, its ``with`` / ``unload()`` are no-ops and
+    ``installed`` is ``False``.
 
     Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
     ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
@@ -3109,40 +3151,49 @@ def load(
     raises ``ValueError`` instead: one file named for both halves, or a path that is not
     a regular file.
     """
-    torch._C._log_api_usage_once("torch._precompile.load")
-    _check_path_pair("torch._precompile.load", artifact_path, cache_path)
+    # The telemetry key names the public spelling the module switch installs, and is
+    # also the entry-point name the diagnostics carry.
+    torch._C._log_api_usage_once("torch.compiler.precompile.load")
+    _check_path_pair("torch.compiler.precompile.load", artifact_path, cache_path)
     python_code, cache = _read_artifact(artifact_path, cache_path)
-    return _runnable_from_pair(python_code, cache, who="torch._precompile.load")
+    return _runnable_from_pair(python_code, cache, who="torch.compiler.precompile.load")
 
 
+# The capture/load surface is a module (torch.compiler.precompile); these functions
+# are defined here but reported and re-exported under that path, so introspection
+# (test_public_bindings, Sphinx, help()) resolves them there.
+for _f in (capture, load):
+    _f.__module__ = "torch.compiler.precompile"
+
+
+del _f
+
+
+# The callable API this module's public surface replaces, kept reachable as the
+# transitional ``torch.compiler._precompile_callable`` pending its removal. Private,
+# undocumented, in no ``__all__``.
 class _PrecompileApi:
-    """Callable namespace implementing ``torch.compiler.precompile`` and ``.load``.
+    """The retired callable API, reachable as ``torch.compiler._precompile_callable``.
 
-    A single instance is exposed as ``torch.compiler.precompile``; calling it precompiles a
-    computation and ``torch.compiler.precompile.load`` reloads the resulting artifacts. It
-    is a class (rather than a function with attached attributes) so the call, the
-    loader, and the error type are explicit members.
-
-    The contract for both ``__call__`` and ``load`` is Note [precompile programming
-    model] in this module.
+    This WAS ``torch.compiler.precompile``: calling it precompiled a computation to an
+    in-memory ``(python_code, cache)`` pair, and ``.load`` read that pair back. The public
+    name is now the ``torch.compiler.precompile`` MODULE (:func:`capture` / :func:`load`),
+    which is the only spelling documented anywhere.
     """
 
-    # Reported so test_public_bindings / introspection see this as ``torch.compiler``.
+    # Reported under the namespace the alias is reachable from.
     __module__ = "torch.compiler"
 
-    # The error type raised by precompile, reachable as
-    # ``torch.compiler.precompile.PrecompileError``.
     PrecompileError = PrecompileError
 
     def __reduce__(self) -> str:
-        # torch.compiler.precompile is a process-wide singleton; pickle/deepcopy must
-        # round-trip to the SAME object (the instance carries no per-call state) rather
-        # than fail to pickle a bound-method-bearing instance. Returning the qualified
-        # name resolves back to this singleton on unpickle.
-        return "precompile"
+        # A process-wide singleton carrying no per-call state: pickle/deepcopy round-trip
+        # to the SAME object rather than failing on a bound-method-bearing instance. The
+        # name resolves against ``__module__`` above.
+        return "_precompile_callable"
 
     def __repr__(self) -> str:
-        return "torch.compiler.precompile"
+        return "torch.compiler._precompile_callable"
 
     def __call__(
         self,
@@ -3152,145 +3203,16 @@ class _PrecompileApi:
         tracer: str = "make_fx",
         decompositions: dict | None = None,
     ) -> tuple[str, bytes]:
-        """Ahead-of-time precompile ``fn`` against ``example_inputs``.
+        """Precompile ``fn`` against ``example_inputs`` to an in-memory pair (retired).
 
-        .. note::
-
-            ``torch.compiler.precompile`` is NOT
-            ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
-            guard-serialization caching mode); it captures ``fn`` ahead of time and
-            lowers it to a self-contained Python source artifact.
-
-        With the default ``make_fx`` tracer this is a non-strict trace with an explicit
-        contract; read Note [precompile programming model] before using it. The artifact
-        faithfully reproduces ``fn`` only for callers that uphold that contract.
-
-        THREADING: the inductor lowering step drives process-global compiler state
-        and is serialized by an internal lock, so concurrent ``backend="inductor"``
-        calls lower one at a time. The make_fx capture phase and the ``backend="eager"``
-        path are NOT serialized.
-
-        ``backend`` selects how the captured graph is realized:
-
-        - ``"inductor"`` (default): lower the graph through
-          ``torch._functorch.aot_autograd.compile_to_python`` (the full AOTAutograd +
-          Inductor pipeline, composed into one self-contained module). ``python_code``
-          is the inlined Inductor output with AOTAutograd's prelude/epilogue; the cache
-          holds the save_cache_artifacts bundle that primes the inductor cache on load.
-        - ``"eager"``: do NOT lower -- keep the captured ATen graph and run it as-is
-          (analogous to ``torch.compile(backend="eager")``). ``python_code`` inlines
-          the readable captured graph (both the inspectable rendering and the
-          executable artifact); the eager cache carries no compiled artifact
-          (artifact=None) but is still a full integrity-tagged envelope -- with no
-          kernels there is nothing to accelerate, so ``load`` runs the inlined graph.
-          Useful for
-          inspecting/debugging exactly what was traced without an Inductor dependency.
-
-        ``tracer`` selects the capture front-end:
-
-        - ``"make_fx"`` (default): a NON-STRICT make_fx trace -- it records the ATen ops
-          that actually run when ``fn`` executes once on FAKE tensors derived from the
-          example inputs (the example tensors themselves are never computed on) and does
-          not analyze your Python, so Python control flow and shapes are specialized to
-          the example (the source of the programming-model contract). The only tracer
-          implemented today.
-        - ``"dynamo"``: planned (a Dynamo-based front-end that analyzes the Python);
-          raises ``NotImplementedError`` for now.
-
-        ``decompositions`` is an optional decomposition table (a dict mapping each
-        ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
-        ``decomposition_table`` during capture, so you can control how ATen ops are
-        broken down in the captured graph. Defaults to ``None`` (make_fx's default).
-
-        Dynamic shapes are opt-in via ``torch._dynamo.decorators.mark_unbacked``
-        (inductor backend only), NOT a precompile kwarg: mark dims on the inputs before
-        calling, e.g. ``mark_unbacked(x, 0); precompile(fn, model, x)`` frees ``x``'s
-        batch dim. Marked dims are captured as UNBACKED symints, which cannot be guarded
-        on, so one artifact serves any runtime size of them (invariant 3); a graph that
-        needs to guard on / specialize a marked dim fails at capture with a
-        ``PrecompileError``. Dims sharing a ``shape_id`` reuse one symbol (equal by
-        construction); ``min``/``max`` become runtime asserts. Other dims stay static.
-        Dims that MUST be equal at runtime (e.g. two inputs combined by a broadcast that
-        requires equal sizes, ``model(a) + model(b)``) MUST be given a SHARED ``shape_id``
-        so a mismatch is rejected; marking two such dims INDEPENDENTLY currently bakes a
-        SILENT equal-size assumption and a runtime mismatch does NOT raise the loud failure
-        eager gives (invariant 3). This is a harvesting gap, not an inherent limit of the
-        standalone artifact: the capture ShapeEnv DOES record the equality (as a deferred
-        runtime assert, e.g. ``Eq(u0, u1)``), but precompile does not yet harvest/enforce
-        those relational asserts in the driver -- only the decorator's declared min/max feed
-        the runtime bound checks. A shared ``shape_id`` is the way to get the check today.
-
-        Returns ``(python_code, cache)`` -- a self-contained, executable Python
-        source string (the single source of truth for the calling convention) and a
-        binary cache holding ONLY the backend artifact (NO metadata, NO weights).
-        Reload a runnable with ``torch.compiler.precompile.load(python_code, cache)``.
-
-        ``fn`` is the whole computation, e.g.::
-
-            python_code, cache = torch.compiler.precompile(
-                lambda model, x: model(x), model, x
-            )
-
-
-            def train_step(model, x, t):
-                loss_fn(model(x), t).backward()  # or return autograd.grad(...)
-
-
-            python_code, cache = torch.compiler.precompile(train_step, model, x, t)
-
-        Among ``example_inputs``, the ``nn.Module`` arguments have their params/buffers
-        lifted to graph inputs (no weights are baked into the artifact -- invariant 1);
-        the rest are the runtime inputs. The reloaded callable is invoked with the SAME
-        argument structure -- pass the model(s) again at runtime, e.g.
-        ``f_c(model, x)``, and that runtime model must match the example model's
-        parameter/buffer structure (invariant 2). Arguments are matched POSITIONALLY:
-        pass the model(s) and inputs positionally both here and at load time; keyword-
-        argument calling conventions are not supported (a fn that relies on them would
-        surface as a raw arity error). If ``fn`` ran a backward, the
-        resulting parameter gradients are scattered (accumulated) onto that runtime
-        model's ``parameters()`` ``.grad`` fields, exactly like eager ``.backward()``,
-        so a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged; the artifact
-        returns ``fn``'s own result (``None`` for a bare ``.backward()`` step), not the
-        grads (invariant 5).
-
-        Input mutation (incl. module buffers, e.g. BatchNorm running stats in
-        training mode), tensor subclasses (e.g. DTensor), and outputs aliasing inputs
-        are supported -- AOTAutograd's prelude/epilogue is composed into the artifact
-        (invariant 4), as is functionalized RNG. Caller responsibilities NOT checked
-        here (see the Note): the runtime model must be structurally identical to the
-        example, and Python control flow / shapes are specialized to ``example_inputs``
-        (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
-        tensor baked as a constant (invariant 1), effectful ops (invariant 4), a
-        data-dependent op a static (fake-tensor) capture cannot know -- ``.item()``,
-        ``.nonzero()``, a Python branch over a tensor value -- an op with no meta/fake
-        kernel and none that can be synthesized (a ``torch.library.custom_op`` tagged
-        ``torch.Tag.inplace`` / ``torch.Tag.out``, or one that only mutates its arguments
-        and returns nothing, gets a trivial one, so it captures without a
-        ``register_fake``), a read of a traced tensor's data (``.data_ptr()``,
-        ``.numpy()`` / ``np.asarray()``), an example input the fake trace cannot represent
-        (a quantized tensor) or whose metadata it silently drops (a pinned, mkldnn or
-        sparse tensor), a nested example input, none of which capture supports on either
-        path (invariant 3), a control-flow HOP whose branch choice is not a Python
-        constant (``torch.while_loop``, or a ``torch.cond`` with a tensor predicate --
-        a ``SymBool`` one arises only on the unbacked path, where it is refused too),
-        which is refused rather than specialized because neither backend can lower the
-        subgraph it captures (a Python-constant ``torch.cond`` predicate specializes to
-        the taken branch instead, like a Python ``if``), a capture attempted inside
-        another trace (invariant 3 in the Note has the reason), and -- for the inductor
-        backend -- a runtime input whose stride / memory format differs from the
-        example's (invariant 6).
-
-        A call served from the artifact IGNORES the serving process's ambient autocast:
-        whatever the capture ran under is already baked in (ATen casts for ``"eager"``,
-        compiled kernels for ``"inductor"``), so re-dispatching under an ambient
-        ``autocast`` region would cast a second time. The reloaded callable therefore
-        returns the capture's dtypes, NOT the dtypes the same eager call returns inside
-        that region -- so capture under the autocast you want baked in. The
-        neutralization lasts for the duration of the call and covers every device this
-        build can autocast, not just the ones the captured graph names, so an op that
-        moves work to another device inside its own body is covered too.
+        ``backend`` is ``"inductor"`` (default) or ``"eager"``, ``tracer`` is the STRING
+        ``"make_fx"``, and ``decompositions`` is forwarded to ``make_fx``. The trace runs
+        under ``torch.enable_grad()`` whatever the ambient mode, as it always did here.
+        The contract is Note [precompile programming model] in this module; the surface
+        that replaces this one is :func:`capture`, which takes the grad mode as
+        ``training=`` rather than forcing it, and writes the pair to files.
         """
-        torch._C._log_api_usage_once("torch.compiler.precompile")
+        torch._C._log_api_usage_once("torch.compiler._precompile_callable")
         if backend not in ("inductor", "eager"):
             raise ValueError(
                 f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
@@ -3299,68 +3221,35 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
-        compiled = PrecompiledModule(
-            fn, backend=backend, tracer=tracer, decompositions=decompositions
-        )
-        # Grad stays enabled around the trace whatever the ambient mode, as it always
-        # was for this entry point, so a ``.backward()`` in ``fn`` builds graph ops
-        # and the artifact does not depend on where the call happened.
+        # PrecompiledModule renders the make_fx capture only, so the string tracer this
+        # entry point takes is refused here rather than inside it.
+        if tracer != "make_fx":
+            raise NotImplementedError(
+                f"precompile tracer={tracer!r} is not implemented yet; use "
+                "tracer='make_fx' (the default)."
+            )
+        compiled = PrecompiledModule(fn, backend=backend, decompositions=decompositions)
         with torch.enable_grad():
             compiled._compile(example_inputs)
-        # Build the (expensive) python_code ONCE and thread it into to_cache_bytes so
-        # the full metadata + embedded kernel source is not rebuilt, and so code_hash is
-        # sha256 over exactly the bytes returned to the caller (a matched pair loads).
+        # Build the (expensive) python_code ONCE and thread it into to_cache_bytes, so
+        # code_hash is sha256 over exactly the bytes returned (a matched pair loads).
         python_code = compiled.to_python_code()
         return python_code, compiled.to_cache_bytes(python_code)
 
     def load(self, python_code: str, cache: bytes) -> Callable[..., object]:
-        """Reconstruct a runnable from ``(python_code, cache)`` from precompile.
+        """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
-        The driver runs from ``python_code`` -- the single source of truth for the whole
-        calling convention. ``load`` reads the cache's ``BACKEND`` (to check the pairing)
-        and, for the inductor backend, primes the inductor kernel caches from its
-        ``save_cache_artifacts`` bundle (via ``torch.compiler.load_cache_artifacts``) so a
-        warm reload loads precompiled kernels instead of JIT-compiling; then it exec's
-        ``python_code``. With no usable cache it degrades to JIT'ing from ``python_code``.
-
-        Call the result with the SAME argument structure ``fn`` took -- the
-        model(s) in their original positions plus the runtime inputs. Per invariant
-        2 of Note [precompile programming model], the runtime model must match the
-        example model's parameter/buffer structure; precompile re-derives the
-        param/buffer list from it (same interning/order as capture).
-
-        Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
-        ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
-        calling-convention metadata), if the cache's ``backend`` tag does not match
-        ``python_code``, or if the cache's ``code_hash`` does not match
-        ``sha256(python_code)`` -- i.e. the cache and python_code came from different
-        precompile captures. A cache whose ``format``/``version`` does not match (a
-        foreign or different-build envelope) is NOT fatal: the cache is acceleration
-        only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
-
-        Calling the result IGNORES this process's ambient autocast, so it returns the
-        capture's dtypes; see ``torch.compiler.precompile``'s docstring for the full
-        contract.
+        The retired loader: it takes the pair :meth:`__call__` returned, where the public
+        :func:`load` takes the two paths a capture wrote. Both go through the same core,
+        so the integrity checks, the failures and the calling convention are
+        :func:`load`'s, minus the file reads it does first.
         """
-        torch._C._log_api_usage_once("torch.compiler.precompile.load")
+        torch._C._log_api_usage_once("torch.compiler._precompile_callable.load")
         return _runnable_from_pair(
-            python_code, cache, who="torch.compiler.precompile.load"
+            python_code, cache, who="torch.compiler._precompile_callable.load"
         )
 
 
-precompile = _PrecompileApi()
-# ``torch.compiler.precompile`` is a callable instance, not a function, so give it the
-# name/doc introspection (Sphinx autosummary, help(), IDEs) expects to find on a
-# public callable; the rich usage docs live on ``__call__``.
-precompile.__name__ = "precompile"  # type: ignore[attr-defined]
-precompile.__qualname__ = "precompile"  # type: ignore[attr-defined]
-precompile.__doc__ = _PrecompileApi.__call__.__doc__
-
-# Both are public under torch.compiler.precompile, so report their module/qualname there
-# (mirroring the singleton fixup above) -- otherwise Sphinx autoexception/autofunction
-# would anchor them under this private module. load is a bound method; patch the
-# underlying function so introspection on precompile.load reports torch.compiler too.
-PrecompileError.__module__ = "torch.compiler"
-PrecompileError.__qualname__ = "precompile.PrecompileError"
-_PrecompileApi.load.__module__ = "torch.compiler"
-_PrecompileApi.load.__qualname__ = "precompile.load"
+# No __name__/__qualname__/__doc__ fixups: nothing documents the alias, so no Sphinx
+# anchor or help() page depends on them the way the public callable's did.
+_precompile_callable = _PrecompileApi()

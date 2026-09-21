@@ -29,7 +29,16 @@ callable, the caller invokes it with real inputs inside their own loop, each
 ``cap(...)`` returns the callable's own result, and every frame, break
 continuation and guarded variant the call exercises is recorded.
 
-``precompile_capture`` below is the entry point that starts one here.
+    with torch.compiler.precompile.capture(
+        step, artifact_path="m.py", cache_path="m.cache", backend="inductor"
+    ) as cap:
+        y1 = cap(model, x1)  # runs step(model, x1), returns its result
+        y2 = cap(model, x2)  # exercises another variant
+
+    # later, in a fresh process
+    compiled = torch.compiler.precompile.load("m.py", "m.cache")
+    with compiled, torch.no_grad():
+        compiled(model, x1)
 
 Calls run with the grad mode the caller sets -- capture does not force
 ``no_grad()`` or ``enable_grad()``. ``training=True`` lowers the backward
