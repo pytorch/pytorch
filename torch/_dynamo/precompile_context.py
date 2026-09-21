@@ -217,19 +217,35 @@ def _rebuild_eager_artifact(key: str, src: _EagerGraphSource) -> "EagerCacheArti
     return EagerCacheArtifact(key=key, content=_SourceGraphModule(src).forward)
 
 
+def reduces_to_graph_source(content: Any) -> bool:
+    """Whether EagerCacheArtifact.__reduce__ carries this content as source.
+
+    A bound GraphModule.forward is the one shape it has a real path for;
+    everything else falls to the plain-pickle branch below. Exposed so a caller
+    deciding whether a compiled callable is worth keeping for a render to
+    serialize asks the artifact's own test rather than repeating it -- or, worse,
+    guessing from the name of the backend that produced the callable.
+    """
+    return isinstance(getattr(content, "__self__", None), torch.fx.GraphModule)
+
+
 class EagerCacheArtifact(BackendCacheArtifact[Any]):
     def after_deserialization(self) -> Any:
         return self.content
 
     def __reduce__(self) -> tuple[Any, ...]:
-        gm = getattr(self.content, "__self__", None)
-        if not isinstance(gm, torch.fx.GraphModule):
+        if not reduces_to_graph_source(self.content):
             # The eager backend returns a GraphModuleSerializableCallable instead
             # of a bound forward under torch._functorch.config.force_autograd_cache
             # (backends/debugging.py); it pickles through GraphModule.__reduce__
-            # and so has the same lossiness, but precompile never reaches it.
+            # and so has the same lossiness. A capture keeps a callable for a
+            # render only when the test above accepts it, so what reaches this
+            # branch from a precompile is the pruned no-op, pickled by name.
             return (type(self), (self.key, self.content))
-        return (_rebuild_eager_artifact, (self.key, _graph_module_to_source(gm)))
+        return (
+            _rebuild_eager_artifact,
+            (self.key, _graph_module_to_source(self.content.__self__)),
+        )
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "EagerCacheArtifact":
         return type(self)(key=self.key, content=copy.deepcopy(self.content, memo))
