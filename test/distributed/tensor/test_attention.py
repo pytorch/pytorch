@@ -318,18 +318,19 @@ class RingAttentionTest(DTensorTestBase):
         )
 
         # Due to numerical error, we need to choose different atol for different
-        # attention kernels
+        # attention kernels. The bf16 backends run into bf16's own quantization
+        # floor: dv sums the whole sequence, so with grad_out=ones it reaches
+        # ~10 under a causal mask, where one bf16 ulp is already 0.0625. That
+        # floor does not shrink with world_size the way an atol scaled by it
+        # does, so the bf16 backends need an rtol above bf16 eps (2**-8) to
+        # compare at all.
         (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [seq_dim])
         atol = (
             2e-06
             if backend == SDPBackend.EFFICIENT_ATTENTION
             else 8e-3 * self.world_size
         )
-        rtol = (
-            1e-05
-            if backend == SDPBackend.EFFICIENT_ATTENTION
-            else 1e-3 * self.world_size
-        )
+        rtol = 1e-05 if backend == SDPBackend.EFFICIENT_ATTENTION else 2e-2
         torch.testing.assert_close(out, cp_out, atol=atol, rtol=rtol)
 
         if test_forward_only:
