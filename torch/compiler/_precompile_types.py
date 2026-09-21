@@ -103,7 +103,14 @@ class PrecompileSummary:
     them, and are stated here rather than checked:
 
     * ``kept_guards`` and ``dropped_guards`` are disjoint: the filter gives a
-      slot one verdict, keep or reject.
+      slot one verdict, keep or reject. A slot nothing checks however the filter
+      voted -- a guard type whose ``GuardBuilder`` method is ``pass`` -- is in
+      NEITHER list, since no verdict took it away; ``GuardFact.enforced`` is
+      where a report says that guard is not checked.
+    * the guards of a compile that BYPASSED are in neither list either: a bypass
+      installs no guarded code, so nothing enforces what its filter kept and no
+      serving artifact was widened by what it dropped. ``bypassed`` is where the
+      report names those frames.
     * ``risky_dropped_guards`` is drawn from ``dropped_guards``.
     * ``policy_dropped_guards`` is disjoint from both: a policy drop is taken
       out of the serialized copy the filter kept, once the slot held

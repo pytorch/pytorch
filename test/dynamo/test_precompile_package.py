@@ -3606,6 +3606,300 @@ class TestGuardCodeMasking(torch._inductor.test_case.TestCase):
         self.assertIn("hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False", parts)
 
 
+class _SessionReadsAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+        self.scale = 2
+
+    def forward(self, x):
+        return self.lin(x) * self.scale
+
+
+def _session_reads_optional(x, obj):
+    return x + 1 if obj is None else x + obj.k
+
+
+class _FakeCompile:
+    """The frame being compiled, as the recording filter reads it.
+
+    ``guarded_codes`` is what a recorded compile is confirmed against: see
+    PrecompileSession._confirmed_compiles.
+    """
+
+    def __init__(self, python_code):
+        self.python_code = python_code
+        self.guarded_codes = []
+
+
+class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _session(self, fn, **kwargs):
+        from torch._dynamo.precompile_package import precompile_capture
+
+        kwargs.setdefault("backend", "eager")
+        kwargs.setdefault("dynamic", False)
+        return precompile_capture(fn, **kwargs)
+
+    def _keep(self, session):
+        """Finish the compile the last filter call recorded, as a real one does.
+
+        A recorded compile counts as one the artifact carries once the frame's
+        entry gains a guarded code (see _confirmed_compiles), which the
+        serializer does after the filter has run and a direct filter call has to
+        stand in for.
+        """
+        session._package._current_entry.guarded_codes.append(object())
+
+    def _summary(self, session):
+        """The report, read as a caller outside a compile reads it."""
+        compiling = session._package._current_entry
+        session._package._current_entry = None
+        try:
+            return session.summary()
+        finally:
+            session._package._current_entry = compiling
+
+    def test_summary_counts_frames_variants_and_guards(self):
+        model = _SessionReadsAttr()
+        session = self._session(model)
+        with session as cap:
+            cap(torch.randn(2, 4))
+            cap(torch.randn(3, 4))
+        summary = session.summary()
+        self.assertEqual(summary.frames, 1)
+        self.assertEqual(summary.guarded_codes, 2)
+        self.assertEqual(summary.backend_graphs, 2)
+        self.assertEqual(summary.bypassed, ())
+        self.assertEqual(summary.capture_errors, ())
+        self.assertTrue(summary.complete)
+        self.assertIn("TENSOR_MATCH", summary.kept_guard_types)
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        self.assertEqual(summary.policy_dropped_guards, ())
+
+    def test_a_guard_nothing_checks_is_not_enforced_however_the_filter_votes(self):
+        # FSDP_TRAINING_STATE's GuardBuilder body is `pass` and GlobalStateGuard
+        # snapshots no training state, so the default filter keeping it does not
+        # make it a condition anything rechecks at load time. It lands in NEITHER
+        # slot list, since both report a filter verdict and no verdict took this
+        # one away. Not risky either, for the same reason.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(precompile_package.default_guard_filter_fn)
+        compiling = _FakeCompile(_SessionReadsAttr.forward.__code__)
+        session._package._current_entry = compiling
+        record([_entry(LocalSource("self"), None, "FSDP_TRAINING_STATE")])
+        self._keep(session)
+        slot = ("FSDP_TRAINING_STATE", "self")
+        summary = self._summary(session)
+        self.assertNotIn(slot, summary.dropped_guards)
+        self.assertNotIn(slot, summary.kept_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+
+    def test_a_no_op_marker_is_enforced_only_with_the_leaf_that_checks_it(self):
+        # GRAD_MODE's own check is `pass`: GLOBAL_STATE's leaf is what compares
+        # the flag, so a filter that drops GLOBAL_STATE drops the check too,
+        # whatever it voted on the marker.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            precompile_package._compose_with_default(
+                lambda es: [e.guard_type != "GLOBAL_STATE" for e in es]
+            )
+        )
+        session._package._current_entry = _FakeCompile(
+            _SessionReadsAttr.forward.__code__
+        )
+        record(
+            [
+                _entry(LocalSource("x"), None, "GLOBAL_STATE"),
+                _entry(LocalSource("x"), None, "GRAD_MODE"),
+            ]
+        )
+        self._keep(session)
+        summary = self._summary(session)
+        # Dropped rather than in neither list: a filter verdict IS what took the
+        # check away here, which is what dropped_guards reports.
+        self.assertIn(("GRAD_MODE", "x"), summary.dropped_guards)
+        self.assertNotIn(("GRAD_MODE", "x"), summary.kept_guards)
+
+    def test_a_bypassed_compile_is_in_neither_slot_list(self):
+        # The filter runs during the guard BUILD, so a compile the serializer
+        # then bypasses has already handed over a full set of verdicts. None of
+        # its guards reach the artifact: kept_guards would claim enforcement no
+        # artifact carries, and dropped_guards would blame a widening on a graph
+        # nothing can serve. One frame, two compiles, one of them kept.
+        class LocalThing:
+            # Defined in local scope, so its TYPE_MATCH cannot be serialized and
+            # serialize_guards bypasses the compile that carries it.
+            k = 3
+
+        session = self._session(_session_reads_optional)
+        with session as cap:
+            cap(torch.ones(2), None)
+            kept_only = session.summary()
+            cap(torch.ones(2), LocalThing())
+            # Both calls filed a record; which of them the artifact carries is
+            # what summary() decides below.
+            self.assertEqual(len(session._compiles), 2)
+        (code,) = session._package.cache_entry().codes
+        self.assertEqual(len(code.guarded_codes), 1)
+        # Not marked bypassed: one compile of the frame WAS kept, which is why
+        # the entry's per-frame flag cannot stand in for this.
+        self.assertFalse(code.bypassed)
+        summary = session.summary()
+        self.assertEqual(summary.kept_guards, kept_only.kept_guards)
+        self.assertEqual(summary.dropped_guards, kept_only.dropped_guards)
+        slots = summary.kept_guards + summary.dropped_guards
+        self.assertFalse([slot for slot in slots if slot[1].startswith("obj.")])
+        self.assertFalse([slot for slot in slots if slot[0] == "TYPE_MATCH"])
+        # The block's exit collapsed the records to the confirmed one, so the
+        # bypassed compile stops holding its entry for the session's life.
+        self.assertEqual(len(session._compiles), 1)
+        self.assertEqual(len(session._confirmed_compiles()), 1)
+
+    def test_a_bypass_before_a_landed_compile_keeps_only_the_landed_verdicts(self):
+        # A bypass and the compile after it see the same guarded_codes length, so
+        # the two records collide on the key _confirmed_compiles dedups by, and
+        # only the later one is evidence that guarded code landed. Keeping the
+        # earlier record instead would confirm the BYPASSED verdicts off the
+        # later compile's growth -- the widening report the rule exists to
+        # prevent -- and the kept-then-bypassed order above collides on nothing,
+        # so this order is what pins the last-wins half of it.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(precompile_package.default_guard_filter_fn)
+        session._package._current_entry = _FakeCompile(
+            _SessionReadsAttr.forward.__code__
+        )
+        # The bypassed compile: the filter voted, and no guarded code followed.
+        record([_entry(LocalSource("n"), 3, "EQUALS_MATCH")])
+        # The landed compile of the same frame, at the same count.
+        record([_entry(LocalSource("x"), torch.ones(2), "TENSOR_MATCH")])
+        self._keep(session)
+        self.assertEqual(len(session._compiles), 2)
+        self.assertEqual(len(session._confirmed_compiles()), 1)
+        summary = self._summary(session)
+        self.assertEqual(summary.kept_guards, (("TENSOR_MATCH", "x"),))
+
+    def test_summary_of_a_capture_that_landed_nothing_reads_empty(self):
+        # A report that raised on its own bookkeeping would lose the coverage it
+        # exists to describe, so the degenerate captures read as empty rather
+        # than as unreadable.
+        session = self._session(_SessionReadsAttr())
+        with session:
+            pass
+        summary = session.summary()
+        self.assertEqual(summary.guarded_codes, 0)
+        self.assertEqual(summary.kept_guards, ())
+        self.assertEqual(summary.dropped_guards, ())
+        self.assertEqual(summary.dropped_guard_code, ())
+        self.assertEqual(summary.wont_generalize, ())
+        self.assertFalse(summary.complete)
+        # A capture whose only compile raised out of the traced code.
+        session = self._session(_session_raises)
+        with session as cap:
+            with self.assertRaisesRegex(ValueError, "boom"):
+                cap(torch.ones(2), True)
+        summary = session.summary()
+        self.assertEqual(summary.capture_errors, ("ValueError: boom",))
+        self.assertEqual(summary.kept_guards, ())
+        self.assertEqual(summary.dropped_guards, ())
+        self.assertFalse(summary.complete)
+
+    def test_summary_refuses_a_read_from_inside_a_capture_call(self):
+        # The read waits for the calls in flight, so a read from inside one would
+        # wait on itself: it says so instead of hanging. Read on a thread of its
+        # own, joined with a timeout, because a regression here waits forever and
+        # on the main thread that is a job timeout rather than a failure: the mark
+        # would stay set and the block's exit would drain for the rest of the run.
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+            outcome: list[object] = []
+
+            def read_from_inside_a_call():
+                with session._state:
+                    # Marked exactly as _call marks it, since what runs inside
+                    # the block is the caller's own code and cannot be reached
+                    # from here.
+                    session._active_calls += 1
+                    session._active_call_threads[threading.get_ident()] = 1
+                try:
+                    outcome.append(session.summary())
+                except RuntimeError as refusal:
+                    outcome.append(refusal)
+                finally:
+                    with session._state:
+                        del session._active_call_threads[threading.get_ident()]
+                        if session._active_calls:
+                            session._active_calls -= 1
+                        session._state.notify_all()
+
+            reader = threading.Thread(target=read_from_inside_a_call, daemon=True)
+            reader.start()
+            reader.join(60)
+            waited = reader.is_alive()
+            if waited:
+                # The reader is waiting on itself, which is the regression. Clear
+                # the mark from here so the block's exit can drain, and let the
+                # assertion below report it.
+                with session._state:
+                    session._active_calls = 0
+                    session._active_call_threads.clear()
+                    session._state.notify_all()
+            self.assertFalse(waited, "summary() waited instead of refusing")
+            self.assertIsInstance(outcome[0], RuntimeError)
+            self.assertIn("from inside a capture call", str(outcome[0]))
+        self.assertTrue(session.summary().complete)
+
+    def test_summary_waits_for_a_call_in_flight_rather_than_raising(self):
+        # cache_entry() validates that no compile holds the package, so a read
+        # that raced a capture call on another thread used to raise
+        # AssertionError out of the package, on the reader's thread. Simulated
+        # rather than raced: a set _current_entry with a call in flight IS the
+        # state a concurrent compile puts the session in.
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        with session._state:
+            # A thread id that is not the reader's, so the reader waits for the
+            # call instead of taking it for its own.
+            session._active_calls += 1
+            session._active_call_threads[-1] = 1
+        session._package._current_entry = _FakeCompile(
+            _SessionReadsAttr.forward.__code__
+        )
+        with self.assertRaisesRegex(AssertionError, "_current_entry should be None"):
+            session._package.cache_entry()
+        read: list[object] = []
+        reader = threading.Thread(target=lambda: read.append(session.summary()))
+        reader.start()
+        try:
+            reader.join(1)
+            self.assertTrue(reader.is_alive())
+            self.assertEqual(read, [])
+        finally:
+            session._package._current_entry = None
+            with session._state:
+                session._active_calls -= 1
+                del session._active_call_threads[-1]
+                session._state.notify_all()
+        reader.join(60)
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(len(read), 1)
+
+    @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False)
+    def test_a_hook_dict_guard_the_config_keeps_is_enforced(self):
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        summary = session.summary()
+        self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
+        self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
+
+
 instantiate_parametrized_tests(TestPrecompilePackage)
 instantiate_parametrized_tests(TestPrecompileSession)
 
