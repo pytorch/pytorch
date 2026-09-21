@@ -8,8 +8,6 @@ on a fully sharded model::
     model.set_all_gather_output_fn(all_gather_output_fn_with_intermediate_copy)
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_intermediate_copy)
 
-The ``for_nonzero_dim_shards`` names remain aliases for the optimized defaults.
-
 All-gather extensions can return ``AllGatherInput`` records from
 ``fsdp_pre_all_gather`` to declare each payload's concatenation dimension and
 gathered shape. FSDP batches these copies before calling ``fsdp_post_all_gather``
@@ -27,8 +25,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _copy_all_gather_outputs,
-    _default_all_gather_output_fn as all_gather_output_fn_for_nonzero_dim_shards,
-    _default_reduce_scatter_input_fn as reduce_scatter_input_fn_for_nonzero_dim_shards,
     AllGatherResult,
     foreach_reduce_scatter_copy_in,
 )
@@ -40,9 +36,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
 __all__ = [
     "AllGatherInput",
     "ReduceScatterInput",
-    "all_gather_output_fn_for_nonzero_dim_shards",
     "all_gather_output_fn_with_intermediate_copy",
-    "reduce_scatter_input_fn_for_nonzero_dim_shards",
     "reduce_scatter_input_fn_with_intermediate_copy",
 ]
 
