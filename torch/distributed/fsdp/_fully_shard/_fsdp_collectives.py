@@ -1,6 +1,5 @@
 import math
 from collections.abc import Callable, Sequence
-from functools import partial
 from itertools import chain
 from typing import Any, cast, Literal, NamedTuple
 
@@ -546,20 +545,20 @@ def _default_reduce_scatter_input_fn(
         )
     copy_in = foreach_reduce_scatter_copy_in
     if any(num_leading_dims):
-        copy_in = partial(_copy_reduce_scatter_input, num_leading_dims=num_leading_dims)
+
+        def copy_in(
+            unsharded_grads: list[torch.Tensor],
+            output: torch.Tensor,
+            world_size: int,
+        ) -> None:
+            torch.ops.fsdp._reduce_scatter_copy_in_(
+                output.view(world_size, -1),
+                unsharded_grads,
+                num_leading_dims,
+                world_size,
+            )
+
     return ReduceScatterInput(padded_unsharded_sizes, copy_in)
-
-
-def _copy_reduce_scatter_input(
-    unsharded_grads: list[torch.Tensor],
-    output: torch.Tensor,
-    world_size: int,
-    *,
-    num_leading_dims: list[int],
-) -> None:
-    torch.ops.fsdp._reduce_scatter_copy_in_(
-        output.view(world_size, -1), unsharded_grads, num_leading_dims, world_size
-    )
 
 
 @torch.no_grad()
