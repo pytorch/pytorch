@@ -1558,7 +1558,12 @@ class MixOrderReductionNumericTest(TestBase):
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
 
 
-instantiate_device_type_tests(MixOrderReductionNumericTest, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    MixOrderReductionNumericTest,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 class MixOrderReductionHeuristicTest(TestBase):

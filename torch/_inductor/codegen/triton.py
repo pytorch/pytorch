@@ -7064,6 +7064,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     var = partial_accum.value
                     name = f"accum{idx}"
                     if not has_constant_xmask:
+                        # Pointwise compute can transform masked load values.
                         default = ir.Reduction.default_accumulator(
                             partial_accum.reduction_type, torch.float
                         )
