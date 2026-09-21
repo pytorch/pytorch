@@ -19,9 +19,9 @@ from torch.distributed.fsdp._fully_shard._fsdp_extensions import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_reorder,
+    all_gather_output_fn_with_intermediate_copy,
     AllGatherInput,
-    reduce_scatter_input_fn_with_reorder,
+    reduce_scatter_input_fn_with_intermediate_copy,
 )
 from torch.distributed.tensor import Shard
 from torch.testing import make_tensor
@@ -127,13 +127,19 @@ class TestPrefixCopy(TestCase):
             self.assertEqual(layouts[0].output_size, (0, 3))
             self.assertEqual(layouts[0].num_prefixes, 1)
 
-    @parametrize("use_reorder", [False, True])
+    @parametrize("intermediate_copy", [False, True])
     @parametrize("nonzero_shards", [False, True])
     @parametrize("world_size", [1, 4])
     @parametrize("mixed_layout", [False, True])
     @dtypes(torch.bfloat16)
     def test_reduce_scatter_preparation(
-        self, device, dtype, use_reorder, nonzero_shards, world_size, mixed_layout
+        self,
+        device,
+        dtype,
+        intermediate_copy,
+        nonzero_shards,
+        world_size,
+        mixed_layout,
     ):
         shapes = [
             (world_size * 3 - 1, 5),
@@ -156,13 +162,13 @@ class TestPrefixCopy(TestCase):
         ).float()
         params = [Mock(fsdp_placement=Shard(dim)) for dim in shard_dims]
         prepare = (
-            reduce_scatter_input_fn_with_reorder
-            if use_reorder
+            reduce_scatter_input_fn_with_intermediate_copy
+            if intermediate_copy
             else _default_reduce_scatter_input_fn
         )
         prepared = prepare(params, grads, world_size)
         sizes = prepared.padded_unsharded_sizes
-        use_prefix_copy = not use_reorder and nonzero_shards and world_size > 1
+        use_prefix_copy = not intermediate_copy and nonzero_shards and world_size > 1
         if use_prefix_copy:
             self.assertIsNot(prepared.copy_in, foreach_reduce_scatter_copy_in)
         else:
@@ -181,7 +187,7 @@ class TestPrefixCopy(TestCase):
             counter.counts[torch.ops.fsdp.chunk_cat.default], int(not use_prefix_copy)
         )
 
-    @parametrize("use_reorder", [False, True])
+    @parametrize("intermediate_copy", [False, True])
     @parametrize(
         "layout",
         [
@@ -196,13 +202,13 @@ class TestPrefixCopy(TestCase):
             "mixed_fallback",
         ],
     )
-    def test_all_gather_output(self, device, use_reorder, layout):
-        self._test_all_gather_output(device, use_reorder, layout)
+    def test_all_gather_output(self, device, intermediate_copy, layout):
+        self._test_all_gather_output(device, intermediate_copy, layout)
 
     def test_all_gather_empty_output(self, device):
         self._test_all_gather_output(device, False, "all_empty")
 
-    def _test_all_gather_output(self, device, use_reorder, layout):
+    def _test_all_gather_output(self, device, intermediate_copy, layout):
         world_size = 4
         layouts = {
             "all_empty": ("zero_prefix",),
@@ -284,8 +290,8 @@ class TestPrefixCopy(TestCase):
         )
         versions = [output._version for output in outputs]
         copy_outputs = (
-            all_gather_output_fn_with_reorder
-            if use_reorder
+            all_gather_output_fn_with_intermediate_copy
+            if intermediate_copy
             else _default_all_gather_output_fn
         )
         with torch.no_grad(), _OpCounter() as counter:
@@ -298,7 +304,7 @@ class TestPrefixCopy(TestCase):
             rtol=0,
         )
         self.assertEqual([output._version for output in outputs], versions)
-        use_prefix_copy = not use_reorder
+        use_prefix_copy = not intermediate_copy
         prefix_op = torch.ops.fsdp._split_with_sizes_copy_with_prefixes_.default
         self.assertEqual(counter.counts[prefix_op], int(use_prefix_copy))
         self.assertEqual(
@@ -306,7 +312,7 @@ class TestPrefixCopy(TestCase):
             int(not use_prefix_copy),
         )
         reorder_layouts = (
-            ("shard1", "singleton_prefix", "extension") if use_reorder else ()
+            ("shard1", "singleton_prefix", "extension") if intermediate_copy else ()
         )
         num_reorders = sum(kind in reorder_layouts for kind in layouts)
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], num_reorders)

@@ -1,11 +1,12 @@
 r"""Experimental FSDP2 customization APIs.
 
 FSDP uses optimized copies for supported nonzero-dimension shards by default.
-Register the ``with_reorder`` callbacks to use the original copy-and-reorder
-behavior. Each direction can be selected independently on a fully sharded model::
+Register the ``with_intermediate_copy`` callbacks to copy nonzero-dimension
+shards through intermediate buffers. Each direction can be selected independently
+on a fully sharded model::
 
-    model.set_all_gather_output_fn(all_gather_output_fn_with_reorder)
-    model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_reorder)
+    model.set_all_gather_output_fn(all_gather_output_fn_with_intermediate_copy)
+    model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_intermediate_copy)
 
 The ``for_nonzero_dim_shards`` names remain aliases for the optimized defaults.
 
@@ -40,21 +41,22 @@ __all__ = [
     "AllGatherInput",
     "ReduceScatterInput",
     "all_gather_output_fn_for_nonzero_dim_shards",
-    "all_gather_output_fn_with_reorder",
+    "all_gather_output_fn_with_intermediate_copy",
     "reduce_scatter_input_fn_for_nonzero_dim_shards",
-    "reduce_scatter_input_fn_with_reorder",
+    "reduce_scatter_input_fn_with_intermediate_copy",
 ]
 
 
-def all_gather_output_fn_with_reorder(
+def all_gather_output_fn_with_intermediate_copy(
     fsdp_params: list[FSDPParam],
     all_gather_result: AllGatherResult,
     world_size: int,
 ) -> None:
-    r"""Use the original all-gather copy followed by nonzero-dimension reassembly.
+    r"""Copy gathered payloads through intermediate buffers when needed.
 
     Nonempty payloads concatenated along a nonzero dimension copy through
-    temporary outputs. Dimension-0 and empty payloads copy directly. Register with
+    intermediate buffers, then concatenate into their final layout. Dimension-0
+    and empty payloads copy directly. Register with
     :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`, which
     documents the callback contract.
     """
@@ -113,15 +115,16 @@ def _reassemble_all_gather_outputs(
             torch.cat(chunks, dim=layout.dim, out=output.view(gathered_size))
 
 
-def reduce_scatter_input_fn_with_reorder(
+def reduce_scatter_input_fn_with_intermediate_copy(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
 ) -> ReduceScatterInput:
-    r"""Reorder nonzero-dimension gradients before the original reduce-scatter copy.
+    r"""Pack nonzero-dimension gradients into intermediate buffers before copying.
 
-    Nonzero-dimension shards use a separate chunk-and-concatenate reorder when
-    the group has more than one rank. Register with
+    When the group has more than one rank, nonzero-dimension gradients are
+    chunked and concatenated into intermediate buffers grouped by destination
+    rank, then copied into the reduce-scatter buffer. Register with
     :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`, which
     documents the callback contract.
     """
