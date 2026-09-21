@@ -67,17 +67,17 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       static -- each size is baked in. Tracing on fakes REFUSES, on BOTH capture paths, an
       example input whose metadata a fake tensor silently drops (pinned, mkldnn, sparse)
       and a nested one, and it refuses to run inside another trace, whose fake mode would
-      outrank its own. It also FAILS, rather than baking a wrong answer, on an op with no
-      meta/fake kernel, on a read of a traced tensor's data (``.data_ptr()``,
-      ``.numpy()``), on an example input a fake tensor cannot represent (quantized), and --
-      on a STATIC capture -- on a data-dependent op (``.item()``, ``.nonzero()``, a Python
-      branch over a tensor value).
+      outrank its own; and, on a STATIC capture, it refuses a data-dependent op
+      (``.item()``, ``.nonzero()``, a Python branch over a tensor value). It also FAILS,
+      rather than baking a wrong answer, on an op with no meta/fake kernel, on a read of a
+      traced tensor's data (``.data_ptr()``, ``.numpy()``), and on an example input a fake
+      tensor cannot represent (quantized).
       The exception to static shapes is a tensor dim explicitly marked unbacked (inductor
       backend only) with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before
       the call; such a dim is captured as an unbacked symint, so one artifact serves any
       runtime size of it, and a graph that needs to guard on it fails at capture. Such an
       unbacked capture also holds a data-dependent value symbolically -- it can capture an
-      ``.item()`` result or a ``.nonzero()``-sized intermediate that a static one cannot,
+      ``.item()`` result or a ``.nonzero()``-sized intermediate that a static one refuses,
       and fails if the computation must guard on that value (or if the op is one no
       ``ShapeEnv`` can fake, e.g. ``aten.equal``). Each input's dtype and device are
       specialized too (a runtime mismatch is rejected), and the inductor backend
