@@ -27,13 +27,13 @@ struct ChunkCatMetadata {
   std::vector<int64_t> num_blocks_per_tensor_chunk;
 };
 
-void split_with_sizes_copy_with_prefixes_cuda(
+void all_gather_copy_out_cuda(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
     at::IntArrayRef num_prefixes,
     int64_t num_chunks) {
-  check_split_with_sizes_copy_inputs(
+  check_all_gather_copy_out_inputs(
       out, input, split_sizes, num_prefixes, num_chunks);
   const c10::cuda::CUDAGuard device_guard(input.device());
   std::vector<int64_t> srcs;
@@ -108,12 +108,13 @@ void split_with_sizes_copy_with_prefixes_cuda(
   }
 }
 
-at::Tensor& chunk_cat_with_prefixes_cuda(
+at::Tensor& reduce_scatter_copy_in_cuda(
     at::Tensor& out,
     at::TensorList tensors,
     at::IntArrayRef num_leading_dims,
     int64_t num_chunks) {
-  check_chunk_cat_inputs(out, tensors, num_leading_dims, num_chunks);
+  check_reduce_scatter_copy_in_inputs(
+      out, tensors, num_leading_dims, num_chunks);
   const c10::cuda::CUDAGuard device_guard(out.device());
   const auto src_dtype = tensors[0].scalar_type();
   bool fast_path = src_dtype == out.scalar_type() ||
@@ -122,7 +123,7 @@ at::Tensor& chunk_cat_with_prefixes_cuda(
     fast_path &= tensor.is_contiguous();
   }
   if (!fast_path) {
-    return chunk_cat_with_prefixes(out, tensors, num_leading_dims, num_chunks);
+    return reduce_scatter_copy_in(out, tensors, num_leading_dims, num_chunks);
   }
 
   int64_t num_inputs = 0;
@@ -204,10 +205,8 @@ at::Tensor& chunk_cat_with_prefixes_cuda(
 } // namespace
 
 TORCH_LIBRARY_IMPL(fsdp, CUDA, m) {
-  m.impl(
-      "_split_with_sizes_copy_with_prefixes_",
-      TORCH_FN(split_with_sizes_copy_with_prefixes_cuda));
-  m.impl("_chunk_cat_with_prefixes_", TORCH_FN(chunk_cat_with_prefixes_cuda));
+  m.impl("_all_gather_copy_out_", TORCH_FN(all_gather_copy_out_cuda));
+  m.impl("_reduce_scatter_copy_in_", TORCH_FN(reduce_scatter_copy_in_cuda));
 }
 
 } // namespace c10d::fsdp

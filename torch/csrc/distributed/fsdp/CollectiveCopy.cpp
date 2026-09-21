@@ -12,7 +12,7 @@
 
 namespace c10d::fsdp {
 
-void check_split_with_sizes_copy_inputs(
+void check_all_gather_copy_out_inputs(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
@@ -56,13 +56,13 @@ void check_split_with_sizes_copy_inputs(
   TORCH_CHECK(remaining == 0, "split sizes must sum to the input chunk size");
 }
 
-void split_with_sizes_copy_with_prefixes(
+void all_gather_copy_out(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
     at::IntArrayRef num_prefixes,
     int64_t num_chunks) {
-  check_split_with_sizes_copy_inputs(
+  check_all_gather_copy_out_inputs(
       out, input, split_sizes, num_prefixes, num_chunks);
   std::vector<int64_t> sizes;
   std::vector<at::Tensor> outputs;
@@ -99,7 +99,7 @@ void split_with_sizes_copy_with_prefixes(
   }
 }
 
-void check_chunk_cat_inputs(
+void check_reduce_scatter_copy_in_inputs(
     const at::Tensor& out,
     at::TensorList tensors,
     at::IntArrayRef num_leading_dims,
@@ -143,12 +143,13 @@ void check_chunk_cat_inputs(
   TORCH_CHECK(has_input, "expected a non-empty input tensor list");
 }
 
-at::Tensor& chunk_cat_with_prefixes(
+at::Tensor& reduce_scatter_copy_in(
     at::Tensor& out,
     at::TensorList tensors,
     at::IntArrayRef num_leading_dims,
     int64_t num_chunks) {
-  check_chunk_cat_inputs(out, tensors, num_leading_dims, num_chunks);
+  check_reduce_scatter_copy_in_inputs(
+      out, tensors, num_leading_dims, num_chunks);
   std::vector<at::Tensor> inputs;
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
@@ -167,25 +168,19 @@ at::Tensor& chunk_cat_with_prefixes(
 
 TORCH_LIBRARY_FRAGMENT(fsdp, m) {
   m.def(
-      "_split_with_sizes_copy_with_prefixes_(Tensor(a!)[] self, Tensor input, int[] split_sizes, int[] num_prefixes, int num_chunks) -> ()");
+      "_all_gather_copy_out_(Tensor(a!)[] self, Tensor input, int[] split_sizes, int[] num_prefixes, int num_chunks) -> ()");
   m.def(
-      "_chunk_cat_with_prefixes_(Tensor(a!) self, Tensor[] tensors, int[] num_leading_dims, int num_chunks) -> Tensor(a!)");
+      "_reduce_scatter_copy_in_(Tensor(a!) self, Tensor[] tensors, int[] num_leading_dims, int num_chunks) -> Tensor(a!)");
 }
 
 TORCH_LIBRARY_IMPL(fsdp, CompositeExplicitAutograd, m) {
+  m.impl("_all_gather_copy_out_", TORCH_FN(c10d::fsdp::all_gather_copy_out));
   m.impl(
-      "_split_with_sizes_copy_with_prefixes_",
-      TORCH_FN(c10d::fsdp::split_with_sizes_copy_with_prefixes));
-  m.impl(
-      "_chunk_cat_with_prefixes_",
-      TORCH_FN(c10d::fsdp::chunk_cat_with_prefixes));
+      "_reduce_scatter_copy_in_", TORCH_FN(c10d::fsdp::reduce_scatter_copy_in));
 }
 
 TORCH_LIBRARY_IMPL(fsdp, Functionalize, m) {
+  m.impl("_all_gather_copy_out_", TORCH_FN(c10d::fsdp::all_gather_copy_out));
   m.impl(
-      "_split_with_sizes_copy_with_prefixes_",
-      TORCH_FN(c10d::fsdp::split_with_sizes_copy_with_prefixes));
-  m.impl(
-      "_chunk_cat_with_prefixes_",
-      TORCH_FN(c10d::fsdp::chunk_cat_with_prefixes));
+      "_reduce_scatter_copy_in_", TORCH_FN(c10d::fsdp::reduce_scatter_copy_in));
 }

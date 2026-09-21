@@ -455,7 +455,7 @@ def _default_all_gather_output_fn(
             num_prefixes.append(layout.num_prefixes)
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
-        torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
+        torch.ops.fsdp._all_gather_copy_out_(
             copy_outputs,
             all_gather_output,
             all_gather_result.all_gather_input_split_sizes,
@@ -557,7 +557,7 @@ def _copy_reduce_scatter_input(
     *,
     num_leading_dims: list[int],
 ) -> None:
-    torch.ops.fsdp._chunk_cat_with_prefixes_(
+    torch.ops.fsdp._reduce_scatter_copy_in_(
         output.view(world_size, -1), unsharded_grads, num_leading_dims, world_size
     )
 
