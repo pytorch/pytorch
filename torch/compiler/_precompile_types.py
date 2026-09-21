@@ -41,10 +41,13 @@ class GuardFact:
             of the same length render one check and only the slot says they
             differed, and a rendering that is not a Python expression at all
             becomes ``"<unparsed check>"``, since nothing can be masked in a
-            shape the producer cannot read. The attribute name a ``hasattr``
+            shape the producer cannot read -- which makes two such checks on one
+            slot read alike, a digest of the text being a fingerprint of what the
+            masking exists to hide. The attribute name a ``hasattr``
             reads stays, as does a key that names a scope or an nn.Module
             attribute (``L['x']``, ``self._modules['lin']``); every other
-            subscript key is masked, its shape notwithstanding.
+            subscript key is masked, its shape notwithstanding, since the check
+            is parsed rather than pattern-matched.
         value: A rendered fragment for what the check compares that its code does
             not show: the ``check_tensor`` line for a tensor guard (python type,
             dispatch keys, dtype, size and stride), ``"is <callable>"`` for an
