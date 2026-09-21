@@ -1095,9 +1095,14 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
+        # A single guard type, or a tuple of them when the case under test
+        # needs two (a by-value dict key: the key's own TYPE_MATCH puts it in
+        # the guard tree, DICT_KEYS_MATCH is what compares it by value).
+        kept = (guard_type,) if isinstance(guard_type, str) else tuple(guard_type)
+
         def guard_filter_fn(guards):
             ret = [
-                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                g.guard_type in kept or any(t in g.derived_guard_types for t in kept)
                 for g in guards
             ]
             self.assertTrue(any(ret))
@@ -1198,6 +1203,45 @@ if torch.distributed.is_available():
         def __init__(self):
             super().__init__(0, 1)
             self.calls = []
+
+
+@dataclasses.dataclass(frozen=True)
+class _KeyCfg:
+    # Hashable by name, compared by every field: a plain object that ends up as
+    # a dict key and is therefore compared by value at run time.
+    name: str
+    tags: list
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubCfg:
+    scale: float
+    tags: list
+
+    def __hash__(self):
+        return hash(self.scale)
+
+
+@dataclasses.dataclass(frozen=True)
+class _KeyWithSub:
+    name: str
+    sub: _SubCfg
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+class _NetWithTags(torch.nn.Module):
+    def __init__(self, tags):
+        super().__init__()
+        self.tags = tags
+        self.scale = 2.0
+
+    def forward(self, x):
+        return x * self.scale
 
 
 class _ModuleWithGenerators(torch.nn.Module):
@@ -3830,6 +3874,59 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIsInstance(loaded, torch.nn.LSTM)
         self.assertEqual(loaded._all_weights, lstm._all_weights)
         self.assertEqual(loaded._flat_weights_names, lstm._flat_weights_names)
+
+    def test_a_dict_key_field_shared_with_a_module_attribute_stays_real(self):
+        # The module path registers its unguarded list by id, and persistent_id
+        # would substitute that list inside the key's own state; the key is
+        # compared by value, so its fields are protected transitively.
+        # The module comes first in the scope so it is reduced, and registers
+        # the list, before the key is reached.
+        def fn(m, d, x):
+            for v in d.values():
+                x = x + v
+            return m(x)
+
+        shared = ["t"]
+        m, d, x = _NetWithTags(shared), {_KeyCfg("a", shared): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, m, d, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).tags, ["t"])
+
+    def test_a_plain_object_key_field_shared_with_a_module_attribute_stays_real(self):
+        # The module path registers its unguarded attributes in missing_values,
+        # and a plain object among them is pruned by reducer_override rather than
+        # persistent_id; the same object is a field of a by-value key, so it must
+        # stay whole. The module comes first in the scope so it is reduced first.
+        def fn(m, d, x):
+            for v in d.values():
+                x = x + v
+            return m(x)
+
+        sub = _SubCfg(2.0, ["t"])
+        m, d, x = _NetWithTags(sub), {_KeyWithSub("a", sub): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, m, d, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).sub, sub)
+
+    def test_a_key_field_that_is_an_empty_rebuilt_receiver_stays_whole(self):
+        # A bound method's receiver is normally rebuilt empty (empty_values); when
+        # it is also a field of a by-value key the comparison would read the
+        # empty object, so verbatim outranks the empty rebuild in both hooks.
+        sub = _SubCfg(2.0, ["t"])
+        key = _KeyWithSub("a", sub)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {id(sub): sub}, {}, {id(key): key}, buf).dump(
+            {"k": key, "g": sub.__hash__}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertEqual(out["k"].sub, sub)
+        self.assertEqual(out["k"].sub.tags, ["t"])
 
     def test_grad_mode(self):
         def fn(x):
