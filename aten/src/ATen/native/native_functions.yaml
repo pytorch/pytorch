@@ -7134,7 +7134,6 @@
 - func: _scaled_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
   structured_delegate: _scaled_mm_v2.out
   variants: function
-  tags: needs_exact_strides
 
 - func: _scaled_mm_v2.out(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -7142,8 +7141,8 @@
   dispatch:
     CPU: _scaled_mm_cpu_v2_out
     CUDA: _scaled_mm_cuda_v2_out
+    MPS: _scaled_mm_mps_v2_out
     XPU: _scaled_mm_xpu_v2_out
-  tags: needs_exact_strides
 
 - func: _scaled_addmm(Tensor self, Tensor mat1, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, int[] contraction_dim=[], *, Scalar beta=1, Scalar alpha=1, bool use_fast_accum=False) -> Tensor
   structured_delegate: _scaled_addmm.out
