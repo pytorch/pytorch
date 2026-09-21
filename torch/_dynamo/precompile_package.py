@@ -1681,26 +1681,27 @@ def _entry_fn_of(fn: object) -> Callable[..., object]:
     return fn  # type: ignore[return-value]
 
 
-def _leaves_backends_on_package(backend: object) -> bool:
-    """Whether a resolved backend files nothing and leaves its callables on the package.
+def _files_precompile_artifacts(backend: object) -> bool:
+    """Whether a resolved backend is one this capture takes its artifacts from.
 
-    The eager family (torch/_dynamo/backends/debugging.py) hands back the fx
-    graph itself or a wrapper that interprets it, and none of it runs
-    AOTAutograd, so nothing reaches PrecompileContext under the backend id and
-    package.cached_backends holds the only copy. Compared by identity against
-    the registry's own functions rather than against the name "eager", which is
-    one of four names for backends with that same property: keying off the
-    string drops the backends of an eager_noexcept capture and reports it as
-    having recorded nothing. aot_eager is deliberately not in the family -- it
-    runs AOTAutograd, which files a bundle like inductor does.
+    inductor is: compile_fx files its compiled code into PrecompileContext under
+    the backend id, so _take_backend_artifacts finds it there and the package's
+    copy of the callable is redundant. Every other backend -- the eager family,
+    ts, aot_eager, anything a caller registers -- hands back a Python callable
+    that package.cached_backends holds the only copy of, so the session leaves it
+    there for the render and an empty artifact dict is not a failed capture.
+    Asked of the resolved function rather than of a list of names, which
+    classifies every backend added later as inductor-like by default and drops
+    its backends.
     """
-    from torch._dynamo.backends import debugging
+    from torch._dynamo.backends.registry import lookup_backend
 
-    return backend in (
-        debugging.eager,
-        debugging.eager_noexcept,
-        debugging.eager_debug,
-        debugging.pre_dispatch_eager,
+    # A session resolves a name through the registry, so the identity compare is
+    # the live path; compiler_name covers a backend handed over as one of
+    # torch.compile's inductor wrappers, which is how such a wrapper names the
+    # compiler it runs (see eval_frame.get_compiler_fn).
+    return backend is lookup_backend("inductor") or (
+        getattr(backend, "compiler_name", None) == "inductor"
     )
 
 
@@ -1870,11 +1871,12 @@ class PrecompileSession:
         # ones, exactly as caching_precompile does today.
         self._package = CompilePackage(self._entry_fn)
         self._backend_artifacts: dict[_BackendId, Any] = {}
-        # Set once the backend name is resolved, in __enter__: which teardown
-        # the backends get is a property of the resolved function, not of the
-        # name (see _leaves_backends_on_package). False until then, which is
-        # what an __enter__ that failed to resolve a backend at all wants.
-        self._backends_on_package = False
+        # Set once the backend name is resolved, in __enter__: whether the
+        # compiled code is filed in PrecompileContext or left on the package is
+        # a property of the resolved function, not of the name (see
+        # _files_precompile_artifacts). False until then, which is what an
+        # __enter__ that failed to resolve a backend at all wants.
+        self._files_artifacts = False
         self._entered = False
         self._compiled: Callable[..., object] | None = None
         self._state = threading.Condition()
@@ -1903,16 +1905,13 @@ class PrecompileSession:
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
-        if (
-            backend_ids
-            and not self._backend_artifacts
-            and not self._backends_on_package
-        ):
+        if backend_ids and not self._backend_artifacts and self._files_artifacts:
             # The bytecode names backend ids but nothing was filed under any of
             # them, so the render has nothing to serve. A single id with no
             # artifact is normal (an exercised empty resume frame compiles to
-            # nothing), and an eager-family capture is exempt: its backends stay
-            # on the package (see _release) instead of being filed here.
+            # nothing), and only a backend that files its code is asked for it:
+            # every other one keeps its callables on the package (see _release)
+            # instead of having them filed here.
             self._record_capture_error(
                 PackageError(
                     "the capture recorded no artifact; the usual causes are a "
@@ -1955,10 +1954,10 @@ class PrecompileSession:
     def _release(self) -> None:
         # The compiled variants stay in the entry's ordinary Dynamo cache, as
         # they would after torch.compile; clearing them per capture needs the
-        # region-scoped cache entries that are not part of this build. The
-        # eager backends stay until the render collects them.
-        self._compiled = None
-        if not self._backends_on_package:
+        # region-scoped cache entries that are not part of this build. Only the
+        # copies _take_backend_artifacts made redundant go: a backend that files
+        # nothing leaves its callables here as the render's only source.
+        if self._files_artifacts:
             self._package.cached_backends.clear()
 
     def _call(self, *args: object, **kwargs: object) -> object:
@@ -1980,21 +1979,79 @@ class PrecompileSession:
                     self._state.notify_all()
         return result
 
+    def _drain_then_close(self) -> None:
+        """Wait for the calls in flight, then close the session either way.
+
+        The drain has to come first: a call can still be compiling against a
+        borrowed cache entry, and collecting the artifacts mutates state that
+        compile reads. The close sits in the drain's finally so an interrupt
+        raised out of wait() (a KeyboardInterrupt) still closes the session
+        instead of leaving cap() callable past the block with the optimize
+        context alive to process exit -- at the price of abandoning the calls
+        still running, which is why _close then collects nothing for them.
+        """
+        drained = False
+        try:
+            with self._state:
+                self._closing = True
+                while self._active_calls:
+                    self._state.wait()
+            drained = True
+        finally:
+            self._close(collect=drained)
+
+    def _close(self, *, collect: bool) -> None:
+        """Close the session, and collect its artifacts if the drain completed.
+
+        Publishing the flags is all that is safe with calls still in flight,
+        which is what an interrupted drain leaves behind: taking the artifacts
+        reads the package's cache entry and _release clears its backends, both of
+        which a compile still running is using. So an interrupt abandons those
+        calls -- whatever they go on to file is not collected, and the artifact
+        this capture renders does not hold their variants -- while the session
+        still closes rather than staying open to process exit.
+        """
+        with self._state:
+            # _closing marks a drain in progress, and by here it is over.
+            self._closing = False
+            entered = self._entered
+            self._entered = False
+            # The optimize context lives on the compiled callable, so dropping
+            # the callable is what releases it.
+            self._compiled = None
+            self._finished = True
+            self._state.notify_all()
+        if not (entered and collect):
+            return
+        try:
+            self._take_backend_artifacts()
+        except BaseException as teardown:
+            # Recorded, never raised: a teardown failure must not replace the
+            # exception the caller's block is already propagating, and the
+            # capture errors are what a render gates on.
+            self._record_capture_error(teardown)
+        finally:
+            self._release()
+
     def __enter__(self) -> Callable[..., object]:
-        if self._finished:
-            raise RuntimeError("PrecompileSession cannot be re-entered")
-        if self._entered:
-            raise PackageError(
-                "PrecompileSession is already active: a session runs one capture "
-                "block at a time, so serialize concurrent entries."
-            )
-        # The grad-mode/config patch is per call, in _call, not block-level:
-        # user code between calls (optimizer.step, data loading) must run in
-        # the ambient mode, not the capture's.
-        self._entered = True
+        # Under _state: the not-finished/not-entered check and the set that
+        # follows are one decision, which two concurrent entries must not both
+        # pass, and _call and _close read _entered and _compiled under it too.
+        with self._state:
+            if self._finished:
+                raise RuntimeError("PrecompileSession cannot be re-entered")
+            if self._entered:
+                raise PackageError(
+                    "PrecompileSession is already active: a session runs one capture "
+                    "block at a time, so serialize concurrent entries."
+                )
+            # The grad-mode/config patch is per call, in _call, not block-level:
+            # user code between calls (optimizer.step, data loading) must run in
+            # the ambient mode, not the capture's.
+            self._entered = True
         try:
             backend_obj = _PrecompileBackend(self._backend)
-            self._backends_on_package = _leaves_backends_on_package(
+            self._files_artifacts = _files_precompile_artifacts(
                 backend_obj._torchdynamo_orig_backend
             )
             optimize_ctx = _optimize_isolated(
@@ -2005,75 +2062,22 @@ class PrecompileSession:
                 guard_filter_fn=self._guard_filter_fn,
                 on_recompile_limit=self._record_recompile_limit,
             )
-            self._compiled = optimize_ctx(self._fn)
+            compiled = optimize_ctx(self._fn)
+            with self._state:
+                self._compiled = compiled
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
-            # the session is wedged: the block reads as still open.
-            self._entered = False
-            self._compiled = None
-            # Drain in-flight calls FIRST, before any teardown, exactly as
-            # __exit__ does: a concurrent call can still be compiling against a
-            # borrowed cache entry, and teardown mutates state it reads. The
-            # cleanup chain sits in the drain's finally so an interrupt raised
-            # out of wait() (e.g. KeyboardInterrupt) still releases the session
-            # rather than leaking it until process exit.
-            try:
-                with self._state:
-                    self._closing = True
-                    while self._active_calls:
-                        self._state.wait()
-            finally:
-                # _closing marks a drain in progress, so both teardown paths
-                # clear it once their own drain is done.
-                self._closing = False
-                try:
-                    self._take_backend_artifacts()
-                except BaseException as teardown:
-                    self._record_capture_error(teardown)
-                finally:
-                    self._release()
-                    self._finished = True
-                    with self._state:
-                        self._state.notify_all()
+            # the session is wedged: the block reads as still open. The same
+            # drain-then-close __exit__ runs, on the same terms.
+            self._drain_then_close()
             raise
         return self._call
 
     def __exit__(self, *exc: object) -> None:
         if isinstance(exc[1], BaseException):
             self._record_capture_error(exc[1])
-        try:
-            with self._state:
-                self._closing = True
-                while self._active_calls:
-                    self._state.wait()
-        finally:
-            # The teardown chain sits in the drain's finally, exactly as
-            # __enter__'s error path does: an interrupt raised out of wait()
-            # (e.g. KeyboardInterrupt) must still close the session rather than
-            # leave cap() callable past the block with the artifacts staged in
-            # PrecompileContext and the optimize context leaking to process exit.
-            with self._state:
-                # _closing marks a drain in progress, and this one is done.
-                self._closing = False
-                entered = self._entered
-                self._entered = False
-                self._compiled = None
-            if entered:
-                try:
-                    self._take_backend_artifacts()
-                except BaseException as teardown:
-                    # Recorded, never raised: a teardown failure must not
-                    # replace the exception the caller's block is already
-                    # propagating, and the capture errors are what a render
-                    # gates on.
-                    self._record_capture_error(teardown)
-                finally:
-                    self._release()
-                    self._finished = True
-                    with self._state:
-                        self._state.notify_all()
-            self._recorded_exception_keys.clear()
+        self._drain_then_close()
 
 
 def precompile_capture(
