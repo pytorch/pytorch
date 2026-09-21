@@ -256,7 +256,7 @@ class DeviceInterface:
             )
 
     @staticmethod
-    def is_fp32_attention_fusion_safe(dtype) -> bool:
+    def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
         return True
 
     @staticmethod
@@ -264,7 +264,7 @@ class DeviceInterface:
         return False
 
     @staticmethod
-    def is_fp32_softmax_attention_fusion_safe(device_type) -> bool:
+    def is_fp32_softmax_attention_fusion_safe(device_type: str) -> bool:
         return True
 
     @staticmethod
@@ -406,7 +406,7 @@ class CudaInterface(DeviceInterface):
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
 
     @staticmethod
-    def is_fp32_attention_fusion_safe(dtype) -> bool:
+    def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
         if dtype != torch.float32:
             return True
         if torch.backends.cuda.matmul.fp32_precision == "tf32":
@@ -420,7 +420,7 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
 
     @staticmethod
-    def is_fp32_softmax_attention_fusion_safe(device_type) -> bool:
+    def is_fp32_softmax_attention_fusion_safe(device_type: str) -> bool:
         return "cuda" not in str(device_type)
 
     @staticmethod
