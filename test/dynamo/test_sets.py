@@ -255,12 +255,14 @@ class TestSetGuards(LoggingTestCase):
         self.assertEqual(y, x.cos())
         self.assertEqual(cnts.frame_count, 2)
         self.assertGreater(len(records), 0)
-        record = self.getRecord(records, "Set s must contain")
+        record = self.getRecord(records, "set.__contains__")
+        message = munge_exc(record.getMessage())
+        self.assertIn("set.__contains__(s, 'PyTorch')", message)
         expected = (
-            "Set s must contain item 'PyTorch'; Dynamo specialized the "
+            "(HINT: Set s must contain item 'PyTorch'; Dynamo specialized the "
             "compiled code on this item being present."
         )
-        self.assertIn(expected, munge_exc(record.getMessage()))
+        self.assertIn(expected, message)
 
     def test_not_in_guard_message(self):
         failures = []
@@ -278,8 +280,9 @@ class TestSetGuards(LoggingTestCase):
         compiled_fn(x, {"PyTorch"})
 
         self.assertEqual(len(failures), 1)
+        self.assertIn("not set.__contains__(s, 'PyTorch')", failures[0])
         expected = (
-            "Set s must not contain item 'PyTorch'; Dynamo specialized the "
+            "(HINT: Set s must not contain item 'PyTorch'; Dynamo specialized the "
             "compiled code on this item being absent."
         )
         self.assertIn(expected, failures[0])
