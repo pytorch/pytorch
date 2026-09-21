@@ -35,7 +35,10 @@ c10::Device normalizeFakeDevice(c10::Device device) {
 void set_and_normalize_fake_device(
     c10::TensorImpl* impl,
     c10::Device device) {
-  impl->set_fake_device(normalizeFakeDevice(device));
+  auto fake_device = normalizeFakeDevice(device);
+  TORCH_INTERNAL_ASSERT(
+      !isIndexedDeviceType(fake_device.type()) || fake_device.has_index());
+  impl->set_fake_device(fake_device);
 }
 
 } // namespace at
