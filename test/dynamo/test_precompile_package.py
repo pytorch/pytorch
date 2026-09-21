@@ -1940,7 +1940,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             "G['__import_mod_140311678493200_c1']": "G['__import_mod_<id>_c<n>']",
             "G['___unnamed_scope_140311678493200_c1']": "G['___unnamed_scope_<id>_c<n>']",
             "G['_140311678493200_c3'] is not None": "G['_<id>_c<n>'] is not None",
-            "top_saved_tensors_hooks ids == (139, 140)": "top_saved_tensors_hooks ids == (<ids>)",
             # User constants and identifiers are not addresses.
             "L['dims'][0] == 140311678493200": "L['dims'][0] == 140311678493200",
             "L['w_1_c2'] == 3": "L['w_1_c2'] == 3",
@@ -3096,6 +3095,515 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             _entry_fn_of(functools.partial(_session_breaks))
         with self.assertRaisesRegex(TypeError, "expected a callable"):
             _entry_fn_of(3)
+
+
+_PINNED_PROMPT = "p" * 80
+_PINNED_PATH = "/home/someone/secret_weights.pt"
+_PINNED_NAME = "alpha-secret"
+_PINNED_TAG = "tag-secret"
+# A literal whose repr is not itself: a backslash, a newline and a non-ASCII
+# character all come back escaped, so a report that leaked this one would not be
+# caught by searching for the literal as written.
+_PINNED_ESCAPED = "c:\\keys\nsecret-\u00e9"
+_PINNED = (_PINNED_PROMPT, _PINNED_PATH, _PINNED_NAME, _PINNED_TAG, _PINNED_ESCAPED)
+
+
+def _pinned_needles():
+    """Every spelling a pinned literal can reach a report as."""
+    for literal in _PINNED:
+        yield literal
+        escaped = literal.encode("unicode_escape").decode("ascii")
+        if escaped != literal:
+            yield escaped
+
+
+class _SessionPinsValues(torch.nn.Module):
+    """Every value-embedding guard type one capture can reach."""
+
+    def __init__(self):
+        super().__init__()
+        self.n = 3
+        self.on = True
+        self.prompt = _PINNED_PROMPT
+        self.path = _PINNED_PATH
+        self.tag = _PINNED_ESCAPED
+
+    def forward(self, x):
+        if self.on and self.prompt and self.path and self.tag:
+            return x * self.n
+        return x
+
+
+class _SessionPinsContainers(torch.nn.Module):
+    """Values a check renders as a container display, a keys list or a key."""
+
+    def __init__(self):
+        super().__init__()
+        self.names = [_PINNED_NAME]
+        self.tags = {_PINNED_TAG}
+        self.cfg = {_PINNED_PATH: 3}
+        self.keys = {_PINNED_PROMPT: 1}
+
+    def forward(self, x):
+        # The literal rather than the global on purpose: a containment check is
+        # rendered as SET_CONTAINS only when Dynamo knows the item while
+        # tracing, and that is the rendering which embeds it with repr.
+        if self.names[0] and "tag-secret" in self.tags:
+            x = x + 1
+        if list(self.keys.keys()) == [_PINNED_PROMPT]:
+            x = x * 2
+        return x + self.cfg[_PINNED_PATH]
+
+
+class TestGuardCodeMasking(torch._inductor.test_case.TestCase):
+    """The masking layer on its own: pure functions over checks and slot names."""
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _rendered(self, fn, *args):
+        """What _render_code makes of the checks a real capture of fn renders."""
+        from torch._dynamo.precompile_package import (
+            _mask_keys,
+            _normalize,
+            _render_code,
+            precompile_capture,
+        )
+
+        rendered = {}
+
+        def record(entries):
+            for entry in entries:
+                slot = (entry.guard_type, _mask_keys(_normalize(entry.name)))
+                rendered[slot] = _render_code(entry.orig_guard.code_list)
+            return [True] * len(entries)
+
+        session = precompile_capture(
+            fn, backend="eager", dynamic=False, guard_filter_fn=record
+        )
+        with session as cap:
+            cap(*args)
+        self.assertTrue(rendered)
+        return rendered
+
+    def _assert_nothing_pinned_reaches(self, rendered):
+        # Escaped as well as raw: a pinned value carrying a backslash reaches a
+        # repr as \\, so searching for it as written would miss it entirely.
+        for needle in _pinned_needles():
+            for slot, code in rendered.items():
+                self.assertNotIn(needle, repr(slot))
+                self.assertNotIn(needle, repr(code))
+
+    def test_a_pinned_string_or_bytes_is_named_by_type(self):
+        from torch._dynamo.precompile_package import _mask_values
+
+        self.assertEqual(
+            _mask_values("L['self'].prompt == 'you are a helpful assistant'"),
+            "L['self'].prompt == '<str>'",
+        )
+        self.assertEqual(_mask_values("L['k'] == b'secret'"), "L['k'] == '<bytes>'")
+
+    def test_a_number_a_bool_and_none_are_the_check_rather_than_a_value(self):
+        # The number IS what a length or a shape check compares, and a check
+        # with nothing to mask comes back exactly as guards.py wrote it rather
+        # than round-tripped through ast.unparse.
+        from torch._dynamo.precompile_package import _mask_values
+
+        for check in (
+            "len(L['x']) == 4",
+            "L['self'].on == True",
+            "L['self'].hook is None",
+            "(L['x'].size()[0]) == 2",
+        ):
+            self.assertEqual(_mask_values(check), check)
+
+    def test_a_container_display_is_masked_whole_but_keeps_its_length(self):
+        # Not element by element: the names in a pinned list of names are the
+        # value. The length stays, so containers of different size do not
+        # collapse into one check the report would read as invariant.
+        from torch._dynamo.precompile_package import _mask_values
+
+        self.assertEqual(
+            _mask_values("list(dict.keys(L['d'])) == ['alpha', 'beta']"),
+            "list(dict.keys(L['d'])) == '<list:2>'",
+        )
+        self.assertEqual(_mask_values("L['s'] == {'a'}"), "L['s'] == '<set:1>'")
+        self.assertEqual(_mask_values("L['d'] == {'a': 1}"), "L['d'] == '<dict:1>'")
+        self.assertEqual(_mask_values("L['t'] == ('a', 1)"), "L['t'] == '<tuple:2>'")
+        self.assertNotEqual(
+            _mask_values("L['s'] == {'a'}"), _mask_values("L['s'] == {'a', 'b'}")
+        )
+
+    def test_a_key_that_names_a_scope_is_kept_and_a_data_key_is_masked(self):
+        # The BASE decides, not the shape of the key: a scope, or an nn.Module
+        # name dict, is keyed by a name, and a user dict is keyed by data that
+        # is identifier-shaped as often as not.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        for name in (
+            "L['x']",
+            "G['CFG'].width",
+            "G['__builtins_dict___<n>']['print']",
+            "self._modules['lin']._parameters['weight']",
+        ):
+            self.assertEqual(_mask_keys(name), name)
+        # A bare ___dict__ name is not one of them: nothing renders a guard that
+        # subscripts one (the __dict__ reads all go through the attribute arm
+        # above), so an exemption for it would be a rule with no producer.
+        self.assertEqual(_mask_keys("___dict__['act']"), "___dict__['<str>']")
+        self.assertEqual(_mask_keys("self.cfg['/home/me/w.pt']"), "self.cfg['<str>']")
+        self.assertEqual(_mask_keys('self.cfg["/home/me/w.pt"]'), "self.cfg['<str>']")
+        self.assertEqual(
+            _mask_keys("self.cfg[b'/home/me/w.pt']"), "self.cfg['<bytes>']"
+        )
+        # Identifier-shaped, and still data: a field name is a secret as often
+        # as a path is.
+        self.assertEqual(_mask_keys("self.cfg['api_key']"), "self.cfg['<str>']")
+        self.assertEqual(_mask_keys("L['cfg']['api_key']"), "L['cfg']['<str>']")
+        # The same rule inside a rendered check, where the key is a subscript.
+        self.assertEqual(
+            _mask_values("L['self'].cfg['api_key'] == 3"),
+            "L['self'].cfg['<str>'] == 3",
+        )
+        self.assertEqual(
+            _mask_values("L['self']._modules['lin']._parameters['weight'] is None"),
+            "L['self']._modules['lin']._parameters['weight'] is None",
+        )
+
+    def test_a_dict_key_that_is_not_a_string_is_masked_in_a_slot_name(self):
+        # A key a textual rule cannot read is masked like any other, because the
+        # slot name is PARSED: a config dict keyed by ("model", "api_key") is a
+        # literal to Dynamo (ConstantVariable.is_literal recurses into a tuple),
+        # so DictGetItemSource reprs the whole tuple into the name.
+        from torch._dynamo.precompile_package import _mask_keys
+
+        self.assertEqual(
+            _mask_keys("L['self'].cfg[('model', 'api_key')]"),
+            "L['self'].cfg['<tuple:2>']",
+        )
+        self.assertEqual(_mask_keys("self.cfg[('a', 1)]"), "self.cfg['<tuple:2>']")
+        self.assertEqual(
+            _mask_keys("self.cfg[(('a', 'b'), 'c')]"), "self.cfg['<tuple:2>']"
+        )
+        self.assertEqual(
+            _mask_keys("self.cfg[frozenset({'api_key'})]"),
+            "self.cfg[frozenset('<set:1>')]",
+        )
+        # A number names no data here any more than it does in a check.
+        self.assertEqual(_mask_keys("L['dims'][0]"), "L['dims'][0]")
+        # A name whose shape cannot be read goes whole, and the empty name of a
+        # guard checked against no source is not such a name.
+        self.assertEqual(_mask_keys("<ephemeral: fake tensor>"), "<unparsed source>")
+        self.assertEqual(_mask_keys(""), "")
+
+    def test_a_user_string_shaped_like_a_placeholder_is_masked_too(self):
+        # The placeholders are not read back, and this is why: a tokenizer's
+        # special tokens are spelled exactly like one, and EQUALS_MATCH renders
+        # any string with repr, so recognizing a placeholder by its SHAPE made
+        # the rule the user's to spell and handed such a string back verbatim.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        self.assertEqual(
+            _mask_values("L['self'].pad_token == '<pad>'"),
+            "L['self'].pad_token == '<str>'",
+        )
+        # As a dict key it is not even name-shaped, so the keep rule refuses it
+        # and only the sentinel was keeping it.
+        self.assertEqual(
+            _mask_values("L['self'].vocab['<pad>'] == 0"),
+            "L['self'].vocab['<str>'] == 0",
+        )
+        self.assertEqual(
+            _mask_keys("L['self'].vocab['<eos>']"), "L['self'].vocab['<str>']"
+        )
+        # And the other direction: a user string reading as a container
+        # placeholder in a committed report is the same ambiguity.
+        self.assertEqual(_mask_values("L['x'] == '<list:3>'"), "L['x'] == '<str>'")
+
+    def test_the_attribute_name_an_absent_attribute_check_reads_is_kept(self):
+        # NOT_PRESENT_IN_GENERIC_DICT puts an attribute NAME in a call too, and
+        # Dynamo installs one per attribute name on ONE source, so masking the
+        # name would collapse the several facts that slot holds into one and
+        # report a slot that split two variants as invariant.
+        from torch._dynamo.precompile_package import _mask_values
+
+        for attr in ("forward", "act"):
+            check = f"not ___dict_contains({attr!r}, L['self'].__dict__)"
+            self.assertEqual(_mask_values(check), check)
+        self.assertNotEqual(
+            _mask_values("not ___dict_contains('a', L['self'].__dict__)"),
+            _mask_values("not ___dict_contains('b', L['self'].__dict__)"),
+        )
+        # The same helper over a USER dict has the compared KEY in that
+        # argument, which is why the dict beside it decides: DICT_CONTAINS and
+        # DICT_NOT_CONTAINS render ___dict_contains(key, dict_ref).
+        self.assertEqual(
+            _mask_values("___dict_contains('api_key', L['self'].cfg)"),
+            "___dict_contains('<str>', L['self'].cfg)",
+        )
+        self.assertEqual(
+            _mask_values("not ___dict_contains('api_key', L['cfg'])"),
+            "not ___dict_contains('<str>', L['cfg'])",
+        )
+        # A module name is a value like any other: nothing keeps this one, and
+        # the ID_MATCH an import carries names the module in GuardFact.value.
+        self.assertEqual(_mask_values("__import__('torch')"), "__import__('<str>')")
+
+    def test_a_check_too_deep_to_walk_is_dropped_rather_than_raised(self):
+        # Failing closed over the whole traversal, not just the parse: the pass
+        # recurses over whatever guards.py rendered, and a deep enough
+        # expression exhausts the stack with a RecursionError, which no syntax
+        # rule catches. Reporting a fact must never break a capture.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        self.assertEqual(
+            _mask_values("L['x'] == 'secret'" + " + 1" * 2000), "<unparsed check>"
+        )
+        self.assertEqual(_mask_keys("L['x']" + "[0]" * 2000), "<unparsed source>")
+
+    def test_the_slot_name_and_the_check_are_masked_by_one_rule(self):
+        # One rule, one implementation, so the two cannot drift: the slot name
+        # goes through the same pass the check does. These are the cases where a
+        # textual rule -- one that matched the END of the base text -- kept a key
+        # the tree masks: an attribute NAMED like a scope, and a user key spelled
+        # like the builtins dict Dynamo installs, whose own key is masked.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        for name, expected in (
+            ("L['self'].G['api_key']", "L['self'].G['<str>']"),
+            ("L['self'].L['api_key']", "L['self'].L['<str>']"),
+            ("L['x'].___dict__['api_key']", "L['x'].___dict__['<str>']"),
+            (
+                "L['self'].cfg['__builtins_dict__x']['api_key']",
+                "L['self'].cfg['<str>']['<str>']",
+            ),
+            (
+                "G['__builtins_dict___<n>']['print']",
+                "G['__builtins_dict___<n>']['print']",
+            ),
+            (
+                "self._modules['lin']._parameters['weight']",
+                "self._modules['lin']._parameters['weight']",
+            ),
+            ("self.cfg[('model', 'api_key')]", "self.cfg['<tuple:2>']"),
+        ):
+            self.assertEqual(_mask_keys(name), expected, name)
+            self.assertEqual(_mask_values(f"{name} == 3"), f"{expected} == 3", name)
+
+    def test_the_saved_tensors_hooks_check_fails_closed_and_leaves_no_ids(self):
+        # The one rendering in the tree that is not an expression, and why
+        # _normalize carries no rule for the ids it interpolates: masking runs
+        # first and drops the text whole, so the ids never reach _normalize.
+        # AUTOGRAD_SAVED_TENSORS_HOOKS is named by GuardFact.value instead.
+        from torch._dynamo.precompile_package import _normalize, _render_code
+
+        hooks = (
+            "torch._functorch.aot_autograd.utils.top_saved_tensors_hooks"
+            " ids == (139, 140)"
+        )
+        self.assertEqual(_render_code([hooks]), ("<unparsed check>",))
+        self.assertEqual(
+            _render_code([hooks.replace("(139, 140)", "None")]), ("<unparsed check>",)
+        )
+        # Nothing downstream scrubs those ids, which is what makes failing
+        # closed the thing that keeps them out of the report.
+        self.assertEqual(_normalize(hooks), hooks)
+
+    def test_the_attribute_name_a_hasattr_reads_is_part_of_the_source(self):
+        from torch._dynamo.precompile_package import _mask_values
+
+        for check in ("hasattr(L['x'], 'act')", "getattr(L['x'], 'act', None) == 3"):
+            self.assertEqual(_mask_values(check), check)
+        # The NAME only. A default getattr falls back to is a value, as is a
+        # string the call compares.
+        self.assertEqual(
+            _mask_values("getattr(L['x'], 'act', 'SECRET_DEFAULT') == 3"),
+            "getattr(L['x'], 'act', '<str>') == 3",
+        )
+        self.assertEqual(
+            _mask_values("getattr(L['x'], 'act', default='SECRET') == 3"),
+            "getattr(L['x'], 'act', default='<str>') == 3",
+        )
+        self.assertEqual(
+            _mask_values("set.__contains__(L['self'].tags, 'tag-secret')"),
+            "set.__contains__(L['self'].tags, '<str>')",
+        )
+
+    def test_a_type_annotated_check_keeps_the_annotation_where_it_sat(self):
+        # ___check_type_id renders "<expr>, type=<class 'int'>", which is not one
+        # expression: the annotation comes off before the parse and goes back
+        # where it was, with a quote inside the class repr tolerated.
+        from torch._dynamo.precompile_package import _mask_values
+
+        self.assertEqual(
+            _mask_values("L['self'].prompt == 'secret', type=<class 'str'>"),
+            "L['self'].prompt == '<str>', type=<class 'str'>",
+        )
+        self.assertEqual(
+            _mask_values("L['x'] == 'secret', type=<class 'M'quoted'>"),
+            "L['x'] == '<str>', type=<class 'M'quoted'>",
+        )
+        # A check the pass has nothing to mask in keeps guards.py's own
+        # spelling, so an annotation inside the body stays inside it.
+        self.assertEqual(
+            _mask_values("f(L['x'], type=<class 'int'>) == 3"),
+            "f(L['x'], type=<class 'int'>) == 3",
+        )
+        # But the unparse regenerates the text, so an annotation that did not
+        # sit at the end cannot be put back where it was -- and moving it to the
+        # end changes what the check reads as. Dropped whole instead.
+        self.assertEqual(
+            _mask_values("f(L['x'], type=<class 'int'>) == 'secret'"),
+            "<unparsed check>",
+        )
+
+    def test_a_check_that_does_not_parse_is_dropped_rather_than_patched(self):
+        # Failing closed: a rendering whose shape the pass cannot read gives it
+        # nothing to tell a source from a value, and a repr can carry a path
+        # with no quote anywhere in it for a textual pass to find. So the text
+        # goes whole, at the documented cost that two such checks on one slot
+        # read alike -- a digest of the text would tell them apart and would be
+        # a stable fingerprint of the value this masks.
+        from torch._dynamo.precompile_package import _mask_values
+
+        for check in (
+            "top_saved_tensors_hooks ids == 'pack', 'unpack'",
+            f"L['self'].cfg == <Cfg ckpt={_PINNED_PATH}>",
+            f"masked ! it's '{_PINNED_TAG}' here",
+        ):
+            self.assertEqual(_mask_values(check), "<unparsed check>")
+
+    def test_an_fstring_is_masked_as_one_value(self):
+        # The value is the joined string, not the pieces: masking them one at a
+        # time would report a shape the compared value does not have.
+        from torch._dynamo.precompile_package import _mask_values
+
+        self.assertEqual(
+            _mask_values("""L['x'] == f'{L["y"]}-secret'"""), "L['x'] == '<str>'"
+        )
+
+    def test_masking_what_is_masked_already_writes_no_value(self):
+        # The placeholder is a string CONSTANT, so a masked check still parses
+        # and a second pass reads it as a check: with a placeholder that did not
+        # parse, that pass would read the slot names as values instead and
+        # collapse every slot into one. It is not a strict no-op, because a
+        # placeholder cannot be told from a user string spelled like one -- the
+        # pass masks its own '<str>' again, to itself.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        for check in (
+            "L['self'].prompt == 'secret'",
+            "L['self'].cfg['/home/me/w.pt'] == 3",
+            "L['self'].prompt == 'secret', type=<class 'str'>",
+            "top_saved_tensors_hooks ids == 'pack'",
+        ):
+            once = _mask_values(check)
+            self.assertEqual(_mask_values(once), once, check)
+        # What makes that hold: the masked check is still an expression.
+        compile("L['self'].cfg['<str>'] == '<list:2>'", "<check>", "eval")
+        for name in ("self.cfg['api_key']", "L['x']", "<ephemeral: fake tensor>"):
+            once = _mask_keys(name)
+            self.assertEqual(_mask_keys(once), once, name)
+        # A TYPED placeholder is what a second pass rewrites, and only ever
+        # downwards: it reads as the string it is spelled as, so the type and
+        # the length go and no value comes back.
+        self.assertEqual(
+            _mask_values(_mask_values("L['s'] == {'a', 'b'}")), "L['s'] == '<str>'"
+        )
+        self.assertEqual(
+            _mask_values(_mask_values("L['k'] == b'secret'")), "L['k'] == '<str>'"
+        )
+        self.assertEqual(
+            _mask_keys(_mask_keys("self.cfg[('a', 'b')]")), "self.cfg['<str>']"
+        )
+
+    def test_render_code_masks_before_it_normalizes(self):
+        # Not interchangeable: _normalize interpolates <id> and <n> placeholders
+        # that no longer parse as Python, so a normalized check could not be
+        # masked at all -- and a name-like key it rewrites is why a kept key is
+        # allowed to carry <> inside the brackets.
+        from torch._dynamo.precompile_package import _render_code
+
+        self.assertEqual(
+            _render_code(
+                [
+                    "___check_type_id(G['__builtins_dict___14']['print'], 94125),"
+                    " type=<class 'int'>",
+                    "G['_123456789_c0'].prompt == 'secret'",
+                ]
+            ),
+            (
+                "___check_type_id(G['__builtins_dict___<n>']['print'], <id>),"
+                " type=<class 'int'>",
+                "G['_<id>_c<n>'].prompt == '<str>'",
+            ),
+        )
+        self.assertEqual(_render_code(None), ())
+
+    def test_pinned_values_do_not_reach_the_checks_a_real_capture_renders(self):
+        rendered = self._rendered(_SessionPinsValues(), torch.ones(2, 4))
+        self.assertEqual(
+            rendered[("CONSTANT_MATCH", "self.prompt")],
+            ("L['self'].prompt == '<str>'",),
+        )
+        self.assertEqual(
+            rendered[("CONSTANT_MATCH", "self.path")], ("L['self'].path == '<str>'",)
+        )
+        # A value whose repr escapes is masked like any other, so neither
+        # spelling of it reaches the check.
+        self.assertEqual(
+            rendered[("CONSTANT_MATCH", "self.tag")], ("L['self'].tag == '<str>'",)
+        )
+        self.assertEqual(rendered[("EQUALS_MATCH", "self.n")], ("L['self'].n == 3",))
+        self.assertEqual(
+            rendered[("CONSTANT_MATCH", "self.on")], ("L['self'].on == True",)
+        )
+        self._assert_nothing_pinned_reaches(rendered)
+
+    def test_a_pinned_container_and_the_key_in_a_slot_name_are_masked(self):
+        rendered = self._rendered(_SessionPinsContainers(), torch.ones(2, 4))
+        for slot, code in [
+            (("CONSTANT_MATCH", "self.names[0]"), ("L['self'].names[0] == '<str>'",)),
+            (("CONSTANT_MATCH", "self.tags"), ("L['self'].tags == '<set:1>'",)),
+            (
+                ("SET_CONTAINS", "self.tags"),
+                ("set.__contains__(L['self'].tags, '<str>')",),
+            ),
+            (
+                ("DICT_KEYS_MATCH", "self.keys"),
+                (
+                    "len(L['self'].keys) == 1",
+                    "list(dict.keys(L['self'].keys)) == '<list:1>'",
+                ),
+            ),
+            # The key is masked in the slot NAME as well, since that name is what
+            # a report spells the source as.
+            (
+                ("EQUALS_MATCH", "self.cfg['<str>']"),
+                ("L['self'].cfg['<str>'] == 3",),
+            ),
+        ]:
+            self.assertEqual(rendered[slot], code, slot)
+        self._assert_nothing_pinned_reaches(rendered)
+
+    def test_the_tensor_match_parts_a_real_capture_renders(self):
+        # The most common code_list there is, and the one masking rewrites: the
+        # set of dims mark_dynamic marked is a display, so it is masked with its
+        # size, while the hasattr parts have nothing to mask and keep guards.py's
+        # own spelling (a code_list can mix the two).
+        def adds_one(x):
+            return x + 1
+
+        x = torch.ones(4, 4)
+        torch._dynamo.mark_dynamic(x, 0)
+        parts = self._rendered(adds_one, x)[("TENSOR_MATCH", "x")]
+        self.assertIn(
+            "getattr(L['x'], '_dynamo_dynamic_indices', set()).issubset('<set:1>')"
+            " if hasattr(L['x'], '_dynamo_dynamic_indices') else True",
+            parts,
+        )
+        self.assertIn("hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False", parts)
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)

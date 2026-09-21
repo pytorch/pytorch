@@ -71,6 +71,7 @@ Know these before relying on an artifact in production:
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import functools
 import hashlib
@@ -1134,7 +1135,10 @@ def _pins_a_value(guard_type: str, name: str) -> bool:
 # variants guarding different values render the same fact and invent an
 # invariant neither holds.
 _OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
-_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
+# There is deliberately no rule for the saved-tensors-hooks ids the guard
+# renders ("... top_saved_tensors_hooks ids == (139, 140)"): that rendering is
+# not an expression, so _mask_values below drops it whole and _normalize never
+# sees the ids. _value_fingerprint is what names those hooks.
 # Dynamo appends a per-process counter to the builtins dict it installs, so the
 # same guard reads __builtins_dict___6 in one compilation and ___8 in the next.
 # Of the globals Dynamo mints, only the three families in
@@ -1153,13 +1157,294 @@ _DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
 
 
 def _normalize(text: str) -> str:
-    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
     text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
     return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
 
 
+# A guard that pins a string pins it BY VALUE, so guards.py writes the value
+# into the check it renders: an EQUALS_MATCH on a system prompt renders as
+# L['self'].prompt == 'you are ...', and a dict keyed by a checkpoint path
+# renders the path inside the guard's own name. The report those renderings go
+# into is meant to be committed to a file and diffed, so every literal is masked
+# by type where the fact is recorded. What makes the report auditable is the
+# SHAPE of the check and the slot it names; that a value told two variants apart
+# is reported as a varying slot, never by printing the value.
+#
+# The mask is a string CONSTANT ('<str>', '<list:3>'), so a masked check still
+# parses and a caller that re-renders a recorded fact cannot collapse it into one
+# placeholder. What a placeholder is not is READ BACK: a user string can be
+# spelled exactly like one -- '<pad>' is an ordinary tokenizer token, and the
+# user is who chooses it -- so there is no shape a string can be trusted by here.
+# Every string constant is masked, and a second pass over a masked check rewrites
+# a typed placeholder as '<str>', losing the type and never a value. Nothing this
+# pass wrote is re-masked WITHIN a pass either, and not by its text: a masked
+# node is a fresh constant put in where the traversal has already been. The bare
+# <id> and <n> _normalize interpolates are the opposite case -- they run after
+# the parse, on text nothing reads back.
+#
+# A subscript key is data unless what it subscripts is keyed by NAME. L, G and
+# the builtins dict Dynamo installs are how a check spells a scope, and an
+# nn.Module attribute is read through the module's own name dicts (mod.lin is
+# rendered mod._modules['lin'], see GuardBuilder's __dict__ accessors), so those
+# keys spell a source too. A user dict does not: in self.cfg['/home/me/w.pt']
+# the value IS the key, and a secret field name is identifier-shaped exactly as
+# 'lin' is, so the shape of the key cannot decide this. The BASE decides, and a
+# kept key has to be name-shaped on top of that -- <> is allowed in it for the
+# caller that masks an ALREADY NORMALIZED name, which is the one that records a
+# slot, where a global reads as _<id>_c<n> inside the brackets; on the
+# _render_code path masking runs first, so a key there is still the raw
+# identifier.
+#
+# ONE implementation, on the tree: a source NAME is a Python expression too, so
+# _mask_keys parses it and masks it with the same pass rather than approximating
+# this rule over text, where a base is whatever precedes a bracket and every
+# spelling of it has to be guessed.
+_NAME_KEYED_SCOPES = frozenset({"L", "G"})
+_NAME_KEYED_DICTS = frozenset({"__dict__", "_modules", "_parameters", "_buffers"})
+_SLOT_KEY = re.compile(r"\A[A-Za-z_][\w<>]*\Z")
+# The other place a rendering spells part of the SOURCE rather than a value: the
+# argument of a call that carries an attribute NAME, by callable and position.
+# HASATTR renders hasattr(L['x'], 'act'), and NOT_PRESENT_IN_GENERIC_DICT renders
+# not ___dict_contains('act', L['x'].__dict__), which Dynamo installs once per
+# attribute name on ONE source -- so masking the name would collapse the several
+# facts that slot holds into one, and a slot that told two variants apart would
+# be reported invariant. ___dict_contains is kept only where the dict beside the
+# name is keyed by name, because DICT_CONTAINS renders the same helper over a
+# USER dict, where argument 0 is the key itself. __import__('torch') is
+# deliberately absent: a module name is a value like any other, and the ID_MATCH
+# a rendered import carries names the module in GuardFact.value anyway.
+_DICT_CONTAINS = "___dict_contains"
+_NAME_ARGUMENT = {"getattr": 1, "hasattr": 1, _DICT_CONTAINS: 0}
+# ___check_type_id renders as "<expr>, type=<class 'int'>", which is not one
+# expression, so the annotation comes off before the parse and goes back where
+# it was. Tolerant of a quote inside the class repr: an annotation left in the
+# body costs the whole check, not just the annotation.
+_CHECK_ANNOTATION = re.compile(r", type=<class '.*?'>")
+# What a check that does not parse is reported as. Its own text cannot go in:
+# masking needs the shape of an expression to tell a source from a value, and an
+# arbitrary __repr__ can carry a path with no quote anywhere in it.
+_UNPARSED_CHECK = "<unparsed check>"
+# The same for a source name, where it lands in a slot rather than in a check.
+_UNPARSED_SOURCE = "<unparsed source>"
+
+
+def _keyed_by_name(base: ast.expr) -> bool:
+    """Whether a subscript of ``base`` inside a check is keyed by a name."""
+    if isinstance(base, ast.Name):
+        return base.id in _NAME_KEYED_SCOPES
+    if isinstance(base, ast.Attribute):
+        return base.attr in _NAME_KEYED_DICTS
+    if isinstance(base, ast.Subscript):
+        # The builtins dict Dynamo installs, read out of a scope that is itself
+        # keyed by name: G['__builtins_dict___6']['print']. The prefix alone
+        # would hand the rule to whoever owns the dict, since a user dict may
+        # hold a key spelled that way, and a base whose own key was masked must
+        # not be able to keep the key under it.
+        key = base.slice
+        return (
+            _keyed_by_name(base.value)
+            and isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and key.value.startswith(_BUILTINS_DICT_PREFIX)
+        )
+    return False
+
+
+def _mask_expr(text: str) -> tuple[str, bool] | None:
+    """``(text with its values masked, whether anything was masked)``.
+
+    ``None`` when ``text`` is not one expression, which is the fail-closed
+    case: the shape of an expression is what tells a source from a value here,
+    so a text whose shape cannot be read is reported by its caller as a
+    placeholder rather than patched.
+    """
+    mask = _MaskValues()
+    try:
+        tree = mask.visit(ast.parse(text, mode="eval"))
+    except Exception:
+        # Not a SyntaxError alone: a pinned container nests without limit, so a
+        # deep enough one exhausts the stack in the parse or in this traversal,
+        # and reporting a fact must never be the thing that breaks a capture.
+        return None
+    if not mask.masked:
+        # Unparsing rewrites a text it has nothing to hide in -- it drops
+        # redundant parentheses and respells a string -- so one without a
+        # literal comes back exactly as its producer wrote it.
+        return text, False
+    try:
+        return ast.unparse(tree), True
+    except Exception:
+        # Defensive, and for the same reason: ast.unparse raises on trees this
+        # pass does not build (a non-string constant inside an f-string is one)
+        # and on a tree too deep to walk.
+        return None
+
+
+def _mask_keys(name: str) -> str:
+    """Mask the data keys a source name interpolates (cfg['/home/me/w.pt']).
+
+    The rule is the one a rendered check goes through, run by the same code: a
+    name is an expression, so it is parsed and masked as one, which is also
+    what makes a key the text could not read -- a tuple, a number, a nested
+    display -- masked rather than kept. A name that does not parse is reported
+    as ``<unparsed source>``, so two such names read as one slot instead of
+    reaching the report as their own text.
+    """
+    if not name:
+        # A guard checked against no source (SHAPE_ENV, GLOBAL_STATE). Not a
+        # name whose shape could not be read.
+        return name
+    masked = _mask_expr(name)
+    return _UNPARSED_SOURCE if masked is None else masked[0]
+
+
+class _MaskValues(ast.NodeTransformer):
+    """Replace the values a rendered check embeds with their type.
+
+    A node that is kept is mutated and returned, as ``generic_visit`` does; a
+    node that is masked is replaced by a fresh constant.
+    """
+
+    def __init__(self) -> None:
+        self.masked = False
+
+    def _mask(self, node: ast.expr, kind: str) -> ast.expr:
+        self.masked = True
+        return ast.copy_location(ast.Constant(value=f"<{kind}>"), node)
+
+    def _visit_expr(self, node: ast.expr) -> ast.expr:
+        visited = self.visit(node)
+        if not isinstance(visited, ast.expr):
+            raise AssertionError(f"masking produced a {type(visited).__name__}")
+        return visited
+
+    def _visit_children(self, node: ast.expr) -> ast.expr:
+        self.generic_visit(node)
+        return node
+
+    def visit_Constant(self, node: ast.Constant) -> ast.expr:
+        if isinstance(node.value, str):
+            # Every string, one shaped like a placeholder included: what this
+            # pass wrote and what a user pinned read alike, and keeping the ones
+            # that read alike would hand the rule to whoever picks the string.
+            return self._mask(node, "str")
+        if isinstance(node.value, bytes):
+            return self._mask(node, "bytes")
+        # A number, a bool and None stay: the number IS the check for a length
+        # or a shape, and neither is a value a report can leak.
+        return node
+
+    def _mask_display(
+        self, node: ast.List | ast.Set | ast.Dict | ast.Tuple
+    ) -> ast.expr:
+        # The whole display goes, not its elements: the names in a pinned list
+        # of names are the value, and a display nests without limit -- a list of
+        # dicts of names -- so a rule that had to look inside to stay safe is
+        # one an element shape it does not model defeats. Its LENGTH stays, so
+        # two variants pinning containers of different size still read
+        # differently; two of the same size read alike, and a display of NUMBERS
+        # (a marked-dims set, a pinned shape) reads as its length where a bare
+        # number would have been kept. That is what not looking inside costs.
+        items = node.keys if isinstance(node, ast.Dict) else node.elts
+        return self._mask(node, f"{type(node).__name__.lower()}:{len(items)}")
+
+    visit_List = visit_Set = visit_Dict = visit_Tuple = _mask_display
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> ast.expr:
+        # One value, masked whole. What a check compares against an f-string is
+        # the joined string, so rewriting the pieces in place would report a
+        # structure the value does not have -- and not every piece is a node a
+        # placeholder can stand in for, since a format spec is an f-string too.
+        return self._mask(node, "str")
+
+    def visit_Subscript(self, node: ast.Subscript) -> ast.expr:
+        key = node.slice
+        if (
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and _SLOT_KEY.match(key.value)
+            and _keyed_by_name(node.value)
+        ):
+            node.value = self._visit_expr(node.value)
+            return node
+        return self._visit_children(node)
+
+    def visit_Call(self, node: ast.Call) -> ast.expr:
+        name = node.func.id if isinstance(node.func, ast.Name) else ""
+        kept = _NAME_ARGUMENT.get(name)
+        if (
+            kept is None
+            or len(node.args) < 2
+            or (name == _DICT_CONTAINS and not _keyed_by_name(node.args[1]))
+        ):
+            return self._visit_children(node)
+        # The attribute name is part of the source being read, not a value being
+        # compared. That one argument only -- getattr's DEFAULT is a value like
+        # any other, as is the key a containment check on a user dict compares.
+        node.args = [
+            arg if i == kept else self._visit_expr(arg)
+            for i, arg in enumerate(node.args)
+        ]
+        for keyword in node.keywords:
+            keyword.value = self._visit_expr(keyword.value)
+        return node
+
+
+def _mask_values(text: str) -> str:
+    """Name what a rendered check compares by type instead of by value.
+
+    What it writes parses, so a caller that masks a recorded check again reads
+    it as a check rather than collapsing it whole; the placeholders in it are
+    masked again, a typed one reading as ``'<str>'``, because a user string can
+    be spelled like a placeholder and recognizing one by its shape is what let
+    such a string through. A display is masked whole rather than element by element
+    because a display can nest strings arbitrarily and a pass that stays safe
+    only by inspecting elements is defeated by an element shape it does not
+    model; it is named by its type and its length alone, so two variants pinning
+    containers of the same length -- two pinned shapes, two sets of marked dims
+    -- render the same check, and what told them apart has to come from
+    ``GuardFact.value`` or from the slot. The ``, type=<class 'int'>`` tail
+    ``___check_type_id`` appends is not part of the expression, so it comes off
+    before the parse and goes back where it was; a rendering carrying one
+    anywhere but at its end is reported as ``<unparsed check>``, since the
+    unparse regenerates the whole text and the position cannot be restored.
+    """
+    annotations = list(_CHECK_ANNOTATION.finditer(text))
+    masked = _mask_expr(_CHECK_ANNOTATION.sub("", text))
+    if masked is None:
+        # Fail closed. A rendering that is not an expression gives nothing to
+        # tell a source from a value: the saved-tensors-hooks guard renders
+        # prose, and an EQUALS_MATCH on a type pytree.register_constant admits
+        # renders that class's __repr__, which can carry a path with no quote
+        # anywhere in it for a textual pass to find. The text goes whole, and
+        # for the hooks guard _value_fingerprint still tells two hook sets
+        # apart. For an EQUALS_MATCH on a repr nothing does: its fingerprint is
+        # "" and _pins_a_value counts bare names only, so two variants pinning
+        # different objects on one slot report one fact and the slot reads
+        # invariant. A digest of the text would tell them apart and is
+        # deliberately not written: a stable fingerprint of the value this pass
+        # exists to hide, in a file meant to be committed, is an oracle for
+        # guessing that value.
+        return _UNPARSED_CHECK
+    body, anything_masked = masked
+    if not anything_masked:
+        # Nothing to hide, so the check is returned exactly as guards.py wrote
+        # it -- annotation included, in the place guards.py put it.
+        return text
+    if len(annotations) > 1 or (annotations and annotations[0].end() != len(text)):
+        # An annotation the unparse cannot put back where it was. Reordering it
+        # would change what the check reads as, and a ", type=<class '...'>"
+        # inside the body is likelier a false match on the pattern than an
+        # annotation, so this fails closed like any other shape the pass cannot
+        # read. No in-tree rendering puts one anywhere but at the end.
+        return _UNPARSED_CHECK
+    return body + (annotations[0].group(0) if annotations else "")
+
+
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
-    return tuple(_normalize(part) for part in (code_list or ()))
+    # Masked BEFORE normalizing: _normalize interpolates <id> and <n>
+    # placeholders that no longer parse as Python.
+    return tuple(_normalize(_mask_values(part)) for part in (code_list or ()))
 
 
 def _hash_text(text: str) -> str:
@@ -1428,8 +1713,9 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
     never checks.
     """
     if entry.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS":
-        # Its code renders tuple(map(id, hooks)), which _normalize has to erase
-        # or the file churns -- but erasing it alone would merge two variants
+        # Its code renders "... ids == tuple(map(id, hooks))", which is not an
+        # expression, so _mask_values drops it whole -- and dropping it alone
+        # would merge two variants
         # that differ ONLY in their hooks and report the guard that split them
         # as an invariant. Put back a discriminator derived from what the hooks
         # ARE rather than where they live, which is both stable across
