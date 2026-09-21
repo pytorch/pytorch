@@ -1,0 +1,17 @@
+# ignore common items
+.idea
+.vscode
+.claude/settings.local.json
+.data
+__pycache__
+*.pyc
+
+# CMake build output
+libkineto/build/
+
+# Stale nested-submodule checkout left behind in existing recursive PyTorch checkouts.
+# Dynolog is no longer a submodule; required headers are vendored under dynolog_headers/.
+/libkineto/third_party/dynolog/
+
+# Binaries downloaded by lintrunner init (e.g. clang-format)
+.lintbin/

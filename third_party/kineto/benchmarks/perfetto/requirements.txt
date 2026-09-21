@@ -1,0 +1,4 @@
+perfetto
+tabulate
+numpy
+requests

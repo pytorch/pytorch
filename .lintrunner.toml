@@ -592,6 +592,7 @@ exclude_patterns = [
     # Vendored: raw throws are upstream's call, not ours.
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
+    'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
     'c10/util/order_preserving_flat_hash_map.h',
@@ -909,6 +910,7 @@ include_patterns = [
 # therefore are permitted to use logging
 exclude_patterns = [
     'tools/**',
+    'third_party/kineto/tools/**',  # copies of tools/linter, excluded above
     'test/**',
     'benchmarks/**',
     'torch/distributed/run.py',
