@@ -427,23 +427,6 @@ def _reject_unsupported_marks(user_flat: list[object]) -> None:
             )
 
 
-def _unbacked_guard_error(e: BaseException) -> PrecompileError:
-    """The capture-time error for a guard on a mark_unbacked dim, shared by the capture paths.
-
-    A mark_unbacked dim is captured as an unbacked symint (no hint), so a computation that
-    needs to guard on / specialize its size (a shape-dependent branch, a reshape that pins
-    it) cannot be captured. Unbacked dims cannot be guarded, so rather than bake a
-    silently-wrong artifact, fail here.
-    """
-    return PrecompileError(
-        "precompile: fn needs to guard on a dim marked with mark_unbacked "
-        "(it branches on or specializes that size), which is not allowed for "
-        "an unbacked dynamic dim. Do not mark that dim (capture it static), "
-        "or restructure fn to avoid the size-dependent operation. Underlying: "
-        f"{(str(e).splitlines() or [''])[0]}"
-    )
-
-
 def _read_unbacked_marks(user_flat: list[object]) -> list[dict[int, _MarkSpec]]:
     """Read ``torch._dynamo.decorators.mark_unbacked`` marks off the user-input tensors.
 
@@ -991,7 +974,17 @@ def _capture(
                     tracing_mode=tracing_mode,
                 )(flat_args)
             except GuardOnDataDependentSymNode as e:
-                raise _unbacked_guard_error(e) from e
+                # A mark_unbacked dim was captured as an unbacked symint (no hint), but
+                # the computation needs to guard on / specialize its size (e.g. a
+                # shape-dependent branch or a reshape that pins it). Unbacked dims cannot
+                # be guarded, so rather than bake a silently-wrong artifact, fail here.
+                raise PrecompileError(
+                    "precompile: fn needs to guard on a dim marked with mark_unbacked "
+                    "(it branches on or specializes that size), which is not allowed for "
+                    "an unbacked dynamic dim. Do not mark that dim (capture it static), "
+                    "or restructure fn to avoid the size-dependent operation. Underlying: "
+                    f"{str(e).splitlines()[0]}"
+                ) from e
     finally:
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
@@ -1192,20 +1185,33 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     executing it (exec'ing the inlined Inductor output would JIT the kernels, the
     very work the cache exists to skip).
 
-    python_code is the single source of truth: the metadata builders emit the constants
-    below as top-level literal assignments, so an AST walk + literal_eval recovers them
-    safely. The cache then only needs to carry the compiled artifact.
-
-    The required set follows TRACER: absent (artifacts predating the dynamo tracer) or
-    anything but "dynamo" means the make_fx set the inlined driver reads. A dynamo
-    artifact instead carries the multi-graph driver's blobs (_FRAMES and _BACKENDS, or
-    _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once SERVING_MODE is "installed"), the
-    readable frame report beside them and the two versions that lock them,
-    _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION for the
-    pickled guard state.
+    python_code is the single source of truth: ``_build_metadata_section`` emits the
+    constants below as top-level literal assignments, so an AST walk + literal_eval
+    recovers them safely. The cache then only needs to carry the compiled artifact.
     """
     import ast
 
+    wanted = {
+        "BACKEND",
+        "MODULE_POSITIONS",
+        "NUM_POSITIONAL_ARGS",
+        "PARAM_NAMES",
+        "BUFFER_NAMES",
+        "PARAM_SHAPES",
+        "BUFFER_SHAPES",
+        "PARAM_DTYPES",
+        "BUFFER_DTYPES",
+        "PARAM_DEVICES",
+        "BUFFER_DEVICES",
+        "GRAD_PARAM_INDICES",
+        "IN_SPEC",
+        "OUT_SPEC",
+        "USER_INPUT_SHAPES",
+        "USER_INPUT_DTYPES",
+        "USER_INPUT_DEVICES",
+        "USER_INPUT_BOUNDS",
+    }
+    found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -1213,95 +1219,31 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "python_code is not valid Python; it does not look like a "
             "torch.compiler.precompile artifact."
         ) from e
-    # The last top-level assignment to a name wins, as it would under exec, so the
-    # set selection below and the reported values read the same assignment.
-    assigns: dict[str, ast.expr] = {}
     for node in tree.body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            assigns[node.targets[0].id] = node.value
-
-    def literal(name: str) -> object:
-        try:
-            return ast.literal_eval(assigns[name])
-        except (ValueError, TypeError) as e:
-            raise PrecompileError(
-                f"python_code {name!r} calling-convention metadata is malformed; "
-                "it must be a Python literal."
-            ) from e
-
-    tracer = literal("TRACER") if "TRACER" in assigns else None
-    if tracer == "dynamo":
-        wanted = {
-            "BACKEND",
-            "FN_NAME",
-            "FRAMES",
-            "DROPPED_GUARDS",
-            "RISKY_DROPPED_GUARDS",
-            "WONT_GENERALIZE",
-            "_FRAMES",
-            "_BACKENDS",
-            "_DYNAMO_PYTHON_VERSION",
-            "_ENTRY_BINDING",
-            "TORCH_VERSION",
-        }
-        mode = literal("SERVING_MODE") if "SERVING_MODE" in assigns else None
-        if mode == "installed":
-            wanted -= {"_FRAMES", "_BACKENDS"}
-            wanted |= {"_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL"}
-    else:
-        wanted = {
-            "BACKEND",
-            "MODULE_POSITIONS",
-            "NUM_POSITIONAL_ARGS",
-            "PARAM_NAMES",
-            "BUFFER_NAMES",
-            "PARAM_SHAPES",
-            "BUFFER_SHAPES",
-            "PARAM_DTYPES",
-            "BUFFER_DTYPES",
-            "PARAM_DEVICES",
-            "BUFFER_DEVICES",
-            "GRAD_PARAM_INDICES",
-            "IN_SPEC",
-            "OUT_SPEC",
-            "USER_INPUT_SHAPES",
-            "USER_INPUT_DTYPES",
-            "USER_INPUT_DEVICES",
-            "USER_INPUT_BOUNDS",
-        }
-    # Parsed when present but never required, so older artifacts load unchanged:
-    # TRACER and SERVING_MODE already selected the required set above, and
-    # the guard-audit sections come back as data.
-    optional = {
-        "TRACER",
-        "SERVING_MODE",
-        "POLICY_DROPPED_GUARDS",
-        "DROPPED_GUARD_CODE",
-    }
-    found = {name: literal(name) for name in assigns if name in wanted | optional}
-    for name in assigns.keys() - wanted - optional - {"forward"}:
-        # Not a metadata name we consume (``forward = ...`` is the multi-graph
-        # driver's own binding, emitted later in this stack). Skipped by design,
-        # but log it at debug so a malformed / renamed artifact is diagnosable
-        # rather than silently dropped.
-        log.debug(
-            "precompile: ignoring unrecognized top-level assignment %r while "
-            "parsing artifact calling-convention metadata",
-            name,
-        )
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        if target.id in wanted:
+            found[target.id] = ast.literal_eval(node.value)
+        else:
+            # Not a metadata name we consume (the driver section emits only
+            # function defs today, but a future artifact revision could add a
+            # driver-internal top-level assignment). Skipped by design, but log
+            # it at debug so a malformed / renamed artifact is diagnosable
+            # rather than silently dropped.
+            log.debug(
+                "precompile: ignoring unrecognized top-level assignment %r while "
+                "parsing artifact calling-convention metadata",
+                target.id,
+            )
     missing = wanted - found.keys()
     if missing:
         raise PrecompileError(
             f"python_code is missing calling-convention metadata {sorted(missing)}; "
             "it does not look like a torch.compiler.precompile artifact."
         )
-    # Artifacts predating the installed serving mode carry no SERVING_MODE, and
-    # they were all standalone.
-    found.setdefault("SERVING_MODE", "standalone")
     return found
 
 
