@@ -3062,8 +3062,6 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
     Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
     """
 
-    hw_classification = HardwareClassification.GENERIC
-
     def test_shuffler_iterdatapipe(self):
         r"""
         Verify ``IterDataPipe.shuffle`` is controlled by ``DataLoader``
