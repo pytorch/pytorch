@@ -2,6 +2,7 @@
 
 import builtins
 import collections
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -15,7 +16,7 @@ import types
 import unittest
 import weakref
 from collections.abc import Iterator
-from typing import Any, NamedTuple
+from typing import Any, Generic, NamedTuple, TypeVar
 from unittest import mock
 
 import torch
@@ -29,7 +30,9 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
+    _is_torch_type,
     _Missing,
+    _pickles_by_default,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -1203,6 +1206,118 @@ if torch.distributed.is_available():
         def __init__(self):
             super().__init__(0, 1)
             self.calls = []
+
+
+class _HolderWithGenerator:
+    def __init__(self):
+        self.it = (i for i in range(3))
+        self.cfg = {"a": 1}
+
+
+_T = TypeVar("_T")
+
+
+class _GenericHolder(Generic[_T]):
+    # typing.Generic declares an empty __slots__ (as abc.ABC does), which adds
+    # no instance state.
+    def __init__(self):
+        self.it = (i for i in range(3))
+        self.cfg = {"a": 1}
+
+
+class _OuterHolder:
+    def __init__(self):
+        self.inner = _HolderWithGenerator()
+        self.name = "outer"
+
+
+@dataclasses.dataclass(frozen=True)
+class _ConstantCfg:
+    dims: tuple
+    tags: list
+
+    def __hash__(self):
+        return hash(self.dims)
+
+
+pytree.register_constant(_ConstantCfg)
+
+
+class _PipelineWithSetstate:
+    def __init__(self):
+        self.stages = ["a", "b"]
+        self.n = len(self.stages)
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.n = len(self.stages)
+
+
+class _SlottedHolder:
+    __slots__ = ("tag", "__dict__")
+
+    def __init__(self):
+        self.tag = "slot"
+        self.extra = [1]
+
+
+class _AttrDict(dict):
+    pass
+
+
+class _TaggedList(list):
+    pass
+
+
+class _WithGetstate:
+    def __init__(self):
+        self.a = 1
+
+    def __getstate__(self):
+        return {"a": self.a}
+
+
+class _WithNewargsEx:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs_ex__(self):
+        return (self.a,), {}
+
+
+class _WithReduce:
+    def __init__(self):
+        self.a = 1
+
+    def __reduce__(self):
+        return (_WithReduce, ())
+
+
+class _CopyregRegistered:
+    def __init__(self):
+        self.a = 1
+
+
+copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+
+
+class _TupleSub(tuple):
+    __slots__ = ()  # var-sized, so refused by __itemsize__, not by the slots scan
+
+
+class _PureSlots:
+    __slots__ = ("a",)
+
+    def __init__(self):
+        self.a = 1
+
+
+class _RebuiltFromNewargs:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs__(self):
+        return (self.a,)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -3874,6 +3989,116 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIsInstance(loaded, torch.nn.LSTM)
         self.assertEqual(loaded._all_weights, lstm._all_weights)
         self.assertEqual(loaded._flat_weights_names, lstm._flat_weights_names)
+
+    def test_pickles_by_default_admits_only_dict_only_plain_objects(self):
+        # The predicate the attribute pruner will gate on: an object round-trips
+        # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
+        # registration and no state outside __dict__ (slots, container items,
+        # var-sized or C layout) is involved. One refusal fixture per conjunct.
+        self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
+        self.assertTrue(_pickles_by_default(_GenericHolder()))
+        for obj in (
+            _PipelineWithSetstate(),
+            _WithGetstate(),
+            _RebuiltFromNewargs([1]),
+            _WithNewargsEx(1),
+            _WithReduce(),
+            _CopyregRegistered(),
+            _SlottedHolder(),
+            _PureSlots(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            _TupleSub((1,)),
+            enum.Enum("Color", "RED").RED,
+            torch.nn.Linear(1, 1),
+            torch.randn(1),
+        ):
+            self.assertFalse(_pickles_by_default(obj), type(obj).__name__)
+
+    def test_is_torch_type_walks_the_mro(self):
+        self.assertTrue(_is_torch_type(torch.nn.Linear))
+        self.assertTrue(_is_torch_type(type("_Sub", (torch.nn.Linear,), {})))
+        self.assertFalse(_is_torch_type(_HolderWithGenerator))
+        self.assertFalse(_is_torch_type(_ConstantCfg))
+
+    def test_pickles_by_default_is_sound_against_pickle_itself(self):
+        # Soundness, not a list of known holes: whenever the predicate says an
+        # object is rebuilt as cls.__new__ plus __dict__, pickle's own reduce of
+        # that object at every protocol from 2 up must be exactly that (newobj, no items, state is
+        # the instance dict), for a zoo of shapes it was never written against.
+        import array
+        import collections
+        import decimal
+        import fractions
+        import pathlib
+
+        def dict_only_reduce(obj, protocol):
+            try:
+                r = obj.__reduce_ex__(protocol)
+            except Exception:
+                return False
+            return (
+                isinstance(r, tuple)
+                and len(r) >= 3
+                and getattr(r[0], "__name__", "") == "__newobj__"
+                and r[1] == (type(obj),)
+                and r[2] == (getattr(obj, "__dict__", None) or None)
+                and all(x is None for x in r[3:5])
+            )
+
+        Point = collections.namedtuple("Point", "x y")
+        zoo = [
+            _HolderWithGenerator(),
+            _GenericHolder(),
+            _OuterHolder(),
+            _ConstantCfg((0, 1), ["a"]),
+            _KeyCfg("a", ["t"]),
+            _PipelineWithSetstate(),
+            _RebuiltFromNewargs([1]),
+            _SlottedHolder(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            _TupleSub((1,)),
+            _PureSlots(),
+            _WithGetstate(),
+            _WithReduce(),
+            _CopyregRegistered(),
+            types.SimpleNamespace(a=1),
+            Point(1, 2),
+            collections.OrderedDict(a=1),
+            collections.defaultdict(int),
+            collections.deque([1]),
+            collections.Counter("ab"),
+            array.array("i", [1]),
+            decimal.Decimal("1.5"),
+            fractions.Fraction(1, 3),
+            pathlib.PurePosixPath("a/b"),
+            enum.Enum("Color", "RED").RED,
+            functools.partial(len),
+            weakref.WeakValueDictionary(),
+            threading.Lock(),
+            torch.randn(1),
+            torch.nn.Linear(1, 1),
+            torch.Size([1]),
+            torch.float32,
+            torch.device("cpu"),
+            torch.Generator(),
+        ]
+        # Every protocol the pickler could write with, DEFAULT_PROTOCOL included.
+        for protocol in range(2, pickle.HIGHEST_PROTOCOL + 1):
+            for obj in zoo:
+                if _pickles_by_default(obj):
+                    self.assertTrue(
+                        dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
+                    )
+        # And the predicate is not vacuous: the plain shapes are admitted (so is
+        # WeakValueDictionary, a pure-Python class whose state is its dict).
+        admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
+        self.assertLessEqual(
+            {"_HolderWithGenerator", "_GenericHolder", "_OuterHolder", "_KeyCfg"},
+            admitted,
+        )
+        self.assertNotIn("SimpleNamespace", admitted)  # a C type: layout differs
 
     def test_a_dict_key_field_shared_with_a_module_attribute_stays_real(self):
         # The module path registers its unguarded list by id, and persistent_id
