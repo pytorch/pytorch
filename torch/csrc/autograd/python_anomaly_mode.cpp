@@ -8,6 +8,9 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <sstream>
+#include <string>
+
 namespace torch::autograd {
 
 void PyAnomalyMetadata::store_stack() {
@@ -23,6 +26,11 @@ void PyAnomalyMetadata::store_stack() {
 }
 
 void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
+  TORCH_WARN(format_stack(current_node_name));
+}
+
+std::string PyAnomalyMetadata::format_stack(
+    const std::string& current_node_name) {
   pybind11::gil_scoped_acquire gil;
   if (!PyDict_Check(dict())) {
     TORCH_CHECK(false, "Anomaly metadata is not a python dictionary.");
@@ -32,14 +40,15 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
       PyDict_GetItemStringRef(dict(), ANOMALY_TRACE_KEY, &trace_stack_ptr) >=
       0);
   THPObjectPtr trace_stack(trace_stack_ptr);
-  _print_stack(trace_stack.get(), current_node_name, false);
+  std::ostringstream out;
+  out << _format_stack(trace_stack.get(), current_node_name, false);
   PyObject* pyparent_ptr = nullptr;
   TORCH_CHECK_PYTHON(
       PyDict_GetItemStringRef(dict(), ANOMALY_PARENT_KEY, &pyparent_ptr) >= 0);
   THPObjectPtr pyparent(pyparent_ptr);
 
   // if there is no "parent_" in metadata, then it means this metadata's node
-  // is the root and stop printing the traceback
+  // is the root and stop walking the traceback
   while (pyparent) {
     THPObjectPtr parent_metadata(
         PyObject_GetAttrString(pyparent.get(), "metadata"));
@@ -55,7 +64,8 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
         PyDict_GetItemStringRef(
             parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack_ptr) >= 0);
     THPObjectPtr parent_stack(parent_stack_ptr);
-    _print_stack(parent_stack.get(), parent_name, true);
+    out << "\n\n"
+        << _format_stack(parent_stack.get(), parent_name, true);
     // get the parent of this node, if this node is a root, pyparent is simply
     // null
     PyObject* next_parent_ptr = nullptr;
@@ -64,6 +74,7 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
             parent_metadata.get(), ANOMALY_PARENT_KEY, &next_parent_ptr) >= 0);
     pyparent = THPObjectPtr(next_parent_ptr);
   }
+  return out.str();
 }
 
 void PyAnomalyMetadata::assign_parent(
@@ -82,18 +93,14 @@ void PyAnomalyMetadata::assign_parent(
       !PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, parent_node_.get()));
 }
 
-void _print_stack(
+std::string _format_stack(
     PyObject* stack,
     const std::string& current_node_name,
     bool is_parent) {
   if (!stack) {
-    TORCH_WARN(
-        "Error detected in ",
-        current_node_name,
-        ". ",
-        "No forward pass information available. Enable detect anomaly "
-        "during forward pass for more information.");
-    return;
+    return "Error detected in " + current_node_name +
+        ". No forward pass information available. Enable detect anomaly "
+        "during forward pass for more information.";
   }
 
   THPObjectPtr empty_string(PyUnicode_FromString(""));
@@ -105,21 +112,13 @@ void _print_stack(
   TORCH_CHECK_PYTHON(msg);
 
   if (!is_parent) {
-    TORCH_WARN(
-        "Error detected in ",
-        current_node_name,
-        ". ",
-        "Traceback of forward call that caused the error:\n",
-        THPUtils_unpackString(msg.get()));
-  } else {
-    TORCH_WARN(
-        "\n\n",
-        "Previous calculation was induced by ",
-        current_node_name,
-        ". "
-        "Traceback of forward call that induced the previous calculation:\n",
-        THPUtils_unpackString(msg.get()));
+    return "Error detected in " + current_node_name +
+        ". Traceback of forward call that caused the error:\n" +
+        THPUtils_unpackString(msg.get());
   }
+  return "Previous calculation was induced by " + current_node_name +
+      ". Traceback of forward call that induced the previous calculation:\n" +
+      THPUtils_unpackString(msg.get());
 }
 
 } // namespace torch::autograd
