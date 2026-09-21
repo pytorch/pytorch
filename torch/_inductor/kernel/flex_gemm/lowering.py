@@ -8,8 +8,8 @@ See ``lower_quack_flex_gemm`` for the template flow.
 
 from __future__ import annotations
 
-import copy
 import dataclasses
+import functools
 import importlib.util
 import logging
 from typing import Any, TYPE_CHECKING
@@ -35,7 +35,12 @@ from ...heuristics.template.flex_gemm import (
     QuackConfigKey,
 )
 from ...ir import IRNode, TensorBox
-from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
+from ...lowering import (
+    constant_pad_nd,
+    empty_strided,
+    process_subgraph_nodes,
+    register_lowering,
+)
 from ...utils import _IntLike, ceildiv, is_bf16x9_matmul
 from ..gemm_epilogue_utils import statically_known_shape_equal
 from .constraints import aux_output_shape_error, LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR
@@ -93,14 +98,6 @@ def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
         graph_module.recompile()
 
 
-class QuackFallbackUnsupported(NotImplementedError):
-    """Request ordinary lowering before FlexGEMM mutates the graph or realizes IR.
-
-    Raised for unsupported grouped-mm compositions or fp32 without TF32;
-    a pinned ``config`` turns it into a hard error instead of a silent fallback.
-    """
-
-
 def check_quack_fp32_operand(gemm_arg: TensorBox) -> None:
     """Reject CUDA float32 GEMMs unless the matmul policy permits TF32."""
     precision = torch.backends.cuda.matmul.fp32_precision
@@ -110,7 +107,7 @@ def check_quack_fp32_operand(gemm_arg: TensorBox) -> None:
         or precision == "tf32"
     ):
         return
-    raise QuackFallbackUnsupported(
+    raise NotImplementedError(
         "FlexGEMM QUACK computes float32 GEMM operands in TF32, but "
         f"torch.backends.cuda.matmul.fp32_precision is {precision!r}; "
         "opt in with torch.set_float32_matmul_precision('high') or use bfloat16/float16 operands"
@@ -123,9 +120,14 @@ def has_flex_gemm_quack() -> bool:
 
 
 # QuACK epilogue captures, aux outputs and local reductions are validated for
-# these 2-D, bias-free GEMMs only.
+# these 2-D, bias-free GEMMs only; grouped_mm additionally rejects the
+# features QuACK's varlen-M path lacks.
 QUACK_EPILOGUE_FEATURE_OPS = frozenset(
-    (torch.ops.aten.mm.default, torch.ops.aten._scaled_mm_v2.default)
+    (
+        torch.ops.aten.mm.default,
+        torch.ops.aten._scaled_mm_v2.default,
+        torch.ops.aten._grouped_mm.default,
+    )
 )
 
 
@@ -176,6 +178,61 @@ def quack_blockscaled_contract(gemm_fx_node: torch.fx.Node) -> QuackBlockScaledC
     )
 
 
+def quack_grouped_mm_contract(
+    gemm_fx_node: torch.fx.Node,
+) -> tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node]:
+    """Resolve ``(mat_a, mat_b, offs)`` for the supported varlen-M form.
+
+    QuACK's varlen path accepts k-major bf16/fp16 A
+    ``[total_m, K]``, per-group B ``[E, K, N]`` and int32 ``offs[E]`` end offsets,
+    which the runtime turns into ``cu_seqlens_m = [0, *offs]``.
+    """
+    normalized = normalize_function(
+        torch.ops.aten._grouped_mm.default,
+        gemm_fx_node.args,
+        gemm_fx_node.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    if normalized is None:
+        raise AssertionError("aten._grouped_mm arguments must bind to its schema")
+    call = normalized.kwargs
+    mat_a, mat_b, offs = call["input"], call["mat2"], call["offs"]
+    if offs is None or call["bias"] is not None or call["out_dtype"] is not None:
+        raise NotImplementedError(
+            "FlexGEMM QUACK grouped_mm requires offs and no bias or out_dtype"
+        )
+    a_meta, b_meta, offs_meta = (node.meta["val"] for node in (mat_a, mat_b, offs))
+    if (
+        a_meta.ndim != 2
+        or a_meta.stride(-1) != 1
+        or b_meta.ndim != 3
+        or a_meta.dtype not in (torch.bfloat16, torch.float16)
+        or b_meta.dtype is not a_meta.dtype
+        or offs_meta.dtype is not torch.int32
+    ):
+        raise NotImplementedError(
+            "FlexGEMM QUACK grouped_mm supports only bf16/fp16 k-major 2-D A "
+            "[total_m, K], 3-D B [E, K, N] and int32 offs"
+        )
+    return mat_a, mat_b, offs
+
+
+def flex_gemm_cu_seqlens_benchmark_input(
+    node: IRNode, total_m: _IntLike
+) -> torch.Tensor:
+    """Build evenly spaced ``[0, ..., total_m]`` boundaries for autotune benchmarks."""
+    from torch._inductor.virtualized import V
+
+    sizevars = V.graph.sizevars
+    return torch.linspace(
+        0,
+        sizevars.optimization_hint(total_m),
+        sizevars.optimization_hint(node.get_size()[0]),
+        dtype=torch.int32,
+        device=node.get_device_or_error(),
+    )
+
+
 def flex_gemm_tensor_placeholders(
     graph_module: torch.fx.GraphModule,
 ) -> list[torch.fx.Node]:
@@ -220,7 +277,7 @@ def infer_flex_gemm_epilogue_arg_kinds(
     if gemm_op not in QUACK_EPILOGUE_FEATURE_OPS:
         raise NotImplementedError(
             "FlexGEMM generated epilogues with captured tensor reads currently "
-            "support only aten.mm and aten._scaled_mm_v2"
+            "support only aten.mm, aten._scaled_mm_v2 and aten._grouped_mm"
         )
     m, n = output_size[-2], output_size[-1]
     epilogue_arg_kinds = []
@@ -253,7 +310,7 @@ def validate_flex_gemm_aux_outputs(
     if gemm_op not in QUACK_EPILOGUE_FEATURE_OPS:
         raise NotImplementedError(
             "FlexGEMM generic aux tuple epilogues currently support only "
-            "aten.mm and aten._scaled_mm_v2"
+            "aten.mm, aten._scaled_mm_v2 and aten._grouped_mm"
         )
     aux_metas = []
     for aux_output in aux_outputs:
@@ -326,6 +383,7 @@ def flex_gemm_quack_configs(
         sizevars.optimization_hint(mat2.get_size()[-1]),
         None if output_contraction is None else output_contraction.concat_layout,
         blockscaled=template_config.blockscaled_format is not None,
+        varlen_m=template_config.cu_seqlens_index is not None,
     )
     legal = legal_mod_configs(
         epimod, device, problem, preferred_config=flex_gemm_preferred_config(problem)
@@ -431,19 +489,25 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     op_spec = FLEX_GEMM_OP_SPECS[gemm_op]
     mat1_index = op_spec.mat1_index
     gemm_fx_node = flex_gemm_node(subgraph.graph_module, gemm_op)
+    scaled_mm = gemm_op is torch.ops.aten._scaled_mm_v2.default
+    grouped_mm = gemm_op is torch.ops.aten._grouped_mm.default
     placeholders = [
         node for node in subgraph.graph_module.graph.nodes if node.op == "placeholder"
     ]
     placeholder_args = dict(zip(placeholders, args, strict=True))
-    if gemm_op is torch.ops.aten._scaled_mm_v2.default:
+    blockscaled = None
+    mainloop_scale_nodes: tuple[torch.fx.Node, ...] = ()
+    if scaled_mm:
         blockscaled = quack_blockscaled_contract(gemm_fx_node)
         gemm_operand_nodes = blockscaled.gemm_inputs
         mainloop_scale_nodes = blockscaled.tensorwise_scales
         alpha, beta = 1.0, 0.0
-    else:
-        blockscaled = None
+    elif grouped_mm:
+        gemm_fx_node.args = quack_grouped_mm_contract(gemm_fx_node)
         gemm_operand_nodes = gemm_fx_node.args
-        mainloop_scale_nodes = ()
+        alpha, beta = 1.0, 0.0
+    else:
+        gemm_operand_nodes = gemm_fx_node.args
         unsupported_gemm_kwargs = OrderedSet(gemm_kwargs) - OrderedSet(
             ["alpha", "beta"]
         )
@@ -463,6 +527,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
         gemm_args.append(gemm_arg)
     check_quack_fp32_operand(gemm_args[mat1_index])
+    if grouped_mm:
+        # QuACK's varlen path reads [0, *offs]; pad in-graph so Inductor owns
+        # the buffer instead of the runtime allocating during CUDA graph capture.
+        gemm_args[2] = constant_pad_nd(gemm_args[2], [1, 0])
     epilogue_arg_placeholders = (
         *mainloop_scale_nodes,
         *flex_gemm_epilogue_arg_placeholders(subgraph.graph_module, gemm_fx_node),
@@ -520,6 +588,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
+    if grouped_mm and outputs.local_reduce is not None:
+        raise NotImplementedError(
+            "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped reductions"
+        )
     output_contraction = outputs.output_contraction
     if (
         blockscaled is not None
@@ -608,6 +680,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     mutated_input_nodes = aux_input_nodes + local_reduce_input_nodes
     aux_out_start = len(gemm_input_nodes) + len(epilogue_input_nodes)
     aux_out_indices = tuple(range(aux_out_start, aux_out_start + len(aux_input_nodes)))
+    gemm_input_indices = tuple(range(len(gemm_input_nodes)))
     local_reduce_out_index = (
         aux_out_start + len(aux_input_nodes) if local_reduce_input_nodes else None
     )
@@ -620,6 +693,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             logical_output_size,
         ),
     )
+    if grouped_mm and "tile" in epilogue_arg_kinds:
+        raise NotImplementedError(
+            "FlexGEMM QUACK grouped_mm (varlen) does not yet support captured "
+            "tensors of the full [total_m, N] output shape"
+        )
     if gemm_args[mat1_index].get_device_or_error().type != "cuda":
         raise NotImplementedError("FlexGEMM QUACK backend requires CUDA tensors")
     epimod_source = materialize_flex_gemm_epilogue(
@@ -675,6 +753,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         beta=float(beta),
         blockscaled_format=None if blockscaled is None else blockscaled.format,
         quack_config=None,
+        cu_seqlens_index=gemm_input_indices[2] if grouped_mm else None,
         epilogue_arg_indices=epilogue_arg_indices,
         epilogue_arg_kinds=epilogue_arg_kinds,
         aux_out_indices=aux_out_indices,
@@ -705,7 +784,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 f"config_constraints={config_constraints!r} for this call"
             )
     if tuned:
-        quack_configs = flex_gemm_search_space(legal_configs)
+        quack_configs = flex_gemm_search_space(legal_configs, varlen=grouped_mm)
     else:
         from torch._inductor.virtualized import V
 
@@ -717,7 +796,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         n_hint = sizevars.optimization_hint(mat2.get_size()[-1])
         # Block-scaled calls keep QuACK's shape-aware blockscaled default.
         dense_shape = None if blockscaled is not None else (m_hint, n_hint)
-        default = flex_gemm_default_config(legal_configs, dense_shape=dense_shape)
+        default = flex_gemm_default_config(
+            legal_configs, varlen=grouped_mm, dense_shape=dense_shape
+        )
         quack_configs = (default,)
     log_flex_gemm_artifact(
         "config_candidates",
@@ -738,6 +819,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         for index, input_node in enumerate(input_nodes)
         if isinstance(input_node, ir.ReinterpretView)
     }
+    if grouped_mm:
+        input_gen_fns[gemm_input_indices[2]] = functools.partial(
+            flex_gemm_cu_seqlens_benchmark_input, total_m=logical_output_size[0]
+        )
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue",
         choices,
@@ -771,7 +856,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     body_gemm_op = flex_gemm_body_gemm_op(gemm_op, gemm_kwargs)
     if body_gemm_op is torch.ops.aten._scaled_mm_v2.default and backend != "QUACK":
         raise NotImplementedError("FlexGEMM F.scaled_mm requires backend='QUACK'")
-    if backend in ("NVGEMM", "QUACK") and gemm_op in FLEX_GEMM_OP_SPECS:
+    if backend == "NVGEMM" and gemm_op in FLEX_GEMM_OP_SPECS:
         mat1 = args[FLEX_GEMM_OP_SPECS[gemm_op].mat1_index]
         if isinstance(mat1, TensorBox) and is_bf16x9_matmul(
             mat1.get_device_or_error().type, mat1.get_dtype()
@@ -779,7 +864,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             # See Note [BF16x9 precision] in torch/_inductor/utils.py.
             warning_once(
                 log,
-                f"FlexGEMM {backend} does not support bfx9 precision; using ATen/cuBLAS instead.",
+                "FlexGEMM NVGEMM does not support bfx9 precision; using ATen/cuBLAS instead.",
             )
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     if backend == "NVGEMM":
@@ -807,22 +892,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         with config.patch(nvgemm_config):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     if backend == "QUACK":
-        # Capture normalization mutates the body; grouped fallback needs the original.
-        quack_subgraph = dataclasses.replace(
-            subgraph, graph_module=copy.deepcopy(subgraph.graph_module)
+        return lower_quack_flex_gemm(
+            body_gemm_op, subgraph, args, gemm_kwargs, kernel_options
         )
-        try:
-            return lower_quack_flex_gemm(
-                body_gemm_op, quack_subgraph, args, gemm_kwargs, kernel_options
-            )
-        except QuackFallbackUnsupported as error:
-            if "config" in kernel_options:
-                raise
-            fallback_reason = str(error)
-            log_flex_gemm_artifact(
-                "fallback",
-                lambda: fallback_reason,
-                lowering_name=subgraph.name,
-            )
-            return process_subgraph_nodes(subgraph.graph_module, list(args))
     return process_subgraph_nodes(subgraph.graph_module, list(args))
