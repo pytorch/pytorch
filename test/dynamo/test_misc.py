@@ -208,6 +208,11 @@ def compare_deleted_cell(x):
     return x + (1 if ca < cb else 0)
 
 
+@torch._dynamo.assume_constant_result
+def constant_deepcopy_deque():
+    return copy.deepcopy(collections.deque([[7]], maxlen=2))
+
+
 class UserDefineSetAttr:
     setup = False
 
@@ -5190,6 +5195,99 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         correct = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
+
+    def test_deepcopy_deque(self):
+        def clone(d):
+            return copy.deepcopy(d)
+
+        original_item = [1, 2]
+        original = collections.deque([original_item], maxlen=3)
+        cloned = torch.compile(clone, fullgraph=True, backend="eager")(original)
+        self.assertEqual(cloned, original)
+        self.assertEqual(cloned.maxlen, original.maxlen)
+        self.assertIsNot(cloned, original)
+        self.assertIsNot(cloned[0], original_item)
+        cloned[0].append(3)
+        self.assertEqual(original_item, [1, 2])
+
+        def clone_unbounded(d):
+            return copy.deepcopy(d)
+
+        unbounded = collections.deque([[3]])
+        cloned_unbounded = torch.compile(
+            clone_unbounded, fullgraph=True, backend="eager"
+        )(unbounded)
+        self.assertEqual(cloned_unbounded, unbounded)
+        self.assertIsNone(cloned_unbounded.maxlen)
+        self.assertIsNot(cloned_unbounded[0], unbounded[0])
+
+        def clone_local():
+            return copy.deepcopy(collections.deque([[4]], maxlen=2))
+
+        cloned_local = torch.compile(clone_local, fullgraph=True, backend="eager")()
+        self.assertEqual(cloned_local, collections.deque([[4]], maxlen=2))
+        self.assertEqual(cloned_local.maxlen, 2)
+
+        def reduce_with_arg(d):
+            try:
+                d.__reduce__(1)
+            except TypeError as exc:
+                return str(exc)
+
+        error = torch.compile(reduce_with_arg, fullgraph=True, backend="eager")(
+            original
+        )
+        self.assertIn("takes no arguments", error)
+
+        def escape_reduce_iterator(d):
+            iterator = d.__reduce__()[3]
+            d.append(9)
+            return iterator
+
+        with self.assertRaisesRegex(Unsupported, "deque iterator reconstruction"):
+            torch.compile(escape_reduce_iterator, fullgraph=True, backend="eager")(
+                original
+            )
+
+        class DequeSubclass(collections.deque):
+            pass
+
+        subclass = DequeSubclass([[5]], maxlen=2)
+        subclass.state = [6]
+        with self.assertRaisesRegex(Unsupported, "deque subclass reduction"):
+            torch.compile(clone, fullgraph=True, backend="eager")(subclass)
+
+        def get_constant_clone():
+            return constant_deepcopy_deque()
+
+        cloned_constant = torch.compile(
+            get_constant_clone, fullgraph=True, backend="eager"
+        )()
+        self.assertEqual(cloned_constant, collections.deque([[7]], maxlen=2))
+        self.assertEqual(cloned_constant.maxlen, 2)
+
+    def test_deepcopy_deque_maxlen_guard(self):
+        def clone(d, x):
+            return copy.deepcopy(d), x + 1
+
+        counter = CompileCounter()
+        compiled = torch.compile(clone, fullgraph=True, backend=counter)
+        x = torch.ones(1)
+        item = [1, 2]
+        original = collections.deque([item], maxlen=3)
+
+        for maxlen in (3, None):
+            collections.deque.__init__(original, [item], maxlen)
+            cloned, result = compiled(original, x)
+            self.assertEqual(result, x + 1)
+            self.assertEqual(cloned, original)
+            self.assertEqual(cloned.maxlen, maxlen)
+            self.assertIsNot(cloned, original)
+            self.assertIsNot(cloned[0], item)
+            cloned[0].append(3)
+            self.assertEqual(item, [1, 2])
+
+        self.assertEqual(counter.frame_count, 2)
 
     def test_deepcopy_user_defined_object(self):
         class MyConfig:

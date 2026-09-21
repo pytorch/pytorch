@@ -1818,6 +1818,25 @@ class DequeVariable(BaseListVariable):
             mutation_type=ValueMutationNew(),
         )
 
+    def reduce(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # deque___reduce___impl: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c
+        constructor_args: list[VariableTracker] = []
+        if not self.maxlen.is_constant_none():
+            constructor_args = [TupleVariable([]), self.maxlen]
+        return TupleVariable(
+            [
+                VariableTracker.build(tx, collections.deque),
+                TupleVariable(constructor_args),
+                ConstantVariable.create(None),
+                self.tp_iter_impl(tx),
+            ]
+        )
+
     def pop(
         self,
         tx: "InstructionTranslatorBase",
@@ -1947,6 +1966,7 @@ class DequeVariable(BaseListVariable):
         "remove": Method(BaseListVariable.list_remove),
         "copy": Method(copy),
         "__copy__": Method(copy),
+        "__reduce__": Method(reduce),
         "__reversed__": Method(deque_reversed),
     }
 
@@ -2583,6 +2603,17 @@ class DequeIteratorVariable(BaseListIteratorVariable):
 
     def python_type(self) -> type:
         return type(iter(collections.deque()))
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        unimplemented(
+            gb_type="deque iterator reconstruction",
+            context="reconstructing a live deque iterator",
+            explanation=(
+                "Dynamo cannot reconstruct a live deque iterator without losing "
+                "its mutation checks."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
 
 class DequeReverseIteratorVariable(BaseListIteratorVariable):
