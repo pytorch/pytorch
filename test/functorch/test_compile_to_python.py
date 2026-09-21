@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import ast
+import textwrap
 import unittest
 
 import torch
@@ -175,6 +176,91 @@ _EFFECTFUL_TARGETS = [
     subtest(torch.ops.aten._print.default, name="op_overload"),
     subtest(hop_print, name="hop"),
 ]
+
+
+# Module-level shapes ``namespace_module_names`` REFUSES, each with a fragment of its
+# message. Only the statement kinds Inductor's wrapper codegen emits are accepted, so every
+# other way of binding a module-level name is rejected by that allowlist rather than by a
+# guard per binder form. ``call`` is the rename target throughout, and none of these is
+# exec'd, so free names in them (``flag``, ``deco``, ...) stay undefined.
+# Module shapes namespace_module_names must refuse, each with a fragment of the expected
+# message specific enough that no OTHER guard's message could satisfy it: the guard's own
+# wording plus the line it names, so the parametrization really discriminates (the three
+# walrus shapes sit on lines 1, 2 and 3 for exactly that reason).
+_UNSUPPORTED_SHAPES = {
+    "compound": (
+        "if flag: kernel = 1\ndef call(a): return kernel\n",
+        "module-level If on line 1 binds ['kernel']",
+    ),
+    "import_rebind": (
+        "if flag:\n    import torch\n    torch = 1\ndef call(a): return torch\n",
+        "module-level If on line 1 binds ['torch']",
+    ),
+    "walrus_value": (
+        "total = (n := 5)\ndef call(a): return n\n",
+        "on line 1 binds a name with a walrus",
+    ),
+    "walrus_decorator": (
+        "@deco(n := 1)\ndef call(a): return n\n",
+        "on line 2 binds a name with a walrus",
+    ),
+    "walrus_class_base": (
+        "\n\nclass R(B := object): pass\ndef call(a): return R\n",
+        "on line 3 binds a name with a walrus",
+    ),
+    "match": (
+        "match flag:\n    case [a]: pass\ndef call(x): return a\n",
+        "module-level Match on line 1 binds ['a']",
+    ),
+    "attribute_target": (
+        "cfg.flag = 1\ndef call(a): return cfg\n",
+        "on line 1 does not store into a plain name",
+    ),
+    # MPS codegen's real line: async_compile.metal returns None and the compiled kernel is
+    # injected later under the STRING, so a renamed reader would still read None.
+    "string_bound_kernel": (
+        "generated_kernel_0 = async_compile.metal('generated_kernel_0', 'k', [])\n"
+        "def call(a): return generated_kernel_0\n",
+        "registers ['generated_kernel_0'] as a string literal",
+    ),
+    "string_bound_setattr": (
+        "import sys\nsetattr(sys.modules[__name__], 'call', 1)\ndef call(a): return a\n",
+        "calls setattr(), which binds a name given as a string",
+    ),
+    "opaque_binder_suffix": (
+        "def call(a): return a\ndef helper(call_s0): return call(3)\n",
+        "already uses ['call_s0']",
+    ),
+    # A class attribute's readers are ``R.call`` attributes OUTSIDE the body, so this
+    # raises with nothing in the body reading bare ``call``.
+    "class_body_store": (
+        "def call(a): return a\nclass R:\n    call = print\n",
+        "rebinds ['call'] with a binder the rewrite cannot follow",
+    ),
+    # The opaque half DOES need the read: an unrenamed parameter under a renamed load.
+    "opaque_binder_read": (
+        "def call(a): return a\ndef helper(call): return call(3)\n",
+        "rebinds ['call'] with a binder the rewrite cannot follow",
+    ),
+    "header_off_def_line": (
+        "def \\\ncall(a): return a\n",
+        "header of 'call' is not on its own line 1",
+    ),
+    "imported_and_assigned": (
+        "from math import sqrt\nsqrt = 1\ndef call(a): return sqrt\n",
+        "['sqrt'] are both imported and assigned",
+    ),
+    # Write-only, which is the shape codegen emits: a ``global`` rebinds the module-level
+    # name whether or not the scope reads it back.
+    "nested_global": (
+        "weight = None\ndef call():\n    global weight\n    weight = 1\n",
+        "rebinds ['weight'] with a binder the rewrite cannot follow",
+    ),
+    "suffix_taken": (
+        "def call_s0(a): return a\ndef call(a): return call_s0(a)\n",
+        "already uses ['call_s0']",
+    ),
+}
 
 
 @instantiate_parametrized_tests
@@ -698,6 +784,174 @@ class TestAOTCompileToPython(TestCase):
             t.join()
         self.assertEqual(sinks["a"], ["a_fn"])
         self.assertEqual(sinks["b"], ["b_fn"])
+
+    def test_namespace_module_names_suffixes_each_modules_top_level_names(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        forward = textwrap.dedent(
+            """
+            import torch
+            from torch import empty_strided
+            def kernel(x):
+                return x + 1
+            class Runner:
+                def call(self, x):
+                    return kernel(x)
+            def call(args):
+                return Runner().call(kernel(args[0]))
+            """
+        )
+        backward = forward.replace("x + 1", "x - 1")
+        fwd, bwd = namespace_module_names([forward, backward])
+        # every module-level name each block DEFINES is suffixed per slot ...
+        self.assertIn("def kernel_s0(x):", fwd)
+        self.assertIn("def call_s0(args):", fwd)
+        self.assertIn("class Runner_s0:", fwd)
+        self.assertIn("return Runner_s0().call(kernel_s0(args[0]))", fwd)
+        self.assertIn("def kernel_s1(x):", bwd)
+        self.assertIn("return x - 1", bwd)
+        # ... while imports, attributes and nested bindings are left alone.
+        self.assertIn("from torch import empty_strided\n", fwd)
+        self.assertIn("    def call(self, x):", fwd)
+        self.assertIn("return kernel_s0(x)", fwd)
+        ns: dict[str, object] = {}
+        exec(fwd + bwd, ns)
+        self.assertEqual(ns["call_s0"]([torch.ones(2)]).tolist(), [3.0, 3.0])
+        self.assertEqual(ns["call_s1"]([torch.ones(2)]).tolist(), [-1.0, -1.0])
+
+    def test_namespace_module_names_leaves_a_module_defining_nothing_alone(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        src = "import torch\nprint(torch.__version__)\n"
+        self.assertEqual(namespace_module_names([src, src]), [src, src])
+
+    def test_namespace_module_names_renames_the_del_pair_and_unpacked_targets(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # The two shapes real Inductor modules use that the collector treats specially:
+        # the ``async_compile`` / ``del async_compile`` pair (renamed TOGETHER, unlike in
+        # _module_level_names, which drops del'd names) and tuple-unpacked targets.
+        src = textwrap.dedent(
+            """
+            from torch._inductor.async_compile import AsyncCompile
+            async_compile = AsyncCompile()
+            kernel, other = async_compile.pair()
+            del async_compile
+            def call(args):
+                return kernel(other(args[0]))
+            """
+        )
+        (renamed,) = namespace_module_names([src])
+        self.assertIn("async_compile_s0 = AsyncCompile()", renamed)
+        self.assertIn("del async_compile_s0", renamed)
+        self.assertIn("kernel_s0, other_s0 = async_compile_s0.pair()", renamed)
+        self.assertIn("return kernel_s0(other_s0(args[0]))", renamed)
+        self.assertIn(
+            "from torch._inductor.async_compile import AsyncCompile\n", renamed
+        )
+
+    def test_namespace_module_names_splices_by_utf8_byte_offset(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # ``col_offset`` is a UTF-8 BYTE offset, so non-ASCII text earlier on a line that
+        # carries a rename shifts it: slicing that line by code point cuts in the wrong
+        # place and corrupts the module.
+        accent = "\u00e9" * 3
+        src = (
+            "def kernel(x):\n    return x\ndef call(args):\n"
+            f'    label = "{accent}"; return kernel(args[0])\n'
+        )
+        (renamed,) = namespace_module_names([src])
+        self.assertIn(f'    label = "{accent}"; return kernel_s0(args[0])\n', renamed)
+        ns: dict[str, object] = {}
+        exec(renamed, ns)
+        self.assertEqual(ns["call_s0"]([2]), 2)
+
+    @parametrize("shape", sorted(_UNSUPPORTED_SHAPES))
+    def test_namespace_module_names_raises_on_an_unsupported_shape(self, shape):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        src, fragment = _UNSUPPORTED_SHAPES[shape]
+        with self.assertRaises(NotImplementedError) as caught:
+            namespace_module_names([src])
+        self.assertIn(fragment, str(caught.exception))
+
+    def test_namespace_module_names_accepts_the_shapes_codegen_emits(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # Lookalikes of the refused shapes that must NOT raise: a conditional import binds
+        # only aliases, which are never renamed; a comprehension is a scope of its own, so a
+        # class-body one over the target renames its binder and loads together; real
+        # graph_partition codegen puts a ``def call`` in ``class Runner`` beside a
+        # module-level ``call`` and never reads bare ``call`` in the class body; a decorated
+        # def is renamed at its ``def`` line, not its decorator's; and a scope holding the
+        # suffixed name but never reading the target captures nothing, so it must not trip
+        # the clash guard.
+        accepted = {
+            "if flag:\n    from torch import empty_strided\nelse:\n"
+            "    from torch import empty_permuted as empty_strided\n"
+            "def call(a): return empty_strided\n": "def call_s0(a): return empty_strided",
+            "def call(a): return a\nclass R:\n"
+            "    fns = [call for call in ()]\n": "fns = [call_s0 for call_s0 in ()]",
+            "def call(a): return a\nclass R:\n    def call(self, a): return a\n"
+            "call = R().call\n": "    def call(self, a): return a",
+            "def deco(f): return f\n@deco\n"
+            "def call(a): return a\n": "@deco_s0\ndef call_s0(a): return a",
+            "def call(a): return a\n"
+            "def other(call_s0): return 1\n": "def other_s0(call_s0): return 1",
+        }
+        for src, expected in accepted.items():
+            with self.subTest(expected):
+                (renamed,) = namespace_module_names([src])
+                ast.parse(renamed)
+                self.assertIn(expected, renamed)
+
+    # graph_partition defaults OFF in fbcode (config.py: "1" if not is_fbcode() else "0")
+    # and nothing on this path pins it, so the Runner assertions below are ambient unless
+    # the flag is patched -- the same constraint test_precompile.py patches around.
+    @torch._inductor.config.patch(graph_partition=True)
+    def test_namespace_module_names_splices_two_real_composed_modules(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # The shapes that finally matter are the ones Inductor really emits: no guard may
+        # fire on a composed module, and two slots of one must coexist in a single namespace
+        # and both still match eager.
+        m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
+        x = torch.randn(5, 4)
+        src, _cache = _compose(m, x)
+        # With graph partition on, this real output carries the partitioned shape the
+        # docstring claims to handle -- a ``class Runner`` with a ``def call`` method beside
+        # the module-level ``call = runner.call`` -- rather than the accepted-shapes fixture
+        # being its only coverage. Pin that.
+        runners = [
+            n
+            for n in ast.parse(src).body
+            if isinstance(n, ast.ClassDef) and n.name == "Runner"
+        ]
+        self.assertEqual(len(runners), 1)
+        methods = [n.name for n in runners[0].body if isinstance(n, ast.FunctionDef)]
+        self.assertIn("call", methods)
+        self.assertIn("\ncall = runner.call\n", src)
+        first, second = namespace_module_names([src, src])
+        ns: dict[str, object] = {}
+        exec(first + "\n" + second, ns)
+        with torch.no_grad():
+            for slot in ("call_s0", "call_s1"):
+                self.assertEqual(ns[slot](_flat_inputs(m, x))[0], m(x))
 
 
 @instantiate_parametrized_tests
