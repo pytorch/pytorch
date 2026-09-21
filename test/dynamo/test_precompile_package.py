@@ -2032,6 +2032,75 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(rendered.startswith(prefix), rendered)
         self.assertNotIn("#", rendered[len(prefix) :])
 
+    def test_value_fingerprint_dispatches_on_the_guard_type(self):
+        from torch.compiler._precompile_types import GuardFact
+
+        fingerprint = precompile_package._value_fingerprint
+        src = LocalSource("x")
+        x = torch.zeros(2, 3)
+        with torch.inference_mode():
+            inference = torch.zeros(2, 3)
+        variants = (x, x.double(), x[:, :2], torch.nn.Parameter(x), inference)
+        rendered = [fingerprint(_entry(src, v, "TENSOR_MATCH")) for v in variants]
+        self.assertEqual(len(set(rendered)), len(variants), rendered)
+        for line in rendered:
+            self.assertTrue(line.startswith("check_tensor(<value>, "), line)
+        # The guard type decides, not the value's type: NOT_NONE_MATCH is what
+        # Dynamo installs on an optimizer's .grad, and it checks only presence.
+        for guard_type in ("NOT_NONE_MATCH", "TYPE_MATCH", "COW_TENSOR_MATCH"):
+            self.assertEqual(fingerprint(_entry(src, x, guard_type)), "")
+        self.assertEqual(fingerprint(_entry(LocalSource("n"), 1, "TYPE_MATCH")), "")
+        self.assertEqual(
+            fingerprint(_entry(_OWN, _user_op, "ID_MATCH")),
+            precompile_package._object_identity(_user_op),
+        )
+        grad_mode = _entry(src, None, "GRAD_MODE", has_value=False)
+        with torch.no_grad():
+            self.assertEqual(fingerprint(grad_mode), "grad_enabled=False")
+
+        class Opaque(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                raise RuntimeError("no attribute reads")
+
+        opaque = torch.zeros(2).as_subclass(Opaque)
+        unrenderable = fingerprint(_entry(src, opaque, "TENSOR_MATCH"))
+        self.assertEqual(unrenderable, "type=Opaque, <unrenderable>")
+        # Once the boilerplate parts are filtered a TENSOR_MATCH renders no code,
+        # so the value is what keeps two shape specializations in a fixed order.
+        facts = [
+            GuardFact(
+                guard_type="TENSOR_MATCH",
+                source="L['x']",
+                code=(),
+                value=v,
+                enforced=True,
+            )
+            for v in rendered
+        ]
+        ordered = sorted(facts, key=precompile_package._fact_order)
+        self.assertEqual([f.value for f in ordered], sorted(rendered))
+
+    def test_saved_hooks_fingerprint_mirrors_what_the_guard_stores(self):
+        fingerprint = precompile_package._saved_hooks_fingerprint
+        self.assertEqual(fingerprint(), "hooks=None")
+        # The guard stores None for hooks it cannot inline, so plain-Python
+        # hooks are one value to it and must be one value here.
+        with torch.autograd.graph.saved_tensors_hooks(_user_op, _user_op):
+            self.assertEqual(fingerprint(), "hooks=None")
+
+        def identity(x):
+            return x
+
+        pack = torch.fx.symbolic_trace(identity)
+        unpack = torch.fx.symbolic_trace(identity)
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            rendered = fingerprint()
+        # Named by rendered graph, never by address: two GraphModules with one
+        # code read the same here although the guard compares their ids.
+        digest = precompile_package._hash_text(pack.code)
+        self.assertEqual(rendered, f"hooks=({digest}, {digest})")
+
 
 instantiate_parametrized_tests(TestPrecompilePackage)
 
