@@ -294,6 +294,25 @@ class TestUtils(TestCase):
             self.assertIs(lookup_device_info("TEST DEVICE"), info)
             self.assertIs(lookup_device_info("test device"), info)
 
+    def test_lookup_device_info_reported_rocm_names(self):
+        # Names as reported by torch.cuda.get_device_name() on ROCm hosts.
+        cases = {
+            "AMD Instinct MI350X VF": "AMD MI350X",
+            "AMD Instinct MI355X": "AMD MI355X",
+            "AMD Instinct MI300X": "AMD MI300X",
+            "AMD Instinct MI300X HF": "AMD MI300X",
+            "AMD Instinct MI210": "AMD MI210X",
+            "AMD Instinct MI250X / MI250": "AMD MI250X",
+            "AMD Radeon RX 7900 XT": "AMD RADEON RX 7900 XT",
+            "AMD Radeon Pro W7800 48GB": "AMD RADEON PRO W7800 48GB",
+        }
+        for reported, entry in cases.items():
+            expected = _device_mapping[entry.upper()]
+            with self.subTest(reported=reported):
+                self.assertIs(lookup_device_info(reported), expected)
+        self.assertIsNone(lookup_device_info("AMD Instinct MI350X XT"))
+        self.assertIsNone(lookup_device_info("VF"))
+
 
 def has_supported_gpu():
     """Check if any GPU platform with Triton support is available."""

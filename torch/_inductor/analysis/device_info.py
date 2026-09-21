@@ -136,8 +136,7 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=24,
     ),
     # Source:
-    # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
-    # /instinct-tech-docs/product-briefs/amd-instinct-mi355x-gpu-brochure.pdf
+    # @lint-ignore https://www.amd.com/en/products/accelerators/instinct/mi350/mi355x.html
     "AMD MI355X": DeviceInfo(
         tops={
             torch.float64: 78.6,
@@ -156,6 +155,8 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_bw_gbs=8000.0,
         dram_gb=288.0,
     ),
+    # Source:
+    # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
     # Source:
     # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
     # /instinct-tech-docs/product-briefs/amd-instinct-mi350x-gpu-brochure.pdf
@@ -245,6 +246,74 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=64.0,
     ),
     # Source:
+    # @lint-ignore https://www.amd.com/en/products/accelerators/instinct/mi200/mi250x.html
+    # The datasheet numbers are for the 2-die module; ROCm exposes each die as its own device,
+    # so every value below is half of the datasheet value.
+    "AMD MI250X": DeviceInfo(
+        tops={
+            torch.float64: 47.85,
+            torch.float32: 47.85,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 47.85,
+            torch.bfloat16: 191.5,
+            torch.float16: 191.5,
+            # not specified, fall back to float16 numbers
+            torch.float8_e8m0fnu: 191.5,
+            torch.float8_e4m3fn: 191.5,
+            torch.float8_e4m3fnuz: 191.5,
+            torch.float8_e5m2: 191.5,
+            torch.float8_e5m2fnuz: 191.5,
+            torch.int8: 191.5,
+        },
+        dram_bw_gbs=1600.0,
+        dram_gb=64.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7800-48gb.html
+    "AMD RADEON PRO W7800 48GB": DeviceInfo(
+        tops={
+            # not specified, estimated as half of float32
+            torch.float64: 22.6,
+            torch.float32: 45.2,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 45.2,
+            torch.bfloat16: 90.4,
+            torch.float16: 90.4,
+            # not supported, fall back to float16 numbers
+            torch.float8_e8m0fnu: 90.4,
+            torch.float8_e4m3fn: 90.4,
+            torch.float8_e4m3fnuz: 90.4,
+            torch.float8_e5m2: 90.4,
+            torch.float8_e5m2fnuz: 90.4,
+            torch.int8: 90.4,
+        },
+        dram_bw_gbs=864.0,
+        dram_gb=48.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.amd.com/en/products/graphics/desktops/radeon/\
+    # 7000-series/amd-radeon-rx-7900xt.html
+    "AMD RADEON RX 7900 XT": DeviceInfo(
+        tops={
+            # not specified, estimated as half of float32
+            torch.float64: 25.8,
+            torch.float32: 51.6,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 51.6,
+            torch.bfloat16: 103.0,
+            torch.float16: 103.0,
+            # not supported, fall back to float16 numbers
+            torch.float8_e8m0fnu: 103.0,
+            torch.float8_e4m3fn: 103.0,
+            torch.float8_e4m3fnuz: 103.0,
+            torch.float8_e5m2: 103.0,
+            torch.float8_e5m2fnuz: 103.0,
+            torch.int8: 103.0,
+        },
+        dram_bw_gbs=800.0,
+        dram_gb=20.0,
+    ),
+    # Source:
     # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/241598/
     # intel-arc-b580-graphics/specifications.html
     "INTEL B580": DeviceInfo(
@@ -315,12 +384,19 @@ _device_mapping["AMD INSTINCT MI355X"] = _device_mapping["AMD MI355X"]
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
+_device_mapping["AMD INSTINCT MI210"] = _device_mapping["AMD MI210X"]
+# Both the MI250X and the MI250 report this name; the entry uses the MI250X numbers.
+_device_mapping["AMD INSTINCT MI250X / MI250"] = _device_mapping["AMD MI250X"]
 _device_mapping["Intel(R) Arc(TM) B580 Graphics"] = _device_mapping["INTEL B580"]
 _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B70"]
 
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).
 _device_mapping = {k.upper(): v for k, v in _device_mapping.items()}
+
+# Suffixes some hosts append to the marketing name, e.g. "AMD Instinct MI350X VF" for an SR-IOV
+# virtual function or "AMD Instinct MI300X HF".
+_DEVICE_NAME_VARIANT_SUFFIXES = ("VF", "HF")
 
 
 def register_device_info(name: str, info: DeviceInfo) -> None:
@@ -335,9 +411,16 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     to the recorded device. Therefore, _device_mapping statically contains the information for lots of devices.
     If one is missing, please run DeviceInfo.get_device_info() and add it to _device_mapping.
       name (str): name of the device to lookup. Should map onto torch.cuda.get_device_name().
-      Will be upper-cased before lookup.
+      Will be upper-cased before lookup. A trailing variant suffix (such as the " VF" an SR-IOV
+      virtual function reports) is ignored when the full name has no entry.
     """
-    return _device_mapping.get(name.upper())
+    key = name.upper()
+    info = _device_mapping.get(key)
+    if info is None:
+        base, _, suffix = key.rpartition(" ")
+        if suffix in _DEVICE_NAME_VARIANT_SUFFIXES:
+            info = _device_mapping.get(base)
+    return info
 
 
 def datasheet_tops(
