@@ -7,8 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from test import run_test as runner
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import run_test as runner
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
