@@ -1294,11 +1294,28 @@ class _WithReduce:
 
 
 class _CopyregRegistered:
+    # Registered in copyreg.dispatch_table by the tests that use it, never at import.
     def __init__(self):
         self.a = 1
 
 
-copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+class _NewNeedsArg:
+    # Reduces to newobj plus __dict__ like a plain class, but cls.__new__(cls)
+    # at load has no argument to pass.
+    def __new__(cls, a):
+        self = super().__new__(cls)
+        self.a = a
+        return self
+
+
+class _RaisingMeta(type):
+    def __getattr__(cls, name):
+        raise RuntimeError(name)
+
+
+class _WithRaisingMeta(metaclass=_RaisingMeta):
+    def __init__(self):
+        self.a = 1
 
 
 class _TupleSub(tuple):
@@ -3994,7 +4011,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # The predicate the attribute pruner will gate on: an object round-trips
         # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
         # registration and no state outside __dict__ (slots, container items,
-        # var-sized or C layout) is involved. One refusal fixture per conjunct.
+        # var-sized or C layout) is involved. One refusal fixture per conjunct,
+        # and a metaclass whose __getattr__ raises RuntimeError reads as False
+        # rather than failing the dump.
+        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
         self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
         self.assertTrue(_pickles_by_default(_GenericHolder()))
         for obj in (
@@ -4004,6 +4025,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             _WithNewargsEx(1),
             _WithReduce(),
             _CopyregRegistered(),
+            _NewNeedsArg(1),
+            _WithRaisingMeta(),
             _SlottedHolder(),
             _PureSlots(),
             _AttrDict(a=1),
@@ -4025,7 +4048,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Soundness, not a list of known holes: whenever the predicate says an
         # object is rebuilt as cls.__new__ plus __dict__, pickle's own reduce of
         # that object at every protocol from 2 up must be exactly that (newobj, no items, state is
-        # the instance dict), for a zoo of shapes it was never written against.
+        # the instance dict), and pickle itself must rebuild the type from that
+        # reduce, for a zoo of shapes it was never written against.
+        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
         import array
         import collections
         import decimal
@@ -4063,6 +4089,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             _WithGetstate(),
             _WithReduce(),
             _CopyregRegistered(),
+            _NewNeedsArg(1),
+            _WithRaisingMeta(),
             types.SimpleNamespace(a=1),
             Point(1, 2),
             collections.OrderedDict(a=1),
@@ -4091,11 +4119,26 @@ class TestGuardSerialization(TestGuardSerializationBase):
                     self.assertTrue(
                         dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
                     )
-        # And the predicate is not vacuous: the plain shapes are admitted (so is
-        # WeakValueDictionary, a pure-Python class whose state is its dict).
+                    # The load side through pickle itself, NEWOBJ then BUILD, on
+                    # a hollow instance so an unpicklable field (a live
+                    # generator) cannot stop the dump: cls.__new__(cls) must
+                    # take no argument and the dict must be the whole state.
+                    fn, args, state = obj.__reduce_ex__(protocol)[:3]
+                    hollow = pickle.loads(pickle.dumps(fn(*args), protocol))
+                    self.assertIs(type(hollow), type(obj))
+                    vars(hollow).update(state or {})
+                    self.assertEqual(vars(hollow), vars(obj))
+        # And the predicate is not vacuous: the plain shapes are admitted, and
+        # so is WeakValueDictionary, a pure-Python class whose state is its dict.
         admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
         self.assertLessEqual(
-            {"_HolderWithGenerator", "_GenericHolder", "_OuterHolder", "_KeyCfg"},
+            {
+                "_HolderWithGenerator",
+                "_GenericHolder",
+                "_OuterHolder",
+                "_KeyCfg",
+                "WeakValueDictionary",
+            },
             admitted,
         )
         self.assertNotIn("SimpleNamespace", admitted)  # a C type: layout differs
