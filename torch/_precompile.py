@@ -1,26 +1,58 @@
-"""Ahead-of-time precompilation (``make_fx`` tracer by default; Dynamo planned).
+"""Ahead-of-time precompilation. Capture is caller-driven: the caller invokes a
+capture around their own execution rather than handing precompile example inputs to
+run. ``precompile.capture(...)`` returns a capture that writes a
+``(python_code, cache)`` artifact to disk when the ``with`` block exits; ``load``
+reloads it from those two files.
 
     with torch.compiler.precompile.capture(
-        fn, artifact_path="m.py", cache_path="m.cache"
+        fn, artifact_path="model.py", cache_path="model.cache"
     ) as cap:
-        out = cap(model, *inputs)       # runs fn(model, *inputs) for real
-    f_c = torch.compiler.precompile.load("m.py", "m.cache")
-    out = f_c(model, *inputs)           # pass the model again at runtime
+        out = cap(model, x)             # runs fn(model, x), returns its result
+    f_c = torch.compiler.precompile.load("model.py", "model.cache")
+    out = f_c(model, x)                 # pass the model again at runtime
 
-precompile captures your computation with ``make_fx`` -- a NON-STRICT trace of the ATen
-ops that run when ``fn`` executes once on FAKE tensors derived from the call made
-inside the block (the call's own tensors are never computed on by the trace). It does
-not analyze your Python, so it comes with an explicit contract (the programming model):
-stay inside it and the artifact faithfully reproduces ``fn``; step outside it and you
-get an artifact that computes the wrong thing.
+The call the caller makes IS the capture: inputs flow through naturally and the call
+returns ``fn``'s result (with ``MakeFxTracer`` the served result, which does not
+require grad; see :func:`capture`), so the capture drops into an ordinary pipeline
+where the result is needed. ``tracer`` picks the capture front-end and carries its
+tracer-specific configuration; ``backend`` and ``training`` are shared across tracers.
 
-The block writes a matched pair of files: a self-contained, executable ``python_code``
-artifact and a companion integrity-tagged ``cache``. With ``backend="inductor"`` (the
-default) the captured graph is lowered through the AOT backend contract
+``MakeFxTracer()`` (the default, and the only tracer ``capture`` accepts in this build)
+captures your computation with ``make_fx`` -- a NON-STRICT trace of the ATen ops that
+run when ``fn`` executes once on FAKE tensors derived from the call made inside the
+block (the trace never computes on the call's own tensors). It does not analyze your
+Python, so it comes with an explicit contract (the programming model): stay inside it
+and the artifact faithfully reproduces ``fn``; step outside it and you get an artifact
+that computes the wrong thing. It produces one trace, so it captures exactly one call
+and refuses a second;
+``cap.save()`` inside the block writes the same single-call artifact that block exit
+writes. ``training=`` IS the grad mode for this tracer: the captured call runs under
+``torch.enable_grad()`` when ``training=True`` and under ``torch.no_grad()`` otherwise,
+overriding whatever grad mode the caller is in, and with ``training=True`` the backward
+is traced into the flat graph and the grads are harvested as extra outputs
+(invariant 5). ``MakeFxTracer.decompositions`` forwards a decomposition table to
+``make_fx``; it is the only decomposition knob (``capture`` has none and
+``DynamoTracer`` has no such field).
+
+``DynamoTracer`` is the front-end the commits that follow add. In this build ``capture``
+refuses it with ``PrecompileError`` and ``MakeFxTracer`` stays the default; once it
+lands it will analyze the Python (bytecode) rather than tracing one path, inline the
+TRANSFORMED BYTECODE Dynamo produces into ``python_code`` (marshalled, rehydrated at
+load), lower the compiled subgraphs through the chosen backend, and record graph breaks
+and every guarded recompilation the calls exercise -- so a capture with it will take as
+many calls as you make, with ``cap.save()`` checkpointing everything captured so far
+without ending the capture, and ``mark_unbacked`` dynamic shapes will work on both
+backends. Its ``require_*`` gates will refuse known coverage gaps, failed captures and
+RISKY dropped guards by default. See the ``tracer`` note at the bottom of
+Note [precompile programming model] for the mechanism.
+
+The artifact is a self-contained, executable ``python_code`` string plus a
+companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
+captured graph is lowered through the AOT backend contract
 (``torch._functorch.aot_autograd.compile_to_python``, AOTAutograd + Inductor);
 ``python_code`` JIT-compiles kernels on first call and the cache primes them so a warm
-reload skips JIT. With ``backend="eager"`` ``python_code`` inlines the captured graph and
-runs on its own. Reload the pair with
+reload skips JIT. With ``backend="eager"`` ``python_code`` inlines the captured graph
+and runs on its own. Reload with
 ``torch.compiler.precompile.load(artifact_path, cache_path)``.
 
 The full contract, the calling convention, and the cache / code_hash design all live in
@@ -31,7 +63,10 @@ it.
 # Note [precompile programming model]
 #
 # ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
-# or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step.
+# or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step
+# (captured with ``training=True``, which runs the call under torch.enable_grad() and
+# traces through the backward; the default ``training=False`` runs it under
+# torch.no_grad() -- ``training=`` is the grad mode, whatever mode the caller is in).
 # Among the positional args, the nn.Module arguments have their parameters and
 # buffers lifted to explicit graph inputs (via functional reparametrization), so
 # nothing live is baked in; the remaining args are the runtime inputs. The artifact
@@ -209,7 +244,13 @@ it.
 #    ``.backward()`` step), not the grads. The grad scatter is the ONLY mutation
 #    precompile performs, and it happens in Python outside the graph, so the graph stays
 #    functional. precompile does not own optimizer state; bring your own optimizer and
-#    zero grads as usual.
+#    zero grads as usual. The dynamo tracer reaches the SAME observable behavior by a
+#    different route (see the tracer note): a ``.backward()`` in ``fn`` graph-breaks
+#    (Dynamo does not trace it while ``trace_autograd_ops`` is off, the default), so at
+#    serve time the live autograd engine runs the compiled backward and does the
+#    accumulate itself; there is no harvested-output list -- but which params get a
+#    grad is still fixed at trace time, frozen params still keep ``.grad = None``, and
+#    the accumulate still matches eager.
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
@@ -289,11 +330,88 @@ it.
 # build is covered at once. Invariant 7 still holds: torch._C._DisableAutocast is a name
 # in the artifact's text, not an import.
 #
-# tracer: the capture front-end, orthogonal to backend, passed to capture() as a tracer
-# object. MakeFxTracer() (the default) is a non-strict trace and is the only tracer
-# implemented today -- everything above (the invariants, the contract) describes its
-# behavior. DynamoTracer is planned (a Dynamo-based front-end that analyzes Python rather
-# than specializing to one traced path); capture() refuses it with a PrecompileError.
+# tracer: the capture front-end, orthogonal to backend. "make_fx" (MakeFxTracer, the
+# default) is a non-strict trace -- everything above (the invariants, the contract)
+# describes its behavior -- and is the only tracer capture() accepts in this build.
+# "dynamo" (DynamoTracer) is a Dynamo-based front-end that analyzes the Python
+# (bytecode) instead of specializing to one traced path; capture() refuses it until the
+# commits that follow land it. The rest of this note describes what the dynamo tracer
+# does ONCE IT LANDS -- the design those commits implement, not behavior reachable in
+# this build.
+#
+# The "dynamo" tracer's TRICK, and how it differs from make_fx: Dynamo does not hand back
+# a single graph we can render as source. It hands back (a) a TRANSFORMED bytecode -- a
+# rewrite of fn that extracts the runtime model's params/buffers, calls a compiled
+# subgraph, and reassembles fn's output -- plus (b) the subgraph (an fx GraphModule) for
+# the backend to lower. So precompile INLINES the transformed bytecode into python_code
+# (marshalled to a base64 blob, rehydrated by the driver via marshal.loads +
+# types.FunctionType) and lowers the subgraph through the SAME backends as make_fx
+# ("inductor" -> aot_autograd.compile_to_python source, "eager" -> the inlined subgraph),
+# wiring the subgraph in under the backend id the bytecode calls. The transformed bytecode
+# IS the calling convention: it reads params off the runtime model itself (given a
+# structurally identical runtime model it reads the right weights, invariant 2), which is
+# why the dynamo driver is thin (rehydrate + wire) and carries none of the make_fx
+# PARAM_NAMES / OUT_SPEC metadata.
+#
+# TRAINING works there by a different mechanism than make_fx. make_fx runs the call
+# under torch.enable_grad() when training=True and traces THROUGH .backward(), so its
+# artifact is one flat graph of fwd+bwd ATen ops with the grads as extra outputs and a
+# Python-level scatter in the driver (invariant 5). The dynamo tracer handles a training
+# step the way torch.compile does: the forward subgraph lowers to a differentiable
+# autograd.Function whose compiled backward AOTAutograd would normally produce lazily on
+# the first .backward() call -- capture forces that lowering eagerly
+# (force_non_lazy_backward_lowering), so the artifact carries the compiled backward and
+# serving never compiles. A .backward() inside the captured fn graph-breaks like any
+# other side effect and re-runs at serve time through the live autograd engine, which is
+# also what accumulates .grad on the runtime model's params: there is no in-graph
+# autograd.grad rewrite and no grad-scatter metadata.
+#
+# Dynamic shapes work there by a different mechanism than make_fx: mark_unbacked is
+# Dynamo's OWN decorator, so Dynamo captures the marked dim as an UNBACKED symint
+# directly -- unguardable, so a graph that needs to guard on it fails loudly at capture
+# (the same PrecompileError the make_fx tracer raises) instead of baking a size. Dynamo
+# emits the ShapeEnv's runtime asserts (mark_unbacked's min/max, a shared shape_id's
+# equality) into the subgraph itself, so they hold on BOTH backends -- unlike the make_fx
+# tracer, whose eager backend has no such asserts and therefore rejects dynamic dims
+# outright. The STRICT variant means something different under each tracer: make_fx
+# honors mark_unbacked(strict=True) exactly like the non-strict form (an unbacked dim;
+# _read_unbacked_marks unions both index sets), while Dynamo reads it as a
+# RelaxedUnspecConstraint -- a BACKED dynamic dim that errors at capture only if the
+# trace specializes it to a constant -- and any guards taken on it ride in the artifact's
+# serialized guard state like every other guard. Decompositions do NOT apply there:
+# Dynamo captures torch-level IR and never consults a decomposition table, so
+# DynamoTracer has no ``decompositions`` field (the frozen dataclass raises TypeError
+# for that keyword) and capture() takes none; MakeFxTracer.decompositions is the only
+# decomposition knob.
+#
+# Scope and differences from make_fx: the capture is execution-driven and multi-frame --
+# it preserves every graph-break continuation, guard, and recompiled variant of the
+# example calls, one transformed bytecode per captured frame. This path does not
+# reproduce the make_fx drivers' upfront runtime validation (the param/buffer structural
+# check, invariant 2, and the per-input shape/dtype/device checks, invariants 3/6): safety
+# comes from the SERIALIZED GUARDS the driver rebuilds and evaluates per variant (minus
+# the unserializable ones that were dropped -- see the require_* gates), from the same
+# specialization contract as make_fx (control flow and unmarked shapes are specialized to
+# the example), and from the captured graph's own asserts -- on the INDUCTOR backend the
+# baked assert_size_stride (which catches a runtime input/weight whose SHAPE or STRIDE
+# differs from the example, but not its DTYPE) and, for a dynamic capture, the ShapeEnv
+# range / equality asserts on both backends. A call no surviving guard set covers is a
+# loud miss rather than a silent wrong answer, but a contract violation the DROPPED
+# guards would have caught can still reach a raw kernel error, and on the EAGER backend
+# (no assert_size_stride) a broadcast-compatible shape mismatch can silently miscompute
+# -- pass inputs and a model matching the example, as the contract requires. Because
+# Dynamo bakes the trace-time environment (e.g. the current accelerator stream) into the
+# bytecode, the artifact is environment-specialized like the make_fx one. This artifact
+# renders its compiled subgraphs as source like the make_fx tracer does, but it ALSO
+# inlines MARSHALLED CPython bytecode plus a PICKLED guard-state blob (which have no
+# source form), so it is LOCKED to the producing Python version: loading it under a
+# different CPython (3.10-3.14) fails with a clean PrecompileError (see the driver's
+# version gate). It is ALSO locked to a compatible torch build, because its import
+# aliases can reference private torch._dynamo runtime modules (also surfaced as a clean
+# PrecompileError). Regenerate per Python version / torch build, or use make_fx for
+# portable source (backend='eager' for torch-build portability -- the default make_fx
+# inductor artifact itself inlines private torch._inductor modules, so it too is
+# torch-build-locked; the Python-version portability holds for either make_fx backend).
 
 from __future__ import annotations
 
@@ -430,7 +548,9 @@ class MakeFxTracer:
 @dataclasses.dataclass(frozen=True)
 class DynamoTracer:
     """The ``dynamo`` capture front-end, passed as ``tracer=`` to
-    :func:`torch.compiler.precompile.capture`.
+    :func:`torch.compiler.precompile.capture`. Not available in this build yet:
+    ``capture`` raises ``PrecompileError`` for it until the front-end lands, and
+    :class:`MakeFxTracer` stays the default until then.
 
     Not available in this build: ``capture`` raises a :class:`PrecompileError` for this
     tracer until the dynamo front-end lands, and :class:`MakeFxTracer` stays the default
