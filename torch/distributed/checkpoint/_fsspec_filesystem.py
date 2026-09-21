@@ -3,6 +3,7 @@
 
 import concurrent.futures
 import io
+import itertools
 import os
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
@@ -13,6 +14,7 @@ import fsspec
 import fsspec.asyn
 from fsspec.core import url_to_fs
 
+from torch import Tensor
 from torch.distributed.checkpoint._extension import StreamTransformExtension
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
@@ -20,7 +22,12 @@ from torch.distributed.checkpoint.filesystem import (
     FileSystemWriter,
     SerializationFormat,
 )
-from torch.distributed.checkpoint.planner import LoadPlan, LoadPlanner
+from torch.distributed.checkpoint.planner import (
+    LoadItemType,
+    LoadPlan,
+    LoadPlanner,
+    ReadItem,
+)
 from torch.futures import Future
 
 
@@ -156,10 +163,33 @@ class FsspecWriter(FileSystemWriter):
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
+def _destinations_disjoint(targets: list[Tensor]) -> bool:
+    """Whether every destination occupies its own bytes.
+
+    Copies into disjoint memory can run concurrently no matter what the planner
+    does. Overlap means two items would race, which happens when a planner
+    resolves several items onto one staging buffer, and it is also the normal
+    case when items narrow into different regions of the same tensor.
+
+    Non-contiguous tensors are rejected rather than analyzed, which keeps
+    ``[data_ptr, nbytes)`` an exact extent instead of a bound, so this never
+    reports disjoint for targets that actually share bytes.
+    """
+    spans = []
+    for t in targets:
+        if not t.is_contiguous():
+            return False
+        start = t.data_ptr()
+        spans.append((start, start + t.numel() * t.element_size()))
+    spans.sort()
+    return all(end <= nxt for (_, end), (nxt, _) in itertools.pairwise(spans))
+
+
 class FsspecReader(FileSystemReader):
     def __init__(
         self,
         path: str | os.PathLike,
+        *,
         max_batch_size: int = 64,
         max_batch_bytes: int = 256 * 1024 * 1024,
         cpu_workers: int | None = None,
@@ -172,8 +202,11 @@ class FsspecReader(FileSystemReader):
             path: directory or URL where the checkpoint will be read from.
             max_batch_size: Maximum number of read items per batched cat_ranges call.
                 Defaults to 64.
-            max_batch_bytes: Maximum cumulative byte size per batched cat_ranges call
-                to bound transient memory usage. Defaults to 256 MiB.
+            max_batch_bytes: Maximum cumulative byte size requested per batched
+                cat_ranges call. Defaults to 256 MiB. This caps one request, not
+                resident memory: the next batch is fetched while the current one is
+                still being decoded and copied, so expect a small multiple of this
+                to be live at peak.
             cpu_workers: Number of worker threads for parallel CPU deserialization.
                 Defaults to min(16, max(1, cpu_count // local_world_size)).
             **kwargs: Additional storage options passed to fsspec url_to_fs.
@@ -287,14 +320,49 @@ class FsspecReader(FileSystemReader):
                             fetch_batch, batches[idx + 1]
                         )
 
-                    # Only deserialization is parallel. Every planner hook runs
-                    # below on this thread, so planners need not be thread safe.
                     decoded = [
                         cpu_executor.submit(decode, req, chunk_data)
                         for req, chunk_data in zip(b_reqs, chunks)
                     ]
-                    for req, f in zip(b_reqs, decoded):
-                        self._apply_item(req, f.result(), planner)
+                    # The futures below own their chunk now; holding the list
+                    # too would pin every raw buffer for the whole batch.
+                    del chunks
+
+                    # Every planner hook runs on this thread, so planners need
+                    # not be thread safe. Only torch.load above and the copies
+                    # below go to the pool.
+                    pending: list[tuple[ReadItem, Tensor, Tensor]] = []
+                    for i, req in enumerate(b_reqs):
+                        f = decoded[i]
+                        # Drop the future so a completed one stops pinning its
+                        # decoded tensor for the rest of the batch.
+                        decoded[i] = None
+                        item = f.result()
+                        if req.type == LoadItemType.BYTE_IO:
+                            planner.load_bytes(req, item)
+                        else:
+                            pending.append(
+                                (req, self._resolve_item(req, item, planner), item)
+                            )
+
+                    if len(pending) > 1 and _destinations_disjoint(
+                        [dst for _, dst, _ in pending]
+                    ):
+                        copies = [
+                            cpu_executor.submit(dst.copy_, src)
+                            for _, dst, src in pending
+                        ]
+                        for c in copies:
+                            c.result()
+                        for req, dst, _ in pending:
+                            planner.commit_tensor(req, dst)
+                    else:
+                        # Overlapping destinations can mean the planner handed
+                        # back one staging buffer, so each item has to be
+                        # copied and committed before the next is touched.
+                        for req, dst, src in pending:
+                            dst.copy_(src)
+                            planner.commit_tensor(req, dst)
             finally:
                 # __exit__ calls shutdown(wait=True) without ``cancel_futures``,
                 # so on failure it would drain the queue instead of dropping it.

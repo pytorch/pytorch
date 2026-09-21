@@ -904,6 +904,21 @@ class FileSystemReader(StorageReader):
         )
         return narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
 
+    def _resolve_item(
+        self, req: ReadItem, decoded: Tensor, planner: LoadPlanner
+    ) -> Tensor:
+        """Resolve the destination for a decoded tensor item.
+
+        Split from :meth:`_apply_item` so that a reader can resolve a whole
+        batch on one thread, run the copies in parallel, and commit afterwards.
+        """
+        target_tensor = planner.resolve_tensor(req).detach()
+        if target_tensor.size() != decoded.size():
+            raise AssertionError(
+                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {decoded.size()}"
+            )
+        return target_tensor
+
     def _apply_item(
         self, req: ReadItem, decoded: Tensor | io.BytesIO, planner: LoadPlanner
     ) -> None:
@@ -917,12 +932,7 @@ class FileSystemReader(StorageReader):
             return
 
         tensor = cast(Tensor, decoded)
-        target_tensor = planner.resolve_tensor(req).detach()
-
-        if target_tensor.size() != tensor.size():
-            raise AssertionError(
-                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-            )
+        target_tensor = self._resolve_item(req, tensor, planner)
         target_tensor.copy_(tensor)
         planner.commit_tensor(req, target_tensor)
 
