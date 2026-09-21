@@ -87,6 +87,16 @@ ALLOWED_EXCEPTION_TYPES = {
     # shape_analysis.cpp to fall back to running the op. It carries no message
     # at all, so it is a signal rather than an error report.
     "propagation_error": "torch/csrc/jit/passes/",
+    # Collected by value into a std::vector<schema_match_error> by the
+    # overload-resolution loop in pybind_utils.cpp, which builds one combined
+    # message from them. Its std::runtime_error base is load-bearing too: RPC
+    # catches that base to drive its overload fallback.
+    "schema_match_error": "torch/csrc/jit/python/",
+    # torch::AttributeError. CATCH_CORE_ERRORS catches its PyTorchError base
+    # and dispatches through the virtual python_type() to raise
+    # PyExc_AttributeError. c10 has no AttributeError, so TORCH_CHECK would
+    # make __getattr__ failures RuntimeError and break hasattr().
+    "AttributeError": "torch/csrc/jit/python/",
 }
 
 
