@@ -2,6 +2,7 @@
 
 import builtins
 import collections
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -29,7 +30,9 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
+    _is_torch_type,
     _Missing,
+    _pickles_by_default,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -1317,6 +1320,49 @@ class _AttrDict(dict):
 
 class _TaggedList(list):
     pass
+
+
+class _WithGetstate:
+    def __init__(self):
+        self.a = 1
+
+    def __getstate__(self):
+        return {"a": self.a}
+
+
+class _WithNewargsEx:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs_ex__(self):
+        return (self.a,), {}
+
+
+class _WithReduce:
+    def __init__(self):
+        self.a = 1
+
+    def __reduce__(self):
+        return (_WithReduce, ())
+
+
+class _CopyregRegistered:
+    def __init__(self):
+        self.a = 1
+
+
+copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+
+
+class _TupleSub(tuple):
+    __slots__ = ()  # var-sized, so refused by __itemsize__, not by the slots scan
+
+
+class _PureSlots:
+    __slots__ = ("a",)
+
+    def __init__(self):
+        self.a = 1
 
 
 class _RebuiltFromNewargs:
@@ -4332,22 +4378,30 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_pickles_by_default_admits_only_dict_only_plain_objects(self):
         # The predicate the attribute pruner will gate on: an object round-trips
-        # as cls.__new__ plus __dict__ only when no pickle hook and no state
-        # outside __dict__ (slots, container items, C layout) is involved.
-        from torch._dynamo.guards import _is_torch_type, _pickles_by_default
-
+        # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
+        # registration and no state outside __dict__ (slots, container items,
+        # var-sized or C layout) is involved. One refusal fixture per conjunct.
         self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
         self.assertTrue(_pickles_by_default(_GenericHolder()))
         for obj in (
             _PipelineWithSetstate(),
+            _WithGetstate(),
             _RebuiltFromNewargs([1]),
+            _WithNewargsEx(1),
+            _WithReduce(),
+            _CopyregRegistered(),
             _SlottedHolder(),
+            _PureSlots(),
             _AttrDict(a=1),
             _TaggedList([1]),
+            _TupleSub((1,)),
+            enum.Enum("Color", "RED").RED,
             torch.nn.Linear(1, 1),
             torch.randn(1),
         ):
             self.assertFalse(_pickles_by_default(obj), type(obj).__name__)
+
+    def test_is_torch_type_walks_the_mro(self):
         self.assertTrue(_is_torch_type(torch.nn.Linear))
         self.assertTrue(_is_torch_type(type("_Sub", (torch.nn.Linear,), {})))
         self.assertFalse(_is_torch_type(_HolderWithGenerator))
@@ -4355,8 +4409,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_pickles_by_default_is_sound_against_pickle_itself(self):
         # Soundness, not a list of known holes: whenever the predicate says an
-        # object is rebuilt as cls.__new__ plus __dict__, pickle's own protocol-2
-        # reduce of that object must be exactly that (newobj, no items, state is
+        # object is rebuilt as cls.__new__ plus __dict__, pickle's own reduce of
+        # that object at every protocol from 2 up must be exactly that (newobj, no items, state is
         # the instance dict), for a zoo of shapes it was never written against.
         import array
         import collections
@@ -4364,11 +4418,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
         import fractions
         import pathlib
 
-        from torch._dynamo.guards import _pickles_by_default
-
-        def dict_only_reduce(obj):
+        def dict_only_reduce(obj, protocol):
             try:
-                r = obj.__reduce_ex__(2)
+                r = obj.__reduce_ex__(protocol)
             except Exception:
                 return False
             return (
@@ -4392,6 +4444,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
             _SlottedHolder(),
             _AttrDict(a=1),
             _TaggedList([1]),
+            _TupleSub((1,)),
+            _PureSlots(),
+            _WithGetstate(),
+            _WithReduce(),
+            _CopyregRegistered(),
             types.SimpleNamespace(a=1),
             Point(1, 2),
             collections.OrderedDict(a=1),
@@ -4413,9 +4470,13 @@ class TestGuardSerialization(TestGuardSerializationBase):
             torch.device("cpu"),
             torch.Generator(),
         ]
-        for obj in zoo:
-            if _pickles_by_default(obj):
-                self.assertTrue(dict_only_reduce(obj), type(obj).__name__)
+        # Every protocol the pickler could write with, DEFAULT_PROTOCOL included.
+        for protocol in range(2, pickle.HIGHEST_PROTOCOL + 1):
+            for obj in zoo:
+                if _pickles_by_default(obj):
+                    self.assertTrue(
+                        dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
+                    )
         # And the predicate is not vacuous: the plain shapes are admitted (so is
         # WeakValueDictionary, a pure-Python class whose state is its dict).
         admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
