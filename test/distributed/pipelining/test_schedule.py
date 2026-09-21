@@ -4,7 +4,6 @@ import copy
 import csv
 import logging
 import os
-from dataclasses import FrozenInstanceError
 from unittest.mock import MagicMock, patch
 
 from model_registry import MultiMLP
@@ -14,7 +13,6 @@ from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     analyze_pipeline_activation_liveness,
     PipelineActivationLiveness,
-    PipelineStageInfo,
     Schedule1F1B,
     ScheduleDualPipeV,
     ScheduleGPipe,
@@ -938,90 +936,6 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
-    @parametrize(
-        "enabled,static_metadata",
-        [(False, False), (False, True), (True, False), (True, True)],
-    )
-    def test_schedule_passes_pipeline_stage_info(self, enabled, static_metadata):
-        class IndexModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.calls: list[PipelineStageInfo | None] = []
-
-            def forward(self, x, *, scale, pipeline_stage_info=None):
-                self.calls.append(pipeline_stage_info)
-                return x * scale
-
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=1, store=store
-        )
-        try:
-            module = IndexModule()
-            stage_kwargs = (
-                {
-                    "input_args": torch.ones(1, requires_grad=True),
-                    "output_args": torch.ones(1, requires_grad=True),
-                }
-                if static_metadata
-                else {}
-            )
-            stage = PipelineStage(
-                module,
-                0,
-                1,
-                torch.device("cpu"),
-                **stage_kwargs,
-            )
-            schedule_kwargs = {"pass_pipeline_stage_info": True} if enabled else {}
-            schedule = ScheduleGPipe(
-                stage,
-                2,
-                loss_fn=lambda output, target: (output - target).square().sum(),
-                scale_grads=False,
-                **schedule_kwargs,
-            )
-            x = torch.ones(2, requires_grad=True)
-            scale = torch.full((2,), 3.0, requires_grad=True)
-
-            self.assertEqual(
-                schedule.step(x, scale=scale, target=torch.zeros(2)), x * scale
-            )
-            if enabled:
-                expected = [
-                    PipelineStageInfo(stage_index=0, microbatch_index=0),
-                    PipelineStageInfo(stage_index=0, microbatch_index=1),
-                ]
-                if not static_metadata:
-                    expected.insert(
-                        0,
-                        PipelineStageInfo(
-                            stage_index=0,
-                            microbatch_index=0,
-                            is_metadata_inference=True,
-                        ),
-                    )
-            else:
-                expected = [None] * (2 if static_metadata else 3)
-            self.assertEqual(module.calls, expected)
-            self.assertEqual(
-                stage._inference_mode,
-                InferenceMode.STATIC if static_metadata else InferenceMode.DYNAMIC,
-            )
-            self.assertEqual(x.grad, torch.full_like(x, 18))
-            self.assertEqual(scale.grad, torch.full_like(scale, 6))
-        finally:
-            torch.distributed.destroy_process_group()
-
-    def test_pipeline_stage_info_requires_manual_stages(self):
-        stage = MockPipelineStage(num_stages=1)
-        with self.assertRaisesRegex(ValueError, "manually constructed PipelineStage"):
-            ScheduleGPipe(
-                stage,
-                1,
-                pass_pipeline_stage_info=True,
-            )
-
     def test_schedule_pre_split_validation(self):
         store = FakeStore()
         torch.distributed.init_process_group(
@@ -1076,45 +990,8 @@ class ScheduleTest(TestCase):
                     arg_mbs=[(x0,), (x1,)],
                     target_mbs=[x0],
                 )
-
-            indexed_schedule = ScheduleGPipe(
-                stage,
-                2,
-                pass_pipeline_stage_info=True,
-            )
-            for pre_split in (False, True):
-                with (
-                    self.subTest(pre_split=pre_split),
-                    self.assertRaisesRegex(ValueError, "reserves.*pipeline_stage_info"),
-                ):
-                    if pre_split:
-                        indexed_schedule.step(
-                            arg_mbs=[(x0,), (x1,)],
-                            kwarg_mbs=[{"pipeline_stage_info": object()}, {}],
-                        )
-                    else:
-                        indexed_schedule.step(x0, pipeline_stage_info=object())
         finally:
             torch.distributed.destroy_process_group()
-
-    def test_pipeline_stage_info_is_dynamo_traceable(self):
-        class StageInfoModule(torch.nn.Module):
-            def forward(self, x, *, pipeline_stage_info):
-                return (
-                    x
-                    + pipeline_stage_info.stage_index
-                    + pipeline_stage_info.microbatch_index
-                )
-
-        compiled = torch.compile(StageInfoModule(), backend="eager", fullgraph=True)
-        info = PipelineStageInfo(stage_index=2, microbatch_index=3)
-        with self.assertRaises(FrozenInstanceError):
-            info.__setattr__("stage_index", 4)
-        self.assertFalse(hasattr(info, "__dict__"))
-        self.assertEqual(
-            compiled(torch.ones(2), pipeline_stage_info=info),
-            torch.full((2,), 6.0),
-        )
 
     @parametrize(
         "ScheduleClass",
