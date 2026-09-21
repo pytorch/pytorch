@@ -1418,9 +1418,11 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
-        # The plain tuples an EQUALS_MATCH reads whole, keyed by id and holding
-        # the value so the id stays live; see Note [Reconstructing a function a
-        # guard is rooted at] in GuardsStatePickler. Save-path only.
+        # What a guard compares by value at run time: the plain tuples an
+        # EQUALS_MATCH reads whole and the non-const dict keys the key managers
+        # bake, keyed by id and holding the value so the id stays live; see Note
+        # [Reconstructing a function a guard is rooted at] in GuardsStatePickler.
+        # Save-path only.
         self.value_guarded_containers: dict[int, Any] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
@@ -1473,6 +1475,7 @@ class GuardBuilder(GuardBuilderBase):
             guard_manager_enum = self.get_guard_manager_type(
                 value_source, example_value
             )
+            self._compared_by_value(key)
             dict_mgr.dict_getitem_manager(
                 key=key,
                 source=f"{dict_source}[{key!r}]",
@@ -4347,9 +4350,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
-        # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
-        # above _keep. Required, because omitting it would carry no plain
-        # tuple verbatim.
+        # What a guard compares by value (plain tuples an EQUALS_MATCH reads
+        # whole, non-const dict keys), by id; see the Note above _keep. Required,
+        # because omitting it would carry no plain tuple verbatim.
         self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
@@ -4373,6 +4376,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # Values only: no pruned type is hashable, so a key can
                 # neither be one nor contain one.
                 stack.extend(value.values())
+            elif (fields := _instance_dict(value)) is not None:
+                # A by-value comparison reads every field, so the protection
+                # is transitive through an object's instance dict.
+                stack.extend(fields.values())
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4524,7 +4531,10 @@ class GuardsStatePickler(FunctionPicklerBase):
     # call-site default binding next to `f.__defaults__ == (...)`), and only
     # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
     # records those tuples in value_guarded_containers, which the pickler takes
-    # as a required argument. A dict/tuple SUBCLASS is verbatim whenever kept,
+    # as a required argument. A non-const dict key is recorded there too
+    # (_compared_by_value): the key managers bake it and compare it by value at
+    # run time, and that comparison reads every field, so the protection
+    # extends through the key's instance dict. A dict/tuple SUBCLASS is verbatim whenever kept,
     # since its type must survive for the guard reading the slot
     # (_keep_container_verbatim).
 
