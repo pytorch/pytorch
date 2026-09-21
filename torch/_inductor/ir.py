@@ -5231,6 +5231,33 @@ class MutationLayoutSHOULDREMOVE(Layout):
             raise AssertionError("Expected isinstance(layout, Layout)")
         return layout
 
+    @staticmethod
+    def _reads_only_where_it_writes(src: IRNode, dst: IRNode) -> bool:
+        """
+        The kernel that computes src may write straight into dst's buffer only if
+        it reads that buffer at the position it writes: x + y does,
+        x + x.flip(0) does not.
+        """
+        loops = src.data if isinstance(src, StorageBox) else src
+        if isinstance(loops, ComputedBuffer):
+            loops = loops.data
+        if not isinstance(loops, Pointwise):
+            return False
+        name = dst.get_name()
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            loader, indexer = loops.make_loader(), dst.make_indexer()
+
+            def body(index: Sequence[Expr]) -> OpsValue:
+                return ops.store(name, indexer(index), loader(index))
+
+            read_writes = extract_read_writes(body, loops.get_size())
+        (write,) = read_writes.writes
+        return all(
+            isinstance(read, dependencies.MemoryDep) and read.index == write.index
+            for read in read_writes.reads
+            if read.name == name
+        )
+
     @classmethod
     def realize_into(
         cls, src: IRNode, dst: IRNode, unsafe_alias: bool = False
@@ -5251,6 +5278,11 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst would effect users of src. However if there are no more users of
         # dst, we can alias src to dst.
         src.realize_hint()
+
+        if unsafe_alias and not cls._reads_only_where_it_writes(src, dst):
+            # Compute src into a buffer of its own, then copy that into dst.
+            src.realize()
+            unsafe_alias = False
 
         if not unsafe_alias:
             node = Pointwise.create(
