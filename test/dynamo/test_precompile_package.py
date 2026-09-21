@@ -2898,6 +2898,10 @@ def _session_branches(x, flag):
     return x * 2 if flag else x + 1
 
 
+def _session_reads_optional(x, obj):
+    return x + 1 if obj is None else x + obj.k
+
+
 def _hook_double(x):
     return x * 2
 
@@ -2921,6 +2925,7 @@ _PINNED_PROMPT = "p" * 80
 _PINNED_PATH = "/home/someone/secret_weights.pt"
 _PINNED_NAME = "alpha-secret"
 _PINNED_TAG = "tag-secret"
+_PINNED = (_PINNED_PROMPT, _PINNED_PATH, _PINNED_NAME, _PINNED_TAG)
 
 
 class _SessionPinsValues(torch.nn.Module):
@@ -2959,10 +2964,15 @@ class _SessionPinsContainers(torch.nn.Module):
 
 
 class _FakeCompile:
-    """The frame being compiled, as the recording filter reads it."""
+    """The frame being compiled, as the recording filter reads it.
+
+    ``guarded_codes`` is what a provisional fact set is settled against: see
+    PrecompileSession._settle_pending.
+    """
 
     def __init__(self, python_code):
         self.python_code = python_code
+        self.guarded_codes = []
 
 
 def _fact(guard_type, source, code=(), value="", enforced=True):
@@ -3003,6 +3013,41 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
             cap(torch.randn(2, 4))
         return session
 
+    def _facts(self, session):
+        """Every fact the recorder filed, by slot."""
+        by_slot = {}
+        for variants in session._guard_sets.values():
+            for facts in variants:
+                for fact in facts:
+                    by_slot[(fact.guard_type, fact.source)] = fact
+        for facts in session._undetermined.values():
+            for fact in facts:
+                by_slot[(fact.guard_type, fact.source)] = fact
+        return by_slot
+
+    def _assert_no_literal_reaches(self, session):
+        """No pinned literal reaches a slot name, a check, or the digest."""
+        summary = session.summary()
+        written = [str(summary), repr(summary.dropped_guard_code)]
+        written += [
+            repr(slot) + repr(fact) for slot, fact in self._facts(session).items()
+        ]
+        written += [repr(summary.kept_guards), repr(summary.dropped_guards)]
+        for literal in _PINNED:
+            for text in written:
+                self.assertNotIn(literal, text)
+
+    def _keep(self, session):
+        """Finish the compile the last filter call recorded, as a real one does.
+
+        A provisional fact set becomes a variant once the frame's entry gains a
+        guarded code (see _settle_pending), which the serializer does after the
+        filter runs and a direct filter call has to stand in for.
+        """
+        session._package._current_entry.guarded_codes.append(object())
+        with session._state:
+            session._settle_pending()
+
     def _rebind_hook(self, fn):
         """Rebind the global _session_calls_hook reads, restored after the test."""
         previous = globals()["_SESSION_HOOK"]
@@ -3015,6 +3060,12 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
             session.write_invariants(path)
             with open(path, encoding="utf-8") as f:
                 return f.read()
+
+    def _assert_no_literal_in_report(self, session):
+        """No pinned literal reaches the FILE, whichever shape rendered it."""
+        report = self._report(session)
+        for literal in _PINNED:
+            self.assertNotIn(literal, report)
 
     def test_summary_counts_frames_variants_and_guards(self):
         model = _SessionReadsAttr()
@@ -3058,6 +3109,38 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertIn(("TENSOR_MATCH", "x"), varying)
         self.assertTrue(any("scale" in f.source for f in frame.invariant))
 
+    def test_a_bypassed_compile_is_not_a_variant_of_the_report(self):
+        # The filter runs during the guard BUILD, so a compile the serializer
+        # then bypasses has already handed over a full fact set. None of its
+        # guards are in the artifact, so counting it would report a whole
+        # compilation's guards as enforced and let its guards tell the variants
+        # apart. One frame, two compiles, one of them kept.
+        class LocalThing:
+            # Defined in local scope, so its TYPE_MATCH cannot be serialized and
+            # serialize_guards bypasses the compile that carries it.
+            k = 3
+
+        session = self._session(_session_reads_optional)
+        with session as cap:
+            cap(torch.ones(2), None)
+            cap(torch.ones(2), LocalThing())
+        (code,) = session._package.cache_entry().codes
+        self.assertEqual(len(code.guarded_codes), 1)
+        # Not marked bypassed: one compile of the frame WAS kept, which is why
+        # the entry's flag cannot stand in for this.
+        self.assertFalse(code.bypassed)
+        (frame,) = session.invariants()
+        self.assertEqual(frame.variants, 1)
+        rendered = [
+            precompile_package._render_fact(f)
+            for f in frame.invariant + frame.varying + frame.undetermined
+        ]
+        self.assertTrue(any("L['obj'] is None" in line for line in rendered))
+        self.assertFalse([line for line in rendered if "LocalThing" in line])
+        report = self._report(session)
+        self.assertIn("1 frame(s), 1 compilation(s)", report)
+        self.assertNotIn("LocalThing", report)
+
     def test_invariants_report_is_written_on_a_clean_exit_only(self):
         model = _SessionReadsAttr()
         with tempfile.TemporaryDirectory() as d:
@@ -3076,6 +3159,25 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
                     raise RuntimeError("boom")
             self.assertFalse(os.path.exists(path))
 
+    def test_a_report_that_cannot_be_written_is_recorded_not_raised(self):
+        # The report is a diagnostic, so a directory it cannot be written to must
+        # not turn a capture that succeeded into a raising block: the failure
+        # goes where the other teardown failures go.
+        with tempfile.TemporaryDirectory() as d:
+            session = self._session(
+                _SessionReadsAttr(), invariants=os.path.join(d, "inv.txt")
+            )
+            with mock.patch(
+                "torch._dynamo.precompile_package.open",
+                create=True,
+                side_effect=OSError("read-only file system"),
+            ):
+                with session as cap:
+                    cap(torch.randn(2, 4))
+        (recorded,) = session._capture_errors
+        self.assertIn("read-only file system", recorded)
+        self.assertEqual(session.summary().guarded_codes, 1)
+
     def test_gates_refuse_an_empty_or_failed_capture(self):
         session = self._session(_SessionReadsAttr())
         with session:
@@ -3090,6 +3192,16 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
                 cap(torch.ones(2), True)
         with self.assertRaisesRegex(PackageError, "incomplete because capture raised"):
             self._gate(session)
+
+    def test_the_gates_run_mid_block_on_what_is_captured_so_far(self):
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            with self.assertRaisesRegex(PackageError, "captured no compiled code"):
+                self._gate(session)
+            cap(torch.randn(2, 4))
+            self.assertEqual(self._gate(session).guarded_codes, 1)
+            cap(torch.randn(3, 4))
+            self.assertEqual(self._gate(session).guarded_codes, 2)
 
     def test_gates_refuse_risky_and_plain_drops_as_asked(self):
         session = self._risky_session()
@@ -3134,11 +3246,18 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         # One rendering per slot, whatever the variants: see
         # PrecompileSummary.dropped_guard_code.
         session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            lambda es: ([False] * len(es), [False] * len(es))
+        )
         slot = ("EQUALS_MATCH", "n")
-        session._record_dropped_code(slot, ["L['n'] == 3"])
-        session._record_dropped_code(slot, ["L['n'] == 4"])
+        for value in (3, 4):
+            entry = _entry(LocalSource("n"), value, "EQUALS_MATCH")
+            entry.orig_guard.code_list = [f"L['n'] == {value}"]
+            record([entry])
         self.assertEqual(session._dropped_guard_code[slot], "L['n'] == 3")
-        session._record_dropped_code(("TENSOR_MATCH", "x"), [])
+        # A guard that rendered no check is a dropped slot with no entry here.
+        record([_entry(LocalSource("x"), torch.ones(2), "TENSOR_MATCH")])
+        self.assertIn(("TENSOR_MATCH", "x"), session._dropped_guards)
         self.assertNotIn(("TENSOR_MATCH", "x"), session._dropped_guard_code)
 
     def test_the_rendered_report_is_stable_and_names_every_class(self):
@@ -3192,12 +3311,11 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
 """,
         )
 
-    def test_a_value_check_renders_as_the_guard_wrote_it(self):
-        # _render_code normalizes a check rather than rewriting it, so what the
-        # report shows for a value guard is guards.py's own check. The report is
-        # therefore exactly as sensitive as the guards are: a guard that pins a
-        # prompt or a path spells it, which is what makes the file worth reading
-        # and what to look at before committing one.
+    def test_a_value_check_renders_with_its_value_masked(self):
+        # A value guard's check is guards.py's own, down to the value it embeds,
+        # and this file is meant to be committed: a guard that pins a prompt or a
+        # path would publish it. The check keeps its SHAPE, which is what makes
+        # the line worth reading, and names the value by type. See GuardFact.code.
         session = self._session(_SessionPinsValues())
         with session as cap:
             cap(torch.ones(2, 4))
@@ -3215,24 +3333,27 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
             (("DEFAULT_DEVICE", ""), "[enforced] utils_device.CURRENT_DEVICE == None"),
             (
                 ("CONSTANT_MATCH", "self.prompt"),
-                f"[enforced] L['self'].prompt == {_PINNED_PROMPT!r} on self.prompt",
+                "[enforced] L['self'].prompt == <str> on self.prompt",
             ),
             (
                 ("CONSTANT_MATCH", "self.path"),
-                f"[enforced] L['self'].path == {_PINNED_PATH!r} on self.path",
+                "[enforced] L['self'].path == <str> on self.path",
             ),
         ]:
             self.assertEqual(rendered[slot], line)
-        # The one thing a check may not keep is an address: the file is meant to
-        # be committed and diffed, and an id differs between two runs of one
-        # capture. See _normalize.
+        # Nor may a check keep an address: the file is meant to be committed and
+        # diffed, and an id differs between two runs of one capture. See
+        # _normalize.
         self.assertIn("<id>", rendered[("TYPE_MATCH", "self")])
+        self._assert_no_literal_in_report(session)
 
-    def test_a_container_check_renders_as_the_guard_wrote_it(self):
+    def test_a_container_check_renders_with_its_value_masked(self):
         # The shapes a value takes inside a check that are not a bare repr: a
         # container display, a keys list, a containment argument, and the key
         # GetItemSource interpolates into the guard's own NAME, which is what a
-        # slot of a dict is called in every list this report prints.
+        # slot of a dict is called in every list this report prints. Each is
+        # masked, the key in the name included, or the value would reach the file
+        # through whichever shape the guard happened to use.
         session = self._session(_SessionPinsContainers())
         with session as cap:
             cap(torch.ones(2, 4))
@@ -3241,32 +3362,32 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
             (f.guard_type, f.source): precompile_package._render_fact(f)
             for f in frame.invariant + frame.varying + frame.undetermined
         }
-        key = f"self.cfg[{_PINNED_PATH!r}]"
+        key = "self.cfg[<str>]"
         for slot, line in [
             (
                 ("CONSTANT_MATCH", "self.names[0]"),
-                f"[enforced] L['self'].names[0] == {_PINNED_NAME!r} on self.names[0]",
+                "[enforced] L['self'].names[0] == <str> on self.names[0]",
             ),
             (
                 ("CONSTANT_MATCH", "self.tags"),
-                f"[enforced] L['self'].tags == {{{_PINNED_TAG!r}}} on self.tags",
+                "[enforced] L['self'].tags == <set> on self.tags",
             ),
             (
                 ("SET_CONTAINS", "self.tags"),
-                f"[enforced] set.__contains__(L['self'].tags, {_PINNED_TAG!r}) "
-                "on self.tags",
+                "[enforced] set.__contains__(L['self'].tags, <str>) on self.tags",
             ),
             (
                 ("DICT_KEYS_MATCH", "self.keys"),
                 "[enforced] len(L['self'].keys) == 1 ; "
-                f"list(dict.keys(L['self'].keys)) == [{_PINNED_PROMPT!r}] on self.keys",
+                "list(dict.keys(L['self'].keys)) == <list> on self.keys",
             ),
             (
                 ("EQUALS_MATCH", key),
-                f"[enforced] L['self'].cfg[{_PINNED_PATH!r}] == 3 on {key}",
+                f"[enforced] L['self'].cfg[<str>] == 3 on {key}",
             ),
         ]:
             self.assertEqual(rendered[slot], line)
+        self._assert_no_literal_in_report(session)
 
     def test_the_saved_tensors_hooks_check_renders_without_its_ids(self):
         # The saved-tensors-hooks guard renders the ids of the hooks it compares
@@ -3305,12 +3426,14 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
             code = compiling.python_code
             keys[fn] = (code.co_name, code.co_filename, code.co_firstlineno)
             record([_entry(LocalSource("fn"), fn, "CLOSURE_MATCH")])
+            self._keep(session)
         self.assertIn(slot, session._dropped_guards)
         self.assertEqual(session._value_varying_slots(), set())
         # A second value in ONE frame is the variation the rail exists for, and
         # it belongs to that frame alone: _current_entry is still the second
         # frame's, so the first frame's slot still held.
         record([_entry(LocalSource("fn"), _hook_double, "CLOSURE_MATCH")])
+        self._keep(session)
         self.assertEqual(session._value_varying_slots(), {slot})
         varying = session._value_varying_slots
         self.assertEqual(varying(keys[_hook_increment]), {slot})
@@ -3319,17 +3442,23 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
     def test_a_guard_nothing_checks_is_not_enforced_however_the_filter_votes(self):
         # FSDP_TRAINING_STATE's GuardBuilder body is `pass` and GlobalStateGuard
         # snapshots no training state, so the default filter keeping it does not
-        # make it a condition anything rechecks at load time. Not risky either:
-        # no filter decision dropped it.
+        # make it a condition anything rechecks at load time. It lands in NEITHER
+        # slot list, since both report a filter verdict and no verdict took this
+        # one away; the fact's enforced flag is what says nothing checks it. Not
+        # risky either, for the same reason.
         session = self._session(_SessionReadsAttr())
         record = session._recording_filter(
             lambda es: ([True] * len(es), [True] * len(es))
         )
+        compiling = _FakeCompile(_SessionReadsAttr.forward.__code__)
+        session._package._current_entry = compiling
         record([_entry(LocalSource("self"), None, "FSDP_TRAINING_STATE")])
+        self._keep(session)
         slot = ("FSDP_TRAINING_STATE", "self")
-        self.assertIn(slot, session._dropped_guards)
+        self.assertNotIn(slot, session._dropped_guards)
         self.assertNotIn(slot, session._kept_guards)
         self.assertEqual(session._risky_dropped_guards, set())
+        self.assertFalse(self._facts(session)[slot].enforced)
 
     def test_a_no_op_marker_is_enforced_only_with_the_leaf_that_checks_it(self):
         # GRAD_MODE's own check is `pass`: GLOBAL_STATE's leaf is what compares
@@ -3348,6 +3477,8 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
                 _entry(LocalSource("x"), None, "GRAD_MODE"),
             ]
         )
+        # Dropped rather than in neither list: a filter verdict IS what took the
+        # check away here, which is what dropped_guards reports.
         self.assertIn(("GRAD_MODE", "x"), session._dropped_guards)
         self.assertNotIn(("GRAD_MODE", "x"), session._kept_guards)
 
@@ -3395,9 +3526,128 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
         with session as cap:
             cap(torch.ones(2, 4))
         summary = session.summary()
-        self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
+        hooks = [
+            slot
+            for slot, fact in self._facts(session).items()
+            if slot[0] == "EMPTY_NN_MODULE_HOOKS_DICT" and not fact.enforced
+        ]
+        self.assertTrue(hooks)
+        # In neither list, per the slot invariants of PrecompileSummary: the
+        # filter kept the slot, so calling it dropped names a verdict nothing
+        # made, and nothing checks it, so calling it kept is false too.
+        self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
         self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
         self.assertEqual(summary.risky_dropped_guards, ())
+
+    def test_a_pinned_string_is_masked_in_the_check_it_records(self):
+        # A guard that pins a string pins it BY VALUE, so guards.py renders the
+        # string into the check. These facts are what a report writes to a file
+        # to be committed, so the recorded check names the type instead: see
+        # GuardFact.code.
+        session = self._session(_SessionPinsValues())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        facts = self._facts(session)
+        self.assertEqual(
+            facts[("CONSTANT_MATCH", "self.prompt")].code,
+            ("L['self'].prompt == <str>",),
+        )
+        self.assertEqual(
+            facts[("CONSTANT_MATCH", "self.path")].code,
+            ("L['self'].path == <str>",),
+        )
+        # A number, a bool and None are the check rather than a value to hide,
+        # and a check with nothing to mask is left exactly as guards.py wrote it.
+        self.assertEqual(facts[("EQUALS_MATCH", "self.n")].code, ("L['self'].n == 3",))
+        self.assertEqual(
+            facts[("CONSTANT_MATCH", "self.on")].code, ("L['self'].on == True",)
+        )
+        self._assert_no_literal_reaches(session)
+
+    def test_a_pinned_container_and_its_keys_are_masked(self):
+        # The shapes a value takes that are not a bare repr: a container display,
+        # a keys list, a containment argument, and the key GetItemSource
+        # interpolates into the guard's own NAME, which is what the slot is
+        # called in every list the report prints.
+        session = self._session(_SessionPinsContainers())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        facts = self._facts(session)
+        for slot, code in [
+            (("CONSTANT_MATCH", "self.names[0]"), ("L['self'].names[0] == <str>",)),
+            (("CONSTANT_MATCH", "self.tags"), ("L['self'].tags == <set>",)),
+            (
+                ("SET_CONTAINS", "self.tags"),
+                ("set.__contains__(L['self'].tags, <str>)",),
+            ),
+            (
+                ("DICT_KEYS_MATCH", "self.keys"),
+                (
+                    "len(L['self'].keys) == 1",
+                    "list(dict.keys(L['self'].keys)) == <list>",
+                ),
+            ),
+            # The key is masked in the slot NAME as well, or the report would
+            # print it in every list that names the slot.
+            (("EQUALS_MATCH", "self.cfg[<str>]"), ("L['self'].cfg[<str>] == 3",)),
+        ]:
+            self.assertEqual(facts[slot].code, code, slot)
+        self._assert_no_literal_reaches(session)
+
+    def test_summary_refuses_a_read_from_inside_a_capture_call(self):
+        # The read waits for the calls in flight, so a read from inside one would
+        # wait on itself: it says so instead of hanging.
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+            with session._state:
+                # Marked exactly as _call marks it, since what runs inside the
+                # block is the caller's own code and cannot be reached from here.
+                session._active_calls += 1
+                session._active_call_threads[threading.get_ident()] = 1
+            with self.assertRaisesRegex(RuntimeError, "from inside a capture call"):
+                session.summary()
+            with session._state:
+                session._active_calls -= 1
+                del session._active_call_threads[threading.get_ident()]
+                session._state.notify_all()
+        self.assertTrue(session.summary().complete)
+
+    def test_summary_waits_for_a_call_in_flight_rather_than_raising(self):
+        # cache_entry() validates that no compile holds the package, so a read
+        # that raced a capture call on another thread used to raise
+        # AssertionError out of the package, on the reader's thread. Simulated
+        # rather than raced: a set _current_entry with a call in flight IS the
+        # state a concurrent compile puts the session in.
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        with session._state:
+            # A thread id that is not the reader's, so the reader waits for the
+            # call instead of taking it for its own.
+            session._active_calls += 1
+            session._active_call_threads[-1] = 1
+        session._package._current_entry = _FakeCompile(
+            _SessionReadsAttr.forward.__code__
+        )
+        with self.assertRaisesRegex(AssertionError, "_current_entry should be None"):
+            session._package.cache_entry()
+        read: list[object] = []
+        reader = threading.Thread(target=lambda: read.append(session.summary()))
+        reader.start()
+        try:
+            reader.join(1)
+            self.assertTrue(reader.is_alive())
+            self.assertEqual(read, [])
+        finally:
+            session._package._current_entry = None
+            with session._state:
+                session._active_calls -= 1
+                del session._active_call_threads[-1]
+                session._state.notify_all()
+        reader.join(60)
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(len(read), 1)
 
     @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False)
     def test_a_hook_dict_guard_the_config_keeps_is_enforced(self):
@@ -3407,6 +3657,22 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
         summary = session.summary()
         self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
         self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
+
+    def test_two_facts_differing_only_in_enforced_sort_stably(self):
+        # enforced is in the sort key because it is the one field two facts of
+        # one frame can differ in and nothing else: the filter reads
+        # skip_nnmodule_hook_guards, so toggling it between two calls flips
+        # whether the slot is checked. Tied lines would keep frozenset order,
+        # which follows the hash of their strings, so the file would differ
+        # between runs of one capture.
+        dropped = _fact("EMPTY_NN_MODULE_HOOKS_DICT", "self", enforced=False)
+        kept = _fact("EMPTY_NN_MODULE_HOOKS_DICT", "self", enforced=True)
+        session = self._session(_SessionReadsAttr())
+        session._guard_sets = {
+            ("forward", "/pkg/m.py", 7): [frozenset({kept}), frozenset({dropped})]
+        }
+        (frame,) = session.invariants()
+        self.assertEqual(frame.varying, (dropped, kept))
 
     def test_the_report_is_written_as_utf8_whatever_the_locale(self):
         session = self._session(_SessionReadsAttr())

@@ -485,6 +485,7 @@ format may change between releases without a deprecation cycle.
 .. py:class:: precompile.GuardFact
 
    One guard observed while compiling a frame variant. Frozen dataclass with ``guard_type``,
-   ``source``, ``code`` (the rendered check parts), ``value``, and ``enforced`` (whether the
-   artifact still checks it).
+   ``source``, ``code`` (the rendered check parts, with the values a check embeds masked by
+   type: a guard pinning a string renders as ``L['self'].prompt == <str>``), ``value``, and
+   ``enforced`` (whether the artifact still checks it).
 ```
