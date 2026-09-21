@@ -707,7 +707,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -720,7 +719,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -1945,6 +1943,7 @@ class TestCompositeCompliance(TestCase):
             skip("topk", variant_name="cutedsl_optimized"),
             skip("topk", variant_name="cutedsl_optimized_deterministic"),
             skip("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
+            skip("nn.functional.linear_cross_entropy", variant_name="cutedsl_none"),
         }
     )
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
