@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/NumericUtils.h>
+#include <type_traits>
 
 namespace at::native {
 
@@ -56,82 +57,43 @@ void topk_impl_loop(
     }
 
     // we want nan to be sorted as top for numpy compatibility
-    if (use_partial_sort) {
-      if (largest) {
-        if (has_nan) {
-          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-            });
-        } else {
-          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return x.first > y.first;
-            });
-        }
+    auto select = [&](auto comp) {
+      if (use_partial_sort) {
+        std::partial_sort(queue.begin(), queue.begin() + k, queue.end(), comp);
       } else {
-        if (has_nan) {
-          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-            });
-        } else {
-          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return x.first < y.first;
-            });
+        std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(), comp);
+        if (sorted) {
+          std::sort(queue.begin(), queue.begin() + k - 1, comp);
         }
       }
+    };
+
+    // largest/has_nan are passed as types, so each instantiation folds down to
+    // a comparator with no branch of its own on the hot comparison path.
+    auto select_as = [&](auto largest_c, auto check_nan_c) {
+      select([](const elem_t& x, const elem_t& y) -> bool {
+        constexpr bool kLargest = decltype(largest_c)::value;
+        constexpr bool kCheckNan = decltype(check_nan_c)::value;
+        // Ordering for `smallest` is the `largest` one with operands swapped.
+        const elem_t& a = kLargest ? x : y;
+        const elem_t& b = kLargest ? y : x;
+        bool result = a.first > b.first;
+        if constexpr (kCheckNan) {
+          result = result ||
+              (_isnan<accscalar_t>(a.first) && !_isnan<accscalar_t>(b.first));
+        }
+        return result;
+      });
+    };
+
+    if (largest && has_nan) {
+      select_as(std::true_type{}, std::true_type{});
+    } else if (largest) {
+      select_as(std::true_type{}, std::false_type{});
+    } else if (has_nan) {
+      select_as(std::false_type{}, std::true_type{});
     } else {
-      if (largest) {
-        if (has_nan) {
-          std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-            });
-          if (sorted) {
-            std::sort(queue.begin(), queue.begin() + k - 1,
-              [](const elem_t& x, const elem_t& y) -> bool {
-                return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-              });
-          }
-        } else {
-          std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return x.first > y.first;
-            });
-          if (sorted) {
-            std::sort(queue.begin(), queue.begin() + k - 1,
-              [](const elem_t& x, const elem_t& y) -> bool {
-                return x.first > y.first;
-              });
-          }
-        }
-      } else {
-        if (has_nan) {
-          std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-            });
-          if (sorted) {
-            std::sort(queue.begin(), queue.begin() + k -1,
-              [](const elem_t& x, const elem_t& y) -> bool {
-                return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-              });
-          }
-        } else {
-          std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return x.first < y.first;
-            });
-          if (sorted) {
-            std::sort(queue.begin(), queue.begin() + k -1,
-              [](const elem_t& x, const elem_t& y) -> bool {
-                return x.first < y.first;
-              });
-          }
-        }
-      }
+      select_as(std::false_type{}, std::false_type{});
     }
 
     for (const auto j : c10::irange(k)) {
