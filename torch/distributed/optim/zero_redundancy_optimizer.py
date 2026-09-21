@@ -549,14 +549,13 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             )
             if self.rank == to:
                 # Consolidate all local `state_dict`s on this rank, storing on
-                # CPU to save GPU memory. These copies must finish before this
-                # method returns since the CPU state may be consumed immediately.
+                # CPU to save GPU memory
                 if rank == self.rank:
                     # Directly append own optimizer state
                     self._all_state_dicts.append(
                         _recursive_copy_to_device(
                             self.optim.state_dict(),
-                            non_blocking=False,
+                            non_blocking=True,
                             device=torch.device("cpu"),
                         )
                     )
@@ -571,10 +570,13 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     self._all_state_dicts.append(
                         _recursive_copy_to_device(
                             local_state_dict,
-                            non_blocking=False,
+                            non_blocking=True,
                             device=torch.device("cpu"),
                         )
                     )
+                # The CPU state may be consumed immediately, so ensure that
+                # all device-to-host copies for this shard have completed.
+                torch.accelerator.synchronize()
             else:
                 if rank == self.rank:
                     # Send the optimizer state to the target rank
