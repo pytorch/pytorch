@@ -493,6 +493,10 @@ class TestCustomOpAutoTune(TestCase):
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
+    # The three implementations are the same pointwise add, so which one wins a
+    # size range is benchmark noise; force one group per range so the dynamic
+    # compile always emits the dispatch this test asserts on.
+    @config.patch({"test_configs.force_no_impl_grouping": True})
     def test_range_based_static_shape_no_cond_dispatch(self):
         """Test dispatch code generation for static vs dynamic shapes.
 
