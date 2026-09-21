@@ -30,13 +30,19 @@ import os
 import site
 import sys
 import sysconfig
+import types
 from typing import TYPE_CHECKING
 
+from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .guards import CheckFunctionManager
+from .source import DictGetItemSource, GetItemSource, GlobalSource, LocalSource
 
 
 if TYPE_CHECKING:
+    import traceback
     from collections.abc import Iterable, Sequence
+
+    from torch._guards import Source
 
     from .types import GuardFilterEntry
 
@@ -106,6 +112,35 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
             )
         )
     return keep
+
+
+def _owning_module(value: object) -> str | None:
+    if isinstance(value, types.ModuleType):
+        return value.__name__
+    owner = getattr(value, "__module__", None)
+    return owner if isinstance(owner, str) else None
+
+
+# The list of Dynamo-generated resume functions every generated resume function
+# takes as its first parameter (resume_execution.py and
+# comprehension_graph_break.py mint the name; codegen_call_resume in
+# symbolic_convert.py builds the list). Its entries are generated code, not a
+# slot any config chooses, so an identity guard lost on one cannot diverge.
+# Only the list and an entry read straight off it are covered: a resume
+# function's closure cells carry the resumed frame's cell variables, so a guard
+# Dynamo mints past an entry (type(__nested_resume_fns[0].__closure__[0]
+# .cell_contents).__call__ for a callable an inner def captured) is the user's
+# and is judged like any other value. Its sibling __nested_frame_values is NOT
+# here: it carries the live stack and locals of the frames nested INSIDE the
+# one resuming, which pops the last entry off it for the callee it resumes, so
+# a guard rooted there is judged like the value it stands for.
+_DYNAMO_SYNTHESIZED = ("__nested_resume_fns",)
+
+
+def _is_dynamo_synthesized(source: Source) -> bool:
+    if isinstance(source, GetItemSource) and isinstance(source.index, int):
+        source = source.base
+    return isinstance(source, LocalSource) and source.local_name in _DYNAMO_SYNTHESIZED
 
 
 def _norm(path: str) -> str:
@@ -237,3 +272,203 @@ def _torch_roots() -> tuple[str, ...]:
 def _within(path: str, roots: tuple[str, ...]) -> bool:
     """Prefix test over ``_norm``-ed paths; the caller normalizes both sides."""
     return any(path == r or path.startswith(r + os.sep) for r in roots)
+
+
+def _defined_where_read(
+    value: object, global_name: str, user_stack: traceback.StackSummary | None
+) -> bool:
+    """
+    Whether ``global_name`` is a def or class statement of that name living in
+    the file that read it.
+
+    ``global_name`` is the read's ``GlobalSource.global_name``; the
+    ``GuardFilterEntry.name`` spelling keeps its ``G[...]`` wrapper and is not
+    it. The reading file is the OUTERMOST frame of the guard's ``user_stack``:
+    a bare GlobalSource denotes the root frame's globals (an inlined frame with
+    other globals reads through an ``__import_`` alias or an
+    ``___unnamed_scope`` dict entry instead), while the stack is stamped at
+    first use, so its innermost frame can be a helper inlined from another
+    file. A def bound under its own name in the reading file is the one binding
+    the inlined-source checksum of that file covers. ``from impl_a import op``
+    takes only a conditional import in the reader, which no checksum sees, and
+    ``act = _impl_a if cfg.fast else _impl_b`` is a slot however close to home
+    the def is; so are ``op = Ops.op`` and a def returned by a factory, which is
+    why the name compared is ``__qualname__``, backed by the code object's own
+    name: functools.wraps copies ``__qualname__`` onto a wrapper but cannot
+    forge its ``co_qualname``, so a same-file ``wraps`` decorator a flag turns
+    on is a slot in both arms (before 3.11 only ``co_name`` exists, so a
+    wrapper def named after what it wraps slips through there). Only a plain
+    function or a class is judged; a bound method or any other proxy that
+    forwards ``__qualname__`` and ``__code__`` is refused before an attribute
+    is read, which also keeps a proxy that answers reads by raising, such as
+    ``torch.classes.<ns>``, out of the value slot. The file is read off the
+    code object, not off ``__module__``: functools.wraps copies ``__module__``
+    along with ``__name__`` and ``__qualname__``, so ``op = torch.compile(op)``
+    behind a flag claims the reader's module while its code lives in
+    eval_frame.py. The object does not tell that shape from an unconditional
+    cross-file decorator, so ``@torch.no_grad()`` on a same-file def is not
+    waived either.
+    A class has no code object, and its ``__module__`` is no better: namedtuple
+    and ``type()`` stamp it from the calling frame (make_dataclass does from
+    3.12) under a BARE ``__qualname__`` (a def or class statement inside the
+    factory would carry ``factory.<locals>.``), so a ``namedtuple("Point", ...)``
+    called in the reader looks exactly like a class statement -- the frame
+    stamped is the caller's, so the collision needs a factory called from the
+    reading file, a cross-file ``lib.make_point()`` coming back stamped ``lib``.
+    Its methods can tell: a class statement compiles its defs in its own file
+    under its own ``__qualname__`` prefix, so a class is waived when at least one
+    function in its own ``__dict__``, stored under key ``k`` with
+    ``__qualname__`` ``Cls.k``
+    (a staticmethod or classmethod is unwrapped through ``__func__`` and a
+    property through ``fget``, by type rather than by ``getattr``, which a proxy
+    attribute such as ``torch.classes.<ns>`` answers by raising; a
+    cached_property keeps its function under ``.func`` and does not count), was
+    compiled in the reading file. A function attached afterwards keeps its bare
+    qualname, and one attached through functools.wraps keeps its code object's
+    own name, so an imported class the reader extends (``Point.extra =
+    _extra``) or patches (``Point.norm = wraps(Point.norm)(_norm)``) and a
+    factory fed same-file methods (``type(name, bases, {"area": _area})``,
+    ``make_dataclass(..., namespace=...)``) are refused, and ``class Marker:
+    pass`` fails closed. So does a class statement whose only functions are
+    generated: a fields-only ``@dataclass``'s and a ``NamedTuple``'s are defs
+    of a factory (dataclasses' ``__create_fn__``, ``namedtuple``), so their
+    code objects' own qualname carries the factory's ``<locals>.`` prefix (on
+    3.10, where only ``co_name`` exists, the ``<string>`` or stdlib file they
+    compile in refuses them instead), and an ``Enum``'s arrive in the subclass
+    ``__dict__`` under ``Enum.`` qualnames the key rule refuses; so a plain
+    config dataclass read as a global is reported. The one function the
+    compiler itself puts in a class ``__dict__``, the PEP 649 annotate function
+    3.14 stores for an annotated class body, compiles in the reading file, but
+    under key ``__annotate_func__`` with ``__qualname__`` ``Cls.__annotate__``,
+    so the key rule refuses it and the verdict is the same on every version;
+    both annotate keys are skipped outright as well, against a version that
+    stores it under its own name. Nothing else without a code object is
+    waived, because a C-implemented wrapper such as functools.lru_cache claims
+    the reader's module the same way. A ``co_filename`` is not always a path:
+    an exec records ``<string>``, a REPL ``<stdin>``, and ``_norm`` would
+    resolve either against the cwd, so a def exec'd under ``<string>`` and read
+    from an exec-generated frame would collide with it and be waived (on 3.10 a
+    fields-only dataclass too, whose ``__init__`` compiles in ``<string>``
+    under a ``co_name`` that cannot tell it from a class statement's def). Only
+    absolute filenames on both sides compare; anything else fails closed. What this
+    cannot see is a same-name fork inside the reading file -- ``try: from x
+    import impl as op`` / ``except ImportError: def op``, or a class statement
+    under the same ``if`` -- which binds a different def per machine under one
+    checksum; that is the conditional-bind KNOWN GAP recorded in
+    ``_is_risky_drop``.
+    """
+    if not user_stack or not isinstance(value, (type, types.FunctionType)):
+        return False
+    if value.__qualname__ != global_name:
+        return False
+
+    # functools.wraps copies __qualname__ but not the code object's own name:
+    # co_qualname from 3.11, before that co_name, its last component only.
+    def compiled_as(fn: types.FunctionType, qualname: str) -> bool:
+        if sys.version_info >= (3, 11):
+            return fn.__code__.co_qualname == qualname
+        return fn.__code__.co_name == qualname.rpartition(".")[2]
+
+    if isinstance(value, type):
+        # 3.14 stores the PEP 649 annotate function under __annotate_func__
+        # with qualname Cls.__annotate__, which the key rule refuses; the skip
+        # covers a version that stores it under its own name.
+        skip = ("__annotate__", "__annotate_func__")
+        files: list[str] = []
+        for key, attr in vars(value).items():
+            if isinstance(attr, (staticmethod, classmethod)):
+                attr = attr.__func__
+            elif isinstance(attr, property):
+                attr = attr.fget
+            if not isinstance(attr, types.FunctionType) or key in skip:
+                continue
+            qualname = f"{global_name}.{key}"
+            if attr.__qualname__ == qualname and compiled_as(attr, qualname):
+                files.append(attr.__code__.co_filename)
+    else:
+        files = [value.__code__.co_filename] if compiled_as(value, global_name) else []
+    read = user_stack[0].filename
+    if not os.path.isabs(read):
+        return False
+    try:
+        here = _norm(read)
+        return any(os.path.isabs(f) and _norm(f) == here for f in files)
+    except ValueError:  # an embedded NUL, which posixpath.realpath lets through
+        return False
+
+
+def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
+    """
+    The module behind an ``__import_a_dot_b`` alias, mirroring the ordinary
+    branch of import_source; a torch_package module is aliased without the
+    prefix and comes back None here, which fails closed.
+
+    The OutputGraph's import_sources table is authoritative, but a guard entry
+    does not carry it; unmangling collides only for a module whose name
+    contains ``_dot_`` (``pkg.sub_dot_mod`` is aliased as
+    ``__import_pkg_dot_sub_dot_mod``, which comes back as ``pkg.sub.mod`` when
+    that module is loaded too), and that collision fails open (the callers judge
+    the module returned).
+    """
+    if not global_name.startswith(_IMPORT_ALIAS_PREFIX):
+        return None
+    tail = global_name[len(_IMPORT_ALIAS_PREFIX) :]
+    return sys.modules.get(tail.replace("_dot_", "."))
+
+
+def _reads_a_builtin(source: Source, value: object) -> bool:
+    """
+    ``len`` or ``sorted`` reached the ordinary way, through the builtins dict
+    Dynamo installs to resolve them. That dict is the frame's live
+    ``builtins.__dict__``, not a table of the real builtins, so a shim's
+    ``builtins.py2_sum = sum`` is a binding under it that another machine's
+    shim can point elsewhere; only a builtin ``builtins`` itself owns, read
+    under its own name, is waived (``IOError`` and ``EnvironmentError``,
+    CPython's aliases of ``OSError``, fail closed), and only one CPython built:
+    functools.wraps copies ``__module__`` and ``__name__`` onto ``builtins.sum =
+    wraps(sum)(logged_sum)``, a Python function whose CLOSURE_MATCH is dropped,
+    and a class statement exec'd with the builtins namespace as its globals (or
+    handed ``__module__ = "builtins"``) claims the module outright, so the value
+    must be a builtin function or a static type as well, one carrying
+    ``Py_TPFLAGS_IMMUTABLETYPE``, which a class statement or a ``type()`` call
+    does not carry. The flag is read through ``type``'s own descriptor, so a
+    metaclass can neither shadow it nor make the read raise, and a static
+    type's ``__module__`` is derived from its C name; a builtin function's
+    ``__module__`` is a writable member, though, so ``builtins.getcwd =
+    os.getcwd`` plus ``os.getcwd.__module__ = "builtins"`` is waived -- evidence
+    rather than proof on that branch, which an advisory lint over a
+    dropped-guard set does not defend against. Every callable in
+    ``builtins.__dict__`` is one of the two kinds apart from the
+    ``_sitebuiltins`` objects, instances of neither, and beside the aliases
+    (``WindowsError`` is a third on Windows) three of them fail closed:
+    ``open``, the one builtin function ``builtins`` does not own (its
+    ``__module__`` is ``_io``, ``io`` before 3.12, so a dropped guard on one of
+    the most mainstream builtins here is reported), and the heap types
+    ``ExceptionGroup`` (3.11+) and ``__loader__``, the latter refused under a
+    name that is not its own as well. The exposure is
+    narrow either way: a registered builtin is id-matched into a BUILTIN_MATCH
+    the serializer keeps, so only a deregistered, polyfilled one (``sum``,
+    ``enumerate``, ``all``, ``any``) or a shim reaches the dropped set this
+    lint examines.
+
+    A builtin parked in a slot -- ``self.act = abs``, straight out of an
+    ACT2FN-style table -- is a slot like any other, so this deliberately keys
+    on where the read comes FROM rather than on who owns the value.
+    """
+    return (
+        isinstance(source, DictGetItemSource)
+        and isinstance(source.base, GlobalSource)
+        and source.base.global_name.startswith(_BUILTINS_DICT_PREFIX)
+        and (
+            isinstance(value, types.BuiltinFunctionType)
+            # Py_TPFLAGS_IMMUTABLETYPE: a static type CPython built, not a
+            # class statement or type() call, whose __module__ is writable. Read
+            # through type's descriptor, past any metaclass shadowing __flags__.
+            or (
+                isinstance(value, type)
+                and bool(vars(type)["__flags__"].__get__(value) & (1 << 8))
+            )
+        )
+        and _owning_module(value) == "builtins"
+        and getattr(value, "__name__", None) == source.index
+    )
