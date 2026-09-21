@@ -48,4 +48,4 @@ delete_then_store_value = 1
 def delete_then_store_value_fn():
     global delete_then_store_value
     del delete_then_store_value
-    delete_then_store_value = 7
+    delete_then_store_value = 7  # noqa: F841
