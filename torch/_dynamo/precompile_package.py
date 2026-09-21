@@ -1681,28 +1681,17 @@ def _entry_fn_of(fn: object) -> Callable[..., object]:
     return fn  # type: ignore[return-value]
 
 
-def _files_precompile_artifacts(backend: object) -> bool:
-    """Whether a resolved backend is one this capture takes its artifacts from.
-
-    inductor is: compile_fx files its compiled code into PrecompileContext under
-    the backend id, so _take_backend_artifacts finds it there and the package's
-    copy of the callable is redundant. Every other backend -- the eager family,
-    ts, aot_eager, anything a caller registers -- hands back a Python callable
-    that package.cached_backends holds the only copy of, so the session leaves it
-    there for the render and an empty artifact dict is not a failed capture.
-    Asked of the resolved function rather than of a list of names, which
-    classifies every backend added later as inductor-like by default and drops
-    its backends.
-    """
-    from torch._dynamo.backends.registry import lookup_backend
-
-    # A session resolves a name through the registry, so the identity compare is
-    # the live path; compiler_name covers a backend handed over as one of
-    # torch.compile's inductor wrappers, which is how such a wrapper names the
-    # compiler it runs (see eval_frame.get_compiler_fn).
-    return backend is lookup_backend("inductor") or (
-        getattr(backend, "compiler_name", None) == "inductor"
-    )
+# Backends whose compiled callable is worth keeping on the package for a render
+# to serialize, for the ids that filed no artifact of their own. Only eager is:
+# EagerCacheArtifact.__reduce__ (precompile_context.py) serializes a bound
+# GraphModule.forward, which is what eager hands back, and plain-pickles anything
+# else -- and ts hands back a RecursiveScriptModule while eager_noexcept and
+# eager_debug hand back local closures, none of which pickle at all. Whether a
+# backend files instead of keeping is not a property of the backend function:
+# aot_eager files a bundle once force_autograd_cache is on, and inductor files
+# nothing with its caches disabled. So the session reads what each compile
+# actually filed and consults this set only for the ids that filed nothing.
+_RENDER_SERIALIZABLE_BACKENDS = frozenset({"eager"})
 
 
 class _PrecompileBackend:
@@ -1871,12 +1860,6 @@ class PrecompileSession:
         # ones, exactly as caching_precompile does today.
         self._package = CompilePackage(self._entry_fn)
         self._backend_artifacts: dict[_BackendId, Any] = {}
-        # Set once the backend name is resolved, in __enter__: whether the
-        # compiled code is filed in PrecompileContext or left on the package is
-        # a property of the resolved function, not of the name (see
-        # _files_precompile_artifacts). False until then, which is what an
-        # __enter__ that failed to resolve a backend at all wants.
-        self._files_artifacts = False
         self._entered = False
         self._compiled: Callable[..., object] | None = None
         self._state = threading.Condition()
@@ -1892,33 +1875,48 @@ class PrecompileSession:
         )
 
         backend_ids = self._package.cache_entry().backend_ids
+        unfiled: list[_BackendId] = []
         for backend_id in backend_ids:
+            if backend_id in self._backend_artifacts:
+                # Already collected. A render can collect mid-block and again at
+                # exit, and take_artifact hands an artifact out once, so a second
+                # pass must not read an id it already holds as one that filed
+                # nothing.
+                continue
             artifact = PrecompileContext.take_artifact(backend_id)
+            compiled = self._package.cached_backends.get(backend_id)
             if artifact is not None:
                 self._backend_artifacts[backend_id] = artifact
-            elif self._package.cached_backends.get(backend_id) is noop_graph_call:
+            elif compiled is noop_graph_call:
                 # output_graph short-circuits an empty graph to noop_graph_call
                 # without filing anything under its id, which the bytecode still
                 # names. Record the no-op so the served frame dispatches to it
                 # rather than running eager. Done here rather than at
-                # render time because _release clears cached_backends first.
+                # render time because _release drops the package's copy for
+                # every backend but the ones a render serializes off it.
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
-        if backend_ids and not self._backend_artifacts and self._files_artifacts:
-            # The bytecode names backend ids but nothing was filed under any of
-            # them, so the render has nothing to serve. A single id with no
-            # artifact is normal (an exercised empty resume frame compiles to
-            # nothing), and only a backend that files its code is asked for it:
-            # every other one keeps its callables on the package (see _release)
-            # instead of having them filed here.
+            elif compiled is not None:
+                # Compiled, but the compile filed nothing under the id, so the
+                # package's callable is the only copy there is. An id the
+                # bytecode names with no callable either is skipped: a resume
+                # frame that was never exercised has nothing to keep or to file.
+                unfiled.append(backend_id)
+        if unfiled and self._backend not in _RENDER_SERIALIZABLE_BACKENDS:
+            # The render cannot serialize what those compiles left behind, so
+            # the capture is short the variants they hold rather than merely
+            # keeping them elsewhere (see _release).
             self._record_capture_error(
                 PackageError(
-                    "the capture recorded no artifact; the usual causes are a "
-                    "grad-enabled capture without training=True, which leaves "
-                    "the backward lowering deferred past the end of the "
-                    "capture, caches turned off through force_disable_caches, "
-                    "and a backend that files nothing"
+                    f"the capture recorded no artifact for {len(unfiled)} of "
+                    f"{len(backend_ids)} compiled graphs, and backend "
+                    f"{self._backend!r} leaves behind a callable the render "
+                    "cannot serialize; the usual causes are a grad-enabled "
+                    "capture without training=True, which leaves the backward "
+                    "lowering deferred past the end of the capture, caches "
+                    "turned off through force_disable_caches, and a backend "
+                    "that never files its compiled code"
                 )
             )
 
@@ -1954,10 +1952,11 @@ class PrecompileSession:
     def _release(self) -> None:
         # The compiled variants stay in the entry's ordinary Dynamo cache, as
         # they would after torch.compile; clearing them per capture needs the
-        # region-scoped cache entries that are not part of this build. Only the
-        # copies _take_backend_artifacts made redundant go: a backend that files
-        # nothing leaves its callables here as the render's only source.
-        if self._files_artifacts:
+        # region-scoped cache entries that are not part of this build. What goes
+        # is the package's own copies: _take_backend_artifacts either filed them
+        # or recorded a capture error for them, and only a backend the render can
+        # serialize off the package has a reason to leave them here.
+        if self._backend not in _RENDER_SERIALIZABLE_BACKENDS:
             self._package.cached_backends.clear()
 
     def _call(self, *args: object, **kwargs: object) -> object:
@@ -2014,14 +2013,13 @@ class PrecompileSession:
         with self._state:
             # _closing marks a drain in progress, and by here it is over.
             self._closing = False
-            entered = self._entered
             self._entered = False
             # The optimize context lives on the compiled callable, so dropping
             # the callable is what releases it.
             self._compiled = None
             self._finished = True
             self._state.notify_all()
-        if not (entered and collect):
+        if not collect:
             return
         try:
             self._take_backend_artifacts()
@@ -2051,9 +2049,6 @@ class PrecompileSession:
             self._entered = True
         try:
             backend_obj = _PrecompileBackend(self._backend)
-            self._files_artifacts = _files_precompile_artifacts(
-                backend_obj._torchdynamo_orig_backend
-            )
             optimize_ctx = _optimize_isolated(
                 backend_obj,
                 self._package,

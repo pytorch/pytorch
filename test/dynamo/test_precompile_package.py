@@ -2846,6 +2846,26 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             staged = PrecompileContext.serialize_artifact_by_key(backend_id)
             self.assertIsNotNone(staged)
 
+    def test_entering_with_an_unknown_backend_closes_the_session(self):
+        from torch._dynamo.exc import InvalidBackend
+
+        # __enter__ raising before it resolved a backend is the one path that
+        # reaches teardown with nothing compiled: it still has to close the
+        # session and collect nothing, on a package whose cache entry holds no
+        # backend id at all.
+        session = self._session(_session_breaks, backend="no_such_backend")
+        with self.assertRaises(InvalidBackend):
+            with session:
+                self.fail("the block must not run")
+        self.assertTrue(session._finished)
+        self.assertFalse(session._entered)
+        self.assertIsNone(session._compiled)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        self.assertFalse(session._package.cache_entry().backend_ids)
+        (recorded,) = session._capture_errors
+        self.assertIn("InvalidBackend", recorded)
+
     def test_an_error_inside_the_block_is_recorded_once_and_propagates(self):
         session = self._session(_session_raises)
         with session as cap:
@@ -2918,28 +2938,37 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         self.assertEqual(session._capture_errors, ["ValueError: boom"])
 
     def test_eager_backends_survive_exit_for_the_render(self):
+        # eager files nothing under the backend ids, and its callables are the
+        # one shape a render serializes off the package (a bound
+        # GraphModule.forward), so they are kept and that is not a failed
+        # capture.
         session = self._session(_session_breaks)
         with session as cap:
             cap(torch.ones(3))
         entry = session._package.cache_entry()
+        self.assertEqual(session._backend_artifacts, {})
         self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
         for backend in session._package.cached_backends.values():
-            self.assertTrue(callable(backend))
+            self.assertIsInstance(backend.__self__, torch.fx.GraphModule)
+        self.assertEqual(session._capture_errors, [])
 
     @parametrize("backend", ("eager_noexcept", "ts"))
-    def test_a_backend_that_files_nothing_keeps_its_backends(self, backend):
-        # Keeping them is a property of the resolved backend, not a list of
-        # names: neither eager_noexcept nor ts (torch.jit.script) files anything
-        # under the backend id, so clearing their backends would drop the only
-        # copy the render has, and the empty artifact dict would read as a
-        # capture that recorded nothing.
+    def test_a_backend_that_files_nothing_unrenderable_records_an_error(self, backend):
+        # Neither files anything under the backend ids, and neither hands back
+        # something a render can serialize off the package -- eager_noexcept
+        # returns a local closure, ts a RecursiveScriptModule -- so the capture
+        # is short those graphs and says so, naming the backend, rather than
+        # silently keeping objects the render would choke on.
         session = self._session(_session_breaks, backend=backend)
         with session as cap:
             cap(torch.ones(3))
         entry = session._package.cache_entry()
-        self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
+        self.assertTrue(entry.backend_ids)
         self.assertEqual(session._backend_artifacts, {})
-        self.assertEqual(session._capture_errors, [])
+        self.assertEqual(session._package.cached_backends, {})
+        (recorded,) = session._capture_errors
+        self.assertIn(f"backend '{backend}' leaves behind a callable", recorded)
+        self.assertIn(f"no artifact for {len(entry.backend_ids)} of", recorded)
 
     def test_inductor_artifacts_are_taken_from_the_precompile_context(self):
         from torch._dynamo.precompile_context import PrecompileContext
@@ -2947,11 +2976,20 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         session = self._session(_session_breaks, backend="inductor")
         with session as cap:
             cap(torch.ones(3))
+            # A render inside the block collects, exactly as save() does, and
+            # exit collects again. take_artifact hands each artifact out once,
+            # so the second pass has to read the ids it already holds as
+            # collected rather than as ids that filed nothing.
+            session._take_backend_artifacts()
+            mid_block = dict(session._backend_artifacts)
+            self.assertTrue(mid_block)
         entry = session._package.cache_entry()
+        self.assertEqual(session._backend_artifacts, mid_block)
         self.assertEqual(set(session._backend_artifacts), set(entry.backend_ids))
         for backend_id in entry.backend_ids:
             self.assertIsNone(PrecompileContext.serialize_artifact_by_key(backend_id))
         self.assertEqual(session._package.cached_backends, {})
+        self.assertEqual(session._capture_errors, [])
 
     def test_entry_fn_of_resolves_modules_and_refuses_the_rest(self):
         from torch._dynamo.precompile_package import _entry_fn_of
