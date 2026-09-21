@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import itertools
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import auto, Enum
 from typing import Any, cast, TYPE_CHECKING
@@ -41,6 +41,11 @@ from ._fsdp_common import (
     HSDPMeshInfo,
     resolve_shard_placement,
     ShardPlacementFnResult,
+)
+from ._fsdp_extensions import (
+    _AllGatherOutputLayout,
+    _get_all_gather_output_layout,
+    _normalize_all_gather_inputs,
 )
 
 
@@ -171,12 +176,9 @@ class ParamModuleInfo:
 class ExtensionsData:
     # User-defined metadata passed from pre to post-all-gather
     all_gather_metadata: Any | None = None
-    # Save the all-gather input sizes to unflatten the all-gather outputs to ND
-    all_gather_input_sizes: Sequence[torch.Size] = ()  # ND
 
     def clear(self):
         self.all_gather_metadata = None
-        self.all_gather_input_sizes = ()
 
 
 class FSDPParam:
@@ -205,6 +207,8 @@ class FSDPParam:
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
+    _all_gather_copy_layouts: tuple[_AllGatherOutputLayout, ...]
+    _post_forward_all_gather_copy_layouts: tuple[_AllGatherOutputLayout, ...]
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
@@ -235,6 +239,7 @@ class FSDPParam:
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
+        self._post_forward_all_gather_copy_layouts = ()
         self.all_gather_outputs: list[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
         self._param_fqn: str | None = None  # prefixed from root module
@@ -817,6 +822,16 @@ class FSDPParam:
         # None indicates that the mixed precision is not enabled
 
     def _init_extensions(self) -> None:
+        world_size = (
+            self.mesh_info.shard_mesh_size
+            if isinstance(self.mesh_info, FSDPMeshInfo)
+            else 1
+        )
+        self._all_gather_copy_layouts = (
+            _get_all_gather_output_layout(
+                self.padded_sharded_param_size, self.fsdp_placement.dim, world_size
+            ),
+        )
         inner_tensor = self._sharded_local_tensor
         has_fsdp_pre_all_gather = hasattr(inner_tensor, "fsdp_pre_all_gather")
         has_fsdp_post_all_gather = hasattr(inner_tensor, "fsdp_post_all_gather")
@@ -953,11 +968,17 @@ class FSDPParam:
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
         return tuple(
-            t.view(-1, *s[1:])
-            for t, s in zip(
-                self.all_gather_outputs, self._extensions_data.all_gather_input_sizes
+            tensor.view(layout.output_size)
+            for tensor, layout in zip(
+                self.all_gather_outputs, self.all_gather_copy_layouts
             )
         )
+
+    @property
+    def all_gather_copy_layouts(self) -> tuple[_AllGatherOutputLayout, ...]:
+        if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
+            return self._post_forward_all_gather_copy_layouts
+        return self._all_gather_copy_layouts
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
@@ -989,6 +1010,12 @@ class FSDPParam:
                 0, sharded_numel * shard_rank, sharded_numel
             )
         ).clone()  # clone to be able to free all-gather output
+        if not self._post_forward_all_gather_copy_layouts:
+            self._post_forward_all_gather_copy_layouts = (
+                _get_all_gather_output_layout(
+                    self._sharded_post_forward_param_data.size(), 0, shard_world_size
+                ),
+            )
         sharded_post_forward_tensor = torch.as_strided(
             self._sharded_post_forward_param_data,
             size=self.sharded_post_forward_size,
@@ -1140,25 +1167,24 @@ class FSDPParam:
                         self._module_info.module,
                         self.mp_policy,
                     )
-                    if (
-                        sharded_local_tensor.size() != self.padded_sharded_param_size
-                        and any(
-                            all_gather_input.size() != self.padded_sharded_param_size
-                            for all_gather_input in all_gather_inputs
-                        )
-                    ):
-                        # NOTE: Since this error can only be raised on the
-                        # ranks that have padding, this can manifest as a NCCL
-                        # watchdog timeout, as the other ranks will not error.
-                        raise AssertionError(
-                            "When a parameter is unevenly sharded by FSDP "
-                            f"(orig size={self._orig_size}, FSDP world size={self.mesh_info.mesh.size()}), "
-                            "fsdp_pre_all_gather must return all-gather inputs with the padded sharded size "
-                            f"{self.padded_sharded_param_size} but got {[t.size() for t in all_gather_inputs]}"
-                        )
-                self._extensions_data.all_gather_input_sizes = [
-                    t.size() for t in all_gather_inputs
-                ]
+                world_size = (
+                    self.mesh_info.shard_mesh_size
+                    if isinstance(self.mesh_info, FSDPMeshInfo)
+                    else 1
+                )
+                all_gather_inputs, self._all_gather_copy_layouts = (
+                    _normalize_all_gather_inputs(
+                        all_gather_inputs,
+                        world_size=world_size,
+                        shard_dim=self.fsdp_placement.dim,
+                        padded_sharded_size=self.padded_sharded_param_size,
+                        require_padding=(
+                            num_fn_params == 5
+                            and sharded_local_tensor.size()
+                            != self.padded_sharded_param_size
+                        ),
+                    )
+                )
                 return [t.view(-1) for t in all_gather_inputs]
             sharded_param_data = self._sharded_param_data
             if self.offload_to_cpu:

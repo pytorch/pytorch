@@ -9,26 +9,35 @@ behavior. Each direction can be selected independently on a fully sharded model:
 
 The ``for_nonzero_dim_shards`` names remain aliases for the optimized defaults.
 
+All-gather extensions can return ``AllGatherInput`` records from
+``fsdp_pre_all_gather`` to declare each payload's concatenation dimension and
+gathered shape. FSDP batches these copies before calling ``fsdp_post_all_gather``
+to reconstruct the parameter. Existing hooks returning tensors remain supported.
+
 .. warning::
     These APIs are experimental. Callback signatures and supported FSDP
     internals may change without backward compatibility.
 """
 
 import torch
-from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatterInput
+from torch.distributed.fsdp._fully_shard._fsdp_api import (
+    AllGatherInput,
+    ReduceScatterInput,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _copy_all_gather_outputs,
     _default_all_gather_output_fn as all_gather_output_fn_for_nonzero_dim_shards,
     _default_reduce_scatter_input_fn as reduce_scatter_input_fn_for_nonzero_dim_shards,
-    _reassemble_all_gather_outputs,
     AllGatherResult,
     foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import _get_dim0_padded_size
-from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_extensions import _AllGatherOutputLayout
+from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
 
 
 __all__ = [
+    "AllGatherInput",
     "ReduceScatterInput",
     "all_gather_output_fn_for_nonzero_dim_shards",
     "all_gather_output_fn_with_reorder",
@@ -44,8 +53,8 @@ def all_gather_output_fn_with_reorder(
 ) -> None:
     r"""Use the original all-gather copy followed by nonzero-dimension reassembly.
 
-    Nonempty nonzero-dimension shards copy through temporary outputs.
-    Shard(0), empty outputs, and flat post-forward shards copy directly. Register with
+    Nonempty payloads concatenated along a nonzero dimension copy through
+    temporary outputs. Dimension-0 and empty payloads copy directly. Register with
     :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`, which
     documents the callback contract.
     """
@@ -59,7 +68,7 @@ def all_gather_output_fn_with_reorder(
     ) = all_gather_result
     device = all_gather_output.device
     split_with_sizes_out: list[torch.Tensor] = []
-    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
+    reorder_infos: list[tuple[torch.Tensor, torch.Tensor, _AllGatherOutputLayout]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
@@ -70,17 +79,15 @@ def all_gather_output_fn_with_reorder(
             device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        param_all_gather_outputs = fsdp_param.all_gather_outputs
-        if (
-            fsdp_param.fsdp_placement.dim != 0
-            and fsdp_param.sharded_state == ShardedState.SHARDED
-            and any(all_gather_input_numels)
+        for output, layout in zip(
+            fsdp_param.all_gather_outputs, fsdp_param.all_gather_copy_layouts
         ):
-            param_all_gather_outputs = [
-                torch.empty_like(t) for t in param_all_gather_outputs
-            ]
-            shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
-        split_with_sizes_out.extend(param_all_gather_outputs)
+            if layout.dim != 0 and output.numel():
+                copy_output = torch.empty_like(output)
+                reorder_infos.append((copy_output, output, layout))
+            else:
+                copy_output = output
+            split_with_sizes_out.append(copy_output)
 
     _copy_all_gather_outputs(
         all_gather_output,
@@ -88,7 +95,22 @@ def all_gather_output_fn_with_reorder(
         split_with_sizes_out,
         world_size,
     )
-    _reassemble_all_gather_outputs(shard_i_copy_infos, world_size)
+    _reassemble_all_gather_outputs(reorder_infos, world_size)
+
+
+def _reassemble_all_gather_outputs(
+    reorder_infos: list[tuple[torch.Tensor, torch.Tensor, _AllGatherOutputLayout]],
+    world_size: int,
+) -> None:
+    outputs = tuple(out for _, out, _ in reorder_infos if not out.is_inference())
+    with torch.autograd._unsafe_preserve_version_counter(outputs):
+        for copy_output, output, layout in reorder_infos:
+            copy_size = list(layout.input_size)
+            copy_size[0] *= world_size
+            chunks = torch.chunk(copy_output.view(copy_size), world_size, dim=0)
+            gathered_size = list(layout.input_size)
+            gathered_size[layout.dim] *= world_size
+            torch.cat(chunks, dim=layout.dim, out=output.view(gathered_size))
 
 
 def reduce_scatter_input_fn_with_reorder(

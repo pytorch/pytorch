@@ -678,7 +678,7 @@ class FSDPModule:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_all_gather_output_fn(self, fn: Callable, *, recurse: bool = True) -> None:
-        """Set the function that copies a parameter group's all-gather outputs.
+        r"""Set the function that copies a parameter group's all-gather outputs.
 
         .. warning::
             This API is experimental. The callback signature and supported FSDP
@@ -689,6 +689,11 @@ class FSDPModule:
         flat rank-major collective buffer, per-parameter input element counts
         and dtypes, and per-rank input split sizes in buffer elements (bytes for
         mixed-dtype buffers). ``world_size`` is the all-gather group size.
+        Each parameter's ``all_gather_copy_layouts`` describes its payloads in
+        order: ``input_size`` and ``dim`` specify concatenation across ranks,
+        ``output_size`` specifies the gathered view passed to an extension,
+        and ``num_prefixes`` gives the product of input sizes before ``dim``
+        (1 for empty payloads).
         The function initializes and allocates each parameter's final
         ``all_gather_outputs`` and owns copying and any reordering into them,
         preserving their dtype, device, and version counters. It runs on the

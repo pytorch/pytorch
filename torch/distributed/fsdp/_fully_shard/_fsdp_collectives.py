@@ -435,15 +435,12 @@ def _default_all_gather_output_fn(
 ) -> None:
     r"""Copy all-gather outputs into their final layout.
 
-    Supported nonzero-dimension shards copy directly into the final outputs.
-    Nonzero-dimension extensions use temporary outputs and reassembly.
-    Empty outputs and flat post-forward shards copy directly.
+    Each payload's prepared layout determines its copy into the final output.
     """
     all_gather_output = all_gather_result.all_gather_output
     device = all_gather_output.device
     copy_outputs: list[torch.Tensor] = []
     num_prefixes: list[int] = []
-    reorder_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         all_gather_result.param_all_gather_input_numels,
         all_gather_result.param_all_gather_input_dtypes,
@@ -453,23 +450,9 @@ def _default_all_gather_output_fn(
             all_gather_input_numels, all_gather_input_dtypes, world_size, device
         )
         fsdp_param.alloc_all_gather_outputs()
-        outputs = fsdp_param.all_gather_outputs
-        shard_dim = fsdp_param.fsdp_placement.dim
-        prefix_count = 1
-        if (
-            shard_dim != 0
-            and fsdp_param.sharded_state == ShardedState.SHARDED
-            and any(all_gather_input_numels)
-        ):
-            if hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather"):
-                outputs = [torch.empty_like(t) for t in outputs]
-                reorder_infos.append((fsdp_param, outputs))
-            else:
-                prefix_count = math.prod(
-                    fsdp_param.padded_sharded_param_size[:shard_dim]
-                )
-        copy_outputs.extend(outputs)
-        num_prefixes.extend([prefix_count] * len(outputs))
+        copy_outputs.extend(fsdp_param.all_gather_outputs)
+        for layout in fsdp_param.all_gather_copy_layouts:
+            num_prefixes.append(layout.num_prefixes)
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
         torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
@@ -479,7 +462,6 @@ def _default_all_gather_output_fn(
             num_prefixes,
             world_size,
         )
-    _reassemble_all_gather_outputs(reorder_infos, world_size)
 
 
 @torch.no_grad()
@@ -525,31 +507,6 @@ def _copy_all_gather_outputs(
         torch.ops.fsdp.split_with_sizes_copy(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
-
-
-def _reassemble_all_gather_outputs(
-    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]], world_size: int
-) -> None:
-    for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
-        # Chunk-cat from the temporary to the final all-gather output tensors
-        shard_dim = fsdp_param.fsdp_placement.dim
-
-        with torch.autograd._unsafe_preserve_version_counter(
-            tuple(t for t in fsdp_param.all_gather_outputs if not t.is_inference())
-        ):
-            for param_all_gather_output, target_all_gather_output in zip(
-                param_all_gather_outputs, fsdp_param.all_gather_outputs
-            ):
-                padded_sharded_size = fsdp_param.padded_sharded_param_size
-                pre_param_size = list(padded_sharded_size)
-                pre_param_size[0] *= world_size
-                chunks = torch.chunk(
-                    param_all_gather_output.view(pre_param_size), world_size, dim=0
-                )
-                post_param_size = list(padded_sharded_size)
-                post_param_size[shard_dim] *= world_size
-                cat_out = target_all_gather_output.view(post_param_size)
-                torch.cat(chunks, dim=shard_dim, out=cat_out)
 
 
 def _default_reduce_scatter_input_fn(

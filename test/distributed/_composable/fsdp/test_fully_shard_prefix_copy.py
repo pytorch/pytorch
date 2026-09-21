@@ -13,9 +13,14 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     AllGatherResult,
     foreach_reduce_scatter_copy_in,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_extensions import (
+    _get_all_gather_output_layout,
+    _normalize_all_gather_inputs,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_reorder,
+    AllGatherInput,
     reduce_scatter_input_fn_with_reorder,
 )
 from torch.distributed.tensor import Shard
@@ -48,6 +53,80 @@ class _OpCounter(TorchDispatchMode):
 @unittest.skipIf(IS_WINDOWS, "FSDP2 is not supported on Windows")
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
+    @parametrize(
+        "dim,output_size,match",
+        [
+            (2, None, "dim 2 is invalid"),
+            (-3, None, "dim -3 is invalid"),
+            (0, torch.Size((-1, 12)), "must be nonnegative"),
+            (1, torch.Size((2, 5)), "must contain 12 elements"),
+        ],
+    )
+    def test_all_gather_input_invalid(self, device, dim, output_size, match):
+        tensor = torch.empty(2, 3, device=device)
+        with self.assertRaisesRegex(ValueError, match):
+            _normalize_all_gather_inputs(
+                (AllGatherInput(tensor, dim, output_size),),
+                world_size=2,
+                shard_dim=1,
+                padded_sharded_size=tensor.size(),
+                require_padding=False,
+            )
+
+    @parametrize("explicit_layout", [False, True])
+    def test_all_gather_input_padding(self, device, explicit_layout):
+        tensor = torch.empty(2, 3, device=device)
+        inputs = (AllGatherInput(tensor, dim=1) if explicit_layout else tensor,)
+        kwargs = {
+            "world_size": 2,
+            "shard_dim": 0,
+            "padded_sharded_size": torch.Size((4, 3)),
+            "require_padding": True,
+        }
+        if explicit_layout:
+            tensors, layouts = _normalize_all_gather_inputs(inputs, **kwargs)
+            self.assertIs(tensors[0], tensor)
+            self.assertEqual(layouts[0].output_size, (2, 6))
+        else:
+            with self.assertRaisesRegex(AssertionError, "padded sharded size"):
+                _normalize_all_gather_inputs(inputs, **kwargs)
+
+    @parametrize("world_size", [1, 2])
+    def test_legacy_all_gather_input_size(self, device, world_size):
+        tensor = torch.empty(2, 3, device=device)
+        kwargs = {
+            "world_size": world_size,
+            "shard_dim": 1,
+            "padded_sharded_size": torch.Size((4, 3)),
+            "require_padding": False,
+        }
+        if world_size == 1:
+            tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
+            self.assertIs(tensors[0], tensor)
+            self.assertEqual(layouts[0].output_size, (2, 3))
+            self.assertEqual(layouts[0].num_prefixes, 1)
+        else:
+            with self.assertRaisesRegex(ValueError, "same number of elements"):
+                _normalize_all_gather_inputs((tensor,), **kwargs)
+
+    @parametrize("empty_list", [False, True])
+    def test_empty_all_gather_inputs(self, device, empty_list):
+        tensor = torch.empty(0, 3, device=device)
+        kwargs = {
+            "world_size": 2,
+            "shard_dim": 1,
+            "padded_sharded_size": torch.Size((4, 3)),
+            "require_padding": False,
+        }
+        if empty_list:
+            with self.assertRaisesRegex(ValueError, "at least one all-gather input"):
+                _normalize_all_gather_inputs((), **kwargs)
+        else:
+            tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
+            self.assertIs(tensors[0], tensor)
+            self.assertEqual(layouts[0].output_size, (0, 3))
+            self.assertEqual(layouts[0].num_prefixes, 1)
+
     @parametrize("use_reorder", [False, True])
     @parametrize("nonzero_shards", [False, True])
     @parametrize("world_size", [1, 4])
@@ -168,6 +247,13 @@ class TestPrefixCopy(TestCase):
                         rank_shards[0] if is_post_forward else None
                     ),
                     all_gather_outputs=[output],
+                    all_gather_copy_layouts=[
+                        _get_all_gather_output_layout(
+                            rank_shards[0].size(),
+                            0 if is_post_forward else dim,
+                            world_size,
+                        )
+                    ],
                 )
             )
             expected.append(tensor)
@@ -220,9 +306,7 @@ class TestPrefixCopy(TestCase):
             int(not use_prefix_copy),
         )
         reorder_layouts = (
-            ("shard1", "singleton_prefix", "extension")
-            if use_reorder
-            else ("extension",)
+            ("shard1", "singleton_prefix", "extension") if use_reorder else ()
         )
         num_reorders = sum(kind in reorder_layouts for kind in layouts)
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], num_reorders)
