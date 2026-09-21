@@ -31,6 +31,7 @@ import inspect
 import logging
 import math
 import re
+import types
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
@@ -567,6 +568,12 @@ class BaseTorchVariable(VariableTracker):
             value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        elif isinstance(
+            value, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ):
+            # These live in the owning type's __dict__, so their identity is
+            # stable across lookups and safe to guard on.
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
         elif is_wrapper_or_member_descriptor(value) or isinstance(
             value, torch._dynamo.compiled_autograd.Op
         ):
