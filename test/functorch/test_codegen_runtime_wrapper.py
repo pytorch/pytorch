@@ -92,6 +92,27 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertNotIn("_force_view_tracking_", source)
         self.assertNotIn("_is_view_replay_enabled", source)
         self.assertNotIn("_set_view_replay_enabled", source)
+        self.assertNotIn("_clear_input_view_bits_", source)
+
+    def test_inference_clears_only_lazy_view_bit_inputs(self):
+        with capture_codegen_source("runtime_wrapper_orchestration") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x, y):
+                return x.clone(), y * 2
+
+            x = torch.arange(4.0)._neg_view()
+            y = torch.arange(4.0)
+            out = f(x, y)
+
+        self.assertEqual(out, (x.clone(), y * 2))
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn(
+            "args[0] = _clear_input_view_bits_(args[0], is_conj=False, is_neg=True)",
+            source,
+        )
+        self.assertNotIn("args[1] = _clear_input_view_bits_", source)
 
     def test_training_simple(self):
         """
@@ -116,6 +137,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn("torch._C._set_view_replay_enabled(True)", source)
         self.assertIn("if not prev_view_replay_enabled:", source)
         self.assertIn("torch.enable_grad()", source)
+        self.assertNotIn("_clear_input_view_bits_", source)
 
     def test_training_with_detach_indices(self):
         """

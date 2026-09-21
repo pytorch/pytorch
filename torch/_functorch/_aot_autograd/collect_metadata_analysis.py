@@ -47,6 +47,7 @@ from .functional_utils import (
     has_metadata_mutation,
     has_same_metadata,
     MetadataKey,
+    replay_view_meta_sequence,
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
@@ -271,11 +272,31 @@ def run_functionalized_fw_and_collect_metadata(
                 and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
             )
             mutation_inductor_storage_resize = was_inductor_storage_resized(f_arg)
+            mutation_is_shallow_copy_data = was_shallow_copy_data(f_arg)
 
             if mutates_storage_metadata:
                 mutates_data = False
 
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
+            has_view_bits = isinstance(arg, Tensor) and (arg.is_conj() or arg.is_neg())
+            if has_view_bits and (
+                mutates_storage_metadata
+                or mutation_inductor_storage_resize
+                or mutation_is_shallow_copy_data
+            ):
+                raise RuntimeError(
+                    "AOTAutograd does not support storage metadata mutations "
+                    "on inputs with conjugate or negative view bits"
+                )
+            keep_input_mutations_for_arg = keep_input_mutations and not has_view_bits
+            mutation_view_meta_sequence = (
+                ViewMetaSequence(f_arg)
+                if has_view_bits
+                and mutates_metadata
+                and not mutates_storage_metadata
+                and isinstance(f_arg, FunctionalTensor)
+                else None
+            )
 
             input_info.append(
                 InputAliasInfo(
@@ -284,11 +305,15 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata=mutates_metadata,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
-                    mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),
+                    mutation_is_shallow_copy_data=mutation_is_shallow_copy_data,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
-                    keep_input_mutations=keep_input_mutations,
+                    keep_input_mutations=keep_input_mutations_for_arg,
+                    has_view_bits=has_view_bits,
+                    is_conj=isinstance(arg, Tensor) and arg.is_conj(),
+                    is_neg=isinstance(arg, Tensor) and arg.is_neg(),
+                    mutation_view_meta_sequence=mutation_view_meta_sequence,
                 )
             )
 
@@ -302,9 +327,14 @@ def run_functionalized_fw_and_collect_metadata(
             for idx, inpt in enumerate(flat_f_args)
             if isinstance(inpt, Tensor)
         }
-
         # We need inp tensor id's to be able to tell if an outputs **are** inputs.
-        inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, Tensor)}
+        inp_tensor_id_to_idx = {
+            id(inpt): idx
+            for idx, inpt in enumerate(flat_f_args)
+            if isinstance(inpt, Tensor)
+        }
+        inp_tensor_ids = set(inp_tensor_id_to_idx)
+
         # We need output tensor id's to tell if any output._base` attributes **are** other outputs.
         # (This is also a dict because we need to know that output's index, so we can regenerate
         # the alias from it).
@@ -500,6 +530,15 @@ def run_functionalized_fw_and_collect_metadata(
                 and grad_fn is not None
                 and is_result_of_custom_autograd_fn
             ):
+                custom_view_base_idx = inp_tensor_id_to_idx.get(id(o._base))
+                if (
+                    custom_view_base_idx is not None
+                    and input_info[custom_view_base_idx].has_view_bits
+                ):
+                    raise RuntimeError(
+                        "AOTAutograd does not support custom autograd views of "
+                        "inputs with conjugate or negative view bits"
+                    )
                 output_type = OutputType.custom_function_view
                 base_idx = None
             elif (
@@ -712,12 +751,27 @@ from a multi-output view call"
                 # anymore.
                 output_type == OutputType.alias_of_input
                 and base_idx is not None
-                and not input_info[base_idx].mutates_metadata
+                and (
+                    not input_info[base_idx].mutates_metadata
+                    or input_info[base_idx].has_view_bits
+                )
             ):
                 if isinstance(o, FunctionalTensor):
                     view_meta_sequence = ViewMetaSequence(o)
 
+            base_input_has_view_bits = (
+                output_type == OutputType.alias_of_input
+                and base_idx is not None
+                and input_info[base_idx].has_view_bits
+            )
+            bit_source = o
+            if base_input_has_view_bits and view_meta_sequence is not None:
+                bit_source = replay_view_meta_sequence(
+                    flat_args[base_idx], view_meta_sequence
+                )
             requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
+            is_conj = isinstance(bit_source, torch.Tensor) and bit_source.is_conj()
+            is_neg = isinstance(bit_source, torch.Tensor) and bit_source.is_neg()
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
@@ -730,6 +784,9 @@ from a multi-output view call"
                 requires_grad_for_backward=requires_grad
                 and (o._base is None or grad_fn is not None),
                 view_meta_sequence=view_meta_sequence,
+                is_conj=is_conj,
+                is_neg=is_neg,
+                base_input_has_view_bits=base_input_has_view_bits,
             )
             output_info.append(out_info)
 

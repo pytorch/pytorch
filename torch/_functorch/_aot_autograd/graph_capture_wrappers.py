@@ -58,6 +58,7 @@ from .descriptors import (
     PhiloxForwardSeedAOTInput,
     PhiloxUpdatedBackwardOffsetAOTOutput,
     PhiloxUpdatedForwardOffsetAOTOutput,
+    SubclassGetAttrAOTInput,
 )
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
@@ -1453,6 +1454,17 @@ def aot_dispatch_subclass(
         primals_unwrapped = args_unwrapped  # type: ignore[assignment]
         primals_unwrapped_descs = args_descs_unwrapped  # type: ignore[assignment]
         fn_to_trace = fw_fn  # type: ignore[assignment]
+
+    if any(
+        isinstance(desc, SubclassGetAttrAOTInput)
+        and isinstance(arg, torch.Tensor)
+        and (arg.is_conj() or arg.is_neg())
+        for arg, desc in zip(primals_unwrapped, primals_unwrapped_descs)
+    ):
+        raise RuntimeError(
+            "AOTAutograd does not support conjugate or negative view bits "
+            "inside tensor subclass inputs"
+        )
 
     # Note: [Partitioner handling for Subclasses, Part 1]
     # The way the partitioner works is that:

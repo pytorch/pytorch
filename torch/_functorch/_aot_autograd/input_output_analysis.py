@@ -109,6 +109,9 @@ def remove_dupe_metadata(
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
+                is_conj=o.is_conj,
+                is_neg=o.is_neg,
+                base_input_has_view_bits=o.base_input_has_view_bits,
             )
             for o in m.output_info
         ],
@@ -214,7 +217,31 @@ def create_synthetic_base_metadata(
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            keep_input_mutations=m.keep_input_mutations,
+            keep_input_mutations=(
+                m.input_info[outer_indices[0]].keep_input_mutations
+                if len(outer_indices) == 1
+                else m.keep_input_mutations
+            ),
+            has_view_bits=(
+                m.input_info[outer_indices[0]].has_view_bits
+                if len(outer_indices) == 1
+                else False
+            ),
+            is_conj=(
+                m.input_info[outer_indices[0]].is_conj
+                if len(outer_indices) == 1
+                else False
+            ),
+            is_neg=(
+                m.input_info[outer_indices[0]].is_neg
+                if len(outer_indices) == 1
+                else False
+            ),
+            mutation_view_meta_sequence=(
+                m.input_info[outer_indices[0]].mutation_view_meta_sequence
+                if len(outer_indices) == 1
+                else None
+            ),
         )
         input_infos.append(inpt_info)
 
@@ -242,11 +269,15 @@ def create_synthetic_base_metadata(
             base_idx=synthetic_base_info[outer_idx][0],  # type: ignore[index]
             requires_grad=(requires_grad := outer_args[outer_idx].requires_grad),
             requires_grad_for_backward=requires_grad,
+            is_conj=outer_args[outer_idx].is_conj(),
+            is_neg=outer_args[outer_idx].is_neg(),
+            base_input_has_view_bits=False,
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
     existing_output_infos = []
     for o in m.output_info:
+        input_merged = False
         if o.base_idx is None or o.output_type not in INPUT_ALIAS_TYPES:
             # base_idx is not an input index for these, so synthetic bases
             # leave it alone. See OutputAliasInfo.base_idx.
@@ -276,7 +307,12 @@ def create_synthetic_base_metadata(
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
-                view_meta_sequence=o.view_meta_sequence,
+                view_meta_sequence=(None if input_merged else o.view_meta_sequence),
+                is_conj=o.is_conj,
+                is_neg=o.is_neg,
+                base_input_has_view_bits=(
+                    False if input_merged else o.base_input_has_view_bits
+                ),
             )
         )
 
