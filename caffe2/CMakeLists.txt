@@ -1007,8 +1007,11 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
-  # IntraNodeComm loads libamd_smi at runtime via dlopen (avoids linking amd_smi
-  # which would cause bus errors if Python amdsmi loads a different copy).
+  # On ROCm < 7.14 IntraNodeComm loads libamd_smi at runtime via dlopen, because
+  # linking it would put its rsmi_* re-exports in the global scope and
+  # interpose the librocm_smi64 symbols RCCL resolves there. On ROCm >= 7.14
+  # RCCL no longer references rsmi_* at all, so there is nothing to interpose
+  # and amd_smi is linked directly (see cmake/Dependencies.cmake).
   if(USE_DISTRIBUTED)
     target_link_libraries(torch_hip PRIVATE ${CMAKE_DL_LIBS})
   endif()
