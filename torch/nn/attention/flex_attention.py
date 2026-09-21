@@ -268,7 +268,11 @@ class FlexKernelOptions(TypedDict, total=False):
     descriptors automatically, and everything else defaults to False. Setting
     False forces the pointer path. Setting True requests descriptors but remains
     subject to the dtype and layout checks, falling back to the pointer path
-    when the operands are ineligible."""
+    when the operands are ineligible. On AMD gfx1250, setting
+    ``torch._inductor.config.triton.enable_flex_tdm = False`` at compile time
+    disables the forward and decode descriptors even for ``USE_TMA=True``; it is
+    the control for callers that cannot reach this option, and it does not
+    affect NVIDIA or Intel selection."""
 
     # ROCm-specific options
 

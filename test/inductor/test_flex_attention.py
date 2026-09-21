@@ -884,6 +884,51 @@ def _pointer_load_pattern(operand):
     return rf"\bload_checked_2d\(\s*{operand.upper()}\s*,"
 
 
+def _check_int64_decode_narrows_coordinates(
+    test_case, query, key, value, *, kernel_options, tolerances
+):
+    """Assert decode keeps descriptor coordinates int32 under int64 indexing.
+
+    Decode derives the K/V row offset from a program id cast to INDEX_DTYPE,
+    and Triton rejects a 64-bit descriptor coordinate. The operands that would
+    force INDEX_DTYPE=tl.int64 naturally are multi-gigabyte, so 32-bit indexing
+    is denied directly instead; that reaches the same codegen on small inputs.
+
+    Shared because the narrowing lives in common.py.jinja, which every
+    descriptor backend renders: the gfx1250 caller reaches it by capability and
+    the CUDA/XPU caller by an explicit USE_TMA request, but the generated
+    coordinate expression is the same one.
+    """
+    from torch._inductor.codegen.triton import TritonScheduling
+
+    def fn(q, k, v):
+        return flex_attention(q, k, v, kernel_options=kernel_options)
+
+    with mock.patch.object(
+        TritonScheduling, "can_use_32bit_indexing", return_value=False
+    ):
+        result, code = run_and_get_code(torch.compile(fn), query, key, value)
+
+    joined = "\n".join(code)
+    test_case.assertIn("INDEX_DTYPE : tl.constexpr = tl.int64", joined)
+    for name in _TDM_DECODE_OPERANDS:
+        test_case.assertRegex(joined, _descriptor_load_pattern(name))
+        # Per operand: one shared substring would accept a half-applied fix,
+        # since K and V render the same expression.
+        test_case.assertRegex(
+            joined,
+            _descriptor_load_pattern(name) + r"\s*\[\s*kv_base_offset\.to\(tl\.int32\)",
+        )
+    # Reference without kernel_options: the request selects an implementation,
+    # it does not define the expected numbers.
+    torch.testing.assert_close(
+        result,
+        flex_attention(query, key, value),
+        atol=tolerances.atol,
+        rtol=tolerances.rtol,
+    )
+
+
 @unittest.skipUnless(
     running_on_tdm_device(),
     "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
@@ -965,39 +1010,19 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
     def test_tdm_flex_decode_narrows_descriptor_coordinates(self, device):
         """Descriptor coordinates stay int32 when indexing is int64.
 
-        Decode derives the K/V row offset from a program id cast to
-        INDEX_DTYPE, and Triton rejects a 64-bit descriptor coordinate. The
-        operands that would force INDEX_DTYPE=tl.int64 naturally are
-        multi-gigabyte, so 32-bit indexing is denied directly instead; that
-        reaches the same codegen on small inputs.
+        Selection is capability-driven here, so the request stays implicit; the
+        empty option dict is what flex_attention() already builds when the
+        argument is omitted. test_tma_with_customer_kernel_options_int64_decode
+        runs the same checks on CUDA and XPU, where it must be explicit.
         """
-        from torch._inductor.codegen.triton import TritonScheduling
-
-        def fn(q, k, v):
-            return flex_attention(q, k, v)
-
         q, k, v = self._qkv(device, torch.float16, q_len=1)
-        with mock.patch.object(
-            TritonScheduling, "can_use_32bit_indexing", return_value=False
-        ):
-            result, code = self._compile_and_get_code(fn, q, k, v)
-
-        joined = "\n".join(code)
-        self.assertIn("INDEX_DTYPE : tl.constexpr = tl.int64", joined)
-        self._assert_descriptor_path(code, _TDM_DECODE_OPERANDS)
-        # Per operand: one shared substring would accept a half-applied fix,
-        # since K and V render the same expression.
-        for name in _TDM_DECODE_OPERANDS:
-            self.assertRegex(
-                joined,
-                rf"tl\.load_tensor_descriptor\(\s*desc_{name}\s*,"
-                r"\s*\[\s*kv_base_offset\.to\(tl\.int32\)",
-            )
-        torch.testing.assert_close(
-            result,
-            fn(q, k, v),
-            atol=_TDM_TOLERANCES[torch.float16].atol,
-            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        _check_int64_decode_narrows_coordinates(
+            self,
+            q,
+            k,
+            v,
+            kernel_options={},
+            tolerances=_TDM_TOLERANCES[torch.float16],
         )
 
     def test_tdm_flex_config_flag_disables_descriptors(self, device):
@@ -8092,6 +8117,39 @@ class GraphModule(torch.nn.Module):
                     else:
                         self.assertRegex(joined, _pointer_load_pattern(name))
                         self.assertNotRegex(joined, _descriptor_load_pattern(name))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # pins kernel_options={"BACKEND": ...}
+    # Same scope as the selection test above, and ROCm is excluded for the same
+    # reason: TestFlexAttentionTDMEndToEnd holds the gfx1250 copy of this check.
+    @skipIfRocm
+    @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
+    def test_tma_with_customer_kernel_options_int64_decode(self, device):
+        """Decode descriptor coordinates stay int32 when indexing is int64.
+
+        The narrowing lives in the shared common.py.jinja, so the bug this
+        covers is reachable on any descriptor backend, but the gfx1250 copy of
+        the check sits behind a hardware skip and never runs in CI. The name
+        shares test_tma_with_customer_kernel_options' prefix so the H100 smoke
+        suite's -k filter selects it; keep them together if either is renamed.
+        """
+        # Random rather than the neighbours' ones(): with a constant fill every
+        # row reads alike, so a wrongly narrowed coordinate still produces the
+        # reference numbers and only the codegen assertions would catch it.
+        make_tensor = functools.partial(
+            torch.randn, (1, 1, 256, 128), device=device, dtype=torch.bfloat16
+        )
+        _check_int64_decode_narrows_coordinates(
+            self,
+            torch.randn((1, 1, 1, 128), device=device, dtype=torch.bfloat16),
+            make_tensor(),
+            make_tensor(),
+            # Decode is requested explicitly: CUDA defaults descriptors off,
+            # and a query length of 1 alone does not pin the decode kernel.
+            kernel_options={"USE_TMA": True, "BACKEND": "TRITON_DECODE"},
+            tolerances=_TDM_TOLERANCES[torch.bfloat16],
+        )
 
     @supported_platform
     @skip_on_cpu
