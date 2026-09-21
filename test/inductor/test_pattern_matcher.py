@@ -4,6 +4,7 @@ import os
 import types
 import unittest
 from collections.abc import Callable
+from typing import Literal
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -908,6 +909,36 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    def _run_reuse_conversion_across_views(
+        self,
+        fn: Callable[..., object],
+        args: tuple[torch.Tensor, ...],
+        *,
+        expected_conversions: int,
+        expected_rewrites: int,
+        tracing_mode: Literal["real", "fake", "symbolic"] = "fake",
+        before_pass: Callable[[torch.fx.GraphModule], None] | None = None,
+    ) -> torch.fx.GraphModule:
+        gm = make_fx(fn, tracing_mode=tracing_mode)(*args)
+        if before_pass is not None:
+            before_pass(gm)
+
+        counters.clear()
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=convert, sort=False)),
+            expected_conversions,
+        )
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            expected_rewrites,
+        )
+        return gm
+
     def test_reuse_conversion_across_views(self):
         def fn(x, lhs, lhs_t):
             x_bf16 = convert(x, torch.bfloat16)
@@ -928,19 +959,8 @@ class TestPatternMatcher(TestCase):
             torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
         )
         expected = fn(*args)
-        gm = make_fx(fn, tracing_mode="fake")(*args)
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
-        counters.clear()
-
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-        gm.recompile()
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            1,
+        gm = self._run_reuse_conversion_across_views(
+            fn, args, expected_conversions=1, expected_rewrites=1
         )
         conversion = next(node for node in gm.graph.nodes if node.target is convert)
         replacement = next(
@@ -962,17 +982,12 @@ class TestPatternMatcher(TestCase):
             return first_random, second_random, aten.sum.default(x_bf16)
 
         x = torch.randn(5, 7, device=GPU_TYPE)
-        gm = make_fx(fn)(x)
-        counters.clear()
-
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            0,
+        self._run_reuse_conversion_across_views(
+            fn,
+            (x,),
+            expected_conversions=2,
+            expected_rewrites=0,
+            tracing_mode="real",
         )
 
     # Reuse is safe when at most one conversion storage reaches a graph output,
@@ -985,18 +1000,8 @@ class TestPatternMatcher(TestCase):
 
         x = torch.randn(5, 7, device=GPU_TYPE)
         expected = fn(x)
-        gm = make_fx(fn, tracing_mode="fake")(x)
-        counters.clear()
-
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-        gm.recompile()
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            1,
+        gm = self._run_reuse_conversion_across_views(
+            fn, (x,), expected_conversions=1, expected_rewrites=1
         )
         torch.testing.assert_close(gm(x), expected)
 
@@ -1008,18 +1013,8 @@ class TestPatternMatcher(TestCase):
 
         x = torch.randn(5, 7, device=GPU_TYPE)
         expected = fn(x)
-        gm = make_fx(fn, tracing_mode="fake")(x)
-        counters.clear()
-
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-        gm.recompile()
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            1,
+        gm = self._run_reuse_conversion_across_views(
+            fn, (x,), expected_conversions=1, expected_rewrites=1
         )
         torch.testing.assert_close(gm(x), expected)
 
@@ -1030,17 +1025,8 @@ class TestPatternMatcher(TestCase):
             return base, viewed
 
         x = torch.randn(5, 7, device=GPU_TYPE)
-        gm = make_fx(fn, tracing_mode="fake")(x)
-        counters.clear()
-
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            0,
+        self._run_reuse_conversion_across_views(
+            fn, (x,), expected_conversions=2, expected_rewrites=0
         )
 
     def test_reuse_conversion_across_views_bails_on_set(self):
@@ -1051,17 +1037,8 @@ class TestPatternMatcher(TestCase):
             return aten.sum.default(base), aten.sum.default(viewed)
 
         x = torch.randn(5, 7, device=GPU_TYPE)
-        gm = make_fx(fn, tracing_mode="fake")(x)
-        counters.clear()
-
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            0,
+        self._run_reuse_conversion_across_views(
+            fn, (x,), expected_conversions=2, expected_rewrites=0
         )
 
     def test_reuse_conversion_across_views_invalid_view_replay(self):
@@ -1074,18 +1051,8 @@ class TestPatternMatcher(TestCase):
             (2, 2, 2), (1, 2, 1), device=GPU_TYPE, dtype=torch.float32
         )
         expected = fn(x)
-        gm = make_fx(fn, tracing_mode="fake")(x)
-        counters.clear()
-
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-        gm.recompile()
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            0,
+        gm = self._run_reuse_conversion_across_views(
+            fn, (x,), expected_conversions=2, expected_rewrites=0
         )
         torch.testing.assert_close(gm(x), expected)
 
@@ -1101,33 +1068,30 @@ class TestPatternMatcher(TestCase):
             torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
         )
         expected = fn(*args)
-        gm = make_fx(fn, tracing_mode="fake")(*args)
-        permuted_convert = next(
-            node
-            for node in gm.graph.nodes
-            if node.target is convert
-            and isinstance(node.args[0], torch.fx.Node)
-            and node.args[0].target is aten.permute.default
-        )
-        # Intermediate strides are not part of the Inductor contract; a
-        # lowering that requires specific strides constrains them at the use.
-        permuted_convert.meta["val"] = torch.empty_strided(
-            (4, 7, 5),
-            (35, 5, 1),
-            dtype=torch.bfloat16,
-            device=GPU_TYPE,
-        )
-        counters.clear()
 
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-        gm.recompile()
+        def set_different_strides(gm):
+            permuted_convert = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is convert
+                and isinstance(node.args[0], torch.fx.Node)
+                and node.args[0].target is aten.permute.default
+            )
+            # Intermediate strides are not part of the Inductor contract; a
+            # lowering that requires specific strides constrains them at the use.
+            permuted_convert.meta["val"] = torch.empty_strided(
+                (4, 7, 5),
+                (35, 5, 1),
+                dtype=torch.bfloat16,
+                device=GPU_TYPE,
+            )
 
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            1,
+        gm = self._run_reuse_conversion_across_views(
+            fn,
+            args,
+            expected_conversions=1,
+            expected_rewrites=1,
+            before_pass=set_different_strides,
         )
         torch.testing.assert_close(gm(*args), expected)
 
@@ -1177,18 +1141,8 @@ class TestPatternMatcher(TestCase):
 
         x = torch.randn(*input_shape, device=GPU_TYPE)
         expected = fn(x)
-        gm = make_fx(fn, tracing_mode="fake")(x)
-        counters.clear()
-
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-        gm.recompile()
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            1,
+        gm = self._run_reuse_conversion_across_views(
+            fn, (x,), expected_conversions=1, expected_rewrites=1
         )
         torch.testing.assert_close(gm(x), expected)
 
@@ -1199,30 +1153,29 @@ class TestPatternMatcher(TestCase):
             return aten.sum.default(x_bf16), aten.sum.default(x_t_bf16)
 
         x = torch.randn(5, 7, device=GPU_TYPE)
-        gm = make_fx(fn, tracing_mode="symbolic")(x)
-        converted_permute = next(
-            node
-            for node in gm.graph.nodes
-            if node.target is convert
-            and isinstance(node.args[0], torch.fx.Node)
-            and node.args[0].target is aten.permute.default
-        )
-        self.assertTrue(
-            any(
-                isinstance(size, torch.SymInt)
-                for size in converted_permute.meta["val"].size()
+
+        def check_symbolic_shapes(gm):
+            converted_permute = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is convert
+                and isinstance(node.args[0], torch.fx.Node)
+                and node.args[0].target is aten.permute.default
             )
-        )
-        counters.clear()
+            self.assertTrue(
+                any(
+                    isinstance(size, torch.SymInt)
+                    for size in converted_permute.meta["val"].size()
+                )
+            )
 
-        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-            gm.graph
-        )
-
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
-        self.assertEqual(
-            counters["inductor"]["reuse_dtype_conversion_across_views"],
-            1,
+        self._run_reuse_conversion_across_views(
+            fn,
+            (x,),
+            expected_conversions=1,
+            expected_rewrites=1,
+            tracing_mode="symbolic",
+            before_pass=check_symbolic_shapes,
         )
 
     # Constant folding was explicitly turned off due to issue #108388
