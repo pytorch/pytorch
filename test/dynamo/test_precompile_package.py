@@ -10,13 +10,17 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import io
+import itertools
+import math
 import os
 import pickle
 import re
 import site
+import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import traceback
 import types
 import typing
@@ -98,17 +102,21 @@ def _pre_check_accepts(entry):
     )
 
 
+_OWN = GlobalSource(__name__)
 _BUILTINS_DICT = GlobalSource("__builtins_dict___0")
 _HERE = _stack(__file__)
 _ELSEWHERE = _stack(F.__file__)
 
 
-def _entry(source, value, guard_type="ID_MATCH", derived=()):
+def _entry(
+    source, value, guard_type="ID_MATCH", derived=(), has_value=True, user_stack=None
+):
     guard = Guard(source, getattr(GuardBuilder, guard_type))
+    guard.user_stack = user_stack
     guard.guard_types = list(derived) or None
     return GuardFilterEntry(
         name=strip_local_scope(source.name),
-        has_value=True,
+        has_value=has_value,
         value=value,
         guard_type=guard_type,
         derived_guard_types=tuple(derived),
@@ -168,6 +176,46 @@ _NOT_LIBRARY_MODULES = {
     # A frozen spec vouches only for a name the frozen table has.
     "frozen_spec_under_a_non_frozen_name": ("graphlib", {"__spec__": importlib.machinery.ModuleSpec("graphlib", importlib.machinery.FrozenImporter, origin="frozen")}, None),
     "shadowed_descendant_of_a_located_parent": ("collections.abc", {"__file__": os.path.join(_STDLIB_ROOT, "site-packages", "abc.py")}, None),
+}  # fmt: skip
+
+
+class _Ops:
+    @staticmethod
+    def op(x):
+        return x
+
+
+# Rows: risky?, source, value, _entry keywords. The trusted namespaces are the
+# torch, stdlib and own-module globals the test builds through _module_namespaces;
+# G['impl'] is an aliased user module and G['config'] a config module, neither
+# trusted. Every risky row was once a silent wrong answer on a serving machine.
+_RISKY_DROP_CASES = {
+    "torch_namespace_read": (False, AttrSource(GlobalSource("F"), "gelu"), F.gelu, {}),
+    "stdlib_namespace_read": (False, AttrSource(GlobalSource("math"), "sqrt"), math.sqrt, {}),
+    "dynamo_import_alias_read": (False, AttrSource(GlobalSource("__import_torch"), "relu"), torch.relu, {}),
+    "trusted_module_itself": (False, GlobalSource("F"), F, {}),
+    "own_module_def_read_as_namespace": (False, AttrSource(_OWN, "_user_op"), _user_op, {}),
+    "own_module_def_under_another_name": (True, AttrSource(_OWN, "act"), _user_op, {}),
+    "own_module_def_lifted_off_a_class": (True, AttrSource(_OWN, "op"), _Ops.op, {}),
+    # mypkg/__init__.py did `from .impl_b import _user_op`: the same def, owned by mypkg.impl_b.
+    "reexport_from_another_module": (True, AttrSource(GlobalSource("mypkg"), "_user_op"), types.FunctionType(_user_op.__code__, {"__name__": "mypkg.impl_b"}), {}),
+    "aliased_user_module": (True, AttrSource(GlobalSource("impl"), "op"), _user_op, {}),
+    "config_module_attribute": (True, AttrSource(GlobalSource("config"), "attn_impl"), _user_op, {}),
+    "module_in_attribute": (True, AttrSource(AttrSource(LocalSource("self"), "ns"), "gelu"), F.gelu, {}),
+    "instance_attribute": (True, AttrSource(LocalSource("self"), "act"), F.gelu, {}),
+    "builtin_in_a_slot": (True, AttrSource(LocalSource("self"), "act"), abs, {}),
+    "builtin_read_ordinary": (False, DictGetItemSource(_BUILTINS_DICT, "len"), len, {}),
+    "user_code_injected_into_builtins": (True, DictGetItemSource(_BUILTINS_DICT, "op"), _user_op, {}),
+    "registry_keyed_by_builtin_name": (True, DictGetItemSource(GlobalSource("_OPS"), "len"), len, {}),
+    "dict_lookup": (True, DictGetItemSource(GlobalSource("DISPATCH"), "act"), _user_op, {}),
+    "global_bound_to_own_def": (False, GlobalSource("_user_op"), _user_op, {"user_stack": _HERE}),
+    "global_bound_to_torch_def": (False, GlobalSource("silu"), F.silu, {}),
+    "global_alias_of_a_def": (True, GlobalSource("act"), _user_op, {"user_stack": _HERE}),
+    "cross_module_from_import": (True, GlobalSource("_user_op"), _user_op, {"user_stack": _ELSEWHERE}),
+    "closure_cell": (True, LocalSource("fn"), _user_op, {}),
+    "value_unreadable": (True, AttrSource(_OWN, "x"), None, {"has_value": False}),
+    "nested_resume_function": (False, GetItemSource(LocalSource("__nested_resume_fns"), 0), _user_op, {}),
+    "nested_frame_value": (True, GetItemSource(GetItemSource(LocalSource("__nested_frame_values"), 0), 1), _user_op, {}),
 }  # fmt: skip
 
 
@@ -1758,6 +1806,741 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIs(namespaces["G['__import_torch']"], torch)
         self.assertIs(namespaces["G['mypkg'].layers"], layers)
 
+    @parametrize("shape", sorted(_RISKY_DROP_CASES))
+    def test_risky_drop_decision_table(self, shape):
+        risky, source, value, kw = _RISKY_DROP_CASES[shape]
+        entry = _entry(source, value, **kw)
+        modules = [
+            (GlobalSource("F"), F),
+            (GlobalSource("math"), math),
+            (_OWN, sys.modules[__name__]),
+            (GlobalSource("mypkg"), types.ModuleType("mypkg")),
+            (GlobalSource("impl"), types.ModuleType("mypkg.impl_b")),
+            (GlobalSource("config"), torch._dynamo.config),
+        ]
+        entries = [_entry(s, m) for s, m in modules] + [entry]
+        namespaces = precompile_package._module_namespaces(entries)
+        self.assertEqual(precompile_package._is_risky_drop(entry, namespaces), risky)
+
+    def test_risky_drop_sees_the_slot_behind_a_nested_resume(self):
+        # With nested_graph_breaks the callee's locals reach the caller's resume
+        # frame as positional entries of L['__nested_frame_values'][0] rather
+        # than as L['act']; a slot
+        # filled by a call config could repoint must be flagged either way,
+        # and the def read inside pick() waived either way.
+        def pick():
+            return _user_op
+
+        def flat(x):
+            act = pick()
+            torch._dynamo.graph_break()
+            return act(x * 2)
+
+        def callee(y):
+            act = pick()
+            torch._dynamo.graph_break()
+            return act(y)
+
+        def nested(x):
+            z = x * 2
+            return callee(z) + z
+
+        for fn, nested_graph_breaks, root in (
+            (flat, False, "L['act']"),
+            (nested, True, "L['__nested_frame_values']["),
+        ):
+            seen = []
+
+            def record(entries):
+                seen.extend(entries)
+                return [True] * len(entries)
+
+            with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+                compiled = torch.compile(
+                    fn, backend="eager", options={"guard_filter_fn": record}
+                )
+                compiled(torch.ones(2))
+            namespaces = precompile_package._module_namespaces(seen)
+            is_risky = precompile_package._is_risky_drop
+            verdicts = {
+                e.orig_guard.originating_source.name: is_risky(e, namespaces)
+                for e in seen
+                if e.value is _user_op
+            }
+            risky = [name for name, flagged in verdicts.items() if flagged]
+            self.assertEqual(verdicts["G['_user_op']"], False, verdicts)
+            self.assertEqual(len(risky), 1, verdicts)
+            self.assertTrue(risky[0].startswith(root), verdicts)
+
+    def test_guard_policy_classification_is_total(self):
+        # A guard type in no set is KEPT, so a drop policy can only ever
+        # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
+        # what makes the never-drop claim enforceable:
+        # a guard type added to GuardBuilder fails here until someone triages
+        # it into exactly one of the four sets.
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.precompile_package import (
+            _IDENTITY_GUARD_TYPES,
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _NOOP_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _UNMODELLED_GUARD_TYPES,
+        )
+
+        # dir() rather than vars(): a guard method added on GuardBuilderBase or
+        # a future mixin is a GuardBuilder guard type too.
+        guard_types = {
+            name
+            for name in dir(GuardBuilder)
+            if name.isupper() and callable(getattr(GuardBuilder, name))
+        }
+        sets = {
+            "_SHAPE_BEARING_GUARD_TYPES": _SHAPE_BEARING_GUARD_TYPES,
+            "_UNMODELLED_GUARD_TYPES": _UNMODELLED_GUARD_TYPES,
+            "_INVARIANT_DROPPABLE_GUARD_TYPES": _INVARIANT_DROPPABLE_GUARD_TYPES,
+            "_NOOP_GUARD_TYPES": _NOOP_GUARD_TYPES,
+        }
+        classified: frozenset[str] = frozenset().union(*sets.values())
+        self.assertEqual(
+            sorted(guard_types - classified),
+            [],
+            "unclassified GuardBuilder guard type(s): add each to exactly one "
+            "policy set in torch/_dynamo/precompile_package.py (KEPT until then)",
+        )
+        self.assertEqual(
+            sorted(classified - guard_types),
+            [],
+            "phantom entries: no GuardBuilder method by these names",
+        )
+        for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
+            self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
+        # The identity guards the default filter drops are droppable by
+        # construction; a literal rewrite of the set must not lose that.
+        self.assertTrue(_IDENTITY_GUARD_TYPES <= _INVARIANT_DROPPABLE_GUARD_TYPES)
+
+    def test_noop_guard_type_follows_the_hook_guard_config(self):
+        # EMPTY_NN_MODULE_HOOKS_DICT emits nothing under the default config and
+        # a SEQUENCE_LENGTH on the hook dicts otherwise, so whether a report may
+        # treat it as a marker depends on the config the frame compiled under.
+        from torch._dynamo.precompile_package import _is_noop_guard_type
+
+        self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
+        self.assertFalse(_is_noop_guard_type("TENSOR_MATCH"))
+        self.assertTrue(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
+        with torch._dynamo.config.patch(skip_nnmodule_hook_guards=False):
+            self.assertFalse(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
+            self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
+
+    def test_normalize_scrubs_addresses_and_counters_but_not_user_constants(self):
+        # Both directions matter: anything run-varying that survives makes the
+        # committed report churn, and anything meaningful that is erased makes
+        # two variants guarding different values render one fact.
+        from torch._dynamo.precompile_package import _normalize
+
+        cases = {
+            "___check_obj_id(G['fn'], 140311678493200), type=<class 'function'>": "___check_obj_id(G['fn'], <id>), type=<class 'function'>",
+            "G['__builtins_dict___6']['len']": "G['__builtins_dict___<n>']['len']",
+            "G['__import_mod_140311678493200_c1']": "G['__import_mod_<id>_c<n>']",
+            "G['___unnamed_scope_140311678493200_c1']": "G['___unnamed_scope_<id>_c<n>']",
+            "G['_140311678493200_c3'] is not None": "G['_<id>_c<n>'] is not None",
+            "top_saved_tensors_hooks ids == (139, 140)": "top_saved_tensors_hooks ids == (<ids>)",
+            # User constants and identifiers are not addresses.
+            "L['dims'][0] == 140311678493200": "L['dims'][0] == 140311678493200",
+            "L['w_1_c2'] == 3": "L['w_1_c2'] == 3",
+            "len(L['xs']) == 6": "len(L['xs']) == 6",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(_normalize(text), expected, text)
+
+    def test_code_fingerprint_recurses_into_container_and_nested_consts(self):
+        # _code_fingerprint names a callable by its body so an ACT2FN-style table
+        # can be told apart. Two lambdas can differ ONLY inside a constant the
+        # outer co_code does not distinguish: a tuple, a frozenset, or a nested
+        # code object. Filtering those out whole -- rather than recursing -- gives
+        # both the same digest, _object_identity names them identically, and the
+        # guard that split the two compilations is reported as an invariant of
+        # each.
+        from torch._dynamo.precompile_package import _code_fingerprint, _stable_consts
+
+        pairs = {
+            "tuple const": (lambda x: x * (1, 2), lambda x: x * (1, 3)),
+            "frozenset const": (lambda x: x in {1, 2}, lambda x: x in {1, 3}),
+            # Not called: what matters is the nested code object in co_consts.
+            "nested code": (lambda x: (lambda y: y + 1), lambda x: (lambda y: y + 2)),
+            # A subscript with Ellipsis folds to ONE const tuple at one index, so
+            # a const type outside the stable set must keep its slot.
+            "ellipsis const": (lambda x: x[..., 0], lambda x: x[0, ...]),
+        }
+        for label, (left, right) in pairs.items():
+            self.assertEqual(
+                left.__code__.co_code,
+                right.__code__.co_code,
+                f"{label}: the pair must differ only in co_consts",
+            )
+            self.assertNotEqual(
+                _code_fingerprint(left.__code__),
+                _code_fingerprint(right.__code__),
+                f"{label}: two different bodies share a fingerprint",
+            )
+        # An unrenderable const keeps its position as a type marker.
+        self.assertEqual(_stable_consts((object(), 1)), ("<object>", 1))
+        # And the digest is a function of the body, not of the code object:
+        # the same source compiled twice must agree.
+        src = "lambda x: (x * 2, 'a', (lambda y: y + 1))"
+        self.assertEqual(
+            _code_fingerprint(compile(src, "<a>", "eval")),
+            _code_fingerprint(compile(src, "<b>", "eval")),
+        )
+
+    def test_code_fingerprint_is_stable_across_processes(self):
+        # The digest goes into a file meant to be committed and diffed, so it
+        # has to agree in a fresh interpreter; within one process any two calls
+        # trivially agree, which is why the positive case above cannot catch a
+        # regression that puts an address back (repr of an arbitrary const).
+        from torch._dynamo.precompile_package import _code_fingerprint
+
+        src = "lambda x: (x * 2, 'a', (lambda y: y + 1), x in {1, 2})"
+        probe = (
+            "from torch._dynamo.precompile_package import _code_fingerprint;"
+            f"print(_code_fingerprint(compile({src!r}, '<p>', 'eval')))"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+        )
+        self.assertEqual(
+            out.stdout.strip(), _code_fingerprint(compile(src, "<p>", "eval"))
+        )
+
+    def test_object_identity_puts_the_digest_before_the_truncation_point(self):
+        from torch._dynamo.precompile_package import _code_fingerprint, _object_identity
+
+        self.assertEqual(
+            _object_identity(torch.nn.functional), "is module torch.nn.functional"
+        )
+        self.assertEqual(_object_identity(object()), "is a builtins.object")
+
+        def fn():
+            pass
+
+        # A qualname that alone exceeds the 160-character bound: the site and
+        # digest must survive the cut and the qualname tail is what goes.
+        fn.__qualname__ = "Outer." * 40 + "fn"
+        rendered = _object_identity(fn)
+        code = fn.__code__
+        prefix = f"is @{os.path.basename(code.co_filename)}:{code.co_firstlineno}#{_code_fingerprint(code)} "
+        self.assertEqual(len(rendered), 160)
+        self.assertTrue(rendered.startswith(prefix), rendered)
+        self.assertNotIn("#", rendered[len(prefix) :])
+
+    def test_value_fingerprint_dispatches_on_the_guard_type(self):
+        from torch.compiler._precompile_types import GuardFact
+
+        fingerprint = precompile_package._value_fingerprint
+        src = LocalSource("x")
+        x = torch.zeros(2, 3)
+        with torch.inference_mode():
+            inference = torch.zeros(2, 3)
+        variants = (x, x.double(), x[:, :2], torch.nn.Parameter(x), inference)
+        rendered = [fingerprint(_entry(src, v, "TENSOR_MATCH")) for v in variants]
+        self.assertEqual(len(set(rendered)), len(variants), rendered)
+        for line in rendered:
+            self.assertTrue(line.startswith("check_tensor(<value>, "), line)
+        # The guard type decides, not the value's type: NOT_NONE_MATCH is what
+        # Dynamo installs on an optimizer's .grad, and it checks only presence.
+        for guard_type in ("NOT_NONE_MATCH", "TYPE_MATCH", "COW_TENSOR_MATCH"):
+            self.assertEqual(fingerprint(_entry(src, x, guard_type)), "")
+        self.assertEqual(fingerprint(_entry(LocalSource("n"), 1, "TYPE_MATCH")), "")
+        self.assertEqual(
+            fingerprint(_entry(_OWN, _user_op, "ID_MATCH")),
+            precompile_package._object_identity(_user_op),
+        )
+        grad_mode = _entry(src, None, "GRAD_MODE", has_value=False)
+        with torch.no_grad():
+            self.assertEqual(fingerprint(grad_mode), "grad_enabled=False")
+
+        class Opaque(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                raise RuntimeError("no attribute reads")
+
+        opaque = torch.zeros(2).as_subclass(Opaque)
+        unrenderable = fingerprint(_entry(src, opaque, "TENSOR_MATCH"))
+        self.assertEqual(unrenderable, "type=Opaque, <unrenderable>")
+        # Once the boilerplate parts are filtered a TENSOR_MATCH renders no code,
+        # so the value is what keeps two shape specializations in a fixed order.
+        facts = [
+            GuardFact(
+                guard_type="TENSOR_MATCH",
+                source="L['x']",
+                code=(),
+                value=v,
+                enforced=True,
+            )
+            for v in rendered
+        ]
+        ordered = sorted(facts, key=precompile_package._fact_order)
+        self.assertEqual([f.value for f in ordered], sorted(rendered))
+
+    def test_saved_hooks_fingerprint_mirrors_what_the_guard_stores(self):
+        fingerprint = precompile_package._saved_hooks_fingerprint
+        self.assertEqual(fingerprint(), "hooks=None")
+        # The guard stores None for hooks it cannot inline, so plain-Python
+        # hooks are one value to it and must be one value here.
+        with torch.autograd.graph.saved_tensors_hooks(_user_op, _user_op):
+            self.assertEqual(fingerprint(), "hooks=None")
+
+        def identity(x):
+            return x
+
+        pack = torch.fx.symbolic_trace(identity)
+        unpack = torch.fx.symbolic_trace(identity)
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            rendered = fingerprint()
+        # Named by rendered graph, never by address: two GraphModules with one
+        # code read the same here although the guard compares their ids.
+        digest = precompile_package._hash_text(pack.code)
+        self.assertEqual(rendered, f"hooks=({digest}, {digest})")
+
+    def test_wont_generalize_cancels_pins_only_within_a_frame(self):
+        from torch._dynamo.precompile_package import (
+            _pins_a_value,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _VALUE_EQUALITY_GUARD_TYPES,
+            _wont_generalize,
+        )
+        from torch.compiler._precompile_types import GuardFact
+
+        # A value pin is never policy-droppable, so a new value-pinning guard
+        # type has to be triaged into the shape-bearing set to land here.
+        self.assertTrue(_VALUE_EQUALITY_GUARD_TYPES <= _SHAPE_BEARING_GUARD_TYPES)
+        self.assertTrue(_pins_a_value("EQUALS_MATCH", "scale"))
+        self.assertTrue(_pins_a_value("CONSTANT_MATCH", "___stack0"))
+        self.assertTrue(_pins_a_value("CONSTANT_SUBCLASS_MATCH", "n"))
+        self.assertTrue(_pins_a_value("RANGE_ITERATOR_MATCH", "it"))
+        self.assertTrue(_pins_a_value("COUNT_ITERATOR_MATCH", "it"))
+        # The empty source of a sourceless guard is not a bare name.
+        self.assertFalse(_pins_a_value("EQUALS_MATCH", ""))
+        # Reached THROUGH an argument, or a container element: not counted.
+        self.assertFalse(_pins_a_value("CONSTANT_MATCH", "self.eps"))
+        self.assertFalse(_pins_a_value("EQUALS_MATCH", "dims[0]"))
+        self.assertFalse(_pins_a_value("EQUALS_MATCH", "G['CFG'].width"))
+        self.assertFalse(_pins_a_value("TENSOR_MATCH", "x"))
+        self.assertFalse(_pins_a_value("SEQUENCE_LENGTH", "xs"))
+
+        def fact(guard_type, source, live=True):
+            return GuardFact(
+                guard_type=guard_type, source=source, code=(), value="", enforced=live
+            )
+
+        entry = ("step", "m.py", 1)
+        resume_a = ("torch_dynamo_resume_in_step_at_7", "m.py", 7)
+        resume_b = ("torch_dynamo_resume_in_step_at_9", "m.py", 9)
+        kept = {
+            ("EQUALS_MATCH", "scale"),
+            ("EQUALS_MATCH", "mode"),
+            ("CONSTANT_MATCH", "___stack0"),
+            ("CONSTANT_MATCH", "fn"),
+            ("EQUALS_MATCH", "keys"),
+            ("TENSOR_MATCH", "x"),
+        }
+        pinned_scale = fact("EQUALS_MATCH", "scale")
+        pinned_mode = fact("EQUALS_MATCH", "mode")
+        generic_scale = fact("TYPE_MATCH", "scale")
+        pinned_keys = fact("EQUALS_MATCH", "keys")
+        it = fact("COUNT_ITERATOR_MATCH", "it")
+        x = fact("TENSOR_MATCH", "x")
+        guard_sets = {
+            # Two variants of the entry: one pins scale and mode, the other
+            # serves scale generically -- the ordinary shape once two examples
+            # are captured -- so only mode stays pinned.
+            entry: [
+                frozenset({pinned_scale, pinned_mode, x}),
+                frozenset({generic_scale, pinned_mode, x}),
+            ],
+            # ___stack0 is a tensor in this resume frame ...
+            resume_a: [frozenset({fact("TENSOR_MATCH", "___stack0")})],
+            # ... and the .item() int in this one. The tensor elsewhere is a
+            # different local under the same bare name and must not cancel it.
+            resume_b: [frozenset({fact("CONSTANT_MATCH", "___stack0")})],
+            # A variant whose value guard the filter dropped checks nothing and
+            # serves any fn, so it cancels the sibling's pin like a generic one.
+            ("gate", "m.py", 12): [
+                frozenset({fact("CONSTANT_MATCH", "fn")}),
+                frozenset({fact("CONSTANT_MATCH", "fn", live=False)}),
+            ],
+            # A dict_keys argument gets EQUALS_MATCH and SEQUENCE_LENGTH on one
+            # source in ONE variant (variables/builder.py): a variant's own
+            # companion guard must not cancel its pin. The iterator pin on `it`
+            # has no kept slot, so it is never reported.
+            ("lookup", "m.py", 15): [
+                frozenset({pinned_keys, fact("SEQUENCE_LENGTH", "keys"), it})
+            ],
+        }
+        self.assertEqual(
+            _wont_generalize(kept, guard_sets), ("___stack0", "keys", "mode")
+        )
+        # A frame that pins scale in its only variant is a real pin; the entry
+        # frame's generic variant cancels the entry's pin, not this one.
+        guard_sets[("helper", "m.py", 20)] = [frozenset({pinned_scale})]
+        self.assertEqual(
+            _wont_generalize(kept, guard_sets), ("___stack0", "keys", "mode", "scale")
+        )
+        # Nothing pinned: nothing to report, whatever the frames say.
+        self.assertEqual(_wont_generalize({("TENSOR_MATCH", "x")}, guard_sets), ())
+
+    def test_varying_guard_slots_are_the_differing_and_present_in_some_ones(self):
+        from torch._dynamo.precompile_package import _varying_guard_slots
+        from torch.compiler._precompile_types import GuardFact
+
+        def fact(guard_type, source, code=(), value="", enforced=True):
+            return GuardFact(
+                guard_type=guard_type,
+                source=source,
+                code=code,
+                value=value,
+                enforced=enforced,
+            )
+
+        x_f32 = fact("TENSOR_MATCH", "L['x']", value="dtype=float32")
+        x_f16 = fact("TENSOR_MATCH", "L['x']", value="dtype=float16")
+        flag = fact("CONSTANT_MATCH", "L['flag']", code=("L['flag'] == 1",))
+        fn_id = fact("ID_MATCH", "G['fn']", value="is mod.fn", enforced=False)
+        # Same check as fn_id, only the filter's verdict differs.
+        fn_id_kept = fact("ID_MATCH", "G['fn']", value="is mod.fn")
+        frame = ("forward", "m.py", 12)
+
+        self.assertEqual(_varying_guard_slots({}), frozenset())
+        # One variant discriminates nothing.
+        self.assertEqual(
+            _varying_guard_slots({frame: [frozenset({x_f32, flag, fn_id})]}),
+            frozenset(),
+        )
+        varying = _varying_guard_slots(
+            {frame: [frozenset({x_f32, fn_id}), frozenset({x_f16, flag, fn_id_kept})]}
+        )
+        self.assertEqual(
+            varying,
+            frozenset({("TENSOR_MATCH", "L['x']"), ("CONSTANT_MATCH", "L['flag']")}),
+        )
+        # Frames are never compared with each other: the same slot pinned to
+        # different values in two frames is invariant within each.
+        other = ("torch_dynamo_resume_in_forward_at_14", "m.py", 14)
+        self.assertEqual(
+            _varying_guard_slots(
+                {frame: [frozenset({x_f32})], other: [frozenset({x_f16})]}
+            ),
+            frozenset(),
+        )
+        # One HASATTR per attribute, all on the parent source: two facts on one
+        # slot inside a variant are that variant's rendering of it, and the slot
+        # varies only when the variants' renderings differ (here by code alone).
+        has_w = fact("HASATTR", "L['mod']", code=("hasattr(L['mod'], 'weight')",))
+        has_b = fact("HASATTR", "L['mod']", code=("hasattr(L['mod'], 'bias')",))
+        both = frozenset({has_w, has_b})
+        self.assertEqual(_varying_guard_slots({frame: [both]}), frozenset())
+        self.assertEqual(_varying_guard_slots({frame: [both, both]}), frozenset())
+        self.assertEqual(
+            _varying_guard_slots({frame: [frozenset({has_w}), frozenset({has_b})]}),
+            frozenset({("HASATTR", "L['mod']")}),
+        )
+
+    def test_summarize_reads_the_frame_lists_off_the_entry(self):
+        from torch._dynamo.package import (
+            _DynamoCacheEntry,
+            _DynamoCodeCacheEntry,
+            _GuardedCodeCacheEntry,
+            SerializedCode,
+            SourceInfo,
+        )
+        from torch._dynamo.precompile_package import _summarize
+        from torch.compiler._precompile_types import GuardFact
+
+        def entry(
+            code,
+            guarded=0,
+            backend_ids=(),
+            bypassed=False,
+            entered=True,
+            install_to_global=False,
+        ):
+            serialized = SerializedCode.from_code_object(code)
+            return _DynamoCodeCacheEntry(
+                python_code=serialized,
+                python_module=__name__,
+                function_names=[],
+                guarded_codes=[
+                    _GuardedCodeCacheEntry(guards_state=b"", dynamo_code=serialized)
+                    for _ in range(guarded)
+                ],
+                import_sources={},
+                backend_ids=list(backend_ids),
+                code_source=None,
+                install_to_global=install_to_global,
+                has_compile_id=entered,
+                bypassed=bypassed,
+            )
+
+        # Three distinct code objects that share the name every nn.Module has.
+        class A:
+            def forward(self):
+                pass
+
+        class B:
+            def forward(self):
+                pass
+
+        class C:
+            def forward(self):
+                pass
+
+        def helper():
+            pass
+
+        def resume():
+            pass
+
+        # A save-time bypass (from_cache_entry) leaves the entry's backend ids
+        # in place; install() loads none of them, so they are not counted.
+        codes = [
+            entry(A.forward.__code__, guarded=1, backend_ids=["__compiled_fn_1"]),
+            entry(B.forward.__code__),
+            entry(C.forward.__code__),
+            entry(helper.__code__, bypassed=True, backend_ids=["__compiled_fn_2"]),
+            # Generated but never executed: no compile id, so not a gap.
+            entry(resume.__code__, entered=False, install_to_global=True),
+        ]
+        info = SourceInfo(inlined_sources=set())
+        cache = _DynamoCacheEntry(codes=codes, source_info=info, device_type="cpu")
+        fn_id, flag = ("ID_MATCH", "G['fn']"), ("HASATTR", "mod")
+        mode, torch_mod = ("EQUALS_MATCH", "mode"), ("MODULE_MATCH", "G['torch']")
+        has_bias, is_torch = "hasattr(L['mod'], 'bias')", "G['torch'] is torch"
+        pinned_mode = GuardFact(
+            guard_type="EQUALS_MATCH",
+            source="mode",
+            code=("L['mode'] == 1",),
+            value="",
+            enforced=True,
+        )
+        summary = _summarize(
+            cache,
+            dropped={fn_id, flag},
+            kept={mode, ("TENSOR_MATCH", "x")},
+            policy_dropped={torch_mod},
+            risky={fn_id},
+            truncated=frozenset({"forward (m.py:3)"}),
+            capture_errors=("boom",),
+            guard_sets={("forward", "m.py", 3): [frozenset({pinned_mode})]},
+            # One rendering per dropped slot, from either drop list; fn_id has none.
+            dropped_code={flag: has_bias, torch_mod: is_torch},
+        )
+        # One bare co_name per frame: two uncovered forwards stay two, and the
+        # frame lists are drawn from the frames the count covers.
+        self.assertEqual(summary.frames, 5)
+        self.assertEqual(summary.resume_functions, 1)
+        self.assertEqual(summary.guarded_codes, 1)
+        self.assertEqual(summary.backend_graphs, 1)
+        self.assertEqual(summary.bypassed, ("helper",))
+        self.assertEqual(summary.uncovered_frames, ("forward", "forward"))
+        self.assertFalse(summary.complete)
+        self.assertEqual(summary.dropped_guards, (flag, fn_id))
+        self.assertEqual(summary.kept_guards, (mode, ("TENSOR_MATCH", "x")))
+        self.assertEqual(summary.policy_dropped_guards, (torch_mod,))
+        self.assertEqual(summary.risky_dropped_guards, (fn_id,))
+        self.assertEqual(
+            summary.dropped_guard_code, ((*flag, has_bias), (*torch_mod, is_torch))
+        )
+        self.assertEqual(summary.wont_generalize, ("mode",))
+        self.assertEqual(summary.capture_errors, ("boom",))
+
+    def test_capture_config_is_scoped_per_entry_and_per_thread(self):
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.precompile_package import _capture_config
+
+        def flags():
+            return (
+                functorch_config.bundled_autograd_cache,
+                functorch_config.bypass_autograd_cache_key,
+                functorch_config.force_non_lazy_backward_lowering,
+                torch._dynamo.config.allow_empty_graphs,
+            )
+
+        ambient = (False, False, False, False)
+        with (
+            functorch_config.patch(
+                bundled_autograd_cache=False,
+                bypass_autograd_cache_key=False,
+                force_non_lazy_backward_lowering=False,
+            ),
+            torch._dynamo.config.patch(allow_empty_graphs=False),
+        ):
+            self.assertEqual(flags(), ambient)
+            with _capture_config(training=False):
+                self.assertEqual(flags(), (True, True, False, True))
+                # The inner scope's training wins while it is open, and the
+                # outer scope's setting comes back when it closes.
+                with _capture_config(training=True):
+                    self.assertEqual(flags(), (True, True, True, True))
+                self.assertEqual(flags(), (True, True, False, True))
+            self.assertEqual(flags(), ambient)
+
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with _capture_config(training=True):
+                    raise RuntimeError("boom")
+            self.assertEqual(flags(), ambient)
+
+            # Config values are per thread, so a worker entering the scope
+            # patches only itself and the main thread stays ambient.
+            entered, release = threading.Event(), threading.Event()
+            seen = []
+
+            def hold():
+                seen.append(flags())
+                with _capture_config(training=False):
+                    seen.append(flags())
+                    entered.set()
+                    release.wait(10)
+                seen.append(flags())
+
+            worker = threading.Thread(target=hold)
+            worker.start()
+            self.assertTrue(entered.wait(10))
+            self.assertEqual(flags(), ambient)
+            release.set()
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(seen[1], (True, True, False, True))
+            self.assertEqual(seen[0], seen[2])
+            self.assertNotEqual(seen[0], seen[1])
+
+    def test_capture_config_refuses_disabled_caches_and_honours_strict(self):
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.exc import PackageError
+        from torch._dynamo.precompile_package import _capture_config
+
+        # Backends reach the artifact through the bundled AOTAutograd cache, so
+        # a capture with caches forced off would record nothing; say so up front.
+        with torch.compiler.config.patch(force_disable_caches=True):
+            with self.assertRaisesRegex(PackageError, "force_disable_caches"):
+                with _capture_config(training=False):
+                    pass
+
+        with functorch_config.patch(strict_autograd_cache=False):
+            with torch._dynamo.config.patch(strict_precompile=False):
+                with _capture_config(training=False):
+                    self.assertFalse(functorch_config.strict_autograd_cache)
+            with torch._dynamo.config.patch(strict_precompile=True):
+                with _capture_config(training=False):
+                    self.assertTrue(functorch_config.strict_autograd_cache)
+            self.assertFalse(functorch_config.strict_autograd_cache)
+
+    def test_allow_empty_graphs_convert_frame_keeps_a_no_op_frame_compilable(self):
+        from torch._dynamo.convert_frame import ConvertFrame
+        from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
+        from torch._dynamo.testing import CompileCounter
+
+        def fn(x, flag):
+            if flag:
+                return x.sin()
+            return x
+
+        # Install a converter of the given class beneath the CatchErrorsWrapper
+        # torch._dynamo.optimize built, the way a capture session will, and
+        # count the variants of fn the backend compiles after a no-op call.
+        def compiled_variants(cls):
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            optimize_ctx = torch._dynamo.optimize(counter)
+            wrapper = optimize_ctx.callback
+            built = wrapper._torchdynamo_orig_backend
+            wrapper._torchdynamo_orig_backend = cls(
+                built._torchdynamo_orig_backend,
+                wrapper.hooks,
+                recompile_limit=built._recompile_limit,
+            )
+            x = torch.ones(2)
+            optimize_ctx(fn)(x, False)
+            optimize_ctx(fn)(x, True)
+            return counter.frame_count
+
+        # The plain converter skips the code object on the empty graph, so the
+        # later sin variant is never compiled; the subclass compiles both.
+        self.assertEqual(compiled_variants(ConvertFrame), 0)
+        self.assertEqual(compiled_variants(_AllowEmptyGraphsConvertFrame), 2)
+        self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+
+    def test_allow_empty_graphs_convert_frame_refuses_a_ddp_optimizer_frame(self):
+        from torch._dynamo.hooks import Hooks
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
+        from torch._dynamo.testing import CompileCounter
+        from torch.nn.parallel import DistributedDataParallel
+
+        def fn(x):
+            return x.sin()
+
+        # A stub active DDP module takes CatchErrorsWrapper down its DDPOptimizer
+        # branch, the one that asks the converter for a clone.
+        ddp_module = types.SimpleNamespace(bucket_bytes_cap=25 * 1024 * 1024)
+        for optimize_ddp in (True, "ddp_optimizer", "no_optimization"):
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            optimize_ctx = torch._dynamo.optimize(counter)
+            wrapper = optimize_ctx.callback
+            built = wrapper._torchdynamo_orig_backend
+            conv = _AllowEmptyGraphsConvertFrame(
+                built._torchdynamo_orig_backend,
+                wrapper.hooks,
+                package=CompilePackage(fn),
+                recompile_limit=built._recompile_limit,
+            )
+            wrapper._torchdynamo_orig_backend = conv
+            # The wrapper's capability probe must still say yes with a package.
+            self.assertTrue(hasattr(conv, "_clone_with_backend"))
+            with (
+                torch._dynamo.config.patch(optimize_ddp=optimize_ddp),
+                mock.patch.object(
+                    DistributedDataParallel, "_active_ddp_module", ddp_module
+                ),
+            ):
+                if optimize_ddp == "no_optimization":
+                    optimize_ctx(fn)(torch.ones(2))
+                    self.assertEqual(counter.frame_count, 1)
+                else:
+                    msg = r'DistributedDataParallel forward.*optimize_ddp=.*optimize_ddp="no_optimization"'
+                    with self.assertRaisesRegex(PackageError, msg):
+                        optimize_ctx(fn)(torch.ones(2))
+                    self.assertEqual(counter.frame_count, 0)
+            self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+        # Without a package the DDP clone keeps the subclass, hooks and limit.
+        backend, hooks = CompileCounter(), Hooks()
+        plain = _AllowEmptyGraphsConvertFrame(backend, hooks, recompile_limit=3)
+        clone = plain._clone_with_backend(backend)
+        self.assertIs(type(clone), _AllowEmptyGraphsConvertFrame)
+        self.assertIs(clone._hooks, hooks)
+        self.assertEqual(clone._recompile_limit, 3)
+
+    def test_allow_empty_graphs_convert_frame_reverts_the_flag_when_the_compile_raises(
+        self,
+    ):
+        from torch._dynamo.convert_frame import ConvertFrame
+        from torch._dynamo.hooks import Hooks
+        from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
+
+        seen = []
+
+        def failing_compile(self, frame, cache_entry, hooks, frame_state, skip=0):
+            seen.append((torch._dynamo.config.allow_empty_graphs, skip))
+            raise RuntimeError("compile failed")
+
+        converter = _AllowEmptyGraphsConvertFrame(lambda gm, inputs: gm, Hooks())
+        with mock.patch.object(ConvertFrame, "__call__", failing_compile):
+            with self.assertRaisesRegex(RuntimeError, "compile failed"):
+                converter(mock.Mock(), None, Hooks(), {}, skip=1)
+        # The flag was on for the compile and the converter's own frame is
+        # accounted for in the traceback skip count.
+        self.assertEqual(seen, [(True, 2)])
+        self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+
     def test_source_graph_module_copies_are_isolated(self):
         # _src and the exec'd forward are shared between copies; everything else
         # nn.Module keeps on an instance is state, hook dicts included, and a
@@ -1986,30 +2769,6 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         self.assertIsInstance(artifact, EagerCacheArtifact)
         self.assertIs(artifact.content, noop_graph_call)
 
-    def test_capture_config_restores_every_patch_when_the_body_unwinds(self):
-        import torch._functorch.config as functorch_config
-        from torch._dynamo.precompile_package import _capture_config
-
-        def ambient():
-            return (
-                functorch_config.bundled_autograd_cache,
-                functorch_config.bypass_autograd_cache_key,
-                functorch_config.force_non_lazy_backward_lowering,
-                torch._dynamo.config.allow_empty_graphs,
-            )
-
-        before = ambient()
-        with self.assertRaisesRegex(RuntimeError, "unwind"):
-            with _capture_config(True):
-                self.assertEqual(ambient(), (True, True, True, True))
-                with _capture_config(False):
-                    # Nested entries patch once: depth != 0 leaves the outer
-                    # training patch in place rather than downgrading it.
-                    self.assertTrue(functorch_config.force_non_lazy_backward_lowering)
-                self.assertEqual(ambient(), (True, True, True, True))
-                raise RuntimeError("unwind")
-        self.assertEqual(ambient(), before)
-
     def test_each_call_folds_into_the_entry_as_a_guarded_variant(self):
         model = _SessionStep()
         session = self._session(model)
@@ -2201,18 +2960,6 @@ class _SessionPinsContainers(torch.nn.Module):
         return x + self.cfg[_PINNED_PATH]
 
 
-class _ReprRaises:
-    def __repr__(self):
-        raise RuntimeError("no repr for you")
-
-
-class _ReprRaisesNumber(float):
-    """A number _plain_value does render, whose repr raises anyway."""
-
-    def __repr__(self):
-        raise RuntimeError("no repr for you")
-
-
 class _FakeCompile:
     """The frame being compiled, as the recording filter reads it."""
 
@@ -2396,105 +3143,20 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         session._record_dropped_code(("TENSOR_MATCH", "x"), [])
         self.assertNotIn(("TENSOR_MATCH", "x"), session._dropped_guard_code)
 
-    def test_a_guarded_value_renders_as_its_shape_or_its_type_only(self):
-        def rendered(value, has_value=True):
-            entry = _entry(LocalSource("x"), value, "TENSOR_MATCH")
-            return precompile_package._plain_value(
-                dataclasses.replace(entry, has_value=has_value)
-            )
-
-        self.assertEqual(rendered(torch.ones(2, 4)), "torch.float32 (2, 4) cpu")
-        self.assertEqual(rendered(3), "3")
-        self.assertEqual(rendered(True), "True")
-        self.assertEqual(rendered(None), "None")
-        # A string is the data itself whatever its length -- a prompt, a path --
-        # and any other object renders as its type, so neither those nor a
-        # tensor's elements reach the report.
-        self.assertEqual(rendered("small"), "<str>")
-        self.assertEqual(rendered("x" * 100), "<str>")
-        self.assertEqual(rendered(b"raw"), "<bytes>")
-        self.assertEqual(rendered(10**100), "<int>")
-        self.assertEqual(rendered(_ReprRaises()), "<_ReprRaises>")
-        self.assertEqual(rendered(torch.nn.ReLU()), "<ReLU>")
-        self.assertEqual(rendered(3, has_value=False), "")
-        # Reading the value is fallible, and a failure here would otherwise
-        # propagate out of the guard filter and kill the compile.
-        self.assertEqual(rendered(_ReprRaisesNumber(1.5)), "<unavailable>")
-
-    @parametrize(
-        "raw,masked",
-        [
-            ("<mypkg.Cfg object at 0x7F88c01a2d90>", "<mypkg.Cfg object at <addr>>"),
-            (
-                "___check_obj_id(L['x'], 140234567), type=<class 'int'>",
-                "___check_obj_id(L['x'], <id>), type=<class 'int'>",
-            ),
-            ("G['__builtins_dict___14']['len']", "G['__builtins_dict___<n>']['len']"),
-            ("__compiled_fn_3_0(L['x'])", "__compiled_fn_<n>(L['x'])"),
-            ("G['_140234567891_c0'].weight", "G['_<id>_c<n>'].weight"),
-            # A subscript key that reads as an attribute name tells two slots of
-            # one dict apart; anything else is the guarded data.
-            ("L['self']._modules['fc1'].weight", "L['self']._modules['fc1'].weight"),
-            ("L['self'].cfg['/home/u/secret']", "L['self'].cfg[<str>]"),
-            ("L['self'].cfg['%s']" % ("p" * 80), "L['self'].cfg[<str>]"),
-            # Narrower than an address: a real name, left alone.
-            ("G['_12345_c0'].weight", "G['_12345_c0'].weight"),
-            # A hex literal in a check is not an address; masking it would make
-            # two different values read as one.
-            ("L['self'].mask == 0xdeadbeef", "L['self'].mask == 0xdeadbeef"),
-            ("self.eps", "self.eps"),
-        ],
-    )
-    def test_normalize_masks_only_what_changes_run_to_run(self, raw, masked):
-        from torch._dynamo.precompile_package import _normalize
-
-        self.assertEqual(_normalize(raw), masked)
-        # Idempotent, or a re-normalized slot would spell itself differently.
-        self.assertEqual(_normalize(masked), masked)
-
-    @parametrize(
-        "part,masked",
-        [
-            # A number or a bool IS the form of a check; a string, a container
-            # display, a keys list and a containment argument are its data.
-            ("L['self'].n == 3", "L['self'].n == 3"),
-            ("L['self'].prompt == 'a secret prompt'", "L['self'].prompt == <str>"),
-            ("L['self'].tags == {'alpha'}", "L['self'].tags == <set>"),
-            (
-                "list(dict.keys(L['x'])) == ['alpha']",
-                "list(dict.keys(L['x'])) == <list>",
-            ),
-            ("set.__contains__(L['x'], 'alpha')", "set.__contains__(L['x'], <str>)"),
-            # The member a getattr names -- and TENSOR_MATCH's dimension marking
-            # through it -- is what the check is about rather than its data.
-            (
-                "hasattr(L['x'], '_dynamo_dynamic_indices') == False",
-                "hasattr(L['x'], '_dynamo_dynamic_indices') == False",
-            ),
-            # A data-shaped subscript key is masked, one that reads as a name is not.
-            ("L['self'].cfg['/home/u/secret'] == 3", "L['self'].cfg[<str>] == 3"),
-            ("L['self']._modules['fc1'].weight", "L['self']._modules['fc1'].weight"),
-            # No expression at all, so nothing can be masked and the part goes.
-            ("top_saved_tensors_hooks ids == (11, 12)", ""),
-        ],
-    )
-    def test_a_rendered_check_keeps_its_form_and_not_its_data(self, part, masked):
-        from torch._dynamo.precompile_package import _render_code
-
-        self.assertEqual(_render_code([part]), (masked,) if masked else ())
-
     def test_the_rendered_report_is_stable_and_names_every_class(self):
         # Driven by a real capture, so the golden pins the recording path too --
         # the filter's verdicts, the rendered checks and values, the frame key
         # and both orderings -- rather than write_invariants alone. Deterministic
-        # on eager and CPU with fixed shapes; the only thing masked is the line
-        # the fixture happens to sit on, which moves with every edit to this file.
+        # on eager and CPU with fixed shapes.
         session = self._session(_session_calls_hook)
         with session as cap:
             cap(torch.ones(2, 4))
             self._rebind_hook(_hook_increment)
             cap(torch.ones(3, 4))
-        report = re.sub(r"(\.py):\d+\)", r"\1:<line>)", self._report(session))
+        # Every line number masked, not just the frame header's: a callable's
+        # identity names its definition line too, and both move with any edit to
+        # this file.
+        report = re.sub(r"(\.py):\d+", r"\1:<line>", self._report(session))
         self.assertExpectedInline(
             report,
             """\
@@ -2517,24 +3179,27 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
 #
 # 1 frame(s), 2 compilation(s)
 
-frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 invariant, 3 varying, 3 undetermined
-  invariant [enforced] <AUTOGRAD_SAVED_TENSORS_HOOKS>
-  invariant [enforced] utils_device.CURRENT_DEVICE == None
-  invariant [enforced] <DETERMINISTIC_ALGORITHMS>
-  invariant [enforced] <GRAD_MODE>
-  varies    [dropped ] <CLOSURE_MATCH> <function> on G['_SESSION_HOOK']
-  varies    [enforced] hasattr(L['x'], '_dynamo_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_static_indices') == False torch.float32 (2, 4) cpu on x
-  varies    [enforced] hasattr(L['x'], '_dynamo_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_static_indices') == False torch.float32 (3, 4) cpu on x
+frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 invariant, 4 varying, 5 undetermined
+  invariant [enforced] <DETERMINISTIC_ALGORITHMS> deterministic=False, warn_only=False
+  invariant [enforced] <GRAD_MODE> grad_enabled=True
+  varies    [dropped ] <CLOSURE_MATCH> is @test_precompile_package.py:<line>#b6b88fff1d6f __main__._hook_double on G['_SESSION_HOOK']
+  varies    [dropped ] <CLOSURE_MATCH> is @test_precompile_package.py:<line>#5053804058b3 __main__._hook_increment on G['_SESSION_HOOK']
+  varies    [enforced] hasattr(L['x'], '_dynamo_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_static_indices') == False check_tensor(<value>, Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[2, 4], stride=[4, 1]) on x
+  varies    [enforced] hasattr(L['x'], '_dynamo_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False ; hasattr(L['x'], '_dynamo_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False ; hasattr(L['x'], '_dynamo_static_indices') == False check_tensor(<value>, Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[3, 4], stride=[4, 1]) on x
+  unknown   [enforced] torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None hooks=None
+  unknown   [enforced] utils_device.CURRENT_DEVICE == None
   unknown   [enforced] <GLOBAL_STATE>
   unknown   [enforced] <SHAPE_ENV>
   unknown   [enforced] <TORCH_FUNCTION_STATE>
 """,
         )
 
-    def test_a_check_renders_its_form_not_the_value_it_embeds(self):
-        # A guard that compares against a value renders it with repr() into its
-        # own check, and write_invariants writes that into a file it tells the
-        # user to commit, so the check has to report its FORM.
+    def test_a_value_check_renders_as_the_guard_wrote_it(self):
+        # _render_code normalizes a check rather than rewriting it, so what the
+        # report shows for a value guard is guards.py's own check. The report is
+        # therefore exactly as sensitive as the guards are: a guard that pins a
+        # prompt or a path spells it, which is what makes the file worth reading
+        # and what to look at before committing one.
         session = self._session(_SessionPinsValues())
         with session as cap:
             cap(torch.ones(2, 4))
@@ -2544,34 +3209,32 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 i
             for f in frame.invariant + frame.varying + frame.undetermined
         }
         for slot, line in [
-            # A number or a bool is the form: it is what makes the report worth
-            # reading, and it is not the user's data.
-            (("EQUALS_MATCH", "self.n"), "[enforced] L['self'].n == 3 3 on self.n"),
+            (("EQUALS_MATCH", "self.n"), "[enforced] L['self'].n == 3 on self.n"),
             (
                 ("CONSTANT_MATCH", "self.on"),
-                "[enforced] L['self'].on == True True on self.on",
+                "[enforced] L['self'].on == True on self.on",
             ),
             (("DEFAULT_DEVICE", ""), "[enforced] utils_device.CURRENT_DEVICE == None"),
-            # A string is the data itself: the operator and its target stay, the
-            # literal does not, at any length.
             (
                 ("CONSTANT_MATCH", "self.prompt"),
-                "[enforced] L['self'].prompt == <str> <str> on self.prompt",
+                f"[enforced] L['self'].prompt == {_PINNED_PROMPT!r} on self.prompt",
             ),
             (
                 ("CONSTANT_MATCH", "self.path"),
-                "[enforced] L['self'].path == <str> <str> on self.path",
+                f"[enforced] L['self'].path == {_PINNED_PATH!r} on self.path",
             ),
         ]:
             self.assertEqual(rendered[slot], line)
-        report = self._report(session)
-        self.assertNotIn(_PINNED_PROMPT, report)
-        self.assertNotIn(_PINNED_PATH, report)
+        # The one thing a check may not keep is an address: the file is meant to
+        # be committed and diffed, and an id differs between two runs of one
+        # capture. See _normalize.
+        self.assertIn("<id>", rendered[("TYPE_MATCH", "self")])
 
-    def test_a_check_renders_container_and_key_shapes_not_their_contents(self):
+    def test_a_container_check_renders_as_the_guard_wrote_it(self):
         # The shapes a value takes inside a check that are not a bare repr: a
         # container display, a keys list, a containment argument, and the key
-        # interpolated into the guard's own NAME by GetItemSource.
+        # GetItemSource interpolates into the guard's own NAME, which is what a
+        # slot of a dict is called in every list this report prints.
         session = self._session(_SessionPinsContainers())
         with session as cap:
             cap(torch.ones(2, 4))
@@ -2580,40 +3243,39 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 i
             (f.guard_type, f.source): precompile_package._render_fact(f)
             for f in frame.invariant + frame.varying + frame.undetermined
         }
+        key = f"self.cfg[{_PINNED_PATH!r}]"
         for slot, line in [
             (
                 ("CONSTANT_MATCH", "self.names[0]"),
-                "[enforced] L['self'].names[0] == <str> <str> on self.names[0]",
+                f"[enforced] L['self'].names[0] == {_PINNED_NAME!r} on self.names[0]",
             ),
             (
                 ("CONSTANT_MATCH", "self.tags"),
-                "[enforced] L['self'].tags == <set> <set> on self.tags",
+                f"[enforced] L['self'].tags == {{{_PINNED_TAG!r}}} on self.tags",
             ),
             (
                 ("SET_CONTAINS", "self.tags"),
-                "[enforced] set.__contains__(L['self'].tags, <str>) <set> on self.tags",
+                f"[enforced] set.__contains__(L['self'].tags, {_PINNED_TAG!r}) "
+                "on self.tags",
             ),
             (
                 ("DICT_KEYS_MATCH", "self.keys"),
                 "[enforced] len(L['self'].keys) == 1 ; "
-                "list(dict.keys(L['self'].keys)) == <list> <dict> on self.keys",
+                f"list(dict.keys(L['self'].keys)) == [{_PINNED_PROMPT!r}] on self.keys",
             ),
-            # A data-shaped key is masked in the name the report prints, so the
-            # slot reads as one slot of that dict rather than as the key.
             (
-                ("EQUALS_MATCH", "self.cfg[<str>]"),
-                "[enforced] L['self'].cfg[<str>] == 3 3 on self.cfg[<str>]",
+                ("EQUALS_MATCH", key),
+                f"[enforced] L['self'].cfg[{_PINNED_PATH!r}] == 3 on {key}",
             ),
         ]:
             self.assertEqual(rendered[slot], line)
-        report = self._report(session)
-        for pinned in (_PINNED_PROMPT, _PINNED_PATH, _PINNED_NAME, _PINNED_TAG):
-            self.assertNotIn(pinned, report)
 
-    def test_a_check_that_is_not_an_expression_renders_as_its_type_only(self):
-        # The saved-tensors-hooks guard renders prose ("top_saved_tensors_hooks
-        # ids == (11, 12)"), which cannot be masked structurally, so the fact
-        # keeps nothing rather than the ids.
+    def test_the_saved_tensors_hooks_check_renders_without_its_ids(self):
+        # The saved-tensors-hooks guard renders the ids of the hooks it compares
+        # ("top_saved_tensors_hooks ids == (11, 12)"), which would churn the file
+        # every run, so _normalize erases them and _value_fingerprint puts back a
+        # discriminator derived from what the hooks ARE. The guard is unmodelled,
+        # so the fact is reported as undetermined rather than compared.
         session = self._session(_SessionReadsAttr())
         with session as cap:
             cap(torch.ones(2, 4))
@@ -2623,36 +3285,27 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 i
             for f in frame.invariant + frame.varying + frame.undetermined
             if f.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS"
         ]
-        self.assertEqual(hooks.code, ())
         self.assertEqual(
             precompile_package._render_fact(hooks),
-            "[enforced] <AUTOGRAD_SAVED_TENSORS_HOOKS>",
+            "[enforced] torch._functorch.aot_autograd.utils.top_saved_tensors_hooks "
+            "ids == None hooks=None",
         )
 
     def test_two_frames_dropping_a_same_named_slot_are_not_risky(self):
         # entry.name is frame-local, so the same name in two frames is two
-        # slots: one fingerprint table for both would read a rebind that never
-        # happened, and the default gate would refuse a valid artifact.
+        # slots: one fact set for both would read a rebind that never happened,
+        # and the default gate would refuse a valid artifact.
         session = self._session(_SessionReadsAttr())
         record = session._recording_filter(
             lambda es: ([False] * len(es), [False] * len(es))
         )
         slot = ("CLOSURE_MATCH", "fn")
         keys = {}
-        # Held for the length of the test: a frame key ends in an address, and a
-        # freed one is reused.
-        alive = []
         for fn in (_hook_double, _hook_increment):
             compiling = _FakeCompile(fn.__code__)
-            alive.append(compiling)
             session._package._current_entry = compiling
             code = compiling.python_code
-            keys[fn] = (
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                id(compiling),
-            )
+            keys[fn] = (code.co_name, code.co_filename, code.co_firstlineno)
             record([_entry(LocalSource("fn"), fn, "CLOSURE_MATCH")])
         self.assertIn(slot, session._dropped_guards)
         self.assertEqual(session._value_varying_slots(), set())
@@ -2733,40 +3386,6 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 i
         (frame,) = session.invariants()
         self.assertIn(_HOOK_SLOT, {(f.guard_type, f.source) for f in frame.invariant})
 
-    def test_a_value_fingerprint_tells_scalars_apart_without_rendering_them(self):
-        # The comparison the coarse rendering cannot make: two different scalars
-        # both render themselves here, but a string renders as <str>, so only the
-        # fingerprint can say the slot varied.
-        def print_of(value, has_value=True):
-            entry = _entry(LocalSource("x"), value, "TENSOR_MATCH")
-            return precompile_package._value_fingerprint(
-                dataclasses.replace(entry, has_value=has_value)
-            )
-
-        self.assertEqual(print_of(3), print_of(3))
-        self.assertNotEqual(print_of(3), print_of(4))
-        self.assertNotEqual(print_of("a" * 80), print_of("b" * 80))
-        # A tensor fingerprints on what a guard compares it by, so differing
-        # elements are not variation but a differing shape is.
-        self.assertEqual(print_of(torch.ones(2, 4)), print_of(torch.rand(2, 4)))
-        self.assertNotEqual(print_of(torch.ones(2, 4)), print_of(torch.ones(3, 4)))
-        self.assertEqual(print_of(3, has_value=False), 0)
-        # A callable fingerprints on where it was DEFINED rather than on its
-        # address: two distinct functions differ, and one minted per call -- a
-        # closure, a functools.partial -- is not a rebind of the slot.
-        self.assertNotEqual(print_of(_hook_double), print_of(_hook_increment))
-
-        def minted():
-            def inner(y):
-                return y
-
-            return inner
-
-        # Both held, because an address freed by the first is reused by the
-        # second and identity would then call two objects one.
-        first, second = minted(), minted()
-        self.assertEqual(print_of(first), print_of(second))
-
     def test_a_guard_the_config_turns_into_a_no_op_is_not_enforced(self):
         # EMPTY_NN_MODULE_HOOKS_DICT passes the serializer pre-check, so the
         # filter keeps it, but under skip_nnmodule_hook_guards GuardBuilder emits
@@ -2795,7 +3414,7 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 4 i
         session = self._session(_SessionReadsAttr())
         name = "self.gewichtsma\u00df"
         session._guard_sets = {
-            ("forward", "/pkg/m.py", 7, 1): [frozenset({_fact("EQUALS_MATCH", name)})]
+            ("forward", "/pkg/m.py", 7): [frozenset({_fact("EQUALS_MATCH", name)})]
         }
         real_open = open
 
@@ -2931,22 +3550,32 @@ class TestPrecompileRender(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(PrecompileError, "not available yet"):
             session.snapshot_artifact()
 
-    def test_a_frame_without_variants_is_uncovered_and_refused(self):
+    def test_a_frame_with_no_variants_that_never_ran_is_not_a_gap(self):
         from torch._dynamo.exc import PackageError
 
         # With nested graph breaks (the default in this harness) the child's
-        # continuation is recorded as a frame Dynamo never compiled a variant
-        # for, which require_complete reports as an uncovered frame.
+        # continuation is recorded as a frame with no variant at all. It never
+        # entered Dynamo, so install() skips it and _summarize does not count it as
+        # an uncovered frame: the render goes through rather than being refused.
         session = self._session(_RenderParent())
         with session as cap:
             cap(torch.ones(3))
         summary = session.summary()
-        self.assertTrue(summary.uncovered_frames)
-        self.assertFalse(summary.complete)
-        with self.assertRaisesRegex(PackageError, "produced NO guarded code"):
-            session.snapshot_artifact()
-        python_code, _ = session.snapshot_artifact(require_complete=False)
+        codes = session._package.cache_entry().codes
+        self.assertTrue(
+            any(not c.has_compile_id and not c.guarded_codes for c in codes)
+        )
+        self.assertEqual(summary.uncovered_frames, ())
+        self.assertTrue(summary.complete)
+        python_code, _ = session.snapshot_artifact()
         self.assertIn('SERVING_MODE = "standalone"', python_code)
+        # The gate over an uncovered frame, driven directly: reporting one takes a
+        # frame that DID enter Dynamo and still produced no guarded code, which this
+        # capture does not produce.
+        gapped = dataclasses.replace(summary, uncovered_frames=("forward",))
+        with mock.patch.object(session, "summary", return_value=gapped):
+            with self.assertRaisesRegex(PackageError, "produced NO guarded code"):
+                session.snapshot_artifact()
 
     def test_a_tensor_default_is_refused_before_capture(self):
         from torch._precompile import (
@@ -2961,7 +3590,6 @@ class TestPrecompileRender(torch._inductor.test_case.TestCase):
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)
-instantiate_parametrized_tests(TestPrecompileSessionSummary)
 
 
 if __name__ == "__main__":
