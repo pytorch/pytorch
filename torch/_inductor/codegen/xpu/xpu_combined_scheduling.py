@@ -7,10 +7,8 @@ from torch._inductor.scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
     FusedSchedulerNode,
-    FusedStagedReduction,
     Scheduler,
     SchedulerNode,
-    SubParentFusionResult,
 )
 
 from ..cutlass.scheduling import CUTLASSScheduling
@@ -52,11 +50,8 @@ class XPUCombinedScheduling(BaseScheduling):
     def has_sub_parent_epilogue(
         self,
         nodes: Sequence[BaseSchedulerNode],
-        fusion_result: SubParentFusionResult | None = None,
     ) -> bool:
-        return self._triton_scheduling.has_sub_parent_epilogue(
-            nodes, fusion_result
-        )
+        return self._triton_scheduling.has_sub_parent_epilogue(nodes)
 
     def validate_staged_reduction(self, node: FusedStagedReduction) -> None:
         return self._triton_scheduling.validate_staged_reduction(node)
