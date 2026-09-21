@@ -941,6 +941,57 @@ class _NestedReductionBase:
         generated_text = "\n\n".join(str(part) for part in generated)
         self.check_fusion()
         self.assertEqual(generated_text.count(".run("), 1)
+        # Sufficiency guard: the fused single kernel must not materialize a
+        # full-resolution intermediate. The 2-kernel path allocated a
+        # [M, K/32, 32] uint8 DRAM spill (shape ends ", 128, 32)"). The fused
+        # path keeps only the compressed scale (s,128,1) and the pack2 qdata
+        # (s,2048); assert the spill shape is gone and only 2 real XPU
+        # buffers are allocated.
+        self.assertNotIn("128, 32)", generated_text)
+        self.assertEqual(generated_text.count("= empty_strided_xpu(("), 2)
+
+    def test_dynamic_m_mxfp4_pack2_rejects_non_divisible(self):
+        """Dynamic-M reduction pack that cannot project onto a lane falls back.
+
+        Negative/soundness guard opposite to
+        test_dynamic_m_mxfp4_standalone_quant_fuses. That positive case packs
+        adjacent elements produced by a ``group=32`` reduction, which expresses
+        ``parent_r * 2 + lane``. Here the epilogue interleaves elements across
+        the reduction-group boundary (a 2-wide interleave out of a group of 4),
+        so the child index is not a constant lane w.r.t. the parent reduction
+        index. The sub-parent planner must reject (no sub-parent epilogue), for
+        which soundness demands a clean fallback to separate kernels rather
+        than an illegal unplanned-lane codegen.
+        """
+
+        def f(x):
+            # Deterministic integer transform of a grouped reduction so that the
+            # compiled result is bit-exact vs eager. The pack interleaves a
+            # 2-wide pair that spans the reduction-group boundary (group of 4),
+            # so the child index is not a constant lane of the parent reduction
+            # index -> the sub-parent planner must not fuse it.
+            B, D = x.shape
+            grouped = x.view(B, D // 4, 4)
+            amax = grouped.abs().amax(dim=-1)  # [B, D/4]
+            # Bit-level mask: even group -> 0x0F pattern, odd -> toggle.
+            sel = (amax > 0).to(torch.int8)  # deterministic 0/1 per group
+            expanded = sel.unsqueeze(-1).expand(B, D // 4, 4).reshape(B, D)
+            u8 = (expanded & 0x0F).to(torch.uint8).contiguous()
+            flat = u8.reshape(-1)
+            # 2-wide interleave across the full flattened buffer (group-1 size
+            # is 1 here, so pairs span group boundaries -> non-constant lane).
+            packed = flat[::2] | (flat[1::2] << 4)
+            return packed.reshape(B, D // 2)
+
+        x = torch.randn(16, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch._dynamo.mark_dynamic(x, 0)
+        metrics.reset()
+        _, generated = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(torch.compile(f)(x), f(x))
+        # Reject the non-lane-projection pack rather than fuse unsoundly: no
+        # sub-parent epilogue may be claimed. Guards the "unplanned lane" crash
+        # class exposed by the ablation study (Case C).
+        self.assertEqual(metrics.codegen_nested_reduction, 0)
 
     def test_grouped_reduction_with_weight_mul(self):
         """Grouped reduction input involves element-wise weight multiply."""
