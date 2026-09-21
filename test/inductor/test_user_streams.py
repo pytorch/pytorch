@@ -37,10 +37,10 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    skipIfXpu,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIfNoAcceleratorTriton,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
@@ -48,7 +48,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE
 TEST_GPU = TEST_CUDA or TEST_XPU
 # Device module for the detected accelerator (torch.cuda or torch.xpu), so tests
 # can drive stream/event APIs generically instead of hardcoding torch.cuda.
-device_module = torch.get_device_module(GPU_TYPE) if TEST_GPU else None
+device_module = torch.get_device_module(GPU_TYPE)
 
 
 def _extract_wrapper_body(code):
@@ -2891,7 +2891,7 @@ class TestAOTIUserStreams(InductorTestCase):
         self.assertEqual(result, expected)
         # XPU AOTI relies on SYCL in-order queues for event ordering, so the
         # CUDA/HIP event helper symbols are not emitted into the generated code.
-        if not TEST_XPU:
+        if TEST_CUDA:
             self.assertIn(self._runtime_name("cudaEventRecord"), code)
             self.assertIn(self._runtime_name("cudaStreamWaitEvent"), code)
             self.assertIn("AOTIPerThreadStreamCache", code)
@@ -2919,7 +2919,7 @@ class TestAOTIUserStreams(InductorTestCase):
         result, code = self._compile_and_run(model, inputs)
 
         self.assertEqual(result, expected)
-        if not TEST_XPU:
+        if TEST_CUDA:
             self.assertGreaterEqual(
                 code.count(self._runtime_name("cudaEventRecord")), 2
             )
@@ -2954,7 +2954,7 @@ class TestStreamCudagraphInteraction(InductorTestCase):
     def test_implicit_current_stream_with_cudagraphs(self):
         """Event record/wait with implicit current stream must work under cudagraph capture.
 
-        The implicit current stream resolves at runtime via device_module.current_stream(),
+        The implicit current stream resolves at runtime to the current stream,
         which correctly returns the cudagraph capture stream during recording.
         """
         s1 = device_module.Stream()
@@ -2981,9 +2981,9 @@ class TestStreamCudagraphInteraction(InductorTestCase):
         self.assertEqual(result, expected)
 
     def test_explicit_current_stream_with_cudagraphs(self):
-        """Passing device_module.current_stream() explicitly must also work under capture.
+        """Passing the current stream explicitly must also work under capture.
 
-        The user writes ev.record(device_module.current_stream()) which is
+        Recording an event on the current stream explicitly is
         semantically identical to ev.record() — both should resolve to the
         capture stream during cudagraph recording, not the stale default stream.
         """

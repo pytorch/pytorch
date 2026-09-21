@@ -45,7 +45,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
     onlyCUDA,
     ops,
 )
@@ -694,107 +693,6 @@ FBCODE_XFAIL_DICTS = {
     "binary_numerical": FBCODE_BINARY_NUMERICAL_XFAILS,
 }
 
-# XPU-specific expected failures. These reflect measured behavior on Intel GPU
-# (xpu) under the current Inductor+Triton stack and diverge from CUDA/ROCm in
-# both directions:
-#   - Some CUDA xfails XPASS on XPU (e.g. remainder/fmod binary numerics, rsqrt/sin
-#     unary numerics), so they are omitted here.
-#   - Some ops fail on XPU that pass on CUDA (e.g. exp/exp2/log2/log1p/tan/tanh
-#     eager_equivalence in fp32, gelu/linear fp32 eager_equivalence, remainder
-#     determinism).
-# intel/torch-xpu-ops/issues/5168
-XPU_EAGER_EQUIV_XFAILS = {
-    "aot_eager_decomp_partition": {
-        "nn.functional.gelu": {fp32},
-        "nn.functional.layer_norm": {fp32},
-        "softmax": {fp32},
-        "log_softmax": {fp32},
-    },
-    "inductor_default": {
-        "exp": {fp32},
-        "exp2": {fp32},
-        "expm1": {fp32},
-        "log1p": {fp32},
-        "log2": {fp32},
-        "remainder": {fp32},
-        "sigmoid": {fp32},
-        "sub": {fp32},
-        "tan": {fp32},
-        "tanh": {fp32},
-        "nn.functional.gelu": {fp32},
-        "nn.functional.layer_norm": {fp32},
-        "nn.functional.silu": {fp32},
-        "softmax": {fp32},
-        "log_softmax": {fp32},
-    },
-    "inductor_numerics": {
-        "exp": {fp32},
-        "exp2": {fp32},
-        "expm1": {fp32},
-        "log1p": {fp32},
-        "log2": {fp32},
-        "sigmoid": {fp32},
-        "sub": {ALL},
-        "tan": {fp32},
-        "tanh": {fp32},
-        "nn.functional.gelu": {fp32},
-        "nn.functional.layer_norm": {fp32},
-        "nn.functional.linear": {fp32},
-        "nn.functional.silu": {fp32},
-        "softmax": {fp32},
-        "log_softmax": {fp32},
-    },
-}
-
-XPU_DETERMINISM_XFAILS = {
-    "inductor_numerics": {
-        "remainder": {fp32},
-    },
-}
-
-XPU_BATCH_INVARIANCE_XFAILS = {
-    "aot_eager_decomp_partition": {
-        "nn.functional.linear": {ALL},
-    },
-    "inductor_default": {
-        "nn.functional.linear": {ALL},
-    },
-    "inductor_numerics": {
-        "nn.functional.linear": {ALL},
-    },
-}
-
-XPU_UNARY_NUMERICAL_XFAILS = {
-    "inductor_default": {
-        "exp": {fp32},
-        "exp2": {fp32},
-        "log1p": {fp32},
-        "log2": {fp32},
-        "sigmoid": {fp32},
-        "tan": {fp32},
-        "tanh": {fp32},
-    },
-    "inductor_numerics": {
-        "exp": {fp32},
-        "exp2": {fp32},
-        "log1p": {fp32},
-        "log2": {fp32},
-        "sigmoid": {fp32},
-        "tan": {fp32},
-        "tanh": {fp32},
-    },
-}
-
-XPU_BINARY_NUMERICAL_XFAILS = {}
-
-XPU_XFAIL_DICTS = {
-    "eager_equivalence": XPU_EAGER_EQUIV_XFAILS,
-    "determinism": XPU_DETERMINISM_XFAILS,
-    "batch_invariance": XPU_BATCH_INVARIANCE_XFAILS,
-    "unary_numerical": XPU_UNARY_NUMERICAL_XFAILS,
-    "binary_numerical": XPU_BINARY_NUMERICAL_XFAILS,
-}
-
 if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
     # ROCm 7.14 fixes log10 strict numerics; the dtype-aware baseline handles
     # the remaining default-mode numerical difference.
@@ -803,17 +701,12 @@ if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
-    if device_type == "xpu":
-        xfail_dicts = XPU_XFAIL_DICTS
-    elif torch.version.hip is not None:
-        xfail_dicts = ROCM_XFAIL_DICTS
-    else:
-        xfail_dicts = XFAIL_DICTS
+    xfail_dicts = ROCM_XFAIL_DICTS if torch.version.hip is not None else XFAIL_DICTS
     xfails = set(xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set()))
     # fbcode's Triton fork + cuBLAS/GPU stack differ from OSS CI, so some combos
     # fail the compiled-vs-eager numerics only in fbcode. Gate on IS_FBCODE (CUDA
     # only) so OSS does not hit spurious XPASS on these.
-    if IS_FBCODE and torch.version.hip is None and device_type != "xpu":
+    if IS_FBCODE and torch.version.hip is None:
         fbcode_xfails = (
             FBCODE_XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
         )
@@ -1072,7 +965,7 @@ class TestOpInfoProperties(TestCase):
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1144,7 +1037,7 @@ class TestOpInfoProperties(TestCase):
     # Numerical Equivalence with Eager Mode Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1188,7 +1081,7 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1243,7 +1136,7 @@ class TestOpInfoProperties(TestCase):
     # Sampled Binary Ufunc Tests
     # =========================================================================
 
-    @onlyAccelerator
+    @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_binary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1285,9 +1178,7 @@ class TestOpInfoProperties(TestCase):
         )
 
 
-instantiate_device_type_tests(
-    TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True
-)
+instantiate_device_type_tests(TestOpInfoProperties, globals(), except_for=["cpu"])
 
 if __name__ == "__main__":
     run_tests()
