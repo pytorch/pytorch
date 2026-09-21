@@ -2749,8 +2749,12 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         session = self._session(reads_one_symbolic_size, dynamic=True)
         with session as cap:
             self.assertIsNone(cap(torch.randn(3, 4)))
+            # Read inside the block: the id's artifact is the no-op, so _release
+            # drops the package's own copy of it on the way out.
+            (inside,) = session._package.cache_entry().backend_ids
+            self.assertIs(session._package.cached_backends[inside], noop_graph_call)
         (backend_id,) = session._package.cache_entry().backend_ids
-        self.assertIs(session._package.cached_backends[backend_id], noop_graph_call)
+        self.assertEqual(session._package.cached_backends, {})
         artifact = session._backend_artifacts[backend_id]
         self.assertIsInstance(artifact, EagerCacheArtifact)
         self.assertIs(artifact.content, noop_graph_call)
@@ -2942,14 +2946,24 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         # one shape a render serializes off the package (a bound
         # GraphModule.forward), so they are kept and that is not a failed
         # capture.
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            reduces_to_graph_source,
+        )
+
         session = self._session(_session_breaks)
         with session as cap:
             cap(torch.ones(3))
         entry = session._package.cache_entry()
+        self.assertTrue(entry.backend_ids)
         self.assertEqual(session._backend_artifacts, {})
         self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
-        for backend in session._package.cached_backends.values():
-            self.assertIsInstance(backend.__self__, torch.fx.GraphModule)
+        for backend_id, backend in session._package.cached_backends.items():
+            self.assertTrue(reduces_to_graph_source(backend))
+            # The premise of keeping them: the artifact a render builds off the
+            # package callable really does serialize.
+            artifact = EagerCacheArtifact(key=backend_id, content=backend)
+            self.assertIsNotNone(pickle.loads(pickle.dumps(artifact)).content)
         self.assertEqual(session._capture_errors, [])
 
     @parametrize("backend", ("eager_noexcept", "ts"))
@@ -2957,18 +2971,96 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         # Neither files anything under the backend ids, and neither hands back
         # something a render can serialize off the package -- eager_noexcept
         # returns a local closure, ts a RecursiveScriptModule -- so the capture
-        # is short those graphs and says so, naming the backend, rather than
-        # silently keeping objects the render would choke on.
+        # is short those graphs and says so, naming the ids, rather than silently
+        # keeping objects the render would choke on.
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            reduces_to_graph_source,
+        )
+
         session = self._session(_session_breaks, backend=backend)
         with session as cap:
             cap(torch.ones(3))
+            # The premise, asserted rather than assumed, and before _release
+            # drops the callables: neither shape is the one a render serializes,
+            # and an artifact built on either fails to pickle at all.
+            self.assertTrue(session._package.cached_backends)
+            for backend_id, held in session._package.cached_backends.items():
+                self.assertFalse(reduces_to_graph_source(held))
+                with self.assertRaises(Exception):
+                    pickle.dumps(EagerCacheArtifact(key=backend_id, content=held))
         entry = session._package.cache_entry()
         self.assertTrue(entry.backend_ids)
         self.assertEqual(session._backend_artifacts, {})
         self.assertEqual(session._package.cached_backends, {})
         (recorded,) = session._capture_errors
-        self.assertIn(f"backend '{backend}' leaves behind a callable", recorded)
-        self.assertIn(f"no artifact for {len(entry.backend_ids)} of", recorded)
+        self.assertIn("recorded no artifact for backend id(s)", recorded)
+        for backend_id in entry.backend_ids:
+            self.assertIn(backend_id, recorded)
+        self.assertIn(f"the callable backend '{backend}' left", recorded)
+
+    def test_eager_is_classified_by_the_shape_it_returns_not_by_its_name(self):
+        # force_autograd_cache makes the eager backend hand back a
+        # GraphModuleSerializableCallable instead of a bound GraphModule.forward
+        # (backends/debugging.py), which EagerCacheArtifact.__reduce__ can only
+        # plain-pickle, lossily. The name is still "eager", so a decision taken
+        # by name would keep those callables and report a complete capture.
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.precompile_context import reduces_to_graph_source
+
+        session = self._session(_session_breaks)
+        with functorch_config.patch(force_autograd_cache=True):
+            with session as cap:
+                cap(torch.ones(3))
+                held = list(session._package.cached_backends.values())
+                self.assertTrue(held)
+                for backend in held:
+                    self.assertFalse(reduces_to_graph_source(backend))
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        (recorded,) = session._capture_errors
+        self.assertIn("recorded no artifact for backend id(s)", recorded)
+
+    def test_a_partly_unfiled_capture_names_only_the_ids_that_filed_nothing(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        session = self._session(_session_breaks, backend="inductor")
+        with session as cap:
+            cap(torch.ones(3))
+            first, second = session._package.cache_entry().backend_ids
+            # The staging area is process-global, so an id's artifact can be gone
+            # before this session collects. That id filed nothing as far as the
+            # collection can tell, while its sibling still has an artifact: the
+            # error has to name the one and not the other.
+            self.assertIsNotNone(PrecompileContext.take_artifact(first))
+        self.assertEqual(list(session._backend_artifacts), [second])
+        (recorded,) = session._capture_errors
+        self.assertIn(first, recorded)
+        self.assertNotIn(second, recorded)
+
+    def test_the_unfiled_error_is_recorded_once_across_two_collections(self):
+        # A render collects mid-block and exit collects again, by which time the
+        # capture has compiled more graphs, so the message names more ids. One
+        # condition, so one entry: the dedup keys on the condition, not on the
+        # wording.
+        session = self._session(_session_breaks, backend="ts")
+        with session as cap:
+            cap(torch.ones(3))
+            session._take_backend_artifacts()
+            (mid_block,) = session._capture_errors
+            early = list(session._package.cache_entry().backend_ids)
+            cap(torch.ones(4))
+        entry = session._package.cache_entry()
+        self.assertGreater(len(entry.backend_ids), len(early))
+        (recorded,) = session._capture_errors
+        self.assertEqual(recorded, mid_block)
+        for backend_id in early:
+            self.assertIn(backend_id, mid_block)
+        # The wording did move on, which is what the dedup had to survive.
+        late = [b for b in entry.backend_ids if b not in early]
+        self.assertTrue(late)
+        for backend_id in late:
+            self.assertNotIn(backend_id, recorded)
 
     def test_inductor_artifacts_are_taken_from_the_precompile_context(self):
         from torch._dynamo.precompile_context import PrecompileContext
@@ -2979,7 +3071,9 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             # A render inside the block collects, exactly as save() does, and
             # exit collects again. take_artifact hands each artifact out once,
             # so the second pass has to read the ids it already holds as
-            # collected rather than as ids that filed nothing.
+            # collected rather than as ids that filed nothing. Single-threaded,
+            # which is the contract _take_backend_artifacts states: no call is in
+            # flight here.
             session._take_backend_artifacts()
             mid_block = dict(session._backend_artifacts)
             self.assertTrue(mid_block)
