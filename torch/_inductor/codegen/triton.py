@@ -129,6 +129,7 @@ from .simd import (
     PartialAccumulate,
     SIMDKernel,
     SIMDScheduling,
+    TRITON_MAX_TENSOR_DIMS,
 )
 from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
@@ -271,7 +272,7 @@ class TritonSymbols:
     Stores sympy.Symbol instances and constants associated with triton codegen.
     """
 
-    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX])
+    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX, SymT.R2_INDEX])
     block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, *reduction_types])
 
     block_offsets = {
@@ -3562,6 +3563,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             SymT.ZBLOCK,
             SymT.R0_INDEX,
             SymT.R1_INDEX,
+            SymT.R2_INDEX,
         ):
             if symbol_is_type(symbol, symt):
                 return prefix_str[symt]
@@ -4287,6 +4289,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     stride_sorter_cls=stride_sorter_cls,
                 )
                 if isinstance(options, TensorDescriptorOptions):
+                    if len(options.params.block_shape) > TRITON_MAX_TENSOR_DIMS:
+                        return None
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -5628,7 +5632,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         strict_op = "*" if reduction_type == "prod" else "+"
 
         # When we do native matmtul codegen,
-        # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
+        # we don't want to keep reduction blocks in the accumulator.
         # so instead of naively calling dense_size_str(), we filter out
         # reduction block from accumulator and only keep (Y,X).
         # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
