@@ -443,7 +443,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
-        aggregate_type_metadata=None,
         current_stream_idx=None,
     ):
         """
@@ -480,7 +479,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     triton_meta=triton_meta,
                     inductor_meta=inductor_meta,
                     original_fxnode_name=original_fxnode_name,
-                    aggregate_type_metadata=aggregate_type_metadata,
                 )
 
             wrapper_name = f"call_{kernel_name}"

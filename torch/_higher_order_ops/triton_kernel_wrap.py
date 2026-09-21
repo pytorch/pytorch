@@ -231,6 +231,10 @@ def reconstruct_tensor_descriptor_from_metadata(
 # TupleSpec:      ("tuple", tuple[children], is_constexpr)
 # NamedTupleSpec: ("namedtuple", type_name, tuple[field_names],
 #                  tuple[children], is_constexpr)
+#
+# Values paired with these specs use exact built-in tuples for every container,
+# including containers described by NamedTupleSpec. Concrete NamedTuples and
+# tl.constexpr wrappers are created only at an emission boundary.
 LeafSpec = tuple[typing.Literal["leaf"], str, bool]
 TupleSpec = tuple[typing.Literal["tuple"], tuple["AggregateSpec", ...], bool]
 NamedTupleSpec = tuple[
@@ -241,6 +245,8 @@ NamedTupleSpec = tuple[
     bool,
 ]
 AggregateSpec = LeafSpec | TupleSpec | NamedTupleSpec
+AggregatePath = tuple[int, ...]
+AggregateFoldResult = typing.TypeVar("AggregateFoldResult")
 # Only top-level aggregate parameters have entries. Ordinary scalar/tensor/TMA
 # parameters are represented solely by the existing argument maps.
 AggregateTypeMetadata = dict[str, TupleSpec | NamedTupleSpec]
@@ -304,104 +310,257 @@ def _namedtuple_type_from_spec(
 
 
 def get_aggregate_leaf_specs(spec: AggregateSpec) -> tuple[LeafSpec, ...]:
-    if spec[0] == "leaf":
-        return (spec,)
-    children = aggregate_spec_children(spec)
-    return tuple(
-        itertools.chain.from_iterable(
-            get_aggregate_leaf_specs(child) for child in children
-        )
-    )
+    """Return the validated leaf specs in depth-first, left-to-right order."""
+    leaf_specs: list[LeafSpec] = []
+
+    def visit(child_spec: AggregateSpec, path: AggregatePath) -> None:
+        kind = _validate_aggregate_spec(child_spec, path)
+        if kind == "leaf":
+            leaf_specs.append(typing.cast(LeafSpec, child_spec))
+            return
+        for child_idx, nested_spec in enumerate(
+            aggregate_spec_children(typing.cast(TupleSpec | NamedTupleSpec, child_spec))
+        ):
+            visit(nested_spec, (*path, child_idx))
+
+    visit(spec, ())
+    return tuple(leaf_specs)
 
 
 def get_aggregate_leaf_keys(spec: AggregateSpec) -> tuple[str, ...]:
     return tuple(leaf_spec[1] for leaf_spec in get_aggregate_leaf_specs(spec))
 
 
-def flatten_aggregate(spec: AggregateSpec, value: Any) -> dict[str, Any]:
-    """Flatten an aggregate value into the leaf names defined by its spec."""
-    flat_values: dict[str, Any] = {}
+@functools.cache
+def _validate_aggregate_spec(
+    spec: AggregateSpec, path: AggregatePath
+) -> typing.Literal["leaf", "tuple", "namedtuple"]:
+    """Validate one spec node and return its kind."""
+    if type(spec) is not tuple or not spec:
+        raise AssertionError(
+            f"Invalid aggregate spec at path {path}: expected a non-empty tuple"
+        )
 
-    def visit(child_spec: AggregateSpec, child_value: Any) -> None:
-        if child_spec[0] == "leaf":
-            key = child_spec[1]
-            if key in flat_values:
-                raise AssertionError(
-                    f"Aggregate leaf {key!r} is referenced more than once"
-                )
-            flat_values[key] = child_value
-            return
-        if not isinstance(child_value, tuple):
-            raise AssertionError(f"Expected aggregate value, got {type(child_value)}")
-
-        children = aggregate_spec_children(child_spec)
-        if len(child_value) != len(children):
+    kind = spec[0]
+    if kind == "leaf":
+        if len(spec) != 3 or not isinstance(spec[1], str) or type(spec[2]) is not bool:
+            raise AssertionError(f"Invalid leaf spec at path {path}: {spec!r}")
+    elif kind == "tuple":
+        if len(spec) != 3 or type(spec[1]) is not tuple or type(spec[2]) is not bool:
+            raise AssertionError(f"Invalid tuple spec at path {path}: {spec!r}")
+    elif kind == "namedtuple":
+        if (
+            len(spec) != 5
+            or not isinstance(spec[1], str)
+            or type(spec[2]) is not tuple
+            or not all(isinstance(field, str) for field in spec[2])
+            or type(spec[3]) is not tuple
+            or type(spec[4]) is not bool
+        ):
+            raise AssertionError(f"Invalid NamedTuple spec at path {path}: {spec!r}")
+        if len(spec[2]) != len(spec[3]):
             raise AssertionError(
-                f"Aggregate has {len(child_value)} values but its spec has "
-                f"{len(children)} children"
+                f"NamedTuple {spec[1]!r} at path {path} has {len(spec[2])} fields "
+                f"but {len(spec[3])} children"
             )
-        for nested_spec, nested_value in zip(children, child_value, strict=True):
-            visit(nested_spec, nested_value)
+    else:
+        raise NotImplementedError(
+            f"Aggregate type {kind!r} at path {path} is not supported"
+        )
+    return kind
 
-    visit(spec, value)
-    return flat_values
 
-
-def reconstruct_aggregate(
+def fold_aggregate(
     spec: AggregateSpec,
-    flat_values: dict[str, Any],
-    *,
-    wrap_with_constexpr: bool = False,
-) -> Any:
-    """Reconstruct an aggregate value from leaves keyed by its spec."""
+    value: Any,
+    *parallel_values: Any,
+    leaf_fn: Callable[[LeafSpec, tuple[Any, ...], AggregatePath], AggregateFoldResult],
+    container_fn: Callable[
+        [
+            TupleSpec | NamedTupleSpec,
+            tuple[Any, ...],
+            tuple[AggregateFoldResult, ...],
+            AggregatePath,
+        ],
+        AggregateFoldResult,
+    ],
+    enter_fn: Callable[
+        [AggregateSpec, tuple[Any, ...], AggregatePath],
+        tuple[bool, AggregateFoldResult],
+    ]
+    | None = None,
+) -> AggregateFoldResult:
+    """Fold one or more aligned normalized aggregate trees.
 
-    def maybe_wrap(child_spec: AggregateSpec, value: Any) -> Any:
-        if child_spec[-1] and wrap_with_constexpr:
-            import triton.language as tl
+    ``value`` and ``parallel_values`` are traversed in lockstep according to
+    ``spec``. Every container in each value tree must be an exact built-in
+    tuple with the arity described by the corresponding spec node. Callback
+    ``values`` contain the aligned nodes in the same order as the input trees,
+    and ``path`` is the tuple of child indices from the root to that node.
 
-            return tl.constexpr(value)
-        return value
+    ``leaf_fn`` handles leaves. Containers are folded left-to-right before
+    ``container_fn`` receives their results. If provided, ``enter_fn`` runs
+    after spec validation but before leaf handling or container value
+    validation; returning ``(True, result)`` returns that result without
+    visiting or validating the node's value children. This supports values
+    such as whole-node constexprs and ``None`` that intentionally replace an
+    aggregate subtree.
+    """
 
-    def visit(child_spec: AggregateSpec) -> Any:
-        if child_spec[0] == "leaf":
-            key = child_spec[1]
+    def visit(
+        child_spec: AggregateSpec,
+        values: tuple[Any, ...],
+        path: AggregatePath,
+    ) -> AggregateFoldResult:
+        kind = _validate_aggregate_spec(child_spec, path)
+        if enter_fn is not None:
+            stop, result = enter_fn(child_spec, values, path)
+            if stop:
+                return result
+
+        if kind == "leaf":
+            return leaf_fn(typing.cast(LeafSpec, child_spec), values, path)
+
+        container_spec = typing.cast(TupleSpec | NamedTupleSpec, child_spec)
+        children = aggregate_spec_children(container_spec)
+        for value_idx, child_value in enumerate(values):
+            if type(child_value) is not tuple:
+                raise AssertionError(
+                    f"Aggregate value {value_idx} at path {path} must be an exact "
+                    f"built-in tuple, got {type(child_value)}"
+                )
+            if len(child_value) != len(children):
+                raise AssertionError(
+                    f"Aggregate value {value_idx} at path {path} has "
+                    f"{len(child_value)} values but its spec has "
+                    f"{len(children)} children"
+                )
+
+        child_results = tuple(
+            visit(
+                nested_spec,
+                tuple(child_value[child_idx] for child_value in values),
+                (*path, child_idx),
+            )
+            for child_idx, nested_spec in enumerate(children)
+        )
+        return container_fn(container_spec, values, child_results, path)
+
+    return visit(spec, (value, *parallel_values), ())
+
+
+def unflatten_aggregate(spec: AggregateSpec, flat_values: dict[str, Any]) -> Any:
+    """Build a normalized aggregate tree from leaves keyed by its spec.
+
+    All containers in the result are exact built-in tuples, including those
+    described by NamedTuple specs. Duplicate leaf keys in the spec and missing
+    entries in ``flat_values`` are rejected.
+    """
+    leaf_keys = get_aggregate_leaf_keys(spec)
+    duplicate_keys = [
+        key for key, count in collections.Counter(leaf_keys).items() if count > 1
+    ]
+    if duplicate_keys:
+        raise AssertionError(
+            f"Aggregate leaves are referenced more than once: {duplicate_keys!r}"
+        )
+
+    def visit(child_spec: AggregateSpec, path: AggregatePath) -> Any:
+        kind = _validate_aggregate_spec(child_spec, path)
+        if kind == "leaf":
+            key = typing.cast(LeafSpec, child_spec)[1]
             if key not in flat_values:
                 raise ValueError(
-                    f"Aggregate leaf {key!r} was not found in the arguments"
+                    f"Aggregate leaf {key!r} at path {path} was not found in the arguments"
                 )
-            return maybe_wrap(child_spec, flat_values[key])
-
-        children = tuple(visit(child) for child in aggregate_spec_children(child_spec))
-        if child_spec[0] == "tuple":
-            value = children
-        elif child_spec[0] == "namedtuple":
-            _, type_name, field_names, _, _ = child_spec
-            if len(field_names) != len(children):
-                raise ValueError(
-                    f"NamedTuple {type_name!r} has {len(field_names)} fields but "
-                    f"its aggregate spec has {len(children)} children"
+            return flat_values[key]
+        return tuple(
+            visit(nested_spec, (*path, child_idx))
+            for child_idx, nested_spec in enumerate(
+                aggregate_spec_children(
+                    typing.cast(TupleSpec | NamedTupleSpec, child_spec)
                 )
-            value = _namedtuple_type_from_spec(type_name, field_names)(*children)
-        else:
-            raise NotImplementedError(
-                f"Aggregate type {child_spec[0]!r} is not supported"
             )
-        return maybe_wrap(child_spec, value)
+        )
 
-    leaf_keys = get_aggregate_leaf_keys(spec)
-    if len(set(leaf_keys)) != len(leaf_keys):
-        raise AssertionError("An aggregate spec references a leaf more than once")
-    return visit(spec)
+    return visit(spec, ())
 
 
-def reconstruct_triton_kernel_aggregates(
+def maybe_wrap_constexpr(
+    spec: AggregateSpec, value: Any, *, str_form: bool = False
+) -> Any:
+    """Wrap ``value`` when ``spec`` marks its node as constexpr.
+
+    ``str_form`` emits a source expression instead of constructing a real
+    ``tl.constexpr`` object.
+    """
+    if not spec[-1]:
+        return value
+    if str_form:
+        return f"tl.constexpr({value})"
+
+    import triton.language as tl
+
+    return tl.constexpr(value)
+
+
+def materialize_aggregate(
+    spec: AggregateSpec, value: Any, *, wrap_with_constexpr: bool = True
+) -> Any:
+    """Materialize a normalized tree for a Python/Triton call boundary.
+
+    Tuple specs remain built-in tuples and NamedTuple specs become cached
+    structural NamedTuple types. By default, nodes marked constexpr are also
+    wrapped in ``tl.constexpr``; callers producing metadata can disable those
+    wrappers while retaining the concrete container types.
+    """
+
+    def materialize_leaf(
+        leaf_spec: LeafSpec, values: tuple[Any, ...], path: AggregatePath
+    ) -> Any:
+        value = values[0]
+        if wrap_with_constexpr:
+            return maybe_wrap_constexpr(leaf_spec, value)
+        return value
+
+    def materialize_container(
+        container_spec: TupleSpec | NamedTupleSpec,
+        values: tuple[Any, ...],
+        children: tuple[Any, ...],
+        path: AggregatePath,
+    ) -> Any:
+        if container_spec[0] == "tuple":
+            result = children
+        else:
+            result = _namedtuple_type_from_spec(container_spec[1], container_spec[2])(
+                *children
+            )
+        if wrap_with_constexpr:
+            return maybe_wrap_constexpr(container_spec, result)
+        return result
+
+    return fold_aggregate(
+        spec,
+        value,
+        leaf_fn=materialize_leaf,
+        container_fn=materialize_container,
+    )
+
+
+def unflatten_triton_kernel_aggregates(
     graph_kwargs: dict[str, Any],
     aggregate_type_metadata: AggregateTypeMetadata,
     *,
     constant_args: dict[str, Any] | None = None,
-    wrap_with_constexpr: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Construct Python aggregate values from already-materialized flat leaves."""
+    """Replace flat aggregate leaves with normalized roots in graph kwargs.
+
+    Leaves may come from either ``graph_kwargs`` or ``constant_args``. The
+    input mappings are copied, consumed leaf keys are removed, and each
+    top-level aggregate is inserted into the returned graph kwargs as an exact
+    built-in tuple tree. This function does not create concrete NamedTuples or
+    constexpr wrappers.
+    """
     if constant_args is None:
         constant_args = {}
     else:
@@ -429,11 +588,7 @@ def reconstruct_triton_kernel_aggregates(
                 f"Aggregate argument {name!r} also appears in the arguments"
             )
 
-        graph_kwargs[name] = reconstruct_aggregate(
-            spec,
-            flat_args,
-            wrap_with_constexpr=wrap_with_constexpr,
-        )
+        graph_kwargs[name] = unflatten_aggregate(spec, flat_args)
         for key in leaf_keys:
             graph_kwargs.pop(key, None)
             constant_args.pop(key, None)
@@ -462,11 +617,14 @@ def reconstruct_triton_kernel_args(
             graph_kwargs[key], metadata
         )
 
-    return reconstruct_triton_kernel_aggregates(
+    graph_kwargs, constant_args = unflatten_triton_kernel_aggregates(
         graph_kwargs,
         aggregate_type_metadata,
         constant_args=constant_args,
     )
+    for name, spec in aggregate_type_metadata.items():
+        graph_kwargs[name] = materialize_aggregate(spec, graph_kwargs[name])
+    return graph_kwargs, constant_args
 
 
 ###############################################################################
@@ -658,19 +816,20 @@ def generate_ttir(
         name: convert_type_for_ttir_generation(name, arg)
         for name, arg in kwargs.items()
     }
-    kwargs, _constant_args = reconstruct_triton_kernel_aggregates(
+    normalized_kwargs, _constant_args = unflatten_triton_kernel_aggregates(
         graph_kwargs=kwargs,
         aggregate_type_metadata=aggregate_type_metadata,
-        wrap_with_constexpr=True,
     )
 
-    if len(kwargs) != len(kernel.arg_names):
+    if len(normalized_kwargs) != len(kernel.arg_names):
         raise ValueError(
             "Incorrect number of arguments passed to kernel: "
-            f"passed {list(kwargs.keys())}, expected {kernel.arg_names}."
+            f"passed {list(normalized_kwargs.keys())}, expected {kernel.arg_names}."
         )
 
-    ordered_args = {name: kwargs[name] for name in kernel.arg_names}
+    normalized_ordered_args = {
+        name: normalized_kwargs[name] for name in kernel.arg_names
+    }
 
     def is_stable_tensor_descriptor_arg(arg: object) -> bool:
         if has_triton_tensor_descriptor_host_tma():
@@ -716,23 +875,21 @@ def generate_ttir(
         return [name]
 
     def get_aggregate_arg_names(spec: AggregateSpec, arg: Any) -> list[str]:
-        is_constexpr = spec[-1]
-        if is_constexpr:
-            return []
-        if spec[0] == "leaf":
-            _, flat_key, _is_constexpr = spec
-            return get_leaf_arg_names(flat_key, arg)
-        children = aggregate_spec_children(spec)
-        if len(children) != len(arg):
-            raise AssertionError(
-                "Aggregate argument does not match its spec: "
-                f"expected {len(children)} children, got {len(arg)}"
-            )
-        return list(
-            itertools.chain.from_iterable(
-                get_aggregate_arg_names(child_spec, child_arg)
-                for child_spec, child_arg in zip(children, arg)
-            )
+        def enter(child_spec, values, path):
+            if child_spec[-1] or values[0] is None:
+                return True, []
+            return False, []
+
+        return fold_aggregate(
+            spec,
+            arg,
+            leaf_fn=lambda leaf_spec, values, path: get_leaf_arg_names(
+                leaf_spec[1], values[0]
+            ),
+            container_fn=lambda spec, values, children, path: list(
+                itertools.chain.from_iterable(children)
+            ),
+            enter_fn=enter,
         )
 
     def get_arg_names(name: str, arg: Any) -> list[str]:
@@ -744,7 +901,7 @@ def generate_ttir(
 
     ordered_arg_names = list(
         itertools.chain.from_iterable(
-            get_arg_names(name, arg) for name, arg in ordered_args.items()
+            get_arg_names(name, arg) for name, arg in normalized_ordered_args.items()
         )
     )
 
@@ -833,46 +990,53 @@ def generate_ttir(
             }
             return attrs
 
+    ordered_args = {
+        name: materialize_aggregate(aggregate_type_metadata[name], arg)
+        if name in aggregate_type_metadata
+        else arg
+        for name, arg in normalized_ordered_args.items()
+    }
     specialization = _get_specialization(ordered_args.values())
     # Triton explicitly interprets ASTSource.constants entries as constexpr
     # Thus, only None and arguments marked `is_constexpr` should be treated as
-    # such. Nested paths match the paths produced by Triton's native binder.
+    # such. Store concrete payloads rather than tl.constexpr wrappers. Nested
+    # paths match the paths produced by Triton's native binder.
     constants: dict[str | tuple[int, ...], Any] = {}
 
     def collect_aggregate_constants(
-        param_idx: int,
-        spec: AggregateSpec,
-        arg: Any,
-        path: tuple[int, ...] = (),
+        param_idx: int, spec: AggregateSpec, arg: Any
     ) -> None:
-        # Is the argument a wrapped tl.constexpr? Note that this is
-        # different from a tl.constexpr formal parameter
-        is_constexpr = spec[-1]
-        if is_constexpr or arg is None:
-            constants[(param_idx, *path)] = (
-                arg.value if isinstance(arg, triton.language.constexpr) else arg
-            )
-            return
-        if spec[0] == "leaf":
-            # Ordinary leaf remains a runtime TTIR argument
-            return
-        children = aggregate_spec_children(spec)
-        if len(children) != len(arg):
-            raise AssertionError(
-                "Aggregate argument does not match its spec: "
-                f"expected {len(children)} children, got {len(arg)}"
-            )
-        for child_idx, (child_spec, child_arg) in enumerate(zip(children, arg)):
-            collect_aggregate_constants(
-                param_idx,
-                child_spec,
-                child_arg,
-                (*path, child_idx),
-            )
+        def enter(child_spec, values, path):
+            if child_spec[-1] or values[0] is None:
+                constants[(param_idx, *path)] = (
+                    None
+                    if values[0] is None
+                    else materialize_aggregate(
+                        child_spec, values[0], wrap_with_constexpr=False
+                    )
+                )
+                return True, None
+            return False, None
 
-    for param_idx, (name, arg) in enumerate(ordered_args.items()):
+        fold_aggregate(
+            spec,
+            arg,
+            leaf_fn=lambda spec, values, path: None,
+            container_fn=lambda spec, values, children, path: None,
+            enter_fn=enter,
+        )
+
+    for param_idx, (name, arg) in enumerate(normalized_ordered_args.items()):
         if _is_constexpr_or_none(name, arg):
-            constants[name] = arg
+            constants[name] = (
+                materialize_aggregate(
+                    aggregate_type_metadata[name],
+                    arg,
+                    wrap_with_constexpr=False,
+                )
+                if name in aggregate_type_metadata and arg is not None
+                else arg
+            )
         elif (spec := aggregate_type_metadata.get(name)) is not None:
             collect_aggregate_constants(param_idx, spec, arg)
 

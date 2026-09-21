@@ -8633,8 +8633,8 @@ class UserDefinedTritonKernel(ExternKernel):
 
     @override
     def get_kwargs_value(self, arg_name: str, **kwargs: Any) -> Any:
-        if arg_name in self.kwargs_with_reconstructed_aggregates:
-            return self.kwargs_with_reconstructed_aggregates[arg_name]
+        if arg_name in self.kwargs_with_normalized_aggregates:
+            return self.kwargs_with_normalized_aggregates[arg_name]
         return super().get_kwargs_value(arg_name, **kwargs)
 
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
@@ -8753,6 +8753,7 @@ class UserDefinedTritonKernel(ExternKernel):
         from torch._higher_order_ops import triton_kernel_wrap
         from torch._inductor.utils import triton_version_uses_attrs_dict
 
+        from .codegen.common import AggregateArg
         from .codegen.wrapper import StrCallArg
 
         (
@@ -8764,7 +8765,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
         # For an epilogue containing a cast, the output arg in kwargs must point to the
         # epilogue's output so that the compiled signature uses the correct dtype.
-        kernel_kwargs = self.kwargs_with_reconstructed_aggregates
+        kernel_kwargs = self.kwargs_with_normalized_aggregates
         if epilogue_fusion:
             if len(self.arg_accesses.read_writes.writes) != 1:
                 raise AssertionError(
@@ -8776,14 +8777,19 @@ class UserDefinedTritonKernel(ExternKernel):
                 if mutable_arg_name in triton_kernel_wrap.get_aggregate_leaf_keys(
                     aggregate_spec
                 ):
-                    flat_values = triton_kernel_wrap.flatten_aggregate(
-                        aggregate_spec, kernel_kwargs[aggregate_name]
-                    )
-                    flat_values[mutable_arg_name] = epilogue_computed_buffer
+
+                    def replace_epilogue_leaf(leaf_spec, values, path):
+                        if leaf_spec[1] == mutable_arg_name:
+                            return epilogue_computed_buffer
+                        return values[0]
+
                     kernel_kwargs = {
                         **kernel_kwargs,
-                        aggregate_name: triton_kernel_wrap.reconstruct_aggregate(
-                            aggregate_spec, flat_values
+                        aggregate_name: triton_kernel_wrap.fold_aggregate(
+                            aggregate_spec,
+                            kernel_kwargs[aggregate_name],
+                            leaf_fn=replace_epilogue_leaf,
+                            container_fn=lambda spec, values, children, path: children,
                         ),
                     }
                     break
@@ -8793,6 +8799,13 @@ class UserDefinedTritonKernel(ExternKernel):
                     mutable_arg_name: epilogue_computed_buffer,
                 }
 
+        codegen_kwargs = {
+            name: AggregateArg(self.aggregate_type_metadata[name], value)
+            if name in self.aggregate_type_metadata
+            else value
+            for name, value in kernel_kwargs.items()
+        }
+
         (
             new_name,
             triton_meta,
@@ -8801,18 +8814,17 @@ class UserDefinedTritonKernel(ExternKernel):
         ) = wrapper.define_user_defined_triton_kernel(
             kernel,
             configs,
-            kernel_kwargs,
+            codegen_kwargs,
             restore_value_args,
             reset_to_zero_args,
             self.grid,
             epilogue_fusion,
             self.launch_kwargs,
-            self.aggregate_type_metadata,
         )
         named_args = {
-            key: kernel_kwargs[key]
+            key: codegen_kwargs[key]
             for key in self.ordered_kwargs_for_cpp_kernel
-            if key in kernel_kwargs
+            if key in codegen_kwargs
         }
 
         arg_names = [p.name for p in kernel.params]  # type: ignore[attr-defined]
@@ -8824,26 +8836,7 @@ class UserDefinedTritonKernel(ExternKernel):
         raw_keys_filtered: list[Any] = []
         raw_args_filtered: list[Any] = []
 
-        def get_arg_and_type(name, arg, aggregate_spec=None):
-            if aggregate_spec is not None:
-                flat_values = triton_kernel_wrap.flatten_aggregate(aggregate_spec, arg)
-                flat_args: dict[str, Any] = {}
-                flat_types: dict[str, Any] = {}
-                for leaf_spec in triton_kernel_wrap.get_aggregate_leaf_specs(
-                    aggregate_spec
-                ):
-                    flat_key = leaf_spec[1]
-                    value = flat_values[flat_key]
-                    leaf_arg, leaf_type = get_arg_and_type(name, value)
-                    flat_args[flat_key] = leaf_arg
-                    flat_types[flat_key] = leaf_type
-                return (
-                    triton_kernel_wrap.reconstruct_aggregate(aggregate_spec, flat_args),
-                    triton_kernel_wrap.reconstruct_aggregate(
-                        aggregate_spec, flat_types
-                    ),
-                )
-
+        def get_leaf_arg_and_type(name, arg):
             if isinstance(arg, IRNode):
                 return arg.codegen_reference(), arg.get_dtype()
             elif isinstance(arg, (int, float, bool, Expr)):
@@ -8861,6 +8854,30 @@ class UserDefinedTritonKernel(ExternKernel):
             else:
                 raise NotImplementedError(f"Unsupported arg type: {type(arg)}: {arg}")
 
+        def get_arg_and_type(name, arg):
+            if not isinstance(arg, AggregateArg):
+                return get_leaf_arg_and_type(name, arg)
+
+            def fold_leaf(leaf_spec, values, path):
+                return get_leaf_arg_and_type(name, values[0])
+
+            def fold_container(spec, values, children, path):
+                return (
+                    tuple(child[0] for child in children),
+                    tuple(child[1] for child in children),
+                )
+
+            folded_args, folded_types = triton_kernel_wrap.fold_aggregate(
+                arg.spec,
+                arg.value,
+                leaf_fn=fold_leaf,
+                container_fn=fold_container,
+            )
+            return (
+                AggregateArg(arg.spec, folded_args),
+                AggregateArg(arg.spec, folded_types),
+            )
+
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
@@ -8869,7 +8886,7 @@ class UserDefinedTritonKernel(ExternKernel):
                 continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
-            if arg is None:
+            if arg is None or (isinstance(arg, AggregateArg) and arg.value is None):
                 """
                 Filter out None args.
 
@@ -8886,9 +8903,7 @@ class UserDefinedTritonKernel(ExternKernel):
                     raw_keys_filtered.pop()
                     raw_args_filtered.pop()
             else:
-                a, a_type = get_arg_and_type(
-                    name, arg, self.aggregate_type_metadata.get(name)
-                )
+                a, a_type = get_arg_and_type(name, arg)
                 args.append(a)
                 arg_types.append(a_type)
 
@@ -8903,7 +8918,6 @@ class UserDefinedTritonKernel(ExternKernel):
             inductor_meta=inductor_meta,
             triton=True,
             device=self.get_device(),
-            aggregate_type_metadata=self.aggregate_type_metadata,
             original_fxnode_name=self.fx_node.name,
         )
 
@@ -9015,18 +9029,19 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_ast = ast.parse(self.kernel_src)
         self.kernel_stores = identify_triton_stores(self.kernel_src)
         self.kernel_args = kernel_args
-        self.kwargs_with_reconstructed_aggregates = self.kwargs
+        # Aggregate entries use built-in tuple trees internally; non-aggregate
+        # kwargs retain their existing representation.
+        self.kwargs_with_normalized_aggregates = self.kwargs
         if self.aggregate_type_metadata:
-            reconstructed_kwargs, reconstructed_constant_args = (
-                triton_kernel_wrap.reconstruct_triton_kernel_aggregates(
+            normalized_kwargs, normalized_constant_args = (
+                triton_kernel_wrap.unflatten_triton_kernel_aggregates(
                     self.kwargs,
                     aggregate_type_metadata=aggregate_type_metadata,
-                    wrap_with_constexpr=False,
                 )
             )
-            self.kwargs_with_reconstructed_aggregates = {
-                **reconstructed_kwargs,
-                **reconstructed_constant_args,
+            self.kwargs_with_normalized_aggregates = {
+                **normalized_kwargs,
+                **normalized_constant_args,
             }
 
         # names in `arg_accesses.read_writes` are names of formal arguments in the kernel's prototype

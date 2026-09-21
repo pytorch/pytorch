@@ -312,7 +312,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
-        aggregate_type_metadata=None,
         current_stream_idx=None,
     ):
         """

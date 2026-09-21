@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
 import collections
 import functools
+import itertools
 import warnings
 from typing import Any
 
 import sympy
 
 import torch
+from torch._higher_order_ops import triton_kernel_wrap
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._triton import has_triton_block_ptr
 
@@ -20,14 +22,13 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import (
+    AggregateArg,
     ArgName,
     ConstexprArg,
     KernelArgType,
-    NamedTupleArg,
     SizeArg,
     TensorArg,
     TMADescriptorArg,
-    TupleArg,
     WorkspaceArg,
 )
 
@@ -132,16 +133,28 @@ def signature_of(
     use_fp64_for_python_float: bool = True,
 ) -> Any:
     """Return the Triton signature value for a kernel argument."""
-    if isinstance(arg, NamedTupleArg):
-        fields = (
-            signature_of(arg=child, size_dtype=child_size_dtype)
-            for child, child_size_dtype in zip(arg.args, size_dtype, strict=True)
-        )
-        return collections.namedtuple(arg.type_name, arg.fields)(*fields)
-    if isinstance(arg, TupleArg):
-        return tuple(
-            signature_of(arg=child, size_dtype=child_size_dtype)
-            for child, child_size_dtype in zip(arg.args, size_dtype, strict=True)
+    if isinstance(arg, AggregateArg):
+
+        def enter(spec, values, path):
+            if spec[-1] or values[0] is None or isinstance(values[0], ConstexprArg):
+                return True, "constexpr"
+            return False, None
+
+        def leaf(spec, values, path):
+            return signature_of(arg=values[0], size_dtype=values[1])
+
+        def container(spec, values, children, path):
+            if spec[0] == "namedtuple":
+                return collections.namedtuple(spec[1], spec[2])(*children)
+            return children
+
+        return triton_kernel_wrap.fold_aggregate(
+            arg.spec,
+            arg.value,
+            size_dtype,
+            leaf_fn=leaf,
+            container_fn=container,
+            enter_fn=enter,
         )
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
@@ -282,8 +295,20 @@ def signature_to_meta(
         #
         # assume_32bit_indexing already asserts (and guards) that every ks* symbol
         # fits in int32.
-        if isinstance(arg, (NamedTupleArg, TupleArg)):
-            return tuple(_decide_tl_dtype(a) for a in arg.args)
+        if isinstance(arg, AggregateArg):
+
+            def enter(spec, values, path):
+                if spec[-1] or values[0] is None or isinstance(values[0], ConstexprArg):
+                    return True, None
+                return False, None
+
+            return triton_kernel_wrap.fold_aggregate(
+                arg.spec,
+                arg.value,
+                leaf_fn=lambda spec, values, path: _decide_tl_dtype(values[0]),
+                container_fn=lambda spec, values, children, path: children,
+                enter_fn=enter,
+            )
         if (
             not is_template
             and not use_block_ptr_enabled()
@@ -453,12 +478,24 @@ def config_of(
     def aligned_leaf_paths(
         arg: KernelArgType, path: tuple[int, ...]
     ) -> list[tuple[int, ...]]:
-        if isinstance(arg, (NamedTupleArg, TupleArg)):
-            return [
-                leaf_path
-                for child_idx, child in enumerate(arg.args)
-                for leaf_path in aligned_leaf_paths(child, (*path, child_idx))
-            ]
+        if isinstance(arg, AggregateArg):
+
+            def enter(spec, values, aggregate_path):
+                if spec[-1] or values[0] is None or isinstance(values[0], ConstexprArg):
+                    return True, []
+                return False, []
+
+            return triton_kernel_wrap.fold_aggregate(
+                arg.spec,
+                arg.value,
+                leaf_fn=lambda spec, values, aggregate_path: aligned_leaf_paths(
+                    values[0], (*path, *aggregate_path)
+                ),
+                container_fn=lambda spec, values, children, aggregate_path: list(
+                    itertools.chain.from_iterable(children)
+                ),
+                enter_fn=enter,
+            )
         if is_aligned(
             arg,
             alignment=16,
@@ -480,7 +517,7 @@ def config_of(
                 for i, arg in zip(indices, args)
                 # Only possible to specify attrs for tuple types
                 # with attrs_dict
-                if not isinstance(arg, (NamedTupleArg, TupleArg))
+                if not isinstance(arg, AggregateArg)
                 and is_aligned(
                     arg,
                     alignment=16,

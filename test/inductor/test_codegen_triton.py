@@ -18,13 +18,12 @@ from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import (
+    AggregateArg,
     ArgName,
-    CSEVariable,
     ConstexprArg,
-    NamedTupleArg,
+    CSEVariable,
     SizeArg,
     TensorArg,
-    TupleArg,
 )
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.simd import IterationRangesRoot
@@ -768,29 +767,37 @@ def helper(x):
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_nested_aggregate_alignment(self):
+        from torch._higher_order_ops import triton_kernel_wrap
         from torch._inductor.utils import triton_version_uses_attrs_dict
 
         if not triton_version_uses_attrs_dict():
             self.skipTest("nested argument attributes require Triton's attrs dict")
 
-        config_arg = NamedTupleArg(
-            "config",
-            "Config",
-            ["source", "parameters"],
-            [
+        config_arg = AggregateArg(
+            triton_kernel_wrap.create_named_tuple_spec(
+                "Config",
+                ("source", "parameters"),
+                (
+                    triton_kernel_wrap.create_leaf_spec("source"),
+                    triton_kernel_wrap.create_tuple_spec(
+                        (
+                            triton_kernel_wrap.create_leaf_spec("scale"),
+                            triton_kernel_wrap.create_leaf_spec("bias"),
+                        )
+                    ),
+                ),
+            ),
+            (
                 TensorArg(
                     name="source",
                     buffer="source",
                     dtype=torch.float32,
                 ),
-                TupleArg(
-                    "parameters",
-                    [
-                        SizeArg("scale", sympy.Integer(16)),
-                        SizeArg("bias", sympy.Integer(3)),
-                    ],
+                (
+                    SizeArg("scale", sympy.Integer(16)),
+                    SizeArg("bias", sympy.Integer(3)),
                 ),
-            ],
+            ),
         )
 
         with patch.object(triton_utils, "is_unaligned_buffer", return_value=False):
@@ -805,17 +812,28 @@ def helper(x):
         )
 
     def test_signature_of_nested_namedtuple(self):
-        flat_arg = NamedTupleArg(
-            "nested_field",
-            "FlatType",
-            ("x", "y"),
-            [ConstexprArg("x"), ConstexprArg("y")],
-        )
-        config_arg = NamedTupleArg(
-            "config",
-            "NestedType",
-            ("a", "nested_field"),
-            [ConstexprArg("a"), flat_arg],
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        config_arg = AggregateArg(
+            triton_kernel_wrap.create_named_tuple_spec(
+                "NestedType",
+                ("a", "nested_field"),
+                (
+                    triton_kernel_wrap.create_leaf_spec("a"),
+                    triton_kernel_wrap.create_named_tuple_spec(
+                        "FlatType",
+                        ("x", "y"),
+                        (
+                            triton_kernel_wrap.create_leaf_spec("x"),
+                            triton_kernel_wrap.create_leaf_spec("y"),
+                        ),
+                    ),
+                ),
+            ),
+            (
+                ConstexprArg("a"),
+                (ConstexprArg("x"), ConstexprArg("y")),
+            ),
         )
 
         signature = triton_utils.signature_of(

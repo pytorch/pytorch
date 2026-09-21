@@ -560,34 +560,49 @@ class CachingAutotuner(KernelInterface):
 
     @staticmethod
     def rebuild_udtk_aggregate(spec: Any, values: tuple[Any, ...]) -> Any:
-        from torch._higher_order_ops.triton_kernel_wrap import aggregate_spec_children
+        """Rebuild a concrete aggregate from its pickle spec and flat leaves.
 
-        values_iter = iter(values)
+        Recreated NamedTuple types receive the same reducer so nested and
+        repeated pickle round trips remain independent of generated modules.
+        """
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            fold_aggregate,
+            get_aggregate_leaf_specs,
+            unflatten_aggregate,
+        )
 
-        def rebuild(node_spec: Any) -> Any:
-            kind = node_spec[0]
-            if kind == "leaf":
-                return next(values_iter)
-            if kind not in ("tuple", "namedtuple"):
-                raise ValueError(f"Unsupported aggregate spec: {node_spec!r}")
-            children_specs = aggregate_spec_children(node_spec)
-            children = tuple(rebuild(child) for child in children_specs)
-            if kind == "tuple":
+        leaf_specs = get_aggregate_leaf_specs(spec)
+        if len(leaf_specs) != len(values):
+            raise ValueError(
+                f"Aggregate spec has {len(leaf_specs)} leaves but got "
+                f"{len(values)} values"
+            )
+        normalized = unflatten_aggregate(
+            spec,
+            {
+                leaf_spec[1]: value
+                for leaf_spec, value in zip(leaf_specs, values, strict=True)
+            },
+        )
+
+        def rebuild_container(container_spec, values, children, path):
+            if container_spec[0] == "tuple":
                 return children
 
-            tuple_type = namedtuple(node_spec[1], node_spec[2])
+            tuple_type = namedtuple(container_spec[1], container_spec[2])
             tuple_type.__reduce__ = CachingAutotuner.reduce_udtk_aggregate
             return tuple_type(*children)
 
-        aggregate = rebuild(spec)
-        try:
-            next(values_iter)
-        except StopIteration:
-            return aggregate
-        raise ValueError("Aggregate spec has fewer leaves than its values")
+        return fold_aggregate(
+            spec,
+            normalized,
+            leaf_fn=lambda spec, values, path: values[0],
+            container_fn=rebuild_container,
+        )
 
     @staticmethod
     def reduce_udtk_aggregate(value: Any) -> tuple[Any, tuple[Any, ...]]:
+        """Create a pickle reduction for a tuple or structural NamedTuple tree."""
         from torch._higher_order_ops.triton_kernel_wrap import (
             create_leaf_spec,
             create_named_tuple_spec,
@@ -596,6 +611,8 @@ class CachingAutotuner(KernelInterface):
 
         leaves = []
 
+        # fold_aggregate is spec-driven; this inverse boundary must construct
+        # the spec while it discovers the concrete value's structure.
         def create_spec(node: Any) -> Any:
             if not isinstance(node, tuple):
                 leaf_spec = create_leaf_spec(str(len(leaves)))

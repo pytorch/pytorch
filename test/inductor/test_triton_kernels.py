@@ -1637,7 +1637,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(graph_kwargs["flat_descriptor"], "descriptor base tensor")
         self.assertEqual(constant_args["flat_static"], 8)
 
-    def test_aggregate_flatten_and_reconstruct(self):
+    def test_aggregate_unflatten_fold_and_materialize(self):
         from torch._higher_order_ops import triton_kernel_wrap
 
         spec = triton_kernel_wrap.create_named_tuple_spec(
@@ -1654,19 +1654,23 @@ class KernelTests(torch._inductor.test_case.TestCase):
             ),
         )
         flat_values = {"flat_source": 0, "flat_scale": 2, "flat_bias": 3}
-        aggregate = triton_kernel_wrap.reconstruct_aggregate(spec, flat_values)
+        aggregate = triton_kernel_wrap.unflatten_aggregate(spec, flat_values)
+        self.assertIs(type(aggregate), tuple)
+        self.assertIs(type(aggregate[1]), tuple)
         self.assertEqual(
-            triton_kernel_wrap.flatten_aggregate(spec, aggregate), flat_values
+            aggregate,
+            (0, (2, 3)),
         )
 
-        transformed_values = {
-            leaf_spec[1]: flat_values[leaf_spec[1]] + len(leaf_spec[1])
-            for leaf_spec in triton_kernel_wrap.get_aggregate_leaf_specs(spec)
-        }
-        transformed_values["flat_scale"] = 7
-        materialized = triton_kernel_wrap.reconstruct_aggregate(
-            spec, transformed_values
+        transformed = triton_kernel_wrap.fold_aggregate(
+            spec,
+            aggregate,
+            leaf_fn=lambda leaf_spec, values, path: 7
+            if leaf_spec[1] == "flat_scale"
+            else values[0] + len(leaf_spec[1]),
+            container_fn=lambda spec, values, children, path: children,
         )
+        materialized = triton_kernel_wrap.materialize_aggregate(spec, transformed)
 
         self.assertEqual(materialized.source, len("flat_source"))
         self.assertEqual(materialized.parameters, (7, 3 + len("flat_bias")))
@@ -1675,14 +1679,167 @@ class KernelTests(torch._inductor.test_case.TestCase):
             (triton_kernel_wrap.create_leaf_spec("flat_none"),)
         )
         self.assertEqual(
-            triton_kernel_wrap.reconstruct_aggregate(none_spec, {"flat_none": None}),
+            triton_kernel_wrap.unflatten_aggregate(none_spec, {"flat_none": None}),
             (None,),
         )
         empty_spec = triton_kernel_wrap.create_tuple_spec(())
-        self.assertEqual(triton_kernel_wrap.reconstruct_aggregate(empty_spec, {}), ())
-        self.assertEqual(triton_kernel_wrap.flatten_aggregate(empty_spec, ()), {})
-        with self.assertRaisesRegex(AssertionError, "Expected aggregate value"):
-            triton_kernel_wrap.flatten_aggregate(spec, 1)
+        self.assertEqual(triton_kernel_wrap.unflatten_aggregate(empty_spec, {}), ())
+        self.assertEqual(
+            triton_kernel_wrap.fold_aggregate(
+                empty_spec,
+                (),
+                leaf_fn=lambda spec, values, path: None,
+                container_fn=lambda spec, values, children, path: children,
+            ),
+            (),
+        )
+        with self.assertRaisesRegex(ValueError, r"path \(1, 1\)"):
+            triton_kernel_wrap.unflatten_aggregate(
+                spec, {"flat_source": 0, "flat_scale": 2}
+            )
+        duplicate_spec = triton_kernel_wrap.create_tuple_spec(
+            (
+                triton_kernel_wrap.create_leaf_spec("duplicate"),
+                triton_kernel_wrap.create_leaf_spec("duplicate"),
+            )
+        )
+        with self.assertRaisesRegex(AssertionError, "referenced more than once"):
+            triton_kernel_wrap.unflatten_aggregate(duplicate_spec, {"duplicate": 1})
+
+    def test_fold_aggregate_aligned_trees(self):
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_tuple_spec(
+            (
+                triton_kernel_wrap.create_leaf_spec("a"),
+                triton_kernel_wrap.create_named_tuple_spec(
+                    "Pair",
+                    ("left", "right"),
+                    (
+                        triton_kernel_wrap.create_leaf_spec("b"),
+                        triton_kernel_wrap.create_tuple_spec(
+                            (triton_kernel_wrap.create_leaf_spec("c"),)
+                        ),
+                    ),
+                ),
+                triton_kernel_wrap.create_tuple_spec(()),
+            )
+        )
+        value = (1, (2, (3,)), ())
+        second = (10, (20, (30,)), ())
+        third = (100, (200, (300,)), ())
+
+        result = triton_kernel_wrap.fold_aggregate(
+            spec,
+            value,
+            second,
+            third,
+            leaf_fn=lambda spec, values, path: sum(values),
+            container_fn=lambda spec, values, children, path: children,
+        )
+        self.assertEqual(result, (111, (222, (333,)), ()))
+
+        for value_idx in range(3):
+            trees = [value, second, third]
+            trees[value_idx] = (trees[value_idx][0], (1,), ())
+            with (
+                self.subTest(value_idx=value_idx),
+                self.assertRaisesRegex(
+                    AssertionError,
+                    rf"Aggregate value {value_idx} at path \(1,\)",
+                ),
+            ):
+                triton_kernel_wrap.fold_aggregate(
+                    spec,
+                    *trees,
+                    leaf_fn=lambda spec, values, path: values,
+                    container_fn=lambda spec, values, children, path: children,
+                )
+
+        Pair = collections.namedtuple("Pair", ("left", "right"))
+        with self.assertRaisesRegex(AssertionError, "exact built-in tuple"):
+            triton_kernel_wrap.fold_aggregate(
+                spec,
+                (1, Pair(2, (3,)), ()),
+                leaf_fn=lambda spec, values, path: values[0],
+                container_fn=lambda spec, values, children, path: children,
+            )
+
+    def test_fold_aggregate_short_circuit(self):
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_tuple_spec(
+            (
+                triton_kernel_wrap.create_leaf_spec("visited"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (triton_kernel_wrap.create_leaf_spec("skipped"),),
+                    is_constexpr=True,
+                ),
+            )
+        )
+        visited = []
+
+        def enter(child_spec, values, path):
+            if child_spec[-1]:
+                return True, "constant"
+            return False, None
+
+        def leaf(leaf_spec, values, path):
+            visited.append((leaf_spec[1], path))
+            return values[0]
+
+        result = triton_kernel_wrap.fold_aggregate(
+            spec,
+            (1, "not a tuple"),
+            leaf_fn=leaf,
+            container_fn=lambda spec, values, children, path: children,
+            enter_fn=enter,
+        )
+        self.assertEqual(result, (1, "constant"))
+        self.assertEqual(visited, [("visited", (0,))])
+
+    @unittest.skipUnless(has_triton_package(), "requires triton")
+    def test_aggregate_python_and_source_emission(self):
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("source", "options"),
+            (
+                triton_kernel_wrap.create_leaf_spec("source"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (triton_kernel_wrap.create_leaf_spec("block"),),
+                    is_constexpr=True,
+                ),
+            ),
+        )
+        normalized = ("x", (16,))
+        materialized = triton_kernel_wrap.materialize_aggregate(spec, normalized)
+        self.assertEqual(materialized.source, "x")
+        self.assertIsInstance(materialized.options, tl.constexpr)
+        self.assertEqual(materialized.options.value, (16,))
+        constant = triton_kernel_wrap.materialize_aggregate(
+            spec, normalized, wrap_with_constexpr=False
+        )
+        self.assertEqual(constant.source, "x")
+        self.assertEqual(constant.options, (16,))
+
+        wrapper = object.__new__(PythonWrapperCodegen)
+        with mock.patch.object(
+            PythonWrapperCodegen,
+            "maybe_add_udtk_aggregate_type_def",
+            return_value="Config",
+        ):
+            source = wrapper._prepare_udtk_aggregate_call_str(
+                spec, normalized, leaf_fn=str
+            )
+        self.assertEqual(
+            source,
+            "Config(source=x, options=tl.constexpr((16,)))",
+        )
 
     def test_aggregate_type_metadata_uses_fx_literals(self):
         from torch._higher_order_ops import triton_kernel_wrap
