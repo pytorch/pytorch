@@ -25,7 +25,6 @@ yet.
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import hashlib
 import importlib.machinery
@@ -38,13 +37,11 @@ import types
 from typing import TYPE_CHECKING
 
 import torch
-import torch._functorch.config as functorch_config
 from torch._guards import ChainedSource
 from torch.compiler._precompile_types import PrecompileSummary
 from torch.utils._config_module import ConfigModule
 
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
-from .exc import PackageError
 from .guards import CheckFunctionManager
 from .source import (
     AttrSource,
@@ -57,64 +54,13 @@ from .source import (
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from torch._guards import Source
     from torch.compiler._precompile_types import GuardFact as _GuardFact
 
     from .package import _DynamoCacheEntry
     from .types import GuardFilterEntry
-
-
-@contextlib.contextmanager
-def _capture_config(training: bool) -> Iterator[None]:
-    """The compiler configuration a multi-graph capture's calls run under.
-
-    Backends serialize into the artifact (``bundled_autograd_cache``) rather
-    than the process-local inductor cache. A training capture lowers its
-    backward eagerly: AOTAutograd otherwise defers it to the first
-    ``.backward()``, and a capture that never makes one records no backend.
-    ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
-    guards reach the artifact; it also extends the lifetime of objects the frame
-    holds -- with it on, a weakref callback on a value the frame captured does
-    not fire when the caller drops its reference (test/dynamo/test_repros.py
-    ReproTests.test_weakref_callback).
-
-    Every scope patches and restores for itself: ``config.patch`` is re-entrant
-    and per-thread, so nested scopes unwind in order (an inner ``training=True``
-    still lowers the backward) and a worker thread sees only its own.
-    """
-    if torch.compiler.config.force_disable_caches:
-        raise PackageError(
-            "Cannot precompile with torch.compiler.config.force_disable_caches=True: "
-            "compiled backends reach the artifact through the AOTAutograd cache, "
-            "which that setting turns off, so the capture would record no graphs"
-        )
-    functorch_patch = {
-        "bundled_autograd_cache": True,
-        # AOTAutogradCache refuses to KEY a graph it cannot address soundly -- a
-        # graph calling anything outside its allowlist -- and a refusal means it
-        # never saves, so the bundled artifact precompile needs is never
-        # recorded and the capture ends with nothing to serialize. That gate
-        # asks whether the key tells this graph's behaviour apart from
-        # another's, which a precompile artifact does not depend on: it is
-        # addressed by backend id and pinned to one torch build, so fall back to
-        # a nonce key rather than declining, as torch._dynamo.aot_compile and
-        # aot_compile_joint_with_descriptors already do.
-        "bypass_autograd_cache_key": True,
-    }
-    if training:
-        functorch_patch["force_non_lazy_backward_lowering"] = True
-    # AOTAutogradCache honours strict_precompile when it loads but not when it
-    # saves: a bundled entry that fails to pickle is dropped with a warning and
-    # the capture is short one backend, so raise where the pickle fails instead.
-    if torch._dynamo.config.strict_precompile:
-        functorch_patch["strict_autograd_cache"] = True
-    with (
-        functorch_config.patch(functorch_patch),
-        torch._dynamo.config.patch(allow_empty_graphs=True),
-    ):
-        yield
 
 
 def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
