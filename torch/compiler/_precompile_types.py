@@ -26,11 +26,21 @@ class GuardFact:
             the ``Guard.name`` with local scope stripped (``L['x']`` -> ``x``),
             the same spelling as the ``(guard_type, source)`` slots of
             ``PrecompileSummary``: ``"x"``, ``"self.eps"``, ``"G['CFG'].width"``.
-            Empty for a guard checked against no source.
+            Empty for a guard checked against no source. A data key the name
+            interpolates is masked like the values in ``code`` below, so a dict
+            slot reads ``"cfg[<str>]"``, while a key that reads as a name
+            (``"G['CFG']"``) is kept: that one spells the source, not a value.
         code: The rendered check parts, with the addresses Dynamo interpolates
-            scrubbed by the producer, e.g.
-            ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``; empty
-            when the guard renders none.
+            scrubbed by the producer and the values the check embeds masked by
+            type, e.g. ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``
+            and ``("L['self'].prompt == <str>",)``; empty when the guard renders
+            none. A guard that pins a string pins it BY VALUE, so the check
+            guards.py renders carries the string itself, and these reports are
+            written to a file to be committed and diffed: what a check compares
+            is named by type, and that it differed between variants is reported
+            by the slot (``PrecompileSummary.risky_dropped_guards``) rather than
+            by printing the value. The attribute name a ``hasattr`` reads is part
+            of the source and stays.
         value: A rendered fragment for what the check compares that its code does
             not show: a tensor's dtype and shape line, or ``"is <callable>"`` for
             an identity guard. Empty when the code says it all.
@@ -66,7 +76,10 @@ class PrecompileSummary:
     them, and are stated here rather than checked:
 
     * ``kept_guards`` and ``dropped_guards`` are disjoint: the filter gives a
-      slot one verdict, keep or reject.
+      slot one verdict, keep or reject. A slot nothing checks however the filter
+      voted -- a guard type whose ``GuardBuilder`` method is ``pass`` -- is in
+      NEITHER list, since no verdict took it away; ``GuardFact.enforced`` is
+      where a report says that guard is not checked.
     * ``risky_dropped_guards`` is drawn from ``dropped_guards``.
     * ``policy_dropped_guards`` is disjoint from both: a policy drop is taken
       out of the serialized copy the filter kept, once the slot held

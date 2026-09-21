@@ -77,6 +77,7 @@ Know these before relying on an artifact in production:
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import functools
 import hashlib
@@ -1173,8 +1174,111 @@ def _normalize(text: str) -> str:
     return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
 
 
+# A guard that pins a string pins it BY VALUE, so guards.py writes the value
+# into the check it renders: an EQUALS_MATCH on a system prompt renders as
+# L['self'].prompt == 'you are ...', and a dict keyed by a checkpoint path
+# renders the path inside the guard's own name. The report those renderings go
+# into is meant to be committed to a file and diffed, so every literal is masked
+# by type where the fact is recorded. What makes the report auditable is the
+# SHAPE of the check and the slot it names; that a value told two variants apart
+# is reported as a varying slot, never by printing the value.
+#
+# A key that reads as a name is not data: L['x'], G['CFG'] and ___dict__['act']
+# are how this module spells a source, so <> is allowed in it as well -- a
+# normalized global keeps its _<id>_c<n> placeholder inside the brackets.
+_SLOT_KEY = re.compile(r"\A[A-Za-z_][\w<>]*\Z")
+_QUOTED_KEY = re.compile(r"""\[(b?)('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\]""")
+_QUOTED_RUN = re.compile(r"""(b?)('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")""")
+# ___check_type_id renders as "<expr>, type=<class 'int'>", which is not one
+# expression, so the annotation comes off before the parse and goes back after.
+_CHECK_ANNOTATION = re.compile(r", type=<class '[^']*'>\Z")
+
+
+def _mask_keys(name: str) -> str:
+    """Mask the data keys a source name interpolates (cfg['/home/me/w.pt'])."""
+
+    def mask(match: re.Match[str]) -> str:
+        if not match.group(1) and _SLOT_KEY.match(match.group(2)[1:-1]):
+            return match.group(0)
+        return "[<bytes>]" if match.group(1) else "[<str>]"
+
+    return _QUOTED_KEY.sub(mask, name)
+
+
+class _MaskValues(ast.NodeTransformer):
+    """Replace the values a rendered check embeds with their type."""
+
+    def __init__(self) -> None:
+        self.masked = False
+
+    def _mask(self, node: ast.expr, kind: str) -> ast.AST:
+        self.masked = True
+        return ast.copy_location(ast.Name(id=f"<{kind}>", ctx=ast.Load()), node)
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if isinstance(node.value, str):
+            return self._mask(node, "str")
+        if isinstance(node.value, bytes):
+            return self._mask(node, "bytes")
+        # A number, a bool and None stay: the number IS the check for a length
+        # or a shape, and neither is a value a report can leak.
+        return node
+
+    def _mask_display(self, node: ast.expr) -> ast.AST:
+        # The whole display goes, not its elements: the length of a pinned list
+        # of names is as much of the value as the names are.
+        return self._mask(node, type(node).__name__.lower())
+
+    visit_List = visit_Set = visit_Dict = visit_Tuple = _mask_display
+
+    def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+        key = node.slice
+        if (
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and _SLOT_KEY.match(key.value)
+        ):
+            node.value = self.visit(node.value)  # type: ignore[assignment]
+            return node
+        return self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        name = node.func.id if isinstance(node.func, ast.Name) else ""
+        if name in ("getattr", "hasattr") and len(node.args) > 1:
+            # HASATTR renders hasattr(L['x'], 'act'): the attribute name is
+            # part of the source being read, not a value being compared.
+            node.args = [self.visit(node.args[0]), *node.args[1:]]
+            return node
+        return self.generic_visit(node)
+
+
+def _mask_values(text: str) -> str:
+    annotation = _CHECK_ANNOTATION.search(text)
+    body = text[: annotation.start()] if annotation else text
+    tail = annotation.group(0) if annotation else ""
+    try:
+        tree = ast.parse(body, mode="eval")
+    except SyntaxError:
+        # Not an expression: the saved-tensors-hooks guard renders prose
+        # ("... top_saved_tensors_hooks ids == (11, 12)"), so a quoted run is
+        # all there is to go on. Masking more than a value is the safe way to
+        # be wrong here.
+        masked = _QUOTED_RUN.sub(lambda m: "<bytes>" if m.group(1) else "<str>", body)
+        return masked + tail
+    mask = _MaskValues()
+    tree = mask.visit(tree)
+    if not mask.masked:
+        # Unparsing rewrites a check it has nothing to hide in -- it drops
+        # redundant parentheses and respells a string -- so a check without a
+        # literal is returned exactly as guards.py wrote it.
+        return text
+    return ast.unparse(tree) + tail
+
+
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
-    return tuple(_normalize(part) for part in (code_list or ()))
+    # Masked BEFORE normalizing: _normalize interpolates <id> and <n>
+    # placeholders that no longer parse as Python.
+    return tuple(_normalize(_mask_values(part)) for part in (code_list or ()))
 
 
 def _hash_text(text: str) -> str:
@@ -1852,6 +1956,10 @@ class PrecompileSession:
         self._compiled: Callable[..., object] | None = None
         self._state = threading.Condition()
         self._active_calls = 0
+        # thread id -> its in-flight calls, so summary() can tell "another
+        # thread is compiling, wait for it" from "the caller is inside the
+        # block's own callable", which it could only wait on forever.
+        self._active_call_threads: dict[int, int] = {}
         self._closing = False
         self._finished = False
 
@@ -1920,6 +2028,10 @@ class PrecompileSession:
                 raise RuntimeError("PrecompileSession is not active")
             compiled = self._compiled
             self._active_calls += 1
+            caller = threading.get_ident()
+            self._active_call_threads[caller] = (
+                self._active_call_threads.get(caller, 0) + 1
+            )
         try:
             with _capture_config(self._training):
                 result = compiled(*args, **kwargs)
@@ -1929,6 +2041,10 @@ class PrecompileSession:
         finally:
             with self._state:
                 self._active_calls -= 1
+                if self._active_call_threads[caller] > 1:
+                    self._active_call_threads[caller] -= 1
+                else:
+                    del self._active_call_threads[caller]
                 if self._active_calls == 0:
                     self._state.notify_all()
         return result
@@ -2023,22 +2139,6 @@ class PrecompileSession:
                     self._state.notify_all()
         self._recorded_exception_keys.clear()
 
-    def _record_dropped_code(
-        self, slot: tuple[str, str], code: Sequence[str] | None
-    ) -> None:
-        """Remember what a dropped slot actually checked.
-
-        The FIRST rendering, as PrecompileSummary.dropped_guard_code documents:
-        one rendering however many variants dropped the slot. A check that embeds
-        its value (EQUALS_MATCH renders L['n'] == 3) therefore tells the form of
-        the check rather than every value the slot took, and the field cannot
-        grow with the variant count.
-        """
-        rendered = " ; ".join(_render_code(code))
-        if rendered:
-            with self._state:
-                self._dropped_guard_code.setdefault(slot, rendered)
-
     def _recording_filter(
         self,
         inner: Callable[
@@ -2071,13 +2171,20 @@ class PrecompileSession:
             kept_slots: set[tuple[str, str]] = set()
             dropped_slots: set[tuple[str, str]] = set()
             risky_slots: set[tuple[str, str]] = set()
+            # Merged under the one lock acquisition below rather than taken per
+            # entry: this runs on the compiling thread for every guard of every
+            # compilation.
+            dropped_code: dict[tuple[str, str], str] = {}
             for keep, by_default, entry in zip(decisions, default_kept, entries):
                 # Normalized where the slot is RECORDED, not where it is read: a
                 # Dynamo per-process counter (__builtins_dict___14) otherwise
                 # makes one logical slot appear once per compilation, under names
                 # that change every run, and the slot lists, the risky subset and
                 # the rendered code end up spelling it three different ways.
-                slot = (entry.guard_type, _normalize(entry.name))
+                # _mask_keys as well because a source name interpolates the
+                # data key it reads (cfg['/home/me/w.pt']), and this name is
+                # what every slot list and every fact spells the source as.
+                slot = (entry.guard_type, _mask_keys(_normalize(entry.name)))
                 # A no-op type's marker is not what makes its check: GLOBAL_STATE's
                 # leaf is, so the leaf's verdict decides, not the marker's.
                 noop = entry.guard_type in _NOOP_GUARD_TYPES
@@ -2085,28 +2192,46 @@ class PrecompileSession:
                 # _is_noop_guard_type names the types GuardBuilder emits no check
                 # for beyond those markers -- EMPTY_NN_MODULE_HOOKS_DICT under
                 # skip_nnmodule_hook_guards, the default -- and FSDP_TRAINING_STATE
-                # is state GlobalStateGuard does not snapshot either. Not risky
-                # though: no filter decision dropped them.
+                # is state GlobalStateGuard does not snapshot either. Neither
+                # dropped nor risky: no filter decision took them away.
                 unchecked = entry.guard_type == "FSDP_TRAINING_STATE" or (
                     not noop and _is_noop_guard_type(entry.guard_type)
                 )
                 enforced = not unchecked and (global_state_kept if noop else keep)
                 unmodelled = entry.guard_type in _UNMODELLED_GUARD_TYPES
-                if not enforced:
-                    self._record_dropped_code(slot, entry.orig_guard.code_list)
-                (kept_slots if enforced else dropped_slots).add(slot)
-                # Risky here means a drop the default filter would not have made,
-                # or one whose fact differed between variants, which summary()
-                # decides from the fact sets recorded below.
-                if not enforced and not unchecked and by_default:
-                    risky_slots.add(slot)
+                # Rendered once per entry: the fact and the dropped-code line
+                # want the same rendering, and rendering parses the check.
+                code = _render_code(entry.orig_guard.code_list)
+                if enforced:
+                    kept_slots.add(slot)
+                elif unchecked:
+                    # NEITHER list, which is what the two of them mean: the
+                    # filter's verdict is what they report, and no verdict took
+                    # this slot away -- nothing ever checked it. GuardFact.enforced
+                    # below is where the report says so. See PrecompileSummary.
+                    pass
+                else:
+                    dropped_slots.add(slot)
+                    rendered = " ; ".join(code)
+                    if rendered:
+                        # The FIRST rendering, as
+                        # PrecompileSummary.dropped_guard_code documents: one
+                        # rendering however many variants dropped the slot, so a
+                        # check that embeds its value tells the form of the check
+                        # rather than every value the slot took.
+                        dropped_code.setdefault(slot, rendered)
+                    # Risky here means a drop the default filter would not have
+                    # made, or one whose fact differed between variants, which
+                    # summary() decides from the fact sets recorded below.
+                    if by_default:
+                        risky_slots.add(slot)
                 # Never compared, so never claimed to hold: see
                 # _UNMODELLED_GUARD_TYPES.
                 (undetermined if unmodelled else facts).add(
                     _GuardFact(
                         guard_type=entry.guard_type,
                         source=slot[1],
-                        code=_render_code(entry.orig_guard.code_list),
+                        code=code,
                         value=_value_fingerprint(entry),
                         enforced=enforced,
                     )
@@ -2126,6 +2251,8 @@ class PrecompileSession:
                 self._kept_guards |= kept_slots
                 self._dropped_guards |= dropped_slots
                 self._risky_dropped_guards |= risky_slots
+                for slot, rendered in dropped_code.items():
+                    self._dropped_guard_code.setdefault(slot, rendered)
                 # One object per distinct fact, so a recompiled frame repeating
                 # nearly all of its guards costs facts rather than variants.
                 facts = {pool.setdefault(f, f) for f in facts}
@@ -2175,25 +2302,52 @@ class PrecompileSession:
         return varying
 
     def summary(self) -> PrecompileSummary:
+        """The report for the capture so far.
+
+        Callable while the block is open, and it WAITS for the calls in flight:
+        reading the package's cache entry needs no compile holding it, which is
+        what ``CompilePackage.validate`` refuses, so a concurrent capture call
+        would otherwise make this raise ``AssertionError`` on the reader's
+        thread. A call from inside the block's own callable cannot be waited for
+        -- it would be waiting on itself -- so that raises instead of hanging.
+
+        ``truncated`` is left empty here because the recompile-limit bookkeeping
+        that fills it is not part of this build, so ``complete`` cannot see a
+        frame that hit the limit: read it as "complete apart from that".
+        """
         # Snapshotted under the lock because a compile on another thread records
         # into the sets below, and a reader wants one consistent view. The
         # slots are already normalized, so every list here spells one slot the
         # same way and risky_dropped_guards really is a subset of dropped_guards.
         with self._state:
+            if self._active_call_threads.get(threading.get_ident()):
+                raise RuntimeError(
+                    "PrecompileSession.summary() cannot be called from inside a "
+                    "capture call: it would wait for that call to finish. Call "
+                    "it from the block, or after it."
+                )
+            while self._active_calls:
+                self._state.wait()
             dropped = set(self._dropped_guards)
             kept = set(self._kept_guards)
             # Two routes, per risky_dropped_guards: a drop the default filter
             # would not have made, and a drop whose value told the variants
             # apart. Merely being absent from one variant is neither -- that
             # flags every ordinary multi-branch capture.
-            risky = self._risky_dropped_guards | self._value_varying_slots()
+            # Intersected with dropped because a fact of a slot nothing checks
+            # varies like any other, and risky_dropped_guards is a subset of
+            # dropped_guards.
+            risky = self._risky_dropped_guards | (self._value_varying_slots() & dropped)
             dropped_code = dict(self._dropped_guard_code)
             capture_errors = list(self._capture_errors)
             guard_sets = {
                 frame: list(variants) for frame, variants in self._guard_sets.items()
             }
+            # Under the lock the drain above left held, so no call can start
+            # between the two and reach a compile while the entry is read.
+            entry = self._package.cache_entry()
         return _summarize(
-            self._package.cache_entry(),
+            entry,
             dropped=dropped,
             kept=kept,
             # The invariance policy that would prune a kept guard is not part of
