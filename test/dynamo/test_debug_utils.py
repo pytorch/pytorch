@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import ast
+import itertools
 import math
 import os
 from unittest.mock import patch
@@ -10,7 +11,7 @@ import torch._dynamo
 import torch._dynamo.config
 from torch._dynamo import debug_utils
 from torch._dynamo.debug_utils import (
-    _serialize_storage_nbytes,
+    _serialize_sym_expr,
     aot_graph_input_parser,
     generate_env_vars_string,
     NNModuleToString,
@@ -39,7 +40,7 @@ class TestDebugUtils(TestCase):
         symbol = shape_env.create_symbol(4, ConstantSource("storage_size"))
         expr = 4 * symbol + 18428 * Max(1, symbol)
         nbytes = torch.SymInt(SymNode(expr, shape_env, int, hint=73728))
-        source = _serialize_storage_nbytes(nbytes)
+        source = _serialize_sym_expr(nbytes)
 
         self.assertNotIn("Max", source)
         for value in (0, 1, 4):
@@ -50,11 +51,58 @@ class TestDebugUtils(TestCase):
 
         floor_expr = floor(symbol / 2)
         floor_nbytes = torch.SymInt(SymNode(floor_expr, shape_env, int, hint=2))
-        floor_source = _serialize_storage_nbytes(floor_nbytes)
+        floor_source = _serialize_sym_expr(floor_nbytes)
         self.assertIn("math.floor", floor_source)
         self.assertEqual(
             eval(floor_source, {"math": math}, {str(symbol): 4}),
             2,
+        )
+
+    def test_input_writer_symbolic_tensor_metadata_is_python(self):
+        from torch._dynamo.debug_utils import InputWriter
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.functions import CeilToInt, IntTrueDiv
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(64, ConstantSource("s33"))
+        # 32*ceil(s33/32) reprs as 32*CeilToInt(IntTrueDiv(s33, 32)) under sympy
+        expr = 32 * CeilToInt(IntTrueDiv(symbol, 32))
+        dim = torch.SymInt(SymNode(expr, shape_env, int, hint=64))
+
+        writer = InputWriter(None)
+        with FakeTensorMode(shape_env=shape_env):
+            base = torch.empty(4, dim, device="cpu")
+            writer.tensor("shape_arg", base)
+            writer.tensor("stride_arg", base.transpose(0, 1))
+            writer.tensor("offset_arg", base[1])
+
+        source = "\n".join(writer.lines())
+        self.assertIn("math.ceil", source)
+        self.assertNotIn("CeilToInt", source)
+        self.assertNotIn("IntTrueDiv", source)
+
+        class Reader:
+            def __init__(self):
+                self.tensors = []
+
+            def storage(self, storage_hash, nbytes, **kwargs):
+                return nbytes
+
+            def tensor(self, buf, shape, stride=None, *, storage_offset=0, **kwargs):
+                self.tensors.append((shape, stride, storage_offset))
+
+        # The repro preamble imports math and torch (sym_max shows up in
+        # contiguous strides); the symbol is bound by the caller.
+        namespace = {"math": math, "torch": torch, str(symbol): 64}
+        exec(source, namespace)
+        reader = Reader()
+        namespace["load_args"](reader)
+        self.assertEqual(
+            reader.tensors,
+            [((4, 64), None, 0), ((64, 4), (1, 64), 0), ((64,), None, 64)],
         )
 
     def test_repro_templates_import_symexpr_dependencies(self):
@@ -126,6 +174,44 @@ def forward(self, x_1):
     return (convert_element_type, _to_copy, full, empty)
     """,
         )
+
+    def test_cast_model_to_fp64_disables_half_to_float(self):
+        for op_name, overload, use_kwargs in itertools.product(
+            ("_softmax", "_log_softmax"),
+            ("default", "out"),
+            (False, True),
+        ):
+            with self.subTest(
+                op_name=op_name, overload=overload, use_kwargs=use_kwargs
+            ):
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                op = getattr(getattr(torch.ops.aten, op_name), overload)
+                kwargs = {}
+                inputs = [torch.randn(2, 4, dtype=torch.float16)]
+                if overload == "out":
+                    kwargs["out"] = graph.placeholder("out")
+                    inputs.append(torch.empty(2, 4, dtype=torch.float16))
+                if use_kwargs:
+                    kwargs["half_to_float"] = True
+                    output = graph.call_function(op, args=(x, 1), kwargs=kwargs)
+                else:
+                    output = graph.call_function(op, args=(x, 1, True), kwargs=kwargs)
+                graph.output(output)
+                model = torch.fx.GraphModule({}, graph)
+
+                fp64_model, fp64_inputs = debug_utils.cast_to_fp64(model, inputs)
+                softmax = next(
+                    node
+                    for node in fp64_model.graph.nodes
+                    if node.op == "call_function"
+                )
+                half_to_float = (
+                    softmax.kwargs["half_to_float"] if use_kwargs else softmax.args[2]
+                )
+
+                self.assertFalse(half_to_float)
+                self.assertEqual(fp64_model(*fp64_inputs).dtype, torch.float64)
 
     @patch.dict(
         os.environ,
