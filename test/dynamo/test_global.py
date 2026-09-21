@@ -623,6 +623,50 @@ fn = functools.partial(my_fn)
             self.assertTrue(same(compiled(x), x + 1))
             self.assertNotIn("flag", mod.__dict__)
 
+    def test_delete_global_then_store_order(self):
+        # Eager `del g; g = 7` re-adds the name at the end of the module
+        # __dict__; the replayed delete has to run before the store to match.
+        with temp_globals(globals(), _dg_a=1, _dg_order_marker=2):
+            x = torch.ones(2, 2)
+
+            def fn(x):
+                global _dg_a
+                del _dg_a
+                _dg_a = 7
+                return x + 1
+
+            keys = list(globals())
+            self.assertLess(keys.index("_dg_a"), keys.index("_dg_order_marker"))
+
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(_dg_a, 7)
+
+            keys = list(globals())
+            self.assertLess(keys.index("_dg_order_marker"), keys.index("_dg_a"))
+
+    def test_delete_global_crossfile_then_store_order(self):
+        with crossfile_globals(delete_then_store_value=1, order_marker=2) as mod:
+
+            def fn(x):
+                mod.delete_then_store_value_fn()
+                return x + 1
+
+            x = torch.ones(2, 2)
+            keys = list(mod.__dict__)
+            self.assertLess(
+                keys.index("delete_then_store_value"), keys.index("order_marker")
+            )
+
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(mod.delete_then_store_value, 7)
+
+            keys = list(mod.__dict__)
+            self.assertLess(
+                keys.index("order_marker"), keys.index("delete_then_store_value")
+            )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

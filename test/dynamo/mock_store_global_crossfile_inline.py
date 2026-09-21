@@ -40,3 +40,12 @@ def store_then_delete_multi_stream_tensor_fn(x, y, device):
     e.wait()
     del store_then_delete_multi_stream_tensor_value
     return z0, z
+
+
+delete_then_store_value = 1
+
+
+def delete_then_store_value_fn():
+    global delete_then_store_value
+    del delete_then_store_value
+    delete_then_store_value = 7
