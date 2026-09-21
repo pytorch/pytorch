@@ -2,7 +2,6 @@
 from ._IR import Pipe, pipe_split, pipeline, SplitPoint
 from .schedules import (
     _ScheduleForwardOnly,
-    PipelineStageInfo,
     Schedule1F1B,
     ScheduleDualPipeV,
     ScheduleGPipe,
@@ -11,7 +10,7 @@ from .schedules import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from .stage import build_stage, PipelineStage
+from .stage import build_stage, PipelineStage, PipelineStageInfo
 
 
 __all__ = [
