@@ -1747,6 +1747,28 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     }
   }
 
+  // Reuse a broadcast right-hand matrix without materializing one copy per
+  // batch. Folding contiguous left-hand batches also lets BF16
+  // inputs use a matrix-matrix kernel instead of separate matrix-vector calls.
+  // Keep the small-matrix kernel and aliased outputs on their existing paths.
+  // Leave FP16 on its existing path: not all CPU addmm backends support it.
+  if (bs > 1 && contraction_size * res_rows * res_cols >= 400 &&
+      batch2.stride(0) == 0 && batch1.is_contiguous() &&
+      self_or_result.is_contiguous() &&
+      batch1.scalar_type() == kBFloat16 &&
+      !self_or_result.is_alias_of(batch1) &&
+      !self_or_result.is_alias_of(batch2)) {
+    auto result_2d = self_or_result.view({bs * res_rows, res_cols});
+    addmm_impl_cpu_(
+        result_2d,
+        result_2d,
+        batch1.view({bs * res_rows, contraction_size}),
+        batch2.select(0, 0),
+        beta,
+        alpha);
+    return;
+  }
+
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
     const auto sizes = t.sizes();
     const auto strides = t.strides();
