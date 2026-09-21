@@ -152,13 +152,13 @@ class TestProfilerCUDA(TestCase):
         )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/78457")
-    def test_mem_leak(self, device):
+    def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA"""
-        t = torch.rand(1, 1).to(device)
+        t = torch.rand(1, 1).cuda()
         p = psutil.Process()
         last_rss = collections.deque(maxlen=5)
         for _ in range(10):
-            with _profile(use_device=torch.device(device).type):
+            with _profile(use_device="cuda"):
                 for _ in range(1024):
                     t = torch.mm(t, t)
 
@@ -179,7 +179,7 @@ class TestProfilerCUDA(TestCase):
             msg=lambda msg: f"{msg}\nmemory usage is increasing, {str(last_rss)}",
         )
 
-    def test_custom_module_input_op_ids(self, device):
+    def test_custom_module_input_op_ids(self):
         class MyFunc(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -197,14 +197,14 @@ class TestProfilerCUDA(TestCase):
         # Only testing that emit_nvtx runs when
         # record_shapes option is enabled.
         with torch.autograd.profiler.emit_nvtx(record_shapes=True) as prof:
-            x = torch.randn(10, 10, device=device, requires_grad=True)
-            y = torch.randn(10, 10, device=device, requires_grad=True)
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
             z = x + y
             s = custom_layer(z)
             q = s.sum()
             q.backward()
 
-    def test_cudagraph_profiling_workaround(self, device):
+    def test_cudagraph_profiling_workaround(self):
         import subprocess
 
         # repro taken from #75504
@@ -214,7 +214,7 @@ class TestProfilerCUDA(TestCase):
             [
                 sys.executable,
                 "-c",
-                f"""
+                """
 import os
 import torch
 from torch.profiler import ProfilerActivity, profile
@@ -222,16 +222,16 @@ from torch.profiler import ProfilerActivity, profile
 def add_one(in_: torch.Tensor):
     return in_ + 1
 
-sample_arg = torch.zeros(10, device="{device}").requires_grad_(True)
+sample_arg = torch.zeros(10, device="cuda").requires_grad_(True)
 
 # add this before cuda graphs are created
 torch.profiler._utils._init_for_cuda_graphs()
 
 add_one_graphed = torch.cuda.graphs.make_graphed_callables(add_one, sample_args=(sample_arg,))
-zeros = torch.zeros(10, device="{device}")
+zeros = torch.zeros(10, device="cuda")
 out = add_one_graphed(zeros)
 if out[0] != 1:
-    raise AssertionError(f"Expected out[0] == 1, got {{out[0]}}")
+    raise AssertionError(f"Expected out[0] == 1, got {out[0]}")
 
 with profile(activities=[ProfilerActivity.CPU]):
     add_one_graphed(zeros)
@@ -248,12 +248,11 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
-    def test_kineto_multigpu(self, device):
-        device_type = device.split(":")[0]
+    def test_kineto_multigpu(self):
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
             for gpu_id in [0, 1]:
-                x = torch.randn(10, 10, device=f"{device_type}:{gpu_id}")
-                y = torch.randn(10, 10, device=f"{device_type}:{gpu_id}")
+                x = torch.randn(10, 10).cuda(gpu_id)
+                y = torch.randn(10, 10).cuda(gpu_id)
                 z = x.matmul(y)
                 torch.cuda.synchronize(gpu_id)
 
@@ -286,7 +285,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
     @unittest.skipIf(
         IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared"
     )
-    def test_oom_tracing(self, device):
+    def test_oom_tracing(self):
         def run_profiler(tensor_creation_fn):
             with _profile(profile_memory=True, record_shapes=True) as prof:
                 with self.assertRaisesRegex(RuntimeError, ".*[tT]ried to allocate.*"):
@@ -294,6 +293,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 return prof
 
         def create_cuda_tensor_oom():
+            device = torch.device("cuda:0")
             return torch.empty(
                 1024, 1024, 1024, 1024, dtype=torch.float32, device=device
             )
@@ -324,7 +324,8 @@ with profile(activities=[ProfilerActivity.CUDA]):
             check_trace(fname)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_profiler_cuda_sync_events(self, device):
+    def test_profiler_cuda_sync_events(self):
+        device = torch.device("cuda:0")
         t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
 
         def workload() -> None:
@@ -365,7 +366,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_disable_external_correlation(self, device):
+    def test_disable_external_correlation(self):
         cuda_external_id_events = {"cuda_runtime", "gpu_memcpy", "kernel"}
         activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
 
@@ -403,16 +404,16 @@ with profile(activities=[ProfilerActivity.CUDA]):
                     disable_external_correlation=disable_external_correlation
                 ),
             ) as prof:
-                self.payload(device=device, tensor_size=256)
+                self.payload(device="cuda", tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_activity_filter_mixed_syntax(self, device):
+    def test_activity_filter_mixed_syntax(self):
         """Enum and dict entries can coexist for different activity groups."""
         activities = [ProfilerActivity.CPU, {ProfilerActivity.CUDA: ["GPU_MEMCPY"]}]
         with profile(activities=activities) as p:
             with record_function("test_annotation"):
-                x = torch.randn(10, 10).to(device)
+                x = torch.randn(10, 10).to("cuda")
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
 
@@ -4469,7 +4470,7 @@ class TestProfilerEventsParityCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
-    def test_structured_metadata_matches_chrome_trace(self, device):
+    def test_structured_metadata_matches_chrome_trace(self):
         # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
         # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs
         # 2. Parse each event instance in the json and events() to create a key->value mapping
@@ -4619,7 +4620,7 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
                 lambda msg: f"{msg}\n{key}: structured metadata differs between events() and Chrome trace JSON",
             )
 
-    def test_typed_metadata_matches_chrome_trace(self, device):
+    def test_typed_metadata_matches_chrome_trace(self):
         # Match events to Chrome trace records by identity (via name, cat, external/correlation id),
         # then verify every metadata field has the same value in the matching trace record.
         target_cats = ("cuda_runtime", "gpu_memcpy", "kernel")
@@ -5209,13 +5210,13 @@ class TestMetadataJsonFormat(TestCase):
             f"trace_activities_types={dict(raw_types)} events_cats={dict(event_cats)}"
         )
 
-    def test_metadata_json_is_valid_json_fragment(self, device):
+    def test_metadata_json_is_valid_json_fragment(self):
         md = self._get_kernel_metadata()
         parsed = json.loads("{" + md + "}")
         self.assertIsInstance(parsed, dict)
         self.assertGreater(len(parsed), 0)
 
-    def test_kernel_metadata_has_expected_fields(self, device):
+    def test_kernel_metadata_has_expected_fields(self):
         md = self._get_kernel_metadata()
         parsed = json.loads("{" + md + "}")
         common_keys = ["device", "stream", "correlation", "grid", "block"]
