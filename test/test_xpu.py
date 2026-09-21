@@ -457,38 +457,74 @@ print(f"{r1}, {r2}")
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
-    def test_cached_zes_device_infos(self):
+    @parametrize("mask", ["0,1", "0", "1"])
+    def test_cached_zes_device_infos(self, mask):
         test_script = """\
 import torch
-import os
-from torch.xpu import _cached_zes_device_infos, _parse_visible_devices, _enum_zes_device_infos
+import pyzes
+import warnings
+from ctypes import byref, c_uint32
+from torch.xpu import (
+    _cached_zes_device_infos, _enum_zes_device_infos, _parse_visible_devices,
+    _zes_check, _zes_ensure_device_infos,
+)
 
-def device_key(info):
-    return (info.device_handle.value, info.subdevice_id)
+with warnings.catch_warnings(record=True) as discovery_warnings:
+    warnings.simplefilter("always")
+    count = _enum_zes_device_infos(_parse_visible_devices())
+lazy = not torch.xpu.is_initialized()
+tile_query_failed = any(
+    "Can't cache Sysman tile UUIDs:" in str(warning.message)
+    for warning in discovery_warnings
+)
+eager = tile_query_failed or len(_cached_zes_device_infos) == count
 
-# Enumerate both devices and snapshot their keys
-os.environ['ZE_AFFINITY_MASK'] = '0, 1'
-_enum_zes_device_infos(_parse_visible_devices())
-orig_keys = [device_key(info) for info in _cached_zes_device_infos]
+driver_count = c_uint32(0)
+_zes_check(pyzes.zesDriverGet(byref(driver_count), None), "Driver count")
+drivers = (pyzes.zes_driver_handle_t * driver_count.value)()
+_zes_check(pyzes.zesDriverGet(byref(driver_count), drivers), "Driver handles")
+def matches_sysman(device_uuid, info):
+    uuid = pyzes.zes_uuid_t.from_buffer_copy(device_uuid)
+    for driver in drivers:
+        handle = pyzes.zes_device_handle_t()
+        on_subdevice = pyzes.ze_bool_t()
+        subdevice_id = c_uint32(0)
+        rc = pyzes.zesDriverGetDeviceByUuidExp(
+            driver, uuid, byref(handle), byref(on_subdevice), byref(subdevice_id)
+        )
+        if rc == pyzes.ZE_RESULT_ERROR_INVALID_ARGUMENT:
+            continue
+        _zes_check(rc, "Device UUID lookup")
+        expected_subdevice = subdevice_id.value if on_subdevice.value else None
+        expected = (handle.value, expected_subdevice)
+        return (info.device_handle.value, info.subdevice_id) == expected
+    return False
 
-# Restrict to device 1 only; cached entry should match orig device 1
-os.environ['ZE_AFFINITY_MASK'] = '1'
-_enum_zes_device_infos(_parse_visible_devices())
-match1 = orig_keys[1] == device_key(_cached_zes_device_infos[0])
+eager_matches = all(
+    matches_sysman(uuid, info) for uuid, info in _cached_zes_device_infos.items()
+)
+device = torch._C._xpu_getDeviceCount() - 1
+device_uuid = bytes(torch.xpu.get_device_properties(device).uuid.bytes)
+_cached_zes_device_infos.pop(device_uuid, None)
+_zes_ensure_device_infos(device)
+info = _cached_zes_device_infos[device_uuid]
+matches = matches_sysman(device_uuid, info)
 
-# Restrict to device 0 only; cached entry should match orig device 0
-os.environ['ZE_AFFINITY_MASK'] = '0'
-_enum_zes_device_infos(_parse_visible_devices())
-match0 = orig_keys[0] == device_key(_cached_zes_device_infos[0])
-print(match1, match0)
+torch.xpu.set_device(device)
+_zes_ensure_device_infos(-1)
+cached = info is _cached_zes_device_infos[device_uuid]
+valid_keys = all(isinstance(k, bytes) and len(k) == 16 for k in _cached_zes_device_infos)
+print(lazy, eager, eager_matches, count == torch.xpu.device_count(), matches, cached, valid_keys)
 """
+        env = {**os.environ, "ZE_AFFINITY_MASK": mask}
+        env.pop("ONEAPI_DEVICE_SELECTOR", None)
         r = (
-            subprocess.check_output([sys.executable, "-c", test_script])
+            subprocess.check_output([sys.executable, "-c", test_script], env=env)
             .decode("ascii")
             .strip()
             .splitlines()[-1]
         )
-        self.assertEqual("True True", r)
+        self.assertEqual("True True True True True True True", r)
 
     def test_device_telemetry_api_without_ze_loader(self):
         # Simulate libze_loader.so.1 missing: pyzes raises OSError at import

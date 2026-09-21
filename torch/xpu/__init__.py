@@ -63,7 +63,11 @@ class _ZesDeviceInfo:
     memory_handle: c_void_p | None = None
 
 
-_cached_zes_device_infos: list[_ZesDeviceInfo] = []
+# Keyed by the 16-byte device UUID.
+_cached_zes_device_infos: dict[bytes, _ZesDeviceInfo] = {}
+# pyzes < 0.1.2 uses 0x2E instead of the Level Zero ABI value 0x00020004.
+# Upstream fix: https://github.com/oneapi-src/level-zero/pull/465
+_ZES_STRUCTURE_TYPE_SUBDEVICE_EXP_PROPERTIES = 0x00020004
 # Interval between two HW counter reads; must be >=100ms for fresh data.
 _zes_sample_interval_ms = 150
 
@@ -125,14 +129,16 @@ def _parse_visible_devices(strict=False) -> list[int]:
     return visible_devices
 
 
-def _enum_zes_device_infos(visible_mask: list[int]) -> int:
+def _enum_zes_device_infos(
+    visible_mask: list[int], *, requested_uuid: bytes | None = None
+) -> int:
     r"""Enumerate visible XPU devices via Level Zero Sysman and cache their info.
 
     Enumerates devices from the first Level Zero Sysman driver and counts those
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
-    The populated ``_cached_zes_device_infos`` list is indexed by PyTorch
-    device ordinal.
+    The populated ``_cached_zes_device_infos`` dictionary is keyed by UUID.
+    Each visible root or tile is cached under its own UUID.
 
     Discrete GPUs (dGPUs) take priority: if any visible dGPU is found, only
     dGPUs are counted; integrated GPUs (iGPUs) are counted only when no
@@ -146,14 +152,22 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     - **COMPOSITE**: sub-devices are hidden; the whole physical device
       counts as one.
 
-    Returns the visible device count, or a negative value on failure.
+    If tile UUID discovery fails, counting still uses the topology properties;
+    UUID-specific requests can fill missing cache entries later.
+
+    If ``requested_uuid`` is given, resolve only that root or tile UUID,
+    independently of the ordinal mask, and return 1 on success. This lets
+    monitoring find a SYCL-selected device without assuming Sysman order.
+
+    Otherwise, return the visible device count. Return a negative value
+    on failure. Neither path initializes SYCL.
     """
     try:
         import pyzes  # type: ignore[import]
     except Exception:
         return -1
 
-    global _cached_zes_device_infos
+    ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
 
     def _zes_check_warn(rc: int, msg: str) -> bool:
         """Return True if the call failed (rc != ZE_RESULT_SUCCESS) after issuing a warning."""
@@ -171,13 +185,56 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     ):
         return -1
     if driver_count.value == 0:
-        return 0
+        return -1 if requested_uuid is not None else 0
 
     drivers = (pyzes.zes_driver_handle_t * driver_count.value)()
     if _zes_check_warn(
         pyzes.zesDriverGet(byref(driver_count), drivers),
         "Can't get Level Zero Sysman driver handles",
     ):
+        return -1
+
+    if requested_uuid is not None:
+        uuid = pyzes.zes_uuid_t.from_buffer_copy(requested_uuid)
+        for driver in drivers:
+            handle = pyzes.zes_device_handle_t()
+            on_subdevice = pyzes.ze_bool_t()
+            subdevice_id = c_uint32(0)
+            try:
+                rc = pyzes.zesDriverGetDeviceByUuidExp(
+                    driver,
+                    uuid,
+                    byref(handle),
+                    byref(on_subdevice),
+                    byref(subdevice_id),
+                )
+            except AttributeError:
+                warnings.warn("Sysman device UUID lookup is unavailable.", stacklevel=2)
+                return -1
+            if rc == pyzes.ZE_RESULT_ERROR_INVALID_ARGUMENT:
+                continue  # This driver does not contain the requested UUID.
+            if _zes_check_warn(rc, "Can't resolve the device UUID in Sysman"):
+                return -1
+            if not handle:
+                return -1
+            props = pyzes.zes_device_properties_t()
+            props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES
+            ext_props = pyzes.zes_device_ext_properties_t()
+            ext_props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_EXT_PROPERTIES
+            props.pNext = cast(pointer(ext_props), c_void_p)
+            if _zes_check_warn(
+                pyzes.zesDeviceGetProperties(handle, byref(props)),
+                "Can't get Level Zero Sysman device properties",
+            ):
+                return -1
+            _cached_zes_device_infos[requested_uuid] = _ZesDeviceInfo(
+                device_handle=handle,
+                subdevice_id=subdevice_id.value if on_subdevice.value else None,
+                is_integrated=bool(
+                    ext_props.flags & ZES_DEVICE_PROPERTY_FLAG_INTEGRATED
+                ),
+            )
+            return 1
         return -1
 
     device_count = c_uint32(0)
@@ -195,7 +252,6 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         return -1
 
     # --- Count visible dGPUs and iGPUs ---
-    ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
     expose_subdevices = os.getenv("ZE_FLAT_DEVICE_HIERARCHY") != "COMPOSITE"
 
     _cached_zes_device_infos.clear()
@@ -223,15 +279,45 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
         num_slots = props.numSubdevices if tiled else 1
 
+        tile_uuids = {}
+        if tiled:
+            try:
+                subdevice_count = c_uint32(num_slots)
+                subdevice_type = pyzes.zes_subdevice_exp_properties_t
+                subdevices = (subdevice_type * num_slots)()
+                for subdevice in subdevices:
+                    subdevice.stype = _ZES_STRUCTURE_TYPE_SUBDEVICE_EXP_PROPERTIES
+                _zes_check(
+                    pyzes.zesDeviceGetSubDevicePropertiesExp(
+                        device, byref(subdevice_count), subdevices
+                    ),
+                    "Can't get Level Zero Sysman subdevice UUIDs",
+                )
+                tile_uuids = {
+                    subdevice.subdeviceId: bytes(subdevice.uuid.id)
+                    for subdevice in subdevices[: subdevice_count.value]
+                    if any(subdevice.uuid.id)
+                }
+                if any(slot not in tile_uuids for slot in range(num_slots)):
+                    warnings.warn(
+                        "Can't cache Sysman tile UUIDs: some tile IDs have no UUID.",
+                        stacklevel=2,
+                    )
+            except (AttributeError, RuntimeError) as e:
+                warnings.warn(f"Can't cache Sysman tile UUIDs: {e}", stacklevel=2)
+
         for slot in range(num_slots):
             if logical_index in visible:
-                _cached_zes_device_infos.append(
-                    _ZesDeviceInfo(
+                if tiled:
+                    device_uuid = tile_uuids.get(slot, b"")
+                else:
+                    device_uuid = bytes(ext_props.uuid.id)
+                if any(device_uuid):
+                    _cached_zes_device_infos[device_uuid] = _ZesDeviceInfo(
                         device_handle=device,
                         subdevice_id=slot if tiled else None,
                         is_integrated=is_integrated,
                     )
-                )
                 if is_integrated:
                     num_igpu += 1
                 else:
@@ -240,9 +326,9 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
 
     # dGPUs take priority; strip iGPUs when at least one dGPU is visible.
     if num_dgpu and num_igpu:
-        _cached_zes_device_infos = [
-            info for info in _cached_zes_device_infos if not info.is_integrated
-        ]
+        for uuid in list(_cached_zes_device_infos):
+            if _cached_zes_device_infos[uuid].is_integrated:
+                del _cached_zes_device_infos[uuid]
     return num_dgpu or num_igpu
 
 
@@ -815,15 +901,17 @@ def _zes_check(rc: int, msg: str) -> None:
 
 def _zes_ensure_device_infos(device: int):
     """Ensure the ZES device info cache is populated and validate the device index."""
-    if not _cached_zes_device_infos:
-        if _enum_zes_device_infos(_parse_visible_devices(strict=True)) < 0:
+    device_uuid = bytes(get_device_properties(device).uuid.bytes)
+    if not any(device_uuid):
+        raise RuntimeError(f"XPU device {device} does not provide a UUID for Sysman.")
+    if device_uuid not in _cached_zes_device_infos:
+        if (
+            _enum_zes_device_infos(_parse_visible_devices(), requested_uuid=device_uuid)
+            < 0
+        ):
             raise RuntimeError("Failed to enumerate devices via Level Zero Sysman.")
-
-    total_devices = len(_cached_zes_device_infos)
-    if device >= total_devices:
-        raise RuntimeError(
-            f"The device {device} is out of range for Level Zero Sysman. It must be in the range [0, {total_devices})."
-        )
+    if device_uuid not in _cached_zes_device_infos:
+        raise RuntimeError(f"Can't find the UUID of XPU device {device} in Sysman.")
 
 
 def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
@@ -843,7 +931,8 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
 
-    info = _cached_zes_device_infos[device]
+    device_uuid = bytes(get_device_properties(device).uuid.bytes)
+    info = _cached_zes_device_infos[device_uuid]
     if info.temperature_handle is not None:
         return info.temperature_handle
 
@@ -935,7 +1024,8 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
 
-    info = _cached_zes_device_infos[device]
+    device_uuid = bytes(get_device_properties(device).uuid.bytes)
+    info = _cached_zes_device_infos[device_uuid]
     if info.frequency_handle is not None:
         return info.frequency_handle
 
@@ -1024,7 +1114,8 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
 
-    info = _cached_zes_device_infos[device]
+    device_uuid = bytes(get_device_properties(device).uuid.bytes)
+    info = _cached_zes_device_infos[device_uuid]
     if info.power_handle is not None:
         return info.power_handle
 
@@ -1149,7 +1240,8 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
 
-    info = _cached_zes_device_infos[device]
+    device_uuid = bytes(get_device_properties(device).uuid.bytes)
+    info = _cached_zes_device_infos[device_uuid]
     if info.engine_handle is not None:
         return info.engine_handle
 
@@ -1264,7 +1356,8 @@ def _zes_get_memory_handle(device: Device = None) -> c_void_p:
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
 
-    info = _cached_zes_device_infos[device]
+    device_uuid = bytes(get_device_properties(device).uuid.bytes)
+    info = _cached_zes_device_infos[device_uuid]
     if info.memory_handle is not None:
         return info.memory_handle
 

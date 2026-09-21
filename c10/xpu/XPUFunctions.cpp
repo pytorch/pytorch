@@ -32,6 +32,8 @@ namespace {
  * 2. If no dGPU is found, identify the first L0 platform containing at least
  *    one iGPU and enumerate all iGPUs on that platform.
  * 3. If neither dGPUs nor iGPUs are found, conclude that no GPUs are available.
+ * The exposed devices must form a prefix of their SYCL platform's device list
+ * so that XPU indices are the indices provided by SYCL.
  */
 thread_local DeviceIndex curDeviceIndex = 0;
 
@@ -69,9 +71,14 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   for (const auto& platform : platform_list) {
     // Find the first platform that contains at least one dGPU.
     if (has_gpu(platform, /*check_igpu=*/false)) {
-      for (const auto& device : platform.get_devices()) {
+      const auto device_count = platform.get_devices().size();
+      for (size_t index = 0; index < device_count; ++index) {
+        auto device = platform.ext_oneapi_device_at_index(index);
         // Only add all dGPUs to the device list.
         if (device.is_gpu() && !is_igpu(device)) {
+          TORCH_CHECK(
+              index == devices.size(),
+              "XPU devices must form a prefix of the SYCL platform's device list.");
           devices.push_back(std::make_unique<sycl::device>(device));
         }
       }
@@ -83,9 +90,14 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   for (const auto& platform : platform_list) {
     // Find the first platform that contains at least one iGPU.
     if (has_gpu(platform, /*check_igpu=*/true)) {
-      for (const auto& device : platform.get_devices()) {
+      const auto device_count = platform.get_devices().size();
+      for (size_t index = 0; index < device_count; ++index) {
+        auto device = platform.ext_oneapi_device_at_index(index);
         // Add all iGPUs to the device list.
         if (device.is_gpu()) { // If the device is a GPU, it must be a iGPU.
+          TORCH_CHECK(
+              index == devices.size(),
+              "XPU devices must form a prefix of the SYCL platform's device list.");
           devices.push_back(std::make_unique<sycl::device>(device));
         }
       }
@@ -238,21 +250,26 @@ void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
 DeviceIndex get_device_idx_from_pointer(void* ptr) {
   initDevicePoolCallOnce();
   TORCH_CHECK(ptr, "ptr is an invalid pointer.");
-  auto type = sycl::get_pointer_type(ptr, get_device_context());
+  auto& context = get_device_context();
+  auto type = sycl::get_pointer_type(ptr, context);
   TORCH_CHECK(
       type == sycl::usm::alloc::device, "ptr is not a device type pointer.");
 
-  sycl::device raw_device = sycl::get_pointer_device(ptr, get_device_context());
-  auto match_device = [raw_device](const auto& device) -> bool {
-    return raw_device == *device;
-  };
-  auto it = std::find_if(
-      gDevicePool.devices.begin(), gDevicePool.devices.end(), match_device);
+  sycl::device raw_device = sycl::get_pointer_device(ptr, context);
+  size_t index;
+  try {
+    index = raw_device.ext_oneapi_index_within_platform();
+  } catch (const sycl::exception& e) {
+    TORCH_CHECK(
+        e.code() != sycl::errc::invalid,
+        "Can't find the pointer from XPU devices.");
+    throw;
+  }
   TORCH_CHECK(
-      it != gDevicePool.devices.end(),
+      index < gDevicePool.devices.size() &&
+          raw_device == *gDevicePool.devices[index],
       "Can't find the pointer from XPU devices.");
-  return static_cast<DeviceIndex>(
-      std::distance(gDevicePool.devices.begin(), it));
+  return static_cast<DeviceIndex>(index);
 }
 
 DeviceIndex device_count() {

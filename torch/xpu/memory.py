@@ -657,7 +657,8 @@ def list_gpu_processes(device: "Device" = None) -> str:
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
 
-    info = _cached_zes_device_infos[device]
+    device_uuid = bytes(torch.xpu.get_device_properties(device).uuid.bytes)
+    info = _cached_zes_device_infos[device_uuid]
     device_handle = info.device_handle
     proc_count = c_uint32(0)
     _zes_check(
