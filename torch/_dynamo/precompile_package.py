@@ -1186,7 +1186,10 @@ def _pins_a_value(guard_type: str, name: str) -> bool:
 # variants guarding different values render the same fact and invent an
 # invariant neither holds.
 _OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
-_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
+# There is deliberately no rule for the saved-tensors-hooks ids the guard
+# renders ("... top_saved_tensors_hooks ids == (139, 140)"): that rendering is
+# not an expression, so _mask_values below drops it whole and _normalize never
+# sees the ids. _value_fingerprint is what names those hooks.
 # Dynamo appends a per-process counter to the builtins dict it installs, so the
 # same guard reads __builtins_dict___6 in one compilation and ___8 in the next.
 # Of the globals Dynamo mints, only the three families in
@@ -1205,7 +1208,6 @@ _DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
 
 
 def _normalize(text: str) -> str:
-    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
     text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
     return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
 
@@ -1234,29 +1236,25 @@ _MASKED_VALUE = re.compile(r"\A<[a-z]+(?::\d+)?>\Z")
 # 'lin' is, so the shape of the key cannot decide this. The BASE decides, and a
 # kept key has to be name-shaped on top of that -- <> is allowed in it because a
 # normalized global keeps its _<id>_c<n> placeholder inside the brackets.
+#
+# ONE implementation, on the tree: a source NAME is a Python expression too, so
+# _mask_keys parses it and masks it with the same pass rather than approximating
+# this rule over text, where a base is whatever precedes a bracket and every
+# spelling of it has to be guessed.
 _NAME_KEYED_SCOPES = frozenset({"L", "G", "___dict__"})
 _NAME_KEYED_DICTS = frozenset({"__dict__", "_modules", "_parameters", "_buffers"})
 _SLOT_KEY = re.compile(r"\A[A-Za-z_][\w<>]*\Z")
-_QUOTED_KEY = re.compile(r"""\[(b?)('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\]""")
-# The same rule over a source NAME, where the base is text rather than a tree:
-# the identifier the bracket hangs off, or the builtins dict's own subscript.
-_NAME_KEYED_TEXT = re.compile(
-    r"(?:\A|[^\w])(?:"
-    + "|".join(sorted(_NAME_KEYED_SCOPES | _NAME_KEYED_DICTS))
-    + r")\Z"
-)
-_BUILTINS_KEYED_TEXT = re.compile(
-    re.escape(_BUILTINS_DICT_PREFIX) + r"""[\w<>]*['"]\]\Z"""
-)
 # ___check_type_id renders as "<expr>, type=<class 'int'>", which is not one
-# expression, so the annotation comes off before the parse and goes back after.
-# Not anchored to the end, and tolerant of a quote inside the class repr: an
-# annotation left in the body costs the whole check, not just the annotation.
+# expression, so the annotation comes off before the parse and goes back where
+# it was. Tolerant of a quote inside the class repr: an annotation left in the
+# body costs the whole check, not just the annotation.
 _CHECK_ANNOTATION = re.compile(r", type=<class '.*?'>")
 # What a check that does not parse is reported as. Its own text cannot go in:
 # masking needs the shape of an expression to tell a source from a value, and an
 # arbitrary __repr__ can carry a path with no quote anywhere in it.
 _UNPARSED_CHECK = "<unparsed check>"
+# The same for a source name, where it lands in a slot rather than in a check.
+_UNPARSED_SOURCE = "<unparsed source>"
 
 
 def _keyed_by_name(base: ast.expr) -> bool:
@@ -1266,38 +1264,65 @@ def _keyed_by_name(base: ast.expr) -> bool:
     if isinstance(base, ast.Attribute):
         return base.attr in _NAME_KEYED_DICTS
     if isinstance(base, ast.Subscript):
+        # The builtins dict Dynamo installs, read out of a scope that is itself
+        # keyed by name: G['__builtins_dict___6']['print']. The prefix alone
+        # would hand the rule to whoever owns the dict, since a user dict may
+        # hold a key spelled that way, and a base whose own key was masked must
+        # not be able to keep the key under it.
         key = base.slice
         return (
-            isinstance(key, ast.Constant)
+            _keyed_by_name(base.value)
+            and isinstance(key, ast.Constant)
             and isinstance(key.value, str)
             and key.value.startswith(_BUILTINS_DICT_PREFIX)
         )
     return False
 
 
-def _keyed_by_name_text(base: str) -> bool:
-    """The same question about the text a source name spells the base as."""
-    return bool(_NAME_KEYED_TEXT.search(base) or _BUILTINS_KEYED_TEXT.search(base))
+def _mask_expr(text: str) -> tuple[str, bool] | None:
+    """``(text with its values masked, whether anything was masked)``.
+
+    ``None`` when ``text`` is not one expression, which is the fail-closed
+    case: the shape of an expression is what tells a source from a value here,
+    so a text whose shape cannot be read is reported by its caller as a
+    placeholder rather than patched.
+    """
+    try:
+        tree = ast.parse(text, mode="eval")
+    except SyntaxError:
+        return None
+    mask = _MaskValues()
+    tree = mask.visit(tree)
+    if not mask.masked:
+        # Unparsing rewrites a text it has nothing to hide in -- it drops
+        # redundant parentheses and respells a string -- so one without a
+        # literal comes back exactly as its producer wrote it.
+        return text, False
+    try:
+        return ast.unparse(tree), True
+    except ValueError:
+        # Defensive. ast.unparse raises on trees this pass does not build (a
+        # non-string constant inside an f-string is one), and reporting a fact
+        # must never be the thing that breaks a capture.
+        return None
 
 
 def _mask_keys(name: str) -> str:
-    """Mask the data keys a source name interpolates (cfg['/home/me/w.pt'])."""
+    """Mask the data keys a source name interpolates (cfg['/home/me/w.pt']).
 
-    def mask(match: re.Match[str]) -> str:
-        key = match.group(2)[1:-1]
-        if _MASKED_VALUE.match(key):
-            # A placeholder this pass already wrote, so masking a masked name
-            # again is a no-op rather than a mask of the mask.
-            return match.group(0)
-        if (
-            not match.group(1)
-            and _SLOT_KEY.match(key)
-            and _keyed_by_name_text(match.string[: match.start()])
-        ):
-            return match.group(0)
-        return "['<bytes>']" if match.group(1) else "['<str>']"
-
-    return _QUOTED_KEY.sub(mask, name)
+    The rule is the one a rendered check goes through, run by the same code: a
+    name is an expression, so it is parsed and masked as one, which is also
+    what makes a key the text could not read -- a tuple, a number, a nested
+    display -- masked rather than kept. A name that does not parse is reported
+    as ``<unparsed source>``, so two such names read as one slot instead of
+    reaching the report as their own text.
+    """
+    if not name:
+        # A guard checked against no source (SHAPE_ENV, GLOBAL_STATE). Not a
+        # name whose shape could not be read.
+        return name
+    masked = _mask_expr(name)
+    return _UNPARSED_SOURCE if masked is None else masked[0]
 
 
 class _MaskValues(ast.NodeTransformer):
@@ -1341,10 +1366,13 @@ class _MaskValues(ast.NodeTransformer):
         self, node: ast.List | ast.Set | ast.Dict | ast.Tuple
     ) -> ast.expr:
         # The whole display goes, not its elements: the names in a pinned list
-        # of names are the value. Its LENGTH stays, so two variants pinning
-        # containers of different size still read differently; two of the same
-        # size read alike, which is what a report that prints nothing from
-        # inside them costs.
+        # of names are the value, and a display nests without limit -- a list of
+        # dicts of names -- so a rule that had to look inside to stay safe is
+        # one an element shape it does not model defeats. Its LENGTH stays, so
+        # two variants pinning containers of different size still read
+        # differently; two of the same size read alike, and a display of NUMBERS
+        # (a marked-dims set, a pinned shape) reads as its length where a bare
+        # number would have been kept. That is what not looking inside costs.
         items = node.keys if isinstance(node, ast.Dict) else node.elts
         return self._mask(node, f"{type(node).__name__.lower()}:{len(items)}")
 
@@ -1389,38 +1417,48 @@ def _mask_values(text: str) -> str:
     """Name what a rendered check compares by type instead of by value.
 
     Idempotent: what it writes parses, and the placeholders survive a second
-    pass unchanged. A container is named by its type and its length alone, so
-    two variants pinning containers of the same length -- two pinned shapes,
-    two sets of marked dims -- render the same check, and what told them apart
-    has to come from ``GuardFact.value`` or from the slot; that is the price of
-    a report that prints nothing from inside a display.
+    pass unchanged. A display is masked whole rather than element by element
+    because a display can nest strings arbitrarily and a pass that stays safe
+    only by inspecting elements is defeated by an element shape it does not
+    model; it is named by its type and its length alone, so two variants pinning
+    containers of the same length -- two pinned shapes, two sets of marked dims
+    -- render the same check, and what told them apart has to come from
+    ``GuardFact.value`` or from the slot. The ``, type=<class 'int'>`` tail
+    ``___check_type_id`` appends is not part of the expression, so it comes off
+    before the parse and goes back where it was; a rendering carrying one
+    anywhere but at its end is reported as ``<unparsed check>``, since the
+    unparse regenerates the whole text and the position cannot be restored.
     """
-    annotations = _CHECK_ANNOTATION.findall(text)
-    body = _CHECK_ANNOTATION.sub("", text)
-    try:
-        tree = ast.parse(body, mode="eval")
-    except SyntaxError:
+    annotations = list(_CHECK_ANNOTATION.finditer(text))
+    masked = _mask_expr(_CHECK_ANNOTATION.sub("", text))
+    if masked is None:
         # Fail closed. A rendering that is not an expression gives nothing to
         # tell a source from a value: the saved-tensors-hooks guard renders
         # prose, and an EQUALS_MATCH on a type pytree.register_constant admits
         # renders that class's __repr__, which can carry a path with no quote
-        # anywhere in it for a textual pass to find. What such a check told two
-        # variants apart by is reported by GuardFact.value and by the slot.
+        # anywhere in it for a textual pass to find. The text goes whole, and
+        # for the hooks guard _value_fingerprint still tells two hook sets
+        # apart. For an EQUALS_MATCH on a repr nothing does: its fingerprint is
+        # "" and _pins_a_value counts bare names only, so two variants pinning
+        # different objects on one slot report one fact and the slot reads
+        # invariant. A digest of the text would tell them apart and is
+        # deliberately not written: a stable fingerprint of the value this pass
+        # exists to hide, in a file meant to be committed, is an oracle for
+        # guessing that value.
         return _UNPARSED_CHECK
-    mask = _MaskValues()
-    tree = mask.visit(tree)
-    if not mask.masked:
-        # Unparsing rewrites a check it has nothing to hide in -- it drops
-        # redundant parentheses and respells a string -- so a check without a
-        # literal is returned exactly as guards.py wrote it.
+    body, anything_masked = masked
+    if not anything_masked:
+        # Nothing to hide, so the check is returned exactly as guards.py wrote
+        # it -- annotation included, in the place guards.py put it.
         return text
-    try:
-        return ast.unparse(tree) + "".join(annotations)
-    except ValueError:
-        # Defensive. ast.unparse raises on trees this pass does not build (a
-        # non-string constant inside an f-string is one), and reporting a fact
-        # must never be the thing that breaks a capture.
+    if len(annotations) > 1 or (annotations and annotations[0].end() != len(text)):
+        # An annotation the unparse cannot put back where it was. Reordering it
+        # would change what the check reads as, and a ", type=<class '...'>"
+        # inside the body is likelier a false match on the pattern than an
+        # annotation, so this fails closed like any other shape the pass cannot
+        # read. No in-tree rendering puts one anywhere but at the end.
         return _UNPARSED_CHECK
+    return body + (annotations[0].group(0) if annotations else "")
 
 
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
@@ -1695,8 +1733,9 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
     never checks.
     """
     if entry.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS":
-        # Its code renders tuple(map(id, hooks)), which _normalize has to erase
-        # or the file churns -- but erasing it alone would merge two variants
+        # Its code renders "... ids == tuple(map(id, hooks))", which is not an
+        # expression, so _mask_values drops it whole -- and dropping it alone
+        # would merge two variants
         # that differ ONLY in their hooks and report the guard that split them
         # as an invariant. Put back a discriminator derived from what the hooks
         # ARE rather than where they live, which is both stable across
@@ -2021,28 +2060,17 @@ def _entry_fn_of(fn: object) -> Callable[..., object]:
     return fn  # type: ignore[return-value]
 
 
-def _files_precompile_artifacts(backend: object) -> bool:
-    """Whether a resolved backend is one this capture takes its artifacts from.
-
-    inductor is: compile_fx files its compiled code into PrecompileContext under
-    the backend id, so _take_backend_artifacts finds it there and the package's
-    copy of the callable is redundant. Every other backend -- the eager family,
-    ts, aot_eager, anything a caller registers -- hands back a Python callable
-    that package.cached_backends holds the only copy of, so the session leaves it
-    there for the render and an empty artifact dict is not a failed capture.
-    Asked of the resolved function rather than of a list of names, which
-    classifies every backend added later as inductor-like by default and drops
-    its backends.
-    """
-    from torch._dynamo.backends.registry import lookup_backend
-
-    # A session resolves a name through the registry, so the identity compare is
-    # the live path; compiler_name covers a backend handed over as one of
-    # torch.compile's inductor wrappers, which is how such a wrapper names the
-    # compiler it runs (see eval_frame.get_compiler_fn).
-    return backend is lookup_backend("inductor") or (
-        getattr(backend, "compiler_name", None) == "inductor"
-    )
+# Backends whose compiled callable is worth keeping on the package for a render
+# to serialize, for the ids that filed no artifact of their own. Only eager is:
+# EagerCacheArtifact.__reduce__ (precompile_context.py) serializes a bound
+# GraphModule.forward, which is what eager hands back, and plain-pickles anything
+# else -- and ts hands back a RecursiveScriptModule while eager_noexcept and
+# eager_debug hand back local closures, none of which pickle at all. Whether a
+# backend files instead of keeping is not a property of the backend function:
+# aot_eager files a bundle once force_autograd_cache is on, and inductor files
+# nothing with its caches disabled. So the session reads what each compile
+# actually filed and consults this set only for the ids that filed nothing.
+_RENDER_SERIALIZABLE_BACKENDS = frozenset({"eager"})
 
 
 def _identify_graph(gm: torch.fx.GraphModule) -> str:
@@ -2390,12 +2418,6 @@ class PrecompileSession:
         # ones, exactly as caching_precompile does today.
         self._package = CompilePackage(self._entry_fn)
         self._backend_artifacts: dict[_BackendId, Any] = {}
-        # Set once the backend name is resolved, in __enter__: whether the
-        # compiled code is filed in PrecompileContext or left on the package is
-        # a property of the resolved function, not of the name (see
-        # _files_precompile_artifacts). False until then, which is what an
-        # __enter__ that failed to resolve a backend at all wants.
-        self._files_artifacts = False
         self._entered = False
         self._compiled: Callable[..., object] | None = None
         self._state = threading.Condition()
@@ -2415,33 +2437,48 @@ class PrecompileSession:
         )
 
         backend_ids = self._package.cache_entry().backend_ids
+        unfiled: list[_BackendId] = []
         for backend_id in backend_ids:
+            if backend_id in self._backend_artifacts:
+                # Already collected. A render can collect mid-block and again at
+                # exit, and take_artifact hands an artifact out once, so a second
+                # pass must not read an id it already holds as one that filed
+                # nothing.
+                continue
             artifact = PrecompileContext.take_artifact(backend_id)
+            compiled = self._package.cached_backends.get(backend_id)
             if artifact is not None:
                 self._backend_artifacts[backend_id] = artifact
-            elif self._package.cached_backends.get(backend_id) is noop_graph_call:
+            elif compiled is noop_graph_call:
                 # output_graph short-circuits an empty graph to noop_graph_call
                 # without filing anything under its id, which the bytecode still
                 # names. Record the no-op so the served frame dispatches to it
                 # rather than running eager. Done here rather than at
-                # render time because _release clears cached_backends first.
+                # render time because _release drops the package's copy for
+                # every backend but the ones a render serializes off it.
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
-        if backend_ids and not self._backend_artifacts and self._files_artifacts:
-            # The bytecode names backend ids but nothing was filed under any of
-            # them, so the render has nothing to serve. A single id with no
-            # artifact is normal (an exercised empty resume frame compiles to
-            # nothing), and only a backend that files its code is asked for it:
-            # every other one keeps its callables on the package (see _release)
-            # instead of having them filed here.
+            elif compiled is not None:
+                # Compiled, but the compile filed nothing under the id, so the
+                # package's callable is the only copy there is. An id the
+                # bytecode names with no callable either is skipped: a resume
+                # frame that was never exercised has nothing to keep or to file.
+                unfiled.append(backend_id)
+        if unfiled and self._backend not in _RENDER_SERIALIZABLE_BACKENDS:
+            # The render cannot serialize what those compiles left behind, so
+            # the capture is short the variants they hold rather than merely
+            # keeping them elsewhere (see _release).
             self._record_capture_error(
                 PackageError(
-                    "the capture recorded no artifact; the usual causes are a "
-                    "grad-enabled capture without training=True, which leaves "
-                    "the backward lowering deferred past the end of the "
-                    "capture, caches turned off through force_disable_caches, "
-                    "and a backend that files nothing"
+                    f"the capture recorded no artifact for {len(unfiled)} of "
+                    f"{len(backend_ids)} compiled graphs, and backend "
+                    f"{self._backend!r} leaves behind a callable the render "
+                    "cannot serialize; the usual causes are a grad-enabled "
+                    "capture without training=True, which leaves the backward "
+                    "lowering deferred past the end of the capture, caches "
+                    "turned off through force_disable_caches, and a backend "
+                    "that never files its compiled code"
                 )
             )
 
@@ -2477,10 +2514,11 @@ class PrecompileSession:
     def _release(self) -> None:
         # The compiled variants stay in the entry's ordinary Dynamo cache, as
         # they would after torch.compile; clearing them per capture needs the
-        # region-scoped cache entries that are not part of this build. Only the
-        # copies _take_backend_artifacts made redundant go: a backend that files
-        # nothing leaves its callables here as the render's only source.
-        if self._files_artifacts:
+        # region-scoped cache entries that are not part of this build. What goes
+        # is the package's own copies: _take_backend_artifacts either filed them
+        # or recorded a capture error for them, and only a backend the render can
+        # serialize off the package has a reason to leave them here.
+        if self._backend not in _RENDER_SERIALIZABLE_BACKENDS:
             self._package.cached_backends.clear()
 
     def _call(self, *args: object, **kwargs: object) -> object:
@@ -2545,14 +2583,21 @@ class PrecompileSession:
         with self._state:
             # _closing marks a drain in progress, and by here it is over.
             self._closing = False
-            entered = self._entered
             self._entered = False
             # The optimize context lives on the compiled callable, so dropping
             # the callable is what releases it.
             self._compiled = None
             self._finished = True
+            if collect:
+                # The drain is over, so no compile can still land guarded code
+                # and a record that is unconfirmed by now never will be. What a
+                # later summary() reports is unchanged -- _confirmed_compiles
+                # keeps one record per key, so it is idempotent over its own
+                # output -- and a bypassed compile stops holding its entry and
+                # its facts for the session's life.
+                self._compiles = self._confirmed_compiles()
             self._state.notify_all()
-        if not (entered and collect):
+        if not collect:
             return
         try:
             self._take_backend_artifacts()
@@ -2582,9 +2627,6 @@ class PrecompileSession:
             self._entered = True
         try:
             self._backend_obj = _PrecompileBackend(self._backend, self._keep_graphs)
-            self._files_artifacts = _files_precompile_artifacts(
-                self._backend_obj._torchdynamo_orig_backend
-            )
             optimize_ctx = _optimize_isolated(
                 self._backend_obj,
                 self._package,
@@ -2823,9 +2865,14 @@ class PrecompileSession:
 
         Narrower than _varying_guard_slots, deliberately: that one reports what
         tells the variants apart at all, kept guards and present-in-some-variants
-        included, and neither is evidence that a DROP widened the artifact. Only
-        the variants that dropped the slot are compared, and what is compared is
-        a whole variant's set of facts for it, as there, so one variant holding
+        included, and neither is evidence that a DROP widened the artifact. It
+        also cannot be read over every recorded fact set: it compares a slot's
+        rendered check and value, so it needs sets whose ENFORCED facts carry
+        that rendering, and where a producer skipped it -- as the recorder does
+        for a guard nothing here reports the check of -- every enforced fact of
+        a slot compares equal there and the slot reads invariant. Only the
+        variants that dropped the slot are compared, and what is compared is a
+        whole variant's set of facts for it, as there, so one variant holding
         several (a HASATTR per attribute name on one parent source) is not
         variation. Over every frame when key is None, which is what summary()
         reports: a slot that varied in the frame that owns it varied. Compares

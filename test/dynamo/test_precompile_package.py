@@ -1943,7 +1943,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             "G['__import_mod_140311678493200_c1']": "G['__import_mod_<id>_c<n>']",
             "G['___unnamed_scope_140311678493200_c1']": "G['___unnamed_scope_<id>_c<n>']",
             "G['_140311678493200_c3'] is not None": "G['_<id>_c<n>'] is not None",
-            "top_saved_tensors_hooks ids == (139, 140)": "top_saved_tensors_hooks ids == (<ids>)",
             # User constants and identifiers are not addresses.
             "L['dims'][0] == 140311678493200": "L['dims'][0] == 140311678493200",
             "L['w_1_c2'] == 3": "L['w_1_c2'] == 3",
@@ -2855,6 +2854,26 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             staged = PrecompileContext.serialize_artifact_by_key(backend_id)
             self.assertIsNotNone(staged)
 
+    def test_entering_with_an_unknown_backend_closes_the_session(self):
+        from torch._dynamo.exc import InvalidBackend
+
+        # __enter__ raising before it resolved a backend is the one path that
+        # reaches teardown with nothing compiled: it still has to close the
+        # session and collect nothing, on a package whose cache entry holds no
+        # backend id at all.
+        session = self._session(_session_breaks, backend="no_such_backend")
+        with self.assertRaises(InvalidBackend):
+            with session:
+                self.fail("the block must not run")
+        self.assertTrue(session._finished)
+        self.assertFalse(session._entered)
+        self.assertIsNone(session._compiled)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        self.assertFalse(session._package.cache_entry().backend_ids)
+        (recorded,) = session._capture_errors
+        self.assertIn("InvalidBackend", recorded)
+
     def test_an_error_inside_the_block_is_recorded_once_and_propagates(self):
         session = self._session(_session_raises)
         with session as cap:
@@ -2927,28 +2946,37 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         self.assertEqual(session._capture_errors, ["ValueError: boom"])
 
     def test_eager_backends_survive_exit_for_the_render(self):
+        # eager files nothing under the backend ids, and its callables are the
+        # one shape a render serializes off the package (a bound
+        # GraphModule.forward), so they are kept and that is not a failed
+        # capture.
         session = self._session(_session_breaks)
         with session as cap:
             cap(torch.ones(3))
         entry = session._package.cache_entry()
+        self.assertEqual(session._backend_artifacts, {})
         self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
         for backend in session._package.cached_backends.values():
-            self.assertTrue(callable(backend))
+            self.assertIsInstance(backend.__self__, torch.fx.GraphModule)
+        self.assertEqual(session._capture_errors, [])
 
     @parametrize("backend", ("eager_noexcept", "ts"))
-    def test_a_backend_that_files_nothing_keeps_its_backends(self, backend):
-        # Keeping them is a property of the resolved backend, not a list of
-        # names: neither eager_noexcept nor ts (torch.jit.script) files anything
-        # under the backend id, so clearing their backends would drop the only
-        # copy the render has, and the empty artifact dict would read as a
-        # capture that recorded nothing.
+    def test_a_backend_that_files_nothing_unrenderable_records_an_error(self, backend):
+        # Neither files anything under the backend ids, and neither hands back
+        # something a render can serialize off the package -- eager_noexcept
+        # returns a local closure, ts a RecursiveScriptModule -- so the capture
+        # is short those graphs and says so, naming the backend, rather than
+        # silently keeping objects the render would choke on.
         session = self._session(_session_breaks, backend=backend)
         with session as cap:
             cap(torch.ones(3))
         entry = session._package.cache_entry()
-        self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
+        self.assertTrue(entry.backend_ids)
         self.assertEqual(session._backend_artifacts, {})
-        self.assertEqual(session._capture_errors, [])
+        self.assertEqual(session._package.cached_backends, {})
+        (recorded,) = session._capture_errors
+        self.assertIn(f"backend '{backend}' leaves behind a callable", recorded)
+        self.assertIn(f"no artifact for {len(entry.backend_ids)} of", recorded)
 
     def test_inductor_artifacts_are_taken_from_the_precompile_context(self):
         from torch._dynamo.precompile_context import PrecompileContext
@@ -2956,11 +2984,20 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         session = self._session(_session_breaks, backend="inductor")
         with session as cap:
             cap(torch.ones(3))
+            # A render inside the block collects, exactly as save() does, and
+            # exit collects again. take_artifact hands each artifact out once,
+            # so the second pass has to read the ids it already holds as
+            # collected rather than as ids that filed nothing.
+            session._take_backend_artifacts()
+            mid_block = dict(session._backend_artifacts)
+            self.assertTrue(mid_block)
         entry = session._package.cache_entry()
+        self.assertEqual(session._backend_artifacts, mid_block)
         self.assertEqual(set(session._backend_artifacts), set(entry.backend_ids))
         for backend_id in entry.backend_ids:
             self.assertIsNone(PrecompileContext.serialize_artifact_by_key(backend_id))
         self.assertEqual(session._package.cached_backends, {})
+        self.assertEqual(session._capture_errors, [])
 
     def test_entry_fn_of_resolves_modules_and_refuses_the_rest(self):
         from torch._dynamo.precompile_package import _entry_fn_of
@@ -3146,6 +3183,80 @@ class TestGuardCodeMasking(torch._inductor.test_case.TestCase):
             "L['self']._modules['lin']._parameters['weight'] is None",
         )
 
+    def test_a_dict_key_that_is_not_a_string_is_masked_in_a_slot_name(self):
+        # A key a textual rule cannot read is masked like any other, because the
+        # slot name is PARSED: a config dict keyed by ("model", "api_key") is a
+        # literal to Dynamo (ConstantVariable.is_literal recurses into a tuple),
+        # so DictGetItemSource reprs the whole tuple into the name.
+        from torch._dynamo.precompile_package import _mask_keys
+
+        self.assertEqual(
+            _mask_keys("L['self'].cfg[('model', 'api_key')]"),
+            "L['self'].cfg['<tuple:2>']",
+        )
+        self.assertEqual(_mask_keys("self.cfg[('a', 1)]"), "self.cfg['<tuple:2>']")
+        self.assertEqual(
+            _mask_keys("self.cfg[(('a', 'b'), 'c')]"), "self.cfg['<tuple:2>']"
+        )
+        self.assertEqual(
+            _mask_keys("self.cfg[frozenset({'api_key'})]"),
+            "self.cfg[frozenset('<set:1>')]",
+        )
+        # A number names no data here any more than it does in a check.
+        self.assertEqual(_mask_keys("L['dims'][0]"), "L['dims'][0]")
+        # A name whose shape cannot be read goes whole, and the empty name of a
+        # guard checked against no source is not such a name.
+        self.assertEqual(_mask_keys("<ephemeral: fake tensor>"), "<unparsed source>")
+        self.assertEqual(_mask_keys(""), "")
+
+    def test_the_slot_name_and_the_check_are_masked_by_one_rule(self):
+        # One rule, one implementation, so the two cannot drift: the slot name
+        # goes through the same pass the check does. These are the cases where a
+        # textual rule -- one that matched the END of the base text -- kept a key
+        # the tree masks: an attribute NAMED like a scope, and a user key spelled
+        # like the builtins dict Dynamo installs, whose own key is masked.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        for name, expected in (
+            ("L['self'].G['api_key']", "L['self'].G['<str>']"),
+            ("L['self'].L['api_key']", "L['self'].L['<str>']"),
+            ("L['x'].___dict__['api_key']", "L['x'].___dict__['<str>']"),
+            (
+                "L['self'].cfg['__builtins_dict__x']['api_key']",
+                "L['self'].cfg['<str>']['<str>']",
+            ),
+            (
+                "G['__builtins_dict___<n>']['print']",
+                "G['__builtins_dict___<n>']['print']",
+            ),
+            (
+                "self._modules['lin']._parameters['weight']",
+                "self._modules['lin']._parameters['weight']",
+            ),
+            ("self.cfg[('model', 'api_key')]", "self.cfg['<tuple:2>']"),
+        ):
+            self.assertEqual(_mask_keys(name), expected, name)
+            self.assertEqual(_mask_values(f"{name} == 3"), f"{expected} == 3", name)
+
+    def test_the_saved_tensors_hooks_check_fails_closed_and_leaves_no_ids(self):
+        # The one rendering in the tree that is not an expression, and why
+        # _normalize carries no rule for the ids it interpolates: masking runs
+        # first and drops the text whole, so the ids never reach _normalize.
+        # AUTOGRAD_SAVED_TENSORS_HOOKS is named by GuardFact.value instead.
+        from torch._dynamo.precompile_package import _normalize, _render_code
+
+        hooks = (
+            "torch._functorch.aot_autograd.utils.top_saved_tensors_hooks"
+            " ids == (139, 140)"
+        )
+        self.assertEqual(_render_code([hooks]), ("<unparsed check>",))
+        self.assertEqual(
+            _render_code([hooks.replace("(139, 140)", "None")]), ("<unparsed check>",)
+        )
+        # Nothing downstream scrubs those ids, which is what makes failing
+        # closed the thing that keeps them out of the report.
+        self.assertEqual(_normalize(hooks), hooks)
+
     def test_the_attribute_name_a_hasattr_reads_is_part_of_the_source(self):
         from torch._dynamo.precompile_package import _mask_values
 
@@ -3166,12 +3277,10 @@ class TestGuardCodeMasking(torch._inductor.test_case.TestCase):
             "set.__contains__(L['self'].tags, '<str>')",
         )
 
-    def test_a_type_annotated_check_keeps_the_annotation_around_the_parse(self):
+    def test_a_type_annotated_check_keeps_the_annotation_where_it_sat(self):
         # ___check_type_id renders "<expr>, type=<class 'int'>", which is not one
-        # expression: the annotation comes off before the parse and goes back on.
-        # Wherever it sits, and with a quote inside the class repr: an
-        # annotation left in the body would cost the whole check, since a body
-        # that does not parse is dropped.
+        # expression: the annotation comes off before the parse and goes back
+        # where it was, with a quote inside the class repr tolerated.
         from torch._dynamo.precompile_package import _mask_values
 
         self.assertEqual(
@@ -3182,17 +3291,27 @@ class TestGuardCodeMasking(torch._inductor.test_case.TestCase):
             _mask_values("L['x'] == 'secret', type=<class 'M'quoted'>"),
             "L['x'] == '<str>', type=<class 'M'quoted'>",
         )
+        # A check the pass has nothing to mask in keeps guards.py's own
+        # spelling, so an annotation inside the body stays inside it.
+        self.assertEqual(
+            _mask_values("f(L['x'], type=<class 'int'>) == 3"),
+            "f(L['x'], type=<class 'int'>) == 3",
+        )
+        # But the unparse regenerates the text, so an annotation that did not
+        # sit at the end cannot be put back where it was -- and moving it to the
+        # end changes what the check reads as. Dropped whole instead.
         self.assertEqual(
             _mask_values("f(L['x'], type=<class 'int'>) == 'secret'"),
-            "f(L['x']) == '<str>', type=<class 'int'>",
+            "<unparsed check>",
         )
 
     def test_a_check_that_does_not_parse_is_dropped_rather_than_patched(self):
         # Failing closed: a rendering whose shape the pass cannot read gives it
         # nothing to tell a source from a value, and a repr can carry a path
         # with no quote anywhere in it for a textual pass to find. So the text
-        # goes whole -- what such a check told two variants apart by is reported
-        # by GuardFact.value and by the slot.
+        # goes whole, at the documented cost that two such checks on one slot
+        # read alike -- a digest of the text would tell them apart and would be
+        # a stable fingerprint of the value this masks.
         from torch._dynamo.precompile_package import _mask_values
 
         for check in (
@@ -3231,14 +3350,21 @@ class TestGuardCodeMasking(torch._inductor.test_case.TestCase):
             self.assertEqual(_mask_values(once), once, check)
         # What makes that hold: the masked check is still an expression.
         compile("L['self'].cfg['<str>'] == '<list:2>'", "<check>", "eval")
-        for name in ("self.cfg['api_key']", "self.cfg[b'k']", "L['x']"):
+        for name in (
+            "self.cfg['api_key']",
+            "self.cfg[b'k']",
+            "self.cfg[('a', 'b')]",
+            "L['x']",
+            "<ephemeral: fake tensor>",
+        ):
             once = _mask_keys(name)
             self.assertEqual(_mask_keys(once), once, name)
 
     def test_render_code_masks_before_it_normalizes(self):
         # Not interchangeable: _normalize interpolates <id> and <n> placeholders
-        # that no longer parse as Python, and a name-like key it rewrites would
-        # then read as a quoted value to the textual fallback.
+        # that no longer parse as Python, so a normalized check could not be
+        # masked at all -- and a name-like key it rewrites is why a kept key is
+        # allowed to carry <> inside the brackets.
         from torch._dynamo.precompile_package import _render_code
 
         self.assertEqual(
@@ -3676,8 +3802,12 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         # One rendering per slot, whatever the variants: see
         # PrecompileSummary.dropped_guard_code.
         session = self._session(_SessionReadsAttr())
+        # Through the real composition, because the verdict PAIR is what the
+        # risky rail reads: a hand-built pair can say the default rejected an
+        # EQUALS_MATCH, which it never does, and then no test drives the rail
+        # with the pair a capture produces.
         record = session._recording_filter(
-            lambda es: ([False] * len(es), [False] * len(es))
+            precompile_package._compose_with_default(lambda es: [False] * len(es))
         )
         session._package._current_entry = _FakeCompile(
             _SessionReadsAttr.forward.__code__
@@ -3697,6 +3827,10 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         summary = self._summary(session)
         self.assertIn(("TENSOR_MATCH", "x"), summary.dropped_guards)
         self.assertEqual([name for _, name, _ in summary.dropped_guard_code], ["n"])
+        # The default kept both slots, so every drop here is one the custom
+        # filter added: the by-filter rail of risky_dropped_guards.
+        self.assertIn(("EQUALS_MATCH", "n"), summary.risky_dropped_guards)
+        self.assertIn(("TENSOR_MATCH", "x"), summary.risky_dropped_guards)
 
     def test_the_rendered_report_is_stable_and_names_every_class(self):
         # Driven by a real capture, so the golden pins the recording path too --
@@ -3854,8 +3988,11 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
         # slots: one fact set for both would read a rebind that never happened,
         # and the default gate would refuse a valid artifact.
         session = self._session(_SessionReadsAttr())
+        # No custom filter: a CLOSURE_MATCH is one the DEFAULT drops, so this is
+        # the pair a capture really produces for it, and the drop is not risky by
+        # filter -- which leaves the value rail below on its own.
         record = session._recording_filter(
-            lambda es: ([False] * len(es), [False] * len(es))
+            precompile_package._compose_with_default(None)
         )
         slot = ("CLOSURE_MATCH", "fn")
         keys = {}
@@ -3874,6 +4011,11 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
         record([_entry(LocalSource("fn"), _hook_double, "CLOSURE_MATCH")])
         self._keep(session)
         self.assertEqual(session._value_varying_slots(), {slot})
+        # The report intersects the value rail with dropped_guards, and this slot
+        # is the one thing in both.
+        self.assertEqual(
+            self._summary(session).risky_dropped_guards, (("CLOSURE_MATCH", "fn"),)
+        )
         varying = session._value_varying_slots
         self.assertEqual(varying(keys[_hook_increment]), {slot})
         self.assertEqual(varying(keys[_hook_double]), set())
@@ -3889,7 +4031,7 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
         # (EMPTY_NN_MODULE_HOOKS_DICT, below).
         session = self._session(_SessionReadsAttr())
         record = session._recording_filter(
-            lambda es: ([True] * len(es), [True] * len(es))
+            precompile_package._compose_with_default(None)
         )
         compiling = _FakeCompile(_SessionReadsAttr.forward.__code__)
         session._package._current_entry = compiling
@@ -3908,9 +4050,8 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
         # whatever it voted on the marker.
         session = self._session(_SessionReadsAttr())
         record = session._recording_filter(
-            lambda es: (
-                [e.guard_type != "GLOBAL_STATE" for e in es],
-                [True] * len(es),
+            precompile_package._compose_with_default(
+                lambda es: [e.guard_type != "GLOBAL_STATE" for e in es]
             )
         )
         session._package._current_entry = _FakeCompile(
@@ -3978,6 +4119,9 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
             cap(torch.ones(2), None)
             kept_only = session.summary()
             cap(torch.ones(2), LocalThing())
+            # Both calls filed a record; which of them the artifact carries is
+            # what summary() decides below.
+            self.assertEqual(len(session._compiles), 2)
         (code,) = session._package.cache_entry().codes
         self.assertEqual(len(code.guarded_codes), 1)
         # Not marked bypassed: one compile of the frame WAS kept, which is why
@@ -3990,9 +4134,37 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
         self.assertFalse([slot for slot in slots if slot[1].startswith("obj.")])
         self.assertFalse([slot for slot in slots if slot[0] == "TYPE_MATCH"])
         # The facts of the dropped compile are gone too, so nothing it guarded
-        # tells the frame's variants apart.
+        # tells the frame's variants apart. The block's exit collapsed the
+        # records to the confirmed one, so the bypassed compile stops holding its
+        # entry and its facts for the session's life.
+        self.assertEqual(len(session._compiles), 1)
+        self.assertEqual(len(session._confirmed_compiles()), 1)
+        self.assertEqual([len(v) for v in session._confirmed_facts().values()], [1])
+
+    def test_a_bypass_before_a_landed_compile_keeps_only_the_landed_verdicts(self):
+        # A bypass and the compile after it see the same guarded_codes length, so
+        # the two records collide on the key _confirmed_compiles dedups by, and
+        # only the later one is evidence that guarded code landed. Keeping the
+        # earlier record instead would confirm the BYPASSED verdicts off the
+        # later compile's growth -- the widening report the rule exists to
+        # prevent -- and the kept-then-bypassed order above collides on nothing,
+        # so this order is what pins the last-wins half of it.
+        session = self._session(_SessionReadsAttr())
+        record = session._recording_filter(
+            precompile_package._compose_with_default(None)
+        )
+        session._package._current_entry = _FakeCompile(
+            _SessionReadsAttr.forward.__code__
+        )
+        # The bypassed compile: the filter voted, and no guarded code followed.
+        record([_entry(LocalSource("n"), 3, "EQUALS_MATCH")])
+        # The landed compile of the same frame, at the same count.
+        record([_entry(LocalSource("x"), torch.ones(2), "TENSOR_MATCH")])
+        self._keep(session)
         self.assertEqual(len(session._compiles), 2)
         self.assertEqual(len(session._confirmed_compiles()), 1)
+        summary = self._summary(session)
+        self.assertEqual(summary.kept_guards, (("TENSOR_MATCH", "x"),))
         self.assertEqual([len(v) for v in session._confirmed_facts().values()], [1])
 
     def test_summary_of_a_capture_that_landed_nothing_reads_empty(self):
@@ -4068,21 +4240,48 @@ frame _session_calls_hook (test_precompile_package.py:<line>)  2 variant(s), 2 i
 
     def test_summary_refuses_a_read_from_inside_a_capture_call(self):
         # The read waits for the calls in flight, so a read from inside one would
-        # wait on itself: it says so instead of hanging.
+        # wait on itself: it says so instead of hanging. Read on a thread of its
+        # own, joined with a timeout, because a regression here waits forever and
+        # on the main thread that is a job timeout rather than a failure: the mark
+        # would stay set and the block's exit would drain for the rest of the run.
         session = self._session(_SessionReadsAttr())
         with session as cap:
             cap(torch.ones(2, 4))
-            with session._state:
-                # Marked exactly as _call marks it, since what runs inside the
-                # block is the caller's own code and cannot be reached from here.
-                session._active_calls += 1
-                session._active_call_threads[threading.get_ident()] = 1
-            with self.assertRaisesRegex(RuntimeError, "from inside a capture call"):
-                session.summary()
-            with session._state:
-                session._active_calls -= 1
-                del session._active_call_threads[threading.get_ident()]
-                session._state.notify_all()
+            outcome: list[object] = []
+
+            def read_from_inside_a_call():
+                with session._state:
+                    # Marked exactly as _call marks it, since what runs inside
+                    # the block is the caller's own code and cannot be reached
+                    # from here.
+                    session._active_calls += 1
+                    session._active_call_threads[threading.get_ident()] = 1
+                try:
+                    outcome.append(session.summary())
+                except RuntimeError as refusal:
+                    outcome.append(refusal)
+                finally:
+                    with session._state:
+                        del session._active_call_threads[threading.get_ident()]
+                        if session._active_calls:
+                            session._active_calls -= 1
+                        session._state.notify_all()
+
+            reader = threading.Thread(target=read_from_inside_a_call, daemon=True)
+            reader.start()
+            reader.join(60)
+            waited = reader.is_alive()
+            if waited:
+                # The reader is waiting on itself, which is the regression. Clear
+                # the mark from here so the block's exit can drain, and let the
+                # assertion below report it.
+                with session._state:
+                    session._active_calls = 0
+                    session._active_call_threads.clear()
+                    session._state.notify_all()
+            self.assertFalse(waited, "summary() waited instead of refusing")
+            self.assertIsInstance(outcome[0], RuntimeError)
+            self.assertIn("from inside a capture call", str(outcome[0]))
         self.assertTrue(session.summary().complete)
 
     def test_summary_waits_for_a_call_in_flight_rather_than_raising(self):
