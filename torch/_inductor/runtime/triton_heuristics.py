@@ -680,6 +680,8 @@ class CachingAutotuner(KernelInterface):
         # Cached launcher for fast path — bypasses all preamble after first
         # successful steady-state launch.  Set to None until populated.
         self._cached_launcher: LauncherType | None = None
+        self._compile_kernel_from_src: Callable[[], CachingAutotuner] | None = None
+        self._jit_fallback: CachingAutotuner | None = None
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -1217,6 +1219,8 @@ class CachingAutotuner(KernelInterface):
         self.__dict__.update(state)
         self.lock = threading.Lock()
         self._plugins = get_caching_autotuner_plugins(self)
+        self._compile_kernel_from_src = None
+        self._jit_fallback = None
 
     def get_device_interface(self):
         # this code cannot run in compile workers, because it imports from torch
@@ -2454,6 +2458,21 @@ class CachingAutotuner(KernelInterface):
             self._debug_call = None
             debug_call.finalize(self.get_device_interface())
 
+    def _run_jit_fallback(self, *args, stream, benchmark_run, **kwargs):
+        if self._compile_kernel_from_src is None:
+            raise AssertionError("JIT fallback callback is not set")
+        log.warning(
+            "Bundled Triton kernel disappeared after loading; "
+            "falling back to JIT compilation"
+        )
+        compile_kernel_from_src = self._compile_kernel_from_src
+        self.release_benchmark_artifacts()
+        self._jit_fallback = compile_kernel_from_src()
+        self._compile_kernel_from_src = None
+        return self._jit_fallback.run(
+            *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+        )
+
     def run(
         self,
         *args,
@@ -2462,6 +2481,11 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):  # type:ignore[override]
         """Launch triton kernel call and return result."""
+        if self._jit_fallback is not None:
+            return self._jit_fallback.run(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
+
         # --- FAST PATH ---
         # After the first successful launch in steady state, cache the launcher
         # and skip all preamble on subsequent calls (~2µs savings).
@@ -2481,7 +2505,14 @@ class CachingAutotuner(KernelInterface):
             and not autograd_profiler._is_profiler_enabled
             and not get_active_debug_mode()
         ):
-            return fast(*args, stream=stream)
+            try:
+                return fast(*args, stream=stream)
+            except MissingTritonKernelError:
+                if self._compile_kernel_from_src is None:
+                    raise
+                return self._run_jit_fallback(
+                    *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+                )
 
         debug_mode = get_active_debug_mode()
         if debug_mode:
@@ -2570,15 +2601,22 @@ class CachingAutotuner(KernelInterface):
                 self.save_gpu_kernel(stream, launcher)
 
         try:
-            self._pre_launch(launcher, *args, stream=stream, **kwargs)
             try:
-                result = launcher(*args, **kwargs, stream=stream)
-            except Exception as e:
-                if isinstance(e, TypeError):
-                    self._check_launcher_call_args(launcher, args)
+                self._pre_launch(launcher, *args, stream=stream, **kwargs)
+                try:
+                    result = launcher(*args, **kwargs, stream=stream)
+                except Exception as e:
+                    if isinstance(e, TypeError):
+                        self._check_launcher_call_args(launcher, args)
+                    raise
+            finally:
+                self._post_launch()
+        except MissingTritonKernelError:
+            if self._compile_kernel_from_src is None:
                 raise
-        finally:
-            self._post_launch()
+            return self._run_jit_fallback(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
 
         # Populate fast path: cache the launcher for future calls.  Static
         # conditions (interpret, dump flags) are pre-computed in _cache_eligible;

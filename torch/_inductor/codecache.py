@@ -5686,6 +5686,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
             raise AssertionError(
                 "source reload callbacks must be set before calling result()"
             )
+        self.static_autotuner._compile_kernel_from_src = self.compile_kernel_from_src
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
             try:
                 self.static_autotuner.recheck_autotune_cache(
@@ -5702,4 +5703,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
                     "Bundled Triton kernel disappeared before loading; "
                     "falling back to JIT compilation"
                 )
-                return self.compile_kernel_from_src()
+                compile_kernel_from_src = self.compile_kernel_from_src
+                self.static_autotuner._compile_kernel_from_src = None
+                self.static_autotuner.release_benchmark_artifacts()
+                return compile_kernel_from_src()

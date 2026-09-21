@@ -1048,6 +1048,101 @@ class TestFxGraphCache(TestCase):
             actual = graph.current_callable([x.clone()])
             self.assertEqual(actual[0], expected)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_missing_bundled_cubin_on_second_device_falls_back_to_jit(self):
+        def fn(x):
+            return x.sin()
+
+        with torch.cuda.device(0):
+            x0 = torch.randn(32, device="cuda")
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
+
+        graph_paths = []
+        for directory, _, filenames in os.walk(FxGraphCache._get_tmp_dir()):
+            graph_paths.extend(os.path.join(directory, name) for name in filenames)
+        self.assertEqual(len(graph_paths), 1)
+        with open(graph_paths[0], "rb") as file:
+            graph = pickle.load(file)
+        bundle = graph._triton_bundle
+        self.assertIsNotNone(bundle)
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        static_autotuner = bundle.static_autotuners[0]
+        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        with torch.cuda.device(0):
+            self.assertEqual(graph.current_callable([x0])[0], fn(x0))
+
+        shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        with torch.cuda.device(1):
+            x1 = torch.randn(32, device="cuda")
+            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
+        self.assertIsNotNone(loaded_autotuner._jit_fallback)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "autotune_local_cache": False,
+            "autotune_remote_cache": False,
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_partial_static_autotuner_load_is_released_before_jit(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(32, device="cuda")
+        expected = fn(x)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+
+        graph_paths = []
+        for directory, _, filenames in os.walk(FxGraphCache._get_tmp_dir()):
+            graph_paths.extend(os.path.join(directory, name) for name in filenames)
+        self.assertEqual(len(graph_paths), 1)
+        with open(graph_paths[0], "rb") as file:
+            graph = pickle.load(file)
+        bundle = graph._triton_bundle
+        self.assertIsNotNone(bundle)
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        static_autotuner = bundle.static_autotuners[0]
+        cached_autotuner = static_autotuner.kernel
+        loaded_result = cached_autotuner.compile_results[0]
+        missing_result = copy.deepcopy(loaded_result)
+        missing_result.kernel.hash = f"{missing_result.kernel.hash}_missing"
+        missing_result.kernel.cubin_path = None
+        cached_autotuner.compile_results.append(missing_result)
+
+        graph.after_deserialization(CompiledFxGraphConstants())
+        self.assertIsNone(loaded_result.kernel.module)
+        self.assertEqual(cached_autotuner.compile_results, [])
+        self.assertIsNot(
+            graph.current_callable.__globals__[static_autotuner.kernel_name],
+            cached_autotuner,
+        )
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"compile_threads": 1})
