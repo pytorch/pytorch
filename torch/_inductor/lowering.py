@@ -7820,8 +7820,59 @@ def _floor_div_floating(a, b):
     return make_pointwise(fn)(a, b, nan, neg_one, zero)
 
 
-@register_lowering(aten.div, broadcast=True)
+def _trunc_div_floating(a, b, original_b):
+    ref = next(
+        (
+            x
+            for x in (a, b)
+            if isinstance(x, TensorBox) and x.get_device_or_error().type == "cuda"
+        ),
+        None,
+    )
+    if ref is None:
+        return trunc(div(a, b))
+
+    dtype = ref.get_dtype()
+    compute_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+    scalar_divisor = isinstance(original_b, (Number, sympy.Basic)) or (
+        isinstance(original_b, TensorBox)
+        and original_b.get_device_or_error().type == "cpu"
+        and not original_b.get_size()
+    )
+    if scalar_divisor:
+        # CUDA eager computes CPU scalar reciprocals in acc_type, before promotion.
+        if isinstance(original_b, TensorBox):
+            b = expand(to_dtype(original_b, compute_dtype), ref.get_size())
+        else:
+            b = full_like(ref, original_b, dtype=compute_dtype)
+    else:
+        a, b = promote_constants((a, b), round_scalar_constants=True)
+
+    def fn(a, b):
+        a = ops.to_dtype(a, compute_dtype)
+        b = ops.to_dtype(b, compute_dtype)
+        if scalar_divisor:
+            quotient = ops.mul(a, ops.div_rn(ops.constant(1, compute_dtype), b))
+        else:
+            quotient = ops.div_rn(a, b)
+            # Half/BFloat16 operator/ rounds before eager applies std::trunc.
+            quotient = ops.to_dtype(quotient, dtype, use_compute_types=False)
+            quotient = ops.to_dtype(quotient, compute_dtype)
+        return ops.trunc(quotient)
+
+    return make_pointwise(fn)(a, b)
+
+
+@register_lowering(aten.div, type_promotion_kind=None)
 def div_mode(a, b, rounding_mode=None):
+    original_b = b
+    (a, b), _ = transform_args(
+        [a, b],
+        {},
+        broadcast=True,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        convert_input_to_bool=False,
+    )
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
 
@@ -7842,7 +7893,7 @@ def div_mode(a, b, rounding_mode=None):
             raise AssertionError(
                 "truncdiv operands can not be boolean at the same time"
             )
-        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+        return truncdiv(a, b) if both_integer else _trunc_div_floating(a, b, original_b)
     return div(a, b)
 
 
