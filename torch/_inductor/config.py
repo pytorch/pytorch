@@ -302,7 +302,7 @@ epilogue_fusion_user_defined_triton_kernel = False
 pattern_matcher = True
 
 # reuse dtype conversions across supported metadata views
-reuse_dtype_conversion_across_views = True
+reuse_dtype_conversions = True
 
 # set to True to enable the back-to-back GEMM pass
 b2b_gemm_pass = False

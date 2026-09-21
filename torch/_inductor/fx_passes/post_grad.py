@@ -255,10 +255,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
-        if config.reuse_dtype_conversion_across_views:
-            GraphTransformObserver(
-                gm, "reuse_dtype_conversion_across_views"
-            ).apply_graph_pass(reuse_dtype_conversion_across_views)
+        if config.reuse_dtype_conversions:
+            GraphTransformObserver(gm, "reuse_dtype_conversions").apply_graph_pass(
+                reuse_dtype_conversions
+            )
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
                 gm, "partitioned_scatter_optimization"
@@ -1435,7 +1435,7 @@ def _replay_view(
         return target(*args, **kwargs)
 
 
-def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
+def reuse_dtype_conversions(graph: torch.fx.Graph) -> None:
     """Reuse dtype conversions across supported direct views.
 
     Finds:
@@ -1565,7 +1565,7 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
         rewrites += 1
 
     if rewrites:
-        counters["inductor"]["reuse_dtype_conversion_across_views"] += rewrites
+        counters["inductor"]["reuse_dtype_conversions"] += rewrites
 
 
 def remove_assert_ops(graph: torch.fx.Graph):
