@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT AND BSD-3-Clause
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 from dataclasses import dataclass
@@ -132,8 +132,9 @@ def make_gemm_gfx950_param(
         raise ValueError("group_m must be non-negative")
 
     if is_mxfp:
-        if mma_k < 128:
-            mma_k = 128
+        if (mma_m, mma_n) != (16, 16) or mma_k not in (32, 128):
+            raise ValueError("the gfx950 MXFP kernel requires mma=16x16x128")
+        mma_k = 128
         if block_k % mma_k != 0:
             raise ValueError(
                 f"block_k must be a multiple of the MFMA K depth: block_k={block_k}"

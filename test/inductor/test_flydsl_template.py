@@ -313,7 +313,11 @@ class TestFlyDSLTemplate(TestCase):
 
     @parametrize(
         "input_names",
-        ((), ("mat1", "mat2", "scale_a", "scale_b")),
+        (
+            (),
+            ("mat1", "mat2", "scale_a", "scale_b"),
+            ("mat1", "mat2", "scale_a", "scale_b", "bias"),
+        ),
     )
     def test_precompile_metadata_supports_inputs(self, input_names):
         scheduling = FlyDSLScheduling(scheduler=None)
@@ -1194,7 +1198,13 @@ def _mxfp_call(inputs, out, param, bias=None, compiler=None):
 
 
 def _scaled_mm_mxfp(
-    a, b, sa, sb, out_dtype=torch.bfloat16, scaling_type=ScalingType.BlockWise1x32
+    a,
+    b,
+    sa,
+    sb,
+    out_dtype=torch.bfloat16,
+    scaling_type=ScalingType.BlockWise1x32,
+    bias=None,
 ):
     return F.scaled_mm(
         a,
@@ -1205,6 +1215,7 @@ def _scaled_mm_mxfp(
         scaling_type,
         SwizzleType.NO_SWIZZLE,
         SwizzleType.NO_SWIZZLE,
+        bias=bias,
         output_dtype=out_dtype,
     )
 
@@ -1346,6 +1357,13 @@ class TestFlyDSLMXFPMetadata(TestCase):
         ):
             with self.subTest(tile=tile), self.assertRaisesRegex(ValueError, error):
                 _mxfp_param(mxfp_format, tile, 2048)
+        for mma in ({"mma_m": 32}, {"mma_k": 192}):
+            with self.subTest(mma=mma), self.assertRaisesRegex(
+                ValueError, "requires mma=16x16x128"
+            ):
+                _mxfp_param(
+                    mxfp_format, (128, 128, 128, 2, 1, 1, 0), 2048, **mma
+                )
 
 
 class TestFlyDSLMXFPDevice(TestCase):
@@ -1501,6 +1519,9 @@ class TestFlyDSLMXFPDevice(TestCase):
             eager = _scaled_mm_mxfp(*inputs)
             self.assertEqual(eager, reference.bfloat16(), atol=3e-2, rtol=2e-2)
             inputs, reference = _mxfp_case(mxfp_format, (64, 4096, 4096), device)
+            bias = torch.randn(4096, device=device, dtype=torch.bfloat16)
+            inputs = (*inputs, torch.bfloat16, ScalingType.BlockWise1x32, bias)
+            reference = reference + bias
         with inductor_config.patch(
             max_autotune=True,
             flydsl_enable_autotuning=False,
