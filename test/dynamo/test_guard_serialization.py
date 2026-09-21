@@ -2,7 +2,9 @@
 
 import builtins
 import collections
+import copyreg
 import dataclasses
+import enum
 import functools
 import io
 import itertools
@@ -14,7 +16,7 @@ import types
 import unittest
 import weakref
 from collections.abc import Iterator
-from typing import Any, NamedTuple
+from typing import Any, Generic, NamedTuple, TypeVar
 from unittest import mock
 
 import torch
@@ -28,12 +30,20 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
+    _is_torch_type,
     _Missing,
+    _pickles_by_default,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    pickle_guards_state,
 )
-from torch._dynamo.package import CompilePackage, DynamoCache
+from torch._dynamo.package import (
+    _PRUNED_VALUE_PID,
+    CompilePackage,
+    DynamoCache,
+    load_guards_state,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -1088,9 +1098,14 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
+        # A single guard type, or a tuple of them when the case under test
+        # needs two (a by-value dict key: the key's own TYPE_MATCH puts it in
+        # the guard tree, DICT_KEYS_MATCH is what compares it by value).
+        kept = (guard_type,) if isinstance(guard_type, str) else tuple(guard_type)
+
         def guard_filter_fn(guards):
             ret = [
-                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                g.guard_type in kept or any(t in g.derived_guard_types for t in kept)
                 for g in guards
             ]
             self.assertTrue(any(ret))
@@ -1182,9 +1197,1009 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         self.assertEqual(ref.check(inputs), loaded.check(inputs))
 
 
+if torch.distributed.is_available():
+    from torch.distributed.tensor.placement_types import Partial as _Partial
+
+    class _ScaledPartial(_Partial):
+        # A user Placement subclass, as torchtitan defines them.
+        pass
+
+    class _PyBackend(torch._C._distributed_c10d.Backend):
+        # A Python backend, as torch/distributed/_nccl4py/backend.py defines one.
+        # Module-level: a <locals> class would hit the local-scope refusal that
+        # sits behind the unsupported-types branch even without this change.
+        def __init__(self):
+            super().__init__(0, 1)
+            self.calls = []
+
+
+class _AssertingGetstate:
+    def __getstate__(self):
+        raise AssertionError("mid-iteration")
+
+
+class _HolderWithGenerator:
+    def __init__(self):
+        self.it = (i for i in range(3))
+        self.cfg = {"a": 1}
+
+
+_T = TypeVar("_T")
+
+
+class _GenericHolder(Generic[_T]):
+    # typing.Generic declares an empty __slots__ (as abc.ABC does), which adds
+    # no instance state.
+    def __init__(self):
+        self.it = (i for i in range(3))
+        self.cfg = {"a": 1}
+
+
+@dataclasses.dataclass(frozen=True)
+class _KeyCfg:
+    # Hashable by name, compared by every field: a plain object that ends up as
+    # a dict key and is therefore compared by value at run time.
+    name: str
+    tags: list
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubCfg:
+    scale: float
+    tags: list
+
+    def __hash__(self):
+        return hash(self.scale)
+
+
+@dataclasses.dataclass(frozen=True)
+class _KeyWithSub:
+    name: str
+    sub: _SubCfg
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+class _NetWithTags(torch.nn.Module):
+    def __init__(self, tags):
+        super().__init__()
+        self.tags = tags
+        self.scale = 2.0
+
+    def forward(self, x):
+        return x * self.scale
+
+
+class _OuterHolder:
+    def __init__(self):
+        self.inner = _HolderWithGenerator()
+        self.name = "outer"
+
+
+@dataclasses.dataclass(frozen=True)
+class _ConstantCfg:
+    dims: tuple
+    tags: list
+
+    def __hash__(self):
+        return hash(self.dims)
+
+
+pytree.register_constant(_ConstantCfg)
+
+
+def _by_name_fn(x):
+    return x
+
+
+class _PipelineWithSetstate:
+    def __init__(self):
+        self.stages = ["a", "b"]
+        self.n = len(self.stages)
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.n = len(self.stages)
+
+
+class _SlottedHolder:
+    __slots__ = ("tag", "__dict__")
+
+    def __init__(self):
+        self.tag = "slot"
+        self.extra = [1]
+
+
+class _AttrDict(dict):
+    pass
+
+
+class _TaggedList(list):
+    pass
+
+
+class _WithGetstate:
+    def __init__(self):
+        self.a = 1
+
+    def __getstate__(self):
+        return {"a": self.a}
+
+
+class _WithNewargsEx:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs_ex__(self):
+        return (self.a,), {}
+
+
+class _WithReduce:
+    def __init__(self):
+        self.a = 1
+
+    def __reduce__(self):
+        return (_WithReduce, ())
+
+
+class _CopyregRegistered:
+    def __init__(self):
+        self.a = 1
+
+
+copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+
+
+class _TupleSub(tuple):
+    __slots__ = ()  # var-sized, so refused by __itemsize__, not by the slots scan
+
+
+class _PureSlots:
+    __slots__ = ("a",)
+
+    def __init__(self):
+        self.a = 1
+
+
+class _RebuiltFromNewargs:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs__(self):
+        return (self.a,)
+
+
+class _ModuleWithGenerators(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.its = [(i for i in range(3))]
+        self.opts = {"k": (i for i in range(3))}
+        self.tagset = {(i for i in range(3))}
+        self.blob = bytearray(b"x")
+        self.empty = ()
+        self.cfg = {"a": 1}
+
+
+def _make_sum_callback():
+    def cb(x):
+        return x.sum((0, 1))
+
+    return cb
+
+
+_Cfg = collections.namedtuple("_Cfg", "opts")
+
+
+class _ModuleSharingAConstantTuple(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.cb = _make_sum_callback()
+        # The compiler folds equal constant tuples in one module into ONE object,
+        # so this unguarded attribute IS cb's `(0, 1)` code constant.
+        self.dims = (0, 1)
+
+
+class _ModuleWithDtypeAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dt = torch.float32
+        self.dev = torch.device("cpu")
+        self.dots = ...
+        self.empty = ()
+
+
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
-    # Pickler-level: these drive GuardsStatePickler directly rather than
-    # through a capture, so none of TestGuardSerialization's setup applies.
+    # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
+    # directly rather than through a capture, so none of
+    # TestGuardSerialization's setup applies.
+
+    def test_module_bookkeeping_containers_are_never_registered_as_pruned(self):
+        # nn.Module.__getattr__ indexes _parameters/_buffers/_modules for every
+        # attribute outside __dict__, so a loaded module whose bookkeeping had
+        # been pruned raised TypeError on every parameter access.
+        m = torch.nn.Linear(2, 2)
+        pickler = GuardsStatePickler({id(m): m}, {}, {}, {}, io.BytesIO())
+        pickler.dump({"m": m})
+        for name in (
+            "_parameters",
+            "_buffers",
+            "_modules",
+            "_non_persistent_buffers_set",
+        ):
+            self.assertNotIn(id(m.__dict__[name]), pickler.missing_values, name)
+        self.assertIn(id(m.__dict__["_forward_hooks"]), pickler.missing_values)
+
+    def test_module_with_its_own_setstate_is_not_pruned(self):
+        # RNNBase.__setstate__ indexes self._all_weights, an unguarded exact
+        # list; a module whose __setstate__ is not nn.Module's is pickled whole.
+        lstm = torch.nn.LSTM(4, 4)
+        pickler = GuardsStatePickler({id(lstm): lstm}, {}, {}, {}, io.BytesIO())
+        pickler.dump({"m": lstm})
+        for name in ("_all_weights", "_flat_weights_names", "_flat_weights"):
+            self.assertNotIn(id(lstm.__dict__[name]), pickler.missing_values, name)
+
+    def test_fake_tensor_reduces_from_the_real_tensors_recorded_dispatch_keys(self):
+        # A guarded FakeTensor stands for a real tensor: the converter may have
+        # recorded that tensor's dispatch keys, whereas _dispatch_keys(fake)
+        # reports the Python keys of the fake itself, and empty_like(fake)
+        # returns another fake (mode active or not) that drags the mode along.
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        real = torch.randn(2)
+        mode = FakeTensorMode()
+        real_keys = torch._C._dispatch_keys(real).raw_repr()
+        # from_meta_and_device is how a loaded artifact's tensors are rebuilt
+        # (from_real_tensor records keys only for an mkldnn source).
+        with_keys = mode.fake_tensor_converter.from_meta_and_device(
+            mode,
+            torch.empty_like(real, device="meta"),
+            real.device,
+            torch.Tensor,
+            torch._C._dispatch_keys(real),
+        )
+        without_keys = mode.from_tensor(real)
+        self.assertIsNone(without_keys.dispatch_keys)
+        for fake in (with_keys, without_keys):
+            buf = io.BytesIO()
+            pickler = GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf)
+            # The meta template is a plain tensor, not another fake carrying
+            # the mode (without no_dispatch the dump still succeeds, with the
+            # mode and its converters pickled along).
+            _, args = pickler.reducer_override(fake)
+            self.assertIs(type(args[0]), torch.Tensor)
+            pickler.dump({"t": fake})
+            self.assertNotIn(b"FakeTensorMode", buf.getvalue())
+            out = load_guards_state(buf.getvalue())["t"]
+            self.assertIsInstance(out, FakeTensor)
+            self.assertEqual(out.shape, real.shape)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(with_keys): with_keys}, {}, {}, {}, buf).dump(
+            {"t": with_keys}
+        )
+        self.assertEqual(
+            load_guards_state(buf.getvalue())["t"].dispatch_keys.raw_repr(), real_keys
+        )
+
+    def test_retained_grad_non_leaf_survives_pickle(self):
+        # A plain non-leaf's .grad is None (and reading it warns), but a
+        # RETAINED-grad non-leaf -- which torch.optim explicitly permits as a
+        # param -- has a real .grad that a guard can chain through; safe_grad
+        # reads it without the warning and must not drop it.
+        base = torch.randn(4, requires_grad=True)
+        x = base * 1
+        x.retain_grad()
+        x.sum().backward()
+        grad = x.grad
+        self.assertIsNotNone(grad)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x, id(grad): grad}, {}, {}, {}, buf).dump(x)
+        out = load_guards_state(buf.getvalue())
+        self.assertIsNotNone(out.grad)
+        self.assertEqual(out.grad.shape, grad.shape)
+
+    def test_an_unguarded_grad_loads_as_none(self):
+        # The .grad of a guarded leaf is a tensor the guard tree may not reach;
+        # it is pruned to the sentinel, and assigning that to .grad raises.
+        x = torch.randn(4, requires_grad=True)
+        x.sum().backward()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump(x)
+        out = load_guards_state(buf.getvalue())
+        self.assertIsNone(out.grad)
+        self.assertEqual(out.shape, x.shape)
+
+    def test_symbolic_scalars_are_refused_as_package_errors(self):
+        # SymInt was refused with a RuntimeError while SymFloat and SymBool fell
+        # through to default pickling; all three are the same serialization
+        # limit and surface as the PackageError the bypass path understands.
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        env = ShapeEnv()
+        for sym in (
+            env.create_unbacked_symint(),
+            env.create_unbacked_symfloat(),
+            env.create_unbacked_symbool(),
+        ):
+            with self.assertRaisesRegex(
+                PackageError, f"Cannot serialize {type(sym).__name__} "
+            ):
+                GuardsStatePickler({id(sym): sym}, {}, {}, {}, io.BytesIO()).dump(
+                    {"s": sym}
+                )
+        # An unguarded symbolic LOCAL is a bystander: pickle_guards_state
+        # registers it and it is pruned before the refusal is reached.
+        s, x = env.create_unbacked_symint(), torch.randn(2)
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"s": s, "x": x},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(x): x}, value_guarded_containers={}
+        )
+        out = load_guards_state(
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+        )
+        self.assertIsInstance(out.output_graph.local_scope["s"], _Missing)
+
+    def test_a_guarded_dynamic_fake_is_refused_not_loaded_broken(self):
+        # The sizes of a guarded dynamic-shaped fake's meta template are
+        # symbolic and in no guard tree: empty_like keeps the fake's symbolic
+        # sizes, so the template's size() tuple carries SymInts. Pruning them
+        # would dump a payload that dies at load in empty_strided, so the
+        # refusal must stay unconditional.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.DYNAMIC]
+        )
+        fake = mode.from_tensor(torch.randn(4, 3), symbolic_context=ctx)
+        with self.assertRaisesRegex(PackageError, "Cannot serialize SymInt"):
+            GuardsStatePickler({id(fake): fake}, {}, {}, {}, io.BytesIO()).dump(
+                {"t": fake}
+            )
+
+    def test_loader_turns_the_pruned_persistent_id_into_the_missing_sentinel(self):
+        # Every occurrence loads as ONE shared _Missing: the sentinel carries
+        # nothing but its reason, so distinct pruned values need not stay distinct.
+        class Pruning(pickle.Pickler):
+            def persistent_id(self, obj):
+                return _PRUNED_VALUE_PID if isinstance(obj, bytearray) else None
+
+        buf = io.BytesIO()
+        Pruning(buf).dump([bytearray(b"a"), bytearray(b"b"), 1])
+        out = load_guards_state(buf.getvalue())
+        self.assertIsInstance(out[0], _Missing)
+        self.assertIs(out[0], out[1])
+        self.assertEqual(out[2], 1)
+
+    def test_prunes_an_unguarded_builtin_container_holding_a_generator(self):
+        # The C pickler saves an exact list/dict/tuple by type and never consults
+        # reducer_override, so registering one in missing_values still left
+        # "cannot pickle 'generator' object". persistent_id sees every object.
+        m = _ModuleWithGenerators()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m, id(m.cfg): m.cfg}, {}, {}, {}, buf).dump(
+            {"m": m, "shared": ()}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertIsInstance(out["m"].its, _Missing)
+        self.assertIs(out["m"].its, out["m"].opts)
+        self.assertIsInstance(out["m"].tagset, _Missing)
+        self.assertIsInstance(out["m"].blob, _Missing)
+        self.assertEqual(out["m"].cfg, {"a": 1})
+        self.assertEqual(out["m"].empty, ())
+        self.assertEqual(out["shared"], ())
+
+    def test_a_verbatim_default_element_survives_an_unguarded_alias(self):
+        # A value-guarded __defaults__ tuple travels whole, element by element.
+        # When an element is also an UNGUARDED module attribute, the module,
+        # pickled first, registers it mid-dump; persistent_id must still leave
+        # the verbatim tuple's element real, or EQUALS_MATCH misses forever.
+        m = _ModuleWithGenerators()
+
+        def fn(a, cfg=[1, m.cfg]):  # noqa: B006
+            return a
+
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"m": m, "fn": fn},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={
+                id(m): m,
+                id(fn): fn,
+                id(fn.__defaults__): fn.__defaults__,
+            },
+            value_guarded_containers={id(fn.__defaults__): fn.__defaults__},
+        )
+        out = load_guards_state(
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+        )
+        self.assertEqual(
+            out.output_graph.local_scope["fn"].__defaults__, ([1, {"a": 1}],)
+        )
+        # The protection is by object, so the module's alias stays real too.
+        self.assertEqual(out.output_graph.local_scope["m"].cfg, {"a": 1})
+
+    def test_a_verbatim_default_inside_a_namedtuple_survives_an_unguarded_alias(self):
+        # A tuple SUBCLASS inside a value-guarded __defaults__ must not stop the
+        # verbatim walk: the aliased dict below it would otherwise be substituted
+        # and EQUALS_MATCH, which falls back to == for a namedtuple, would miss.
+        m = _ModuleWithGenerators()
+
+        def fn(a, cfg=_Cfg(m.cfg)):
+            return a
+
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"m": m, "fn": fn},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={
+                id(m): m,
+                id(fn): fn,
+                id(fn.__defaults__): fn.__defaults__,
+            },
+            value_guarded_containers={id(fn.__defaults__): fn.__defaults__},
+        )
+        out = load_guards_state(
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+        )
+        self.assertEqual(
+            out.output_graph.local_scope["fn"].__defaults__, (_Cfg({"a": 1}),)
+        )
+
+    def test_an_unguarded_tuple_shared_with_a_code_constant_is_not_substituted(self):
+        # A guarded <locals> callback is rebuilt by value, co_consts included; an
+        # unguarded tuple attribute that is the same object must not turn that
+        # constant into the sentinel, so tuples stay on the C fast path.
+        m = _ModuleSharingAConstantTuple()
+        self.assertIs(m.dims, m.cb.__code__.co_consts[1])
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m, id(m.cb): m.cb}, {}, {}, {}, buf).dump({"m": m})
+        out = load_guards_state(buf.getvalue())["m"]
+        self.assertEqual(out.cb.__code__.co_consts[1], (0, 1))
+        self.assertEqual(out.cb(torch.ones(2, 3)), torch.tensor(6.0))
+        self.assertEqual(out.dims, (0, 1))
+
+    def test_loader_rejects_a_foreign_persistent_id(self):
+        class Foreign(pickle.Pickler):
+            def persistent_id(self, obj):
+                return "foo" if obj == "X" else None
+
+        buf = io.BytesIO()
+        Foreign(buf).dump(["X"])
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError, "unknown guards state persistent id 'foo'"
+        ):
+            load_guards_state(buf.getvalue())
+
+    def test_unguarded_bystander_on_a_guarded_user_object_is_pruned(self):
+        # Only nn.Module attributes were pruned; a guarded plain object holding
+        # one unpicklable bystander failed the whole dump.
+        h = _HolderWithGenerator()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(h): h, id(h.cfg): h.cfg}, {}, {}, {}, buf).dump({"h": h})
+        out = load_guards_state(buf.getvalue())["h"]
+        self.assertIsInstance(out.it, _Missing)
+        self.assertEqual(out.cfg, {"a": 1})
+
+    def test_a_by_name_function_does_not_register_its_dict_values(self):
+        # A guarded module-level function is saved by reference, so its __dict__
+        # never travels; registering its values would only prune a shared object
+        # somewhere else in the state.
+        _by_name_fn.cache = {"k": 1}
+        pickler = GuardsStatePickler(
+            {id(_by_name_fn): _by_name_fn}, {}, {}, {}, io.BytesIO()
+        )
+        pickler.dump({"f": _by_name_fn})
+        self.assertNotIn(id(_by_name_fn.cache), pickler.missing_values)
+
+    def test_guarded_object_with_a_custom_setstate_is_pickled_whole(self):
+        # Attribute pruning assumes the default pickle protocol; a __setstate__
+        # that recomputes a field from an unguarded one would read _Missing.
+        p = _PipelineWithSetstate()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(p): p}, {}, {}, {}, buf).dump({"p": p})
+        out = load_guards_state(buf.getvalue())["p"]
+        self.assertEqual((out.stages, out.n), (["a", "b"], 2))
+
+    def test_shared_value_is_pruned_only_inside_the_pruned_receiver(self):
+        # The pruned holder is rebuilt from a filtered copy of its own __dict__,
+        # so the list it shares with a pipeline that is pickled whole stays real
+        # where the pipeline's __setstate__ reads it back, in either pickle order.
+        for order in ("holder first", "pipeline first"):
+            shared = ["a", "b"]
+            p = _PipelineWithSetstate()
+            p.stages, p.n = shared, 2
+            h = _HolderWithGenerator()
+            h.data = shared
+            state = {"h": h, "p": p} if order == "holder first" else {"p": p, "h": h}
+            buf = io.BytesIO()
+            GuardsStatePickler(
+                {id(h): h, id(h.cfg): h.cfg, id(p): p}, {}, {}, {}, buf
+            ).dump(state)
+            out = load_guards_state(buf.getvalue())
+            self.assertEqual((out["p"].stages, out["p"].n), (["a", "b"], 2), order)
+            self.assertIsInstance(out["h"].data, _Missing, order)
+            self.assertIsInstance(out["h"].it, _Missing, order)
+
+    def test_slotted_object_is_pickled_whole(self):
+        # A receiver with __slots__ carries state outside __dict__, which the
+        # filtered-__dict__ rebuild would drop, so it is not pruned at all.
+        obj = _SlottedHolder()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump({"o": obj})
+        out = load_guards_state(buf.getvalue())["o"]
+        self.assertEqual((out.tag, out.extra), ("slot", [1]))
+
+    def test_dict_and_list_subclasses_are_pickled_whole(self):
+        # Their items ride the reduce tuple, not __dict__, and neither type has a
+        # hook to screen for; the layout check keeps them off the pruning path.
+        cfg, tags = _AttrDict(a=1), _TaggedList([1, 2])
+        cfg.tag, tags.name = "t", "n"
+        buf = io.BytesIO()
+        GuardsStatePickler({id(cfg): cfg, id(tags): tags}, {}, {}, {}, buf).dump(
+            {"cfg": cfg, "tags": tags}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertEqual((dict(out["cfg"]), out["cfg"].tag), ({"a": 1}, "t"))
+        self.assertEqual((list(out["tags"]), out["tags"].name), ([1, 2], "n"))
+
+    def test_object_rebuilt_from_newargs_is_pickled_whole(self):
+        # __getnewargs__ feeds cls.__new__ through the same pickler, so a pruned
+        # attribute it returns would arrive as the sentinel.
+        obj = _RebuiltFromNewargs([1])
+        buf = io.BytesIO()
+        GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump({"o": obj})
+        self.assertEqual(load_guards_state(buf.getvalue())["o"].a, [1])
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_an_unguarded_dtensor_placement_is_not_pruned(self):
+        # An unguarded Placement on a guarded holder can be the same object a
+        # DTensorSpec elsewhere in the state rebuilds itself from; pruning it by
+        # id would poison that spec, so DTensor structural values stay. Every
+        # other torch-typed bystander is still pruned: a GradScaler's
+        # __getstate__ asserts mid-iteration, and pruning is what spares the frame.
+        from torch.distributed.tensor.placement_types import Shard
+
+        shard = Shard(0)
+        h = _HolderWithGenerator()
+        h.placement, h.scaler = shard, torch.amp.GradScaler()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(h): h, id(h.cfg): h.cfg}, {}, {}, {}, buf).dump(
+            {"h": h, "shared": shard}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertIsInstance(out["h"].it, _Missing)
+        self.assertIsInstance(out["h"].scaler, _Missing)
+        self.assertIs(out["h"].placement, out["shared"])
+        self.assertEqual(out["shared"], shard)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_an_unguarded_placement_subclass_on_a_module_is_not_pruned(self):
+        # The module path registers pruned attributes by id, so without the
+        # exemption the shared placement would be the sentinel in the spec too;
+        # the exemption is by class, so a user Placement subclass is covered.
+        # Both pickle orders: with the module first, the placement is registered
+        # before the shared local is reached; with the local first, the memo
+        # would carry it real even without the exemption.
+        for order in ("module first", "shared first"):
+            placement = _ScaledPartial()
+            m = torch.nn.Module()
+            m.placement, m.scaler = placement, torch.amp.GradScaler()
+            state = (
+                {"m": m, "shared": placement}
+                if order == "module first"
+                else {"shared": placement, "m": m}
+            )
+            buf = io.BytesIO()
+            GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump(state)
+            out = load_guards_state(buf.getvalue())
+            # The value assertions carry the test: pruning by id would load the
+            # sentinel on both sides, and identity alone would still hold.
+            self.assertEqual(out["m"].placement, placement, order)
+            self.assertIsInstance(out["shared"], _ScaledPartial, order)
+            self.assertIs(out["m"].placement, out["shared"], order)
+            self.assertIsInstance(out["m"].scaler, _Missing, order)
+
+    def test_torch_namespace_objects_are_pickled_whole(self):
+        # type(obj).__module__ == "torch" is torch's namespace too, so the
+        # exclusion must not stop at "torch."; the wrapper's config dict stays.
+        wrapper = torch._TorchCompileInductorWrapper("default", None, False)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(wrapper): wrapper}, {}, {}, {}, buf).dump({"w": wrapper})
+        loaded = load_guards_state(buf.getvalue())["w"]
+        self.assertEqual(loaded.config, wrapper.config)
+        self.assertEqual(loaded.dynamic, wrapper.dynamic)
+
+    def test_unguarded_bystander_on_a_generic_subclass_is_pruned(self):
+        # An empty __slots__ on a base (typing.Generic, abc.ABC) is not state;
+        # the gate must still reach the object.
+        h = _GenericHolder()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(h): h, id(h.cfg): h.cfg}, {}, {}, {}, buf).dump({"h": h})
+        out = load_guards_state(buf.getvalue())["h"]
+        self.assertIsInstance(out.it, _Missing)
+        self.assertEqual(out.cfg, {"a": 1})
+
+    def test_bystander_several_levels_down_is_pruned(self):
+        # The guard tree reaches the inner holder through the outer one; the
+        # generator two levels down is pruned, what the guards read survives.
+        o = _OuterHolder()
+        buf = io.BytesIO()
+        GuardsStatePickler(
+            {id(o): o, id(o.inner): o.inner, id(o.inner.cfg): o.inner.cfg},
+            {},
+            {},
+            {},
+            buf,
+        ).dump({"o": o})
+        out = load_guards_state(buf.getvalue())["o"]
+        self.assertIsInstance(out.inner.it, _Missing)
+        self.assertEqual(out.inner.cfg, {"a": 1})
+        self.assertEqual(out.name, "outer")
+
+    def test_registered_constant_object_is_pickled_whole(self):
+        # EQUALS_MATCH keeps a pytree-registered constant itself and compares it
+        # by value at run time, so pruning its unguarded list field would make
+        # the rebuilt guard miss forever.
+        c = _ConstantCfg((0, 1), ["a"])
+        buf = io.BytesIO()
+        GuardsStatePickler({id(c): c}, {}, {}, {}, buf).dump({"c": c})
+        self.assertEqual(load_guards_state(buf.getvalue())["c"], c)
+
+    def test_unpicklable_guarded_attribute_names_its_path(self):
+        # A type alone ("cannot pickle 'generator' object") is not actionable in
+        # a model with a thousand-frame guard tree; the path is.
+        from torch._dynamo.guards import pickle_guards_state
+
+        h = _HolderWithGenerator()
+        graph = types.SimpleNamespace(
+            guards=[], local_scope={"h": h}, global_scope={}, guard_on_key_order=set()
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(h): h, id(h.it): h.it}, value_guarded_containers={}
+        )
+        with self.assertRaisesRegex(
+            PackageError,
+            r"cannot pickle 'generator' object\n  reached via: local_scope\['h'\]\.it",
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_unpicklable_function_default_names_the_path(self):
+        # A function a guard is rooted at is pickled by value, and a default some
+        # guard reads travels with it verbatim. When that default cannot be
+        # pickled the walk used to stop at the function -- no attribute holds a
+        # default -- and the error arrived with no path at all.
+        from torch._dynamo.guards import pickle_guards_state
+
+        def fn(x, cfg=threading.Lock()):
+            return x
+
+        graph = types.SimpleNamespace(
+            guards=[], local_scope={"fn": fn}, global_scope={}, guard_on_key_order=set()
+        )
+        # What a guard on fn.__defaults__[0] leaves in the guard tree.
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(fn): fn, id(fn.__defaults__): fn.__defaults__},
+            value_guarded_containers={id(fn.__defaults__): fn.__defaults__},
+        )
+        with self.assertRaisesRegex(
+            PackageError, r"reached via: local_scope\['fn'\]\.__defaults__\[0\]"
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_offending_value_path_descends_kwdefaults_and_closures(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        lock = threading.Lock()
+        in_cell = threading.RLock()
+
+        def outer():
+            cell = in_cell
+            if lock is None:
+                empty = 1  # never runs, so the `empty` cell fn closes over stays EMPTY
+
+            def fn(x, *, kw=lock):
+                return cell, empty
+
+            return fn
+
+        fn = outer()
+        graph = types.SimpleNamespace(
+            local_scope={"fn": fn, "m": fn.__get__(object())}, global_scope={}
+        )
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "local_scope['fn'].__kwdefaults__['kw']", _offending_value_path(state, lock)
+        )
+        # The path is a pasteable accessor; the empty cell is skipped, not fatal.
+        self.assertIn(
+            "local_scope['fn'].__closure__[0].cell_contents  # cell",
+            _offending_value_path(state, in_cell),
+        )
+        # A bound method is descended through its function and receiver.
+        graph.local_scope.pop("fn")
+        self.assertIn(
+            "local_scope['m'].__func__.__kwdefaults__['kw']",
+            _offending_value_path(state, lock),
+        )
+
+    def test_unpicklable_value_outside_both_scopes_is_named(self):
+        # What gets pickled is `state`; the two scopes are a handful of objects
+        # off it. A real capture failed on a lock held by a compiler internal
+        # reachable from the guards, not from either scope, so preserving the
+        # scopes perfectly still found nothing. The walk has to start where the
+        # pickler starts.
+        from torch._dynamo.guards import _offending_value_path
+        from torch._guards import Guard, GuardsSet
+
+        class _Node:  # hashable, unlike SimpleNamespace, so a set can hold it
+            pass
+
+        internal = _Node()
+        internal.lock = threading.RLock()
+        graph = types.SimpleNamespace(local_scope={"x": _Node()}, global_scope={})
+        # The real shape: a GuardsSet over an OrderedSet of slotted Guard
+        # dataclasses whose create_fn is a partial -- a list, then slots, then
+        # partial arguments, none of which a __dict__ walk sees.
+        graph._guards = GuardsSet()
+        guard = Guard(LocalSource("x"), functools.partial(lambda *a: None, internal))
+        graph._guards.inner.add(guard)
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "list(state.output_graph._guards.inner)[0].create_fn.args[0].lock",
+            _offending_value_path(state, internal.lock),
+        )
+        # Reachable both ways: the short, readable scope path still wins, so
+        # rooting at state does not make the common report worse.
+        shared = threading.RLock()
+        graph.local_scope["x"].it = shared
+        guard.guard_types = [shared]
+        self.assertIn("local_scope['x'].it", _offending_value_path(state, shared))
+        # A module in the state pickles by name, so the walk does not enter it.
+        graph.local_scope["mod"] = threading
+        self.assertEqual(_offending_value_path(state, threading.RLock), "")
+
+    def test_offending_value_path_is_found_by_identity(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        holder = types.SimpleNamespace(deep=types.SimpleNamespace())
+        # A same-typed decoy a type-based search would have reported instead.
+        holder.deep.decoy = (n for n in range(3))
+        holder.deep.it = (n for n in range(3))
+        graph = types.SimpleNamespace(local_scope={"p": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "local_scope['p'].deep.it", _offending_value_path(state, holder.deep.it)
+        )
+        self.assertEqual(_offending_value_path(state, object()), "")
+
+    def test_offending_value_path_names_a_value_inside_a_container(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        lock, tag = threading.Lock(), threading.Lock()
+        member = _HolderWithGenerator()  # hashable, unlike SimpleNamespace
+        member.it = tag
+        holder = types.SimpleNamespace(cfg={"a": [1, (2, lock)]}, tags={member})
+        graph = types.SimpleNamespace(local_scope={"h": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "local_scope['h'].cfg['a'][1][1]", _offending_value_path(state, lock)
+        )
+        # A set has no index; the placeholder composes with what hangs below it.
+        self.assertIn(
+            "local_scope['h'].tags[<a member>].it", _offending_value_path(state, tag)
+        )
+        # One budget bounds everything queued: past it a value is not named.
+        far = threading.Lock()
+        graph.local_scope["big"] = [0] * 30000 + [far]
+        self.assertEqual(_offending_value_path(state, far), "")
+        graph.local_scope["big"] = [[0] * 200 for _ in range(200)] + [[far]]
+        self.assertEqual(_offending_value_path(state, far), "")
+        graph.local_scope["big"] = [0] * 30 + [far]
+        self.assertIn("local_scope['big'][30]", _offending_value_path(state, far))
+
+    def test_a_reducer_refusal_names_its_path_too(self):
+        # A PackageError the reducer raises itself (a guard reads a weakref) is
+        # re-raised with the path appended: there last_reduced is exact.
+        referent = _HolderWithGenerator()
+        ref = weakref.ref(referent)
+        graph = types.SimpleNamespace(
+            guards=[], local_scope={"w": ref}, global_scope={}, guard_on_key_order=set()
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(ref): ref}, value_guarded_containers={}
+        )
+        with self.assertRaisesRegex(
+            PackageError,
+            r"a guard reads a ReferenceType.*\n  reached via: local_scope\['w'\]$",
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_an_object_whose_getstate_raises_is_named_itself(self):
+        # The C pickler consults reducer_override for the object right before
+        # calling its __reduce_ex__, so a __getstate__ that asserts (GradScaler
+        # mid-iteration) is attributed to that object, not to a sibling.
+        bystander, bad = _HolderWithGenerator(), _AssertingGetstate()
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"ok": bystander, "bad": bad},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(bystander): bystander, id(bad): bad},
+            value_guarded_containers={},
+        )
+        with self.assertRaisesRegex(
+            PackageError, r"mid-iteration\n  reached via: local_scope\['bad'\]$"
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_a_deep_scope_value_is_named_despite_a_wide_state(self):
+        # The scopes get a budget of their own: a wide container directly on
+        # the state used to consume the shared pool before a deep scope value
+        # was reached, and the report came back empty.
+        from torch._dynamo.guards import _offending_value_path
+
+        holder = types.SimpleNamespace(
+            a=types.SimpleNamespace(b=types.SimpleNamespace(lock=threading.Lock()))
+        )
+        graph = types.SimpleNamespace(local_scope={"h": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph, big=[0] * 30000)
+        self.assertEqual(
+            _offending_value_path(state, holder.a.b.lock),
+            "\n  reached via: local_scope['h'].a.b.lock",
+        )
+
+    def test_a_guards_only_value_is_named_despite_a_wide_scope(self):
+        # The converse: pass two must not be charged for the scope dicts pass
+        # one already covered, or a wide scope starves the guards subtree.
+        from torch._dynamo.guards import _offending_value_path
+        from torch._guards import Guard, GuardsSet
+
+        class _Node:
+            pass
+
+        internal = _Node()
+        internal.lock = threading.RLock()
+        graph = types.SimpleNamespace(
+            local_scope={f"k{i}": i for i in range(30000)}, global_scope={}
+        )
+        graph._guards = GuardsSet()
+        guard = Guard(LocalSource("x"), functools.partial(lambda *a: None, internal))
+        graph._guards.inner.add(guard)
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn("._guards", _offending_value_path(state, internal.lock))
+
+    def test_offending_value_path_never_masks_the_real_error(self):
+        # It is a diagnostic appended to an error already being raised, so any
+        # failure inside it must stay silent.
+        from torch._dynamo.guards import _offending_value_path
+
+        class _Exploding:
+            @property
+            def output_graph(self):
+                raise RuntimeError("boom")
+
+        self.assertEqual(_offending_value_path(_Exploding(), object()), "")
+
+    def test_an_unguarded_interned_singleton_is_not_pruned(self):
+        # Pruning is keyed by id(): an unguarded module attribute holding
+        # torch.float32 registered the one dtype object as missing, and every
+        # tensor pickled after it then carried the sentinel as its dtype.
+        m = _ModuleWithDtypeAttr()
+        t = torch.randn(2)
+        buf = io.BytesIO()
+        state = {"m": m, "t": t, "dots": ..., "empty": ()}
+        GuardsStatePickler({id(m): m, id(t): t}, {}, {}, {}, buf).dump(state)
+        out = load_guards_state(buf.getvalue())
+        self.assertIs(out["m"].dt, torch.float32)
+        self.assertEqual(out["m"].dev, torch.device("cpu"))
+        self.assertEqual(out["t"].dtype, torch.float32)
+        # Ellipsis (a code constant of every `x[...]`) and () are shared too.
+        self.assertIs(out["dots"], ...)
+        self.assertEqual(out["empty"], ())
+
+    def test_a_non_literal_subclass_instance_is_still_pruned(self):
+        # The skip is by exact type: an IntEnum member is an int but not a
+        # shared literal, so an unguarded one still prunes to the sentinel.
+        class Color(enum.IntEnum):
+            RED = 1
+
+        m = _ModuleWithDtypeAttr()
+        m.color = Color.RED
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump({"m": m})
+        self.assertIsInstance(load_guards_state(buf.getvalue())["m"].color, _Missing)
+
+    def test_an_unguarded_interned_singleton_local_is_not_pruned(self):
+        # The other registration site: pickle_guards_state marks every
+        # unguarded local-scope leaf as missing, so a bare dtype local poisoned
+        # the tensors' dtype the same way.
+        # A class is shared the same way: torch.Tensor is the pytype of every
+        # tensor payload, and the leaf loop has no callable filter. A <locals>
+        # class cannot be pickled by name, so it stays pruned.
+        class Local:
+            pass
+
+        t = torch.randn(2)
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={
+                "dt": torch.float32,
+                "cfg": {"cls": torch.Tensor, "local": Local},
+                "t": t,
+            },
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(t): t}, value_guarded_containers={}
+        )
+        state = types.SimpleNamespace(output_graph=graph)
+        out = load_guards_state(pickle_guards_state(state, builder)).output_graph
+        self.assertIs(out.local_scope["dt"], torch.float32)
+        self.assertIs(out.local_scope["cfg"]["cls"], torch.Tensor)
+        self.assertIsInstance(out.local_scope["cfg"]["local"], _Missing)
+        self.assertEqual(out.local_scope["t"].dtype, torch.float32)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_unsupported_types_prune_unless_a_guard_reads_them(self):
+        # A c10d Backend is not a ProcessGroup, so an unguarded one failed the
+        # dump instead of pruning to the sentinel; a Python subclass of the C++
+        # Backend (the backend extension point) cannot be pickled either. A
+        # GUARDED unsupported value (a TYPE_MATCH on a stream local, a
+        # FAKE_SCRIPT_TYPE_MATCH on a process-group local) must not prune, or
+        # the rebuilt guard compares against the sentinel forever: it
+        # is refused by name, and pickle_guards_state re-raises that
+        # PackageError unchanged as the bypass reason.
+        from torch._C._distributed_c10d import Backend, FakeProcessGroup, ProcessGroup
+
+        pg = FakeProcessGroup._create_internal(0, world_size=2)
+        self.assertIsInstance(pg, Backend)
+        self.assertNotIsInstance(pg, ProcessGroup)
+        referent = _ModuleWithDtypeAttr()
+        objs = (pg, _PyBackend(), ProcessGroup(0, 1), torch.Stream(device="cpu"))
+        for obj in (*objs, weakref.ref(referent)):
+            with self.subTest(type(obj).__name__):
+                buf = io.BytesIO()
+                GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
+                self.assertIsInstance(load_guards_state(buf.getvalue())["o"], _Missing)
+                graph = types.SimpleNamespace(
+                    guards=[],
+                    local_scope={"o": obj},
+                    global_scope={},
+                    guard_on_key_order=set(),
+                )
+                builder = types.SimpleNamespace(
+                    guard_tree_values={id(obj): obj}, value_guarded_containers={}
+                )
+                with self.assertRaisesRegex(
+                    PackageError,
+                    f"^a guard reads a {type(obj).__name__}, which cannot be",
+                ):
+                    pickle_guards_state(
+                        types.SimpleNamespace(output_graph=graph), builder
+                    )
 
     def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
@@ -1195,7 +2210,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"cell": empty[0]})
-        self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
+        self.assertTrue(_cell_is_empty(load_guards_state(buf.getvalue())["cell"]))
 
     def test_rebuilt_function_keeps_an_empty_closure_cell(self):
         # A by-value rebuild of an fqn-mismatched wrapper carries its cells
@@ -1208,7 +2223,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(wrapped): wrapped}, {}, {}, {}, buf).dump(
             {"fn": wrapped}
         )
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertTrue(_cell_is_empty(out.__closure__[empty[0]]))
 
     def test_reduce_keeps_the_function_dict_key_set(self):
@@ -1226,7 +2241,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         gtv = {id(base): base, id(base.tag): base.tag}
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": base})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertEqual(set(out.__dict__), {"tag", "cache"})
         self.assertEqual(out.__dict__["tag"], 2.0)
         self.assertIsInstance(out.__dict__["cache"], _Missing)
@@ -1244,7 +2259,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         pickler = GuardsStatePickler(gtv, {}, {}, {id(d): d}, buf)
         pickler.dump({"fn": base})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], Inputs)
         self.assertIsInstance(out.__defaults__[1], Inputs)
 
@@ -1259,7 +2274,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         d = base.__defaults__
         buf = io.BytesIO()
         GuardsStatePickler({id(base): base}, {}, {}, {id(d): d}, buf).dump({"fn": base})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], Inputs)
 
     def test_a_length_guarded_tuple_is_pruned_per_value(self):
@@ -1274,7 +2289,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
         buf = io.BytesIO()
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": base})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], _Missing)
         self.assertIsInstance(out.__defaults__[1], Inputs)
 
@@ -1290,7 +2305,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(base): base, id(kw): kw, id(kw["b"]): kw["b"]}
         buf = io.BytesIO()
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": base})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIs(type(out.__kwdefaults__), collections.OrderedDict)
         self.assertIsInstance(out.__kwdefaults__["a"], Inputs)
 
@@ -1306,7 +2321,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(a): a, id(b): b, id(cell.cell_contents): cell.cell_contents}
         pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
         pickler.dump({"a": a, "b": b})
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
         # The gate carried the cell's contents rather than pruning them.
         self.assertNotIsInstance(out["a"].__closure__[0].cell_contents, _Missing)
@@ -1324,7 +2339,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = outer()
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertEqual((out.__name__, out.__qualname__), ("f", fn.__qualname__))
 
     def test_rebuilt_wrapper_is_scoped_to_the_module_that_compiled_it(self):
@@ -1352,7 +2367,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # the rebuilt wrapper can be CALLED (the guard pickler never does).
         gtv = {id(fn): fn, id(global_func): global_func}
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIs(out.__globals__, deco_mod.__dict__)
         self.assertEqual(out.__module__, __name__)
         # SCALE resolves through the decorator module; __module__'s dict has none.
@@ -1368,7 +2383,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn.__module__ = ["not", "a", "module"]
         buf = io.BytesIO()
         GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertEqual(out.__module__, ["not", "a", "module"])
         # A non-str __module__ still has a compile scope, and that is what the
         # rebuilt function gets as its globals.
@@ -1447,7 +2462,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # omitted from guard_tree_values, so the cell is pruned.
         gtv = {id(a): a, id(b): b}
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"a": a, "b": b})
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         self.assertIsInstance(out["a"].__closure__[0].cell_contents, _Missing)
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
@@ -1471,7 +2486,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(fn): fn, id(g): g}
         pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
         pickler.dump(fn)
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         self.assertEqual(out.__module__, torch._dynamo.testing.__name__)
         self.assertEqual(out.__globals__["__name__"], __name__)
         # The builtins entry comes back by reference, not as a copy: a guard
@@ -1512,7 +2527,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertNotIn("__compiled_fn_0", scope)
         # The snapshot's key set is the live dict's as of loop entry, which is
         # what a guard on the scope's shape was baked against.
-        self.assertIn("__compiled_fn_0", pickle.loads(buf.getvalue()).__globals__)
+        self.assertIn("__compiled_fn_0", load_guards_state(buf.getvalue()).__globals__)
 
     def test_snapshot_of_a_scope_without_builtins_stays_without(self):
         # A hand-built globals dict may lack __builtins__ (FunctionType reads
@@ -1522,7 +2537,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = types.FunctionType(global_func.__code__, scope, "global_func")
         buf = io.BytesIO()
         GuardsStatePickler({id(fn): fn, id(scope): scope}, {}, {}, {}, buf).dump(fn)
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         self.assertNotIn("__builtins__", out.__globals__)
         self.assertEqual(set(out.__globals__), set(scope))
 
@@ -1534,7 +2549,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = types.FunctionType(global_func.__code__, scope, "global_func")
         buf = io.BytesIO()
         GuardsStatePickler({id(fn): fn, id(scope): scope}, {}, {}, {}, buf).dump(fn)
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         # By reference, which no copy could be: carrying the dict whole puts
         # the dump of this scope alone at ~6 KB.
         self.assertIs(out.__globals__["__builtins__"], builtins.__dict__)
@@ -1553,7 +2568,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(fn): fn, id(scope): scope, id(builtins.__dict__): builtins.__dict__}
         buf = io.BytesIO()
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump(fn)
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         self.assertIs(out.__globals__["__builtins_dict___0"], builtins.__dict__)
 
     def test_snapshot_keeps_the_save_time_value_of_a_guarded_global(self):
@@ -1567,7 +2582,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(fn): fn, id(g): g}, {}, {}, {}, buf).dump(fn)
         FQN_MISMATCH_GLOBAL = 3
         try:
-            out = pickle.loads(buf.getvalue())
+            out = load_guards_state(buf.getvalue())
             self.assertEqual(out.__globals__["FQN_MISMATCH_GLOBAL"], 2)
             self.assertIsNot(out.__globals__, g)
         finally:
@@ -1584,7 +2599,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(a): a, id(b): b, id(g): g}
         buf = io.BytesIO()
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"a": a, "b": b})
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         self.assertIs(out["a"].__globals__, out["b"].__globals__)
         # Complete rather than the half-loaded copy, and not a key-set equality
         # against the live dict, which a CleanupHook pop would flip.
@@ -1637,7 +2652,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = outer()
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], _Missing)
         self.assertIsInstance(out.__kwdefaults__["kw"], _Missing)
         self.assertIsInstance(out.__closure__[0].cell_contents, _Missing)
@@ -1649,7 +2664,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         inner = DecoratedForwardModule.forward.__wrapped__
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": inner})
-        self.assertIsInstance(pickle.loads(buf.getvalue())["fn"], _Missing)
+        self.assertIsInstance(load_guards_state(buf.getvalue())["fn"], _Missing)
 
     def test_snapshot_globals_share_one_missing_sentinel(self):
         # A globals snapshot prunes a whole module dict; a fresh _Missing per
@@ -1660,7 +2675,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(a): a, id(b): b, id(g): g}
         buf = io.BytesIO()
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"a": a, "b": b})
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         sentinels = {
             id(v)
             for fn in out.values()
@@ -1684,7 +2699,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = outer()
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
 
@@ -1703,7 +2718,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         # The cell's contents is fn itself, which is kept, so the cell is carried.
         GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIs(out.__closure__[0].cell_contents, out)
         self.assertEqual(out(5), 120)
 
@@ -1718,7 +2733,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gen = ns["gen"]
         buf = io.BytesIO()
         GuardsStatePickler({id(gen): gen}, {}, {}, {}, buf).dump({"fn": gen})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertEqual(len(out.__type_params__), 1)
         self.assertIsInstance(out.__type_params__[0], _Missing)
 
@@ -1752,7 +2767,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             exc = RecursionError("maximum recursion depth exceeded")
             with self.assertRaisesRegex(RecursionError, "maximum recursion depth"):
                 GuardsStatePickler({id(fn): fn}, {}, {}, {}, io.BytesIO()).dump(fn)
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertEqual(out.__annotations__, {})
         self.assertEqual(out(3), 3)
 
@@ -1783,7 +2798,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(inner): inner, id(odd): odd}, {}, {}, {}, buf).dump(
             {"inner": inner, "odd": odd}
         )
-        out = pickle.loads(buf.getvalue())
+        out = load_guards_state(buf.getvalue())
         self.assertIsInstance(out["inner"].__annotations__["x"], _Missing)
         self.assertEqual(out["inner"](1, 2), 2)
         self.assertEqual(out["odd"].__annotations__, {})
@@ -1799,7 +2814,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn.__type_params__ = (int,)
         buf = io.BytesIO()
         GuardsStatePickler({id(fn): fn, id(int): int}, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertEqual(out.__type_params__, (int,))
         if sys.version_info >= (3, 12):
             self.assertNotIn("__type_params__", out.__dict__)
@@ -1821,7 +2836,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(base): base, id(d[1]): d[1], id(kw["d"]): kw["d"]}
         buf = io.BytesIO()
         GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": base})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], _Missing)
         self.assertIsInstance(out.__defaults__[1], Inputs)
         self.assertIsInstance(out.__kwdefaults__["c"], _Missing)
@@ -1841,7 +2856,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn.__annotations__ = {"x": Local, "y": int}
         buf = io.BytesIO()
         GuardsStatePickler({id(int): int}, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__annotations__["x"], _Missing)
         self.assertIs(out.__annotations__["y"], int)
 
@@ -1856,7 +2871,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn.__doc__ = threading.Lock()
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__doc__, _Missing)
 
     def test_function_reaching_itself_through_its_dict(self):
@@ -1869,7 +2884,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # __dict__ is not kept, so the cycle runs through a REBUILT dict; `me`
         # survives pruning because its value, w, is kept.
         GuardsStatePickler({id(w): w}, {}, {}, {}, buf).dump({"w": w})
-        out = pickle.loads(buf.getvalue())["w"]
+        out = load_guards_state(buf.getvalue())["w"]
         self.assertIs(out.me, out)
         self.assertIs(out.__closure__[cell[0]].cell_contents, out)
 
@@ -1882,7 +2897,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertFalse(hasattr(m.__self__, "global_add"))
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, Inputs)
 
@@ -1898,7 +2913,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         m = types.MethodType(global_add, obj)
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, SlottedByName)
 
@@ -1913,7 +2928,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # pickle itself may look protocol names up on the instance (3.10 probes
         # __getstate__), so pin only that the METHOD name was never probed.
         self.assertNotIn("global_add", GetattrProxy.probed)
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, GetattrProxy)
 
@@ -1940,7 +2955,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         m = types.MethodType(global_add, StaticHolder())
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIsInstance(out, types.MethodType)
         self.assertIs(out.__func__, global_add)
 
@@ -1950,7 +2965,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         m = types.MethodType(functools.partial(global_add), Inputs(1, 2))
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIs(out.__func__.func, global_add)
         self.assertIsInstance(out.__self__, Inputs)
 
@@ -1970,7 +2985,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         mod = Local()
         buf = io.BytesIO()
         GuardsStatePickler({id(mod): mod}, {}, {}, {}, buf).dump({"m": mod.forward})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIs(type(out.__self__), torch.nn.Module)
         self.assertEqual(out.__func__.__name__, "forward")
         self.assertEqual(out.__func__.__code__.co_name, "forward")
@@ -1985,7 +3000,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         obj.global_add = types.MethodType(global_add, obj)
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": obj.global_add})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIs(type(out.__self__), PlainMethods)
         self.assertEqual(out(1), 2)
@@ -1997,7 +3012,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         method = types.MethodType(RaisingNameProxy(), PlainMethods())
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": method})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIs(type(out.__func__), RaisingNameProxy)
         self.assertEqual(out(3), 3)
         # A receiver whose class defines __getattr__ takes the pair at the gate,
@@ -2008,7 +3023,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": method})
         self.assertNotIn("__name__", RaisingNameProxy.probed)
-        out = pickle.loads(buf.getvalue())["m"]
+        out = load_guards_state(buf.getvalue())["m"]
         self.assertIs(type(out.__func__), RaisingNameProxy)
         self.assertIs(type(out.__self__), GetattrProxy)
         self.assertEqual(out(3), 3)
@@ -3364,6 +4379,255 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
         h.remove()
 
+    def test_loaded_nested_module_keeps_its_bookkeeping_containers(self):
+        # _parameters/_buffers/_modules are exact dicts and
+        # _non_persistent_buffers_set an exact set, so persistent_id would prune
+        # an unguarded one to the sentinel: nn.Module.__getattr__ indexes the
+        # dicts on every attribute miss, register_buffer and __setattr__ index
+        # the set. A module-scope class, so the outer module loads as its own
+        # type rather than as the bare nn.Module a <locals> class becomes.
+        def fn(m, x):
+            return m(x)
+
+        m = GlobalNestedModule()
+        m.register_buffer("scratch", torch.zeros(1), persistent=False)
+        self._test_serialization("TENSOR_MATCH", fn, m, torch.randn(2, 10))
+        loaded = load_guards_state(self._cached_guards_state).output_graph
+        loaded = loaded.local_scope["m"]
+        self.assertIsInstance(loaded, GlobalNestedModule)
+        self.assertFalse(hasattr(loaded, "absent"))
+        self.assertFalse(hasattr(loaded.linear, "absent"))
+        self.assertEqual(loaded.linear.in_features, 10)
+        loaded.register_buffer("extra", torch.zeros(1), persistent=False)
+        self.assertEqual(loaded._non_persistent_buffers_set, {"scratch", "extra"})
+
+    @torch._dynamo.config.patch(allow_rnn=True)
+    def test_loaded_rnn_module_survives_its_own_setstate(self):
+        # RNNBase.__setstate__ indexes _all_weights, an unguarded exact list;
+        # a module with its own __setstate__ is pickled whole rather than pruned.
+        def fn(m, x):
+            return m(x)[0]
+
+        lstm, x = torch.nn.LSTM(4, 4), torch.randn(2, 3, 4)
+        self._test_serialization("TENSOR_MATCH", fn, lstm, x)
+        loaded = load_guards_state(self._cached_guards_state).output_graph
+        loaded = loaded.local_scope["m"]
+        self.assertIsInstance(loaded, torch.nn.LSTM)
+        self.assertEqual(loaded._all_weights, lstm._all_weights)
+        self.assertEqual(loaded._flat_weights_names, lstm._flat_weights_names)
+
+    def test_guarded_plain_object_with_a_generator_bystander_round_trips(self):
+        # The headline case through a real capture: the guard on h.cfg["a"]
+        # reaches the holder, its generator is pruned, and the loaded guards
+        # still pass against the original inputs.
+        def fn(h, x):
+            return x + h.cfg["a"]
+
+        h, x = _HolderWithGenerator(), torch.randn(2)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, h, x)
+        self._test_check_fn(ref, loaded, {"h": h, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertIsInstance(state.local_scope["h"].it, _Missing)
+        self.assertEqual(state.local_scope["h"].cfg, {"a": 1})
+
+    def test_a_guarded_dict_key_travels_whole_and_its_guards_still_pass(self):
+        # A non-const dict key is compared by value at run time through the key
+        # manager, a door that does not go through GuardBuilder.EQUALS_MATCH;
+        # its own TYPE_MATCH puts it in the guard tree, so the pruning gate
+        # would hollow it and the rebuilt guard would miss forever.
+        def fn(d, x):
+            for v in d.values():
+                x = x + v
+            return x
+
+        d, x = {_KeyCfg("a", ["t"]): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, d, x
+        )
+        self._test_check_fn(ref, loaded, {"d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).tags, ["t"])
+
+    def test_pickles_by_default_admits_only_dict_only_plain_objects(self):
+        # The predicate the attribute pruner will gate on: an object round-trips
+        # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
+        # registration and no state outside __dict__ (slots, container items,
+        # var-sized or C layout) is involved. One refusal fixture per conjunct.
+        self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
+        self.assertTrue(_pickles_by_default(_GenericHolder()))
+        for obj in (
+            _PipelineWithSetstate(),
+            _WithGetstate(),
+            _RebuiltFromNewargs([1]),
+            _WithNewargsEx(1),
+            _WithReduce(),
+            _CopyregRegistered(),
+            _SlottedHolder(),
+            _PureSlots(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            _TupleSub((1,)),
+            enum.Enum("Color", "RED").RED,
+            torch.nn.Linear(1, 1),
+            torch.randn(1),
+        ):
+            self.assertFalse(_pickles_by_default(obj), type(obj).__name__)
+
+    def test_is_torch_type_walks_the_mro(self):
+        self.assertTrue(_is_torch_type(torch.nn.Linear))
+        self.assertTrue(_is_torch_type(type("_Sub", (torch.nn.Linear,), {})))
+        self.assertFalse(_is_torch_type(_HolderWithGenerator))
+        self.assertFalse(_is_torch_type(_ConstantCfg))
+
+    def test_pickles_by_default_is_sound_against_pickle_itself(self):
+        # Soundness, not a list of known holes: whenever the predicate says an
+        # object is rebuilt as cls.__new__ plus __dict__, pickle's own reduce of
+        # that object at every protocol from 2 up must be exactly that (newobj, no items, state is
+        # the instance dict), for a zoo of shapes it was never written against.
+        import array
+        import collections
+        import decimal
+        import fractions
+        import pathlib
+
+        def dict_only_reduce(obj, protocol):
+            try:
+                r = obj.__reduce_ex__(protocol)
+            except Exception:
+                return False
+            return (
+                isinstance(r, tuple)
+                and len(r) >= 3
+                and getattr(r[0], "__name__", "") == "__newobj__"
+                and r[1] == (type(obj),)
+                and r[2] == (getattr(obj, "__dict__", None) or None)
+                and all(x is None for x in r[3:5])
+            )
+
+        Point = collections.namedtuple("Point", "x y")
+        zoo = [
+            _HolderWithGenerator(),
+            _GenericHolder(),
+            _OuterHolder(),
+            _ConstantCfg((0, 1), ["a"]),
+            _KeyCfg("a", ["t"]),
+            _PipelineWithSetstate(),
+            _RebuiltFromNewargs([1]),
+            _SlottedHolder(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            _TupleSub((1,)),
+            _PureSlots(),
+            _WithGetstate(),
+            _WithReduce(),
+            _CopyregRegistered(),
+            types.SimpleNamespace(a=1),
+            Point(1, 2),
+            collections.OrderedDict(a=1),
+            collections.defaultdict(int),
+            collections.deque([1]),
+            collections.Counter("ab"),
+            array.array("i", [1]),
+            decimal.Decimal("1.5"),
+            fractions.Fraction(1, 3),
+            pathlib.PurePosixPath("a/b"),
+            enum.Enum("Color", "RED").RED,
+            functools.partial(len),
+            weakref.WeakValueDictionary(),
+            threading.Lock(),
+            torch.randn(1),
+            torch.nn.Linear(1, 1),
+            torch.Size([1]),
+            torch.float32,
+            torch.device("cpu"),
+            torch.Generator(),
+        ]
+        # Every protocol the pickler could write with, DEFAULT_PROTOCOL included.
+        for protocol in range(2, pickle.HIGHEST_PROTOCOL + 1):
+            for obj in zoo:
+                if _pickles_by_default(obj):
+                    self.assertTrue(
+                        dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
+                    )
+        # And the predicate is not vacuous: the plain shapes are admitted (so is
+        # WeakValueDictionary, a pure-Python class whose state is its dict).
+        admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
+        self.assertLessEqual(
+            {"_HolderWithGenerator", "_GenericHolder", "_OuterHolder", "_KeyCfg"},
+            admitted,
+        )
+        self.assertNotIn("SimpleNamespace", admitted)  # a C type: layout differs
+
+    def test_a_dict_key_field_shared_with_a_module_attribute_stays_real(self):
+        # The module path registers its unguarded list by id, and persistent_id
+        # would substitute that list inside the key's own state; the key is
+        # compared by value, so its fields are protected transitively.
+        # The module comes first in the scope so it is reduced, and registers
+        # the list, before the key is reached.
+        def fn(m, d, x):
+            for v in d.values():
+                x = x + v
+            return m(x)
+
+        shared = ["t"]
+        m, d, x = _NetWithTags(shared), {_KeyCfg("a", shared): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, m, d, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).tags, ["t"])
+
+    def test_a_nested_field_of_a_dict_key_is_not_pruned(self):
+        # A guard that reads through a field of the key puts that field in the
+        # guard tree as its own receiver; the key's by-value comparison reads
+        # the field's fields too, so the gate must leave it whole.
+        def fn(d, x):
+            for k in d:
+                x = x + k.sub.scale
+            return x
+
+        d, x = {_KeyWithSub("a", _SubCfg(2.0, ["t"])): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, d, x
+        )
+        self._test_check_fn(ref, loaded, {"d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).sub.tags, ["t"])
+
+    def test_a_plain_object_key_field_shared_with_a_module_attribute_stays_real(self):
+        # The module path registers its unguarded attributes in missing_values,
+        # and a plain object among them is pruned by reducer_override rather than
+        # persistent_id; the same object is a field of a by-value key, so it must
+        # stay whole. The module comes first in the scope so it is reduced first.
+        def fn(m, d, x):
+            for v in d.values():
+                x = x + v
+            return m(x)
+
+        sub = _SubCfg(2.0, ["t"])
+        m, d, x = _NetWithTags(sub), {_KeyWithSub("a", sub): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, m, d, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).sub, sub)
+
+    def test_a_key_field_that_is_an_empty_rebuilt_receiver_stays_whole(self):
+        # A bound method's receiver is normally rebuilt empty (empty_values); when
+        # it is also a field of a by-value key the comparison would read the
+        # empty object, so verbatim outranks the empty rebuild in both hooks.
+        sub = _SubCfg(2.0, ["t"])
+        key = _KeyWithSub("a", sub)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {id(sub): sub}, {}, {id(key): key}, buf).dump(
+            {"k": key, "g": sub.__hash__}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertEqual(out["k"].sub, sub)
+        self.assertEqual(out["k"].sub.tags, ["t"])
+
     def test_grad_mode(self):
         def fn(x):
             return x + 1
@@ -3385,7 +4649,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, _ = self._test_serialization("GLOBAL_STATE", fn, x)
         with torch.no_grad():
             # Ensure guards state loading is not affected by the current global grad mode.
-            guards_state = pickle.loads(self._cached_guards_state)
+            guards_state = load_guards_state(self._cached_guards_state)
             check_fn_manager = CheckFunctionManager(
                 self._cached_f_code,
                 guards_state.output_graph,
