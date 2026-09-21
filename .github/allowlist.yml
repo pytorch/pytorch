@@ -44,7 +44,9 @@ L1:
 
 L2:
   - NVIDIA/pytorch-windows-ci
-  - TorchedHat/pytorch-redhat-ci
+  - TorchedHat/pytorch-redhat-ci:
+      events:
+        - nightly
   - torch-spyre/torch-spyre
   # vLLM reports its scheduled nightly results directly through CRCR.
   - vllm-project/vllm:
