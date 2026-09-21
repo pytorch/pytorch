@@ -15,7 +15,7 @@ import types
 import unittest
 import weakref
 from collections.abc import Iterator
-from typing import Any, NamedTuple
+from typing import Any, Generic, NamedTuple, TypeVar
 from unittest import mock
 
 import torch
@@ -1206,6 +1206,17 @@ class _HolderWithGenerator:
         self.cfg = {"a": 1}
 
 
+_T = TypeVar("_T")
+
+
+class _GenericHolder(Generic[_T]):
+    # typing.Generic declares an empty __slots__ (as abc.ABC does), which adds
+    # no instance state.
+    def __init__(self):
+        self.it = (i for i in range(3))
+        self.cfg = {"a": 1}
+
+
 class _OuterHolder:
     def __init__(self):
         self.inner = _HolderWithGenerator()
@@ -1668,6 +1679,16 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         loaded = load_guards_state(buf.getvalue())["w"]
         self.assertEqual(loaded.config, wrapper.config)
         self.assertEqual(loaded.dynamic, wrapper.dynamic)
+
+    def test_unguarded_bystander_on_a_generic_subclass_is_pruned(self):
+        # An empty __slots__ on a base (typing.Generic, abc.ABC) is not state;
+        # the gate must still reach the object.
+        h = _GenericHolder()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(h): h, id(h.cfg): h.cfg}, {}, {}, {}, buf).dump({"h": h})
+        out = load_guards_state(buf.getvalue())["h"]
+        self.assertIsInstance(out.it, _Missing)
+        self.assertEqual(out.cfg, {"a": 1})
 
     def test_bystander_several_levels_down_is_pruned(self):
         # The guard tree reaches the inner holder through the outer one; the
