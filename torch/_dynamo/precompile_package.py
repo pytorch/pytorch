@@ -20,9 +20,10 @@ here, with that tooling, rather than beside the serializer's pre-check in
 ``guards.py``: it is the capture's policy over that pre-check, not part of it.
 Everything here is internal; the filter alone is unprefixed because the capture
 session passes it as the default a caller may name. ``PrecompileSession``, the
-multi-graph Dynamo capture session that drives it, is added here; the public
-entry point that reaches it lands later in this stack, so nothing under
-``torch/`` calls into the session yet.
+multi-graph Dynamo capture session that drives it, is added here; the
+``torch.compiler.precompile.capture(..., tracer=DynamoTracer())`` entry point
+that reaches it lands later in this stack, so nothing under ``torch/`` calls
+into the session yet.
 
 Capture is by execution, and the caller drives it: the session hands back a
 callable, the caller invokes it with real inputs inside their own loop, each
@@ -90,6 +91,21 @@ Know these before relying on an artifact in production:
   is byte-identical to base and which plain ``caching_precompile`` also raises.
 * The model must live in an importable module. Source is checksummed, so a
   class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
+* ``install()`` writes compiled and resume functions into module globals, but
+  guarded dispatch is scoped to the isolated compile region owned by the
+  returned callable. Call the returned object rather than another instance of
+  the same class. Multiple loaded artifacts can share entry, inner, and resume
+  code objects without taking each other's entries; ``unload()`` removes only
+  its own region and the globals it still owns.
+
+The public surface is ``torch.compiler.precompile.capture(...)``, a caller-driven
+capture used as a context manager: the caller's own calls inside the block drive
+the capture, and the ``(python_code, cache)`` artifact is written to the given files
+when the block exits (its default ``tracer=DynamoTracer()`` records many calls;
+``tracer=MakeFxTracer()`` produces a self-contained Python source artifact from one
+call); and ``torch.compiler.precompile.load``.
+The helpers in this module, including the capture session, implement that surface
+and remain internal.
 """
 
 from __future__ import annotations
@@ -2071,6 +2087,31 @@ def _entry_fn_of(fn: object) -> Callable[..., object]:
     return fn  # type: ignore[return-value]
 
 
+def _identify_graph(gm: torch.fx.GraphModule) -> str:
+    """Name a graph well enough to find it, from inside a backend.
+
+    The module class alone does not: every graph a model produces reports the
+    same one, so a capture that recompiled nine graphs at serve time said
+    "GraphModule" nine times. The compile id keys tlparse, the backend id keys
+    the artifact, and the first node carrying a stack trace names the user line
+    -- including, for a continuation, the resume frame Dynamo minted for it,
+    which is the only thing that tells one break in a chain from another.
+    """
+    parts: list[str] = []
+    compile_id = torch._guards.CompileContext.current_compile_id()
+    if compile_id is not None:
+        parts.append(f"compile id {compile_id}")
+    backend_id = gm.meta.get("backend_id") or getattr(gm, "_backend_id", None)
+    if backend_id is not None:
+        parts.append(f"backend id {backend_id}")
+    for node in gm.graph.nodes:
+        if node.op not in ("placeholder", "output") and node.stack_trace:
+            first = node.stack_trace.strip().splitlines()[0].strip()
+            parts.append(f"first traced at {first}")
+            break
+    return f" Graph: {'; '.join(parts)}." if parts else ""
+
+
 class _PrecompileBackend:
     """One session's own object wrapped around the inner backend.
 
@@ -2083,7 +2124,7 @@ class _PrecompileBackend:
     has to count or hold what the inner backend was handed.
     """
 
-    def __init__(self, backend: str) -> None:
+    def __init__(self, backend: str, serving: bool = False) -> None:
         inner = torch._dynamo.lookup_backend(backend)
         self._torchdynamo_orig_backend = inner
         # Named the way get_compiler_fn derives a name, because a wrapper object
@@ -2093,6 +2134,13 @@ class _PrecompileBackend:
         self.backend_ctx_ctor = getattr(
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
+        # Serving an INSTALLED artifact answers a guard miss by compiling,
+        # because a frame reachable only through the frame evaluator has no
+        # other way to run. Counted, and said out loud once per graph: an
+        # artifact that quietly compiles more of itself on every batch looks
+        # exactly like one that is serving.
+        self.serving = serving
+        self.serve_time_compiles = 0
 
     # Forwarded, as _TorchCompileWrapper and AotAutograd do, so the inner
     # backend's one-time init still fires through the wrapper; read at fire time
@@ -2104,6 +2152,14 @@ class _PrecompileBackend:
     def __call__(
         self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor], **kwargs: Any
     ) -> Any:
+        if self.serving:
+            self.serve_time_compiles += 1
+            log.warning(
+                "precompile: serving compiled a NEW graph -- no captured variant "
+                "matched this call, so the artifact is serving less than it was "
+                "measured to. Recapture with an example that covers it.%s",
+                _identify_graph(gm),
+            )
         return self._torchdynamo_orig_backend(gm, inputs, **kwargs)
 
     def get_compiler_config(self) -> Any:
