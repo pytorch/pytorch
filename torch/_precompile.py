@@ -85,8 +85,29 @@ it.
 #    trace follows the single path taken for the example inputs: Python ``if``/``for``
 #    over tensor values, ``.item()``, and shape-dependent branching are resolved at
 #    trace time and baked. Shapes are static BY DEFAULT (capture uses make_fx in its
-#    "real" mode, so each size is baked as a constant). You can opt specific user-input
-#    dims into being dynamic by marking them with
+#    "real" mode, so each size is baked as a constant).
+#    Capture also constrains the example INPUTS: a NESTED tensor (either layout) is
+#    refused on BOTH capture paths, as a restriction rather than a claim that it cannot be
+#    fakeified -- nothing downstream of the trace has a nested representation (the recorded
+#    dense shape/dtype/device the driver checks against is None for one). That refusal
+#    applies to a traceable wrapper subclass's INNER tensors too, since a wrapper reports
+#    non-nested whatever it wraps.
+#    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
+#    An UNBACKED capture traces under a fake mode IT built, so THAT path -- and only that
+#    path -- also refuses to run inside another trace: an ambient fake mode (a
+#    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
+#    outranks the mode capture built, and no enclosing-trace mode passes
+#    ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted namespace would
+#    be run for real again. A mode built under DEFAULT config (an AOTAutograd / inductor
+#    one) lacks the data-ptr snapshot as well, so a ``.data_ptr()`` read would bake 0
+#    rather than raise; a torch.compile / export mode does build under that patch, so for
+#    those two only the fallback setting is lost. A STATIC capture has no mode of its own to
+#    lose (it traces on the real example tensors), so the refusal does not apply to it: with
+#    ``backend="eager"`` it captures inside another trace as it does outside one, while the
+#    inductor lowering itself refuses a foreign fake mode ("Mixing fake modes NYI"), a
+#    limitation that predates this note. Call precompile outside the enclosing trace.
+#
+#    You can opt specific user-input dims into being dynamic by marking them with
 #    ``torch._dynamo.decorators.mark_unbacked`` before calling: those dims are
 #    captured as UNBACKED symints (symbolic capture), which CANNOT be guarded on -- so
 #    the artifact is valid for any runtime size of those dims, and a graph that needs to
@@ -204,15 +225,20 @@ it.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import logging
+import os
+import stat
+import uuid
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._guards import detect_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -224,6 +250,7 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -271,8 +298,10 @@ class PrecompileError(RuntimeError):
 
     Raised when capture, lowering, ``load``, or a runtime call violates the precompile
     contract -- e.g. a tensor baked as a constant (invariant 1), an unsupported /
-    effectful op, a non-tensor output the inductor backend cannot lower, or a runtime
-    input whose shape or memory format differs from the example (invariants 3 and 6).
+    effectful op, a nested example input, which capture does not support on either path
+    (invariant 3), an UNBACKED capture attempted inside another trace (invariant 3), a
+    non-tensor output the inductor backend cannot lower, or a runtime input whose shape or
+    memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
     """
 
@@ -398,6 +427,23 @@ def _reject_unsupported_marks(user_flat: list[object]) -> None:
             )
 
 
+def _unbacked_guard_error(e: BaseException) -> PrecompileError:
+    """The capture-time error for a guard on a mark_unbacked dim, shared by the capture paths.
+
+    A mark_unbacked dim is captured as an unbacked symint (no hint), so a computation that
+    needs to guard on / specialize its size (a shape-dependent branch, a reshape that pins
+    it) cannot be captured. Unbacked dims cannot be guarded, so rather than bake a
+    silently-wrong artifact, fail here.
+    """
+    return PrecompileError(
+        "precompile: fn needs to guard on a dim marked with mark_unbacked "
+        "(it branches on or specializes that size), which is not allowed for "
+        "an unbacked dynamic dim. Do not mark that dim (capture it static), "
+        "or restructure fn to avoid the size-dependent operation. Underlying: "
+        f"{(str(e).splitlines() or [''])[0]}"
+    )
+
+
 def _read_unbacked_marks(user_flat: list[object]) -> list[dict[int, _MarkSpec]]:
     """Read ``torch._dynamo.decorators.mark_unbacked`` marks off the user-input tensors.
 
@@ -493,11 +539,24 @@ def _fakeify_with_unbacked(
     one symbol; ``min``/``max`` add runtime asserts. Returns ``(flat_fake, fake_mode)``;
     the fake_mode (ShapeEnv) is threaded to the lowering via from_tracing_context.
     """
+    import torch._functorch.config as functorch_config
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     shape_env = ShapeEnv()
-    fake_mode = FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
+    # FakeTensorMode SNAPSHOTS this config at construction, and that snapshot is what
+    # every fake tensor it makes consults, so the patch must wrap the CONSTRUCTION (as
+    # make_fx does around its own mode): with it off, a .data_ptr() read in fn raises
+    # instead of returning a meaningless value. allow_fallback_kernels=False keeps a
+    # meta-less op in an allowlisted namespace (aten, prims, quantized, ...) from having
+    # its real kernel run on zero-filled substitutes and whatever shape that produced
+    # baked.
+    with functorch_config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+        fake_mode = FakeTensorMode(
+            shape_env=shape_env,
+            allow_non_fake_inputs=True,
+            allow_fallback_kernels=False,
+        )
     # shape_id -> unbacked symint (a dynamic SymInt); untyped so grouped dims share one symbol.
     shared: dict[object, Any] = {}
     with fake_mode:
@@ -550,6 +609,42 @@ def _fakeify_with_unbacked(
                 f.requires_grad_(leaf.requires_grad)
                 fake_user.append(f)
     return [*fake_pb, *fake_user], fake_mode
+
+
+def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
+    """Refuse an example tensor capture cannot trace on.
+
+    ``label`` is one of ``_capture``'s ``input_labels`` ("parameter w", "buffer nt", "user
+    input 0"), so each refusal names what the caller has to change. A NESTED input is
+    refused on BOTH capture paths, and worded as a restriction rather than as a claim about
+    either fake mode: the unbacked path's ShapeEnv could mint the symbolic nested int a
+    jagged tensor's ragged dim needs (a static capture has none, so fakeifying one there
+    dies on a raw internal assertion), but nothing downstream of the trace has a nested
+    representation either way -- the recorded dense shape/dtype/device the driver checks
+    against is None for one. Running ahead of every shape read also gets the STRIDED
+    layout, whose ``t.shape`` read raises inside NestedTensorImpl, this same named refusal.
+    """
+    if a.is_nested:
+        raise PrecompileError(
+            f"precompile: example {label} is a nested tensor ({a.layout} layout), "
+            "which capture does not support. Make it a plain dense tensor (or a "
+            "supported subclass) -- on the model for a parameter/buffer, at the call "
+            "site for a user input."
+        )
+    # The metadata read above sees the OUTER tensor only, and a traceable wrapper subclass
+    # reports non-nested whatever it wraps, so recurse into its inner tensors.
+    # Unwrapping rather than refusing wrappers wholesale keeps DTensor working, and it is
+    # the same flattening the fake conversion performs.
+    if is_traceable_wrapper_subclass(a):
+        attrs, _ = a.__tensor_flatten__()
+        for name in attrs:
+            inner = getattr(a, name)
+            # Not every listed attribute is a tensor: DTensor lists its device_mesh.
+            if isinstance(inner, torch.Tensor):
+                _reject_unfakeifiable_input(
+                    f"{label} (inner tensor {name!r} of a {type(a).__name__} subclass)",
+                    inner,
+                )
 
 
 def _check_no_constant_tensors(gm: torch.fx.GraphModule) -> None:
@@ -697,6 +792,34 @@ def _capture(
         _intern_param_buffers(mods)
     )
     num_pb = len(pb_flat)
+    user_flat, in_spec = pytree.tree_flatten(user_inputs)
+    # Reject mark options precompile cannot honor (mark_dynamic, specialize_on) loudly
+    # here, before tracing, rather than silently dropping them. (hint_override is honored,
+    # not rejected -- it is a perf-only autotuning hint threaded onto the capture symbol.)
+    _reject_unsupported_marks(user_flat)
+    flat_args = [*pb_flat, *user_flat]
+    # The REAL example tensors (params/buffers and user inputs). flat_args is reassigned
+    # to FAKE tensors in the unbacked path below, but the saved-grad snapshot/clear/restore
+    # block must protect the real example model's .grad fields (those are what the user
+    # owns and what a backward in fn populates), not the throwaway fakes. list() snapshots
+    # the real tensors here, so the later flat_args rebind does not affect real_flat.
+    real_flat = list(flat_args)
+    # Labels for the per-input refusal below, aligned with flat_args. Each names its KIND,
+    # because the model half is not an argument the caller can swap out: a refusal saying
+    # "buffer nt" sends them to the model, "user input 0" to the call site.
+    input_labels = [
+        *(f"parameter {n}" for n in param_names),
+        *(f"buffer {n}" for n in buffer_names),
+        *(f"user input {i}" for i in range(len(user_flat))),
+    ]
+    # Example inputs capture cannot trace on are refused capture-wide, on BOTH paths and
+    # before either traces. This runs ahead of EVERY shape read below -- the param/buffer
+    # records and the user-input _dense_shape records alike -- which is what gets a STRIDED
+    # nested parameter, buffer or user input the same named refusal rather than the raw
+    # "NestedTensorImpl doesn't support sizes" that reading t.shape raises.
+    for label, a in zip(input_labels, flat_args):
+        if isinstance(a, torch.Tensor):
+            _reject_unfakeifiable_input(label, a)
     # Record each interned param's / buffer's example SHAPE, DTYPE, and DEVICE (aligned to
     # param_names / buffer_names) so the structural check (invariant 2) compares not just
     # names but also each runtime tensor's shape, dtype, and device. The graph is specialized
@@ -710,18 +833,6 @@ def _capture(
     param_devices = [str(t.device) for t in pb_flat[:num_params]]
     buffer_devices = [str(t.device) for t in pb_flat[num_params:]]
 
-    user_flat, in_spec = pytree.tree_flatten(user_inputs)
-    # Reject mark options precompile cannot honor (mark_dynamic, specialize_on) loudly
-    # here, before tracing, rather than silently dropping them. (hint_override is honored,
-    # not rejected -- it is a perf-only autotuning hint threaded onto the capture symbol.)
-    _reject_unsupported_marks(user_flat)
-    flat_args = [*pb_flat, *user_flat]
-    # The REAL example tensors (params/buffers and user inputs). flat_args is reassigned
-    # to FAKE tensors in the unbacked path below, but the saved-grad snapshot/clear/restore
-    # block must protect the real example model's .grad fields (those are what the user
-    # owns and what a backward in fn populates), not the throwaway fakes. list() snapshots
-    # the real tensors here, so the later flat_args rebind does not affect real_flat.
-    real_flat = list(flat_args)
     # Record the example user inputs' dense shapes/dtypes/devices so the drivers can
     # reject a shape (invariant 3) or dtype/device (invariant 6) mismatch up front; see
     # the inlined driver checks (torch._precompile_driver). Stride is NOT recorded --
@@ -743,6 +854,22 @@ def _capture(
     # (GuardOnDataDependentSymNode) rather than baking it. Reading the marks here (instead
     # of a precompile kwarg) keeps the precompile signature simple.
     marks = _read_unbacked_marks(user_flat)
+    # An UNBACKED capture traces under a fake mode IT built, and an ambient one outranks
+    # that, carrying neither of the two settings _fakeify_with_unbacked gives it (invariant
+    # 3 in the Note has the details), so refuse rather than trace under someone else's
+    # contract. The STATIC path has no mode to lose: make_fx's "real" mode resolves none. Ask
+    # detect_fake_mode -- what make_fx itself resolves through -- so both sources it sees
+    # without arguments (an ambient TracingContext, the dispatch-mode stack) are refused by
+    # name here instead of reaching its own mode-mismatch assertion once capture enters its
+    # mode; a fake tensor handed in as an example input, its third source, is not covered.
+    if any(marks) and detect_fake_mode() is not None:
+        raise PrecompileError(
+            "precompile: unbacked capture cannot run inside another trace -- a "
+            "FakeTensorMode is already active (e.g. precompile called from inside "
+            "torch.compile or an export/AOTAutograd trace). make_fx would adopt that mode "
+            "and its ShapeEnv, so capture's own safety settings would not apply. Capture "
+            "outside the enclosing trace."
+        )
     # Record each marked dim's declared min/max so the driver enforces them at runtime;
     # the capture-time torch._check on an unbacked symint never becomes a runtime guard,
     # so without this the documented mark_unbacked min/max check would be a silent no-op.
@@ -864,17 +991,7 @@ def _capture(
                     tracing_mode=tracing_mode,
                 )(flat_args)
             except GuardOnDataDependentSymNode as e:
-                # A mark_unbacked dim was captured as an unbacked symint (no hint), but
-                # the computation needs to guard on / specialize its size (e.g. a
-                # shape-dependent branch or a reshape that pins it). Unbacked dims cannot
-                # be guarded, so rather than bake a silently-wrong artifact, fail here.
-                raise PrecompileError(
-                    "precompile: fn needs to guard on a dim marked with mark_unbacked "
-                    "(it branches on or specializes that size), which is not allowed for "
-                    "an unbacked dynamic dim. Do not mark that dim (capture it static), "
-                    "or restructure fn to avoid the size-dependent operation. Underlying: "
-                    f"{str(e).splitlines()[0]}"
-                ) from e
+                raise _unbacked_guard_error(e) from e
     finally:
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
@@ -994,7 +1111,7 @@ _GENERATED_HEADER = """\
 """
 
 
-def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
+def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -> None:
     if compiled._out_spec is None or compiled._in_spec is None:
         raise PrecompileError("internal: cannot build metadata before _compile()")
     # OUT_SPEC is load-bearing: the driver rebuilds fn's output via tree_unflatten, so
@@ -1023,54 +1140,51 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
         in_spec_str: str | None = pytree.treespec_dumps(compiled._in_spec)
     except (NotImplementedError, TypeError):
         in_spec_str = None
-    parts = [
-        "# " + "=" * 70,
-        "# 2. Calling-convention metadata",
-        "# " + "=" * 70,
-        "import torch as _torch",
-        "import torch.utils._pytree as _pytree",
-        "",
-        # python_code is the single source of truth for the calling convention; the
-        # cache holds ONLY the compiled/captured artifact. load() reads these
-        # constants back out of python_code (see _parse_artifact_metadata).
-        f"BACKEND = {compiled._backend!r}",
-        f"MODULE_POSITIONS = {compiled._module_positions!r}",
-        # Number of positional args the traced fn took (modules + runtime inputs); the
-        # driver checks the runtime call passes the same count up front, so a wrong
-        # arity raises a clear PrecompileError instead of a raw IndexError.
-        f"NUM_POSITIONAL_ARGS = {compiled._num_positional_args}",
-        f"PARAM_NAMES = {compiled._param_names!r}",
-        f"BUFFER_NAMES = {compiled._buffer_names!r}",
-        # Per interned param / buffer example shape / dtype / device (aligned to
-        # PARAM_NAMES / BUFFER_NAMES); the driver checks each runtime param/buffer against
-        # these for the structural contract (invariant 2).
-        f"PARAM_SHAPES = {compiled._param_shapes!r}",
-        f"BUFFER_SHAPES = {compiled._buffer_shapes!r}",
-        f"PARAM_DTYPES = {compiled._param_dtypes!r}",
-        f"BUFFER_DTYPES = {compiled._buffer_dtypes!r}",
-        f"PARAM_DEVICES = {compiled._param_devices!r}",
-        f"BUFFER_DEVICES = {compiled._buffer_devices!r}",
-        # Which unique-param index each trailing grad output belongs to (see invariant 5);
-        # the driver scatters grad k onto params[GRAD_PARAM_INDICES[k]].
-        f"GRAD_PARAM_INDICES = {compiled._grad_param_indices!r}",
-        # The pytree structure of the runtime inputs, or None if not serializable (the
-        # driver validates against it when present, else skips the structure check).
-        f"IN_SPEC = {in_spec_str!r}",
-        f"OUT_SPEC = {out_spec_str!r}",
-        # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
-        # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
-        # Memory-format mismatches are caught by the inductor artifact's own
-        # assert_size_stride (pinned on at capture).
-        f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}",
-        f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}",
-        f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}",
-        # Per user-input-leaf mark_unbacked min/max bounds: None for a leaf with no bounded
-        # marked dim, else {dim: (lo, hi)} (either may be None). The drivers reject a
-        # runtime size outside the declared range (invariant 3); see the inlined drivers.
-        f"USER_INPUT_BOUNDS = {compiled._user_input_bounds!r}",
-        "",
-    ]
-    return parts
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 2. Calling-convention metadata")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("import torch as _torch")
+    buf.writeline("import torch.utils._pytree as _pytree")
+    buf.writeline("")
+    # python_code is the single source of truth for the calling convention; the
+    # cache holds ONLY the compiled/captured artifact. load() reads these
+    # constants back out of python_code (see _parse_artifact_metadata).
+    buf.writeline(f"BACKEND = {compiled._backend!r}")
+    buf.writeline(f"MODULE_POSITIONS = {compiled._module_positions!r}")
+    # Number of positional args the traced fn took (modules + runtime inputs); the
+    # driver checks the runtime call passes the same count up front, so a wrong
+    # arity raises a clear PrecompileError instead of a raw IndexError.
+    buf.writeline(f"NUM_POSITIONAL_ARGS = {compiled._num_positional_args}")
+    buf.writeline(f"PARAM_NAMES = {compiled._param_names!r}")
+    buf.writeline(f"BUFFER_NAMES = {compiled._buffer_names!r}")
+    # Per interned param / buffer example shape / dtype / device (aligned to
+    # PARAM_NAMES / BUFFER_NAMES); the driver checks each runtime param/buffer against
+    # these for the structural contract (invariant 2).
+    buf.writeline(f"PARAM_SHAPES = {compiled._param_shapes!r}")
+    buf.writeline(f"BUFFER_SHAPES = {compiled._buffer_shapes!r}")
+    buf.writeline(f"PARAM_DTYPES = {compiled._param_dtypes!r}")
+    buf.writeline(f"BUFFER_DTYPES = {compiled._buffer_dtypes!r}")
+    buf.writeline(f"PARAM_DEVICES = {compiled._param_devices!r}")
+    buf.writeline(f"BUFFER_DEVICES = {compiled._buffer_devices!r}")
+    # Which unique-param index each trailing grad output belongs to (see invariant 5);
+    # the driver scatters grad k onto params[GRAD_PARAM_INDICES[k]].
+    buf.writeline(f"GRAD_PARAM_INDICES = {compiled._grad_param_indices!r}")
+    # The pytree structure of the runtime inputs, or None if not serializable (the
+    # driver validates against it when present, else skips the structure check).
+    buf.writeline(f"IN_SPEC = {in_spec_str!r}")
+    buf.writeline(f"OUT_SPEC = {out_spec_str!r}")
+    # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
+    # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
+    # Memory-format mismatches are caught by the inductor artifact's own
+    # assert_size_stride (pinned on at capture).
+    buf.writeline(f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}")
+    buf.writeline(f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}")
+    buf.writeline(f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}")
+    # Per user-input-leaf mark_unbacked min/max bounds: None for a leaf with no bounded
+    # marked dim, else {dim: (lo, hi)} (either may be None). The drivers reject a
+    # runtime size outside the declared range (invariant 3); see the inlined drivers.
+    buf.writeline(f"USER_INPUT_BOUNDS = {compiled._user_input_bounds!r}")
+    buf.writeline("")
 
 
 def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
@@ -1078,33 +1192,20 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     executing it (exec'ing the inlined Inductor output would JIT the kernels, the
     very work the cache exists to skip).
 
-    python_code is the single source of truth: ``_build_metadata_section`` emits the
-    constants below as top-level literal assignments, so an AST walk + literal_eval
-    recovers them safely. The cache then only needs to carry the compiled artifact.
+    python_code is the single source of truth: the metadata builders emit the constants
+    below as top-level literal assignments, so an AST walk + literal_eval recovers them
+    safely. The cache then only needs to carry the compiled artifact.
+
+    The required set follows TRACER: absent (artifacts predating the dynamo tracer) or
+    anything but "dynamo" means the make_fx set the inlined driver reads. A dynamo
+    artifact instead carries the multi-graph driver's blobs (_FRAMES and _BACKENDS, or
+    _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once SERVING_MODE is "installed"), the
+    readable frame report beside them and the two versions that lock them,
+    _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION for the
+    pickled guard state.
     """
     import ast
 
-    wanted = {
-        "BACKEND",
-        "MODULE_POSITIONS",
-        "NUM_POSITIONAL_ARGS",
-        "PARAM_NAMES",
-        "BUFFER_NAMES",
-        "PARAM_SHAPES",
-        "BUFFER_SHAPES",
-        "PARAM_DTYPES",
-        "BUFFER_DTYPES",
-        "PARAM_DEVICES",
-        "BUFFER_DEVICES",
-        "GRAD_PARAM_INDICES",
-        "IN_SPEC",
-        "OUT_SPEC",
-        "USER_INPUT_SHAPES",
-        "USER_INPUT_DTYPES",
-        "USER_INPUT_DEVICES",
-        "USER_INPUT_BOUNDS",
-    }
-    found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -1112,31 +1213,95 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "python_code is not valid Python; it does not look like a "
             "torch.compiler.precompile artifact."
         ) from e
+    # The last top-level assignment to a name wins, as it would under exec, so the
+    # set selection below and the reported values read the same assignment.
+    assigns: dict[str, ast.expr] = {}
     for node in tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            continue
-        if target.id in wanted:
-            found[target.id] = ast.literal_eval(node.value)
-        else:
-            # Not a metadata name we consume (the driver section emits only
-            # function defs today, but a future artifact revision could add a
-            # driver-internal top-level assignment). Skipped by design, but log
-            # it at debug so a malformed / renamed artifact is diagnosable
-            # rather than silently dropped.
-            log.debug(
-                "precompile: ignoring unrecognized top-level assignment %r while "
-                "parsing artifact calling-convention metadata",
-                target.id,
-            )
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            assigns[node.targets[0].id] = node.value
+
+    def literal(name: str) -> object:
+        try:
+            return ast.literal_eval(assigns[name])
+        except (ValueError, TypeError) as e:
+            raise PrecompileError(
+                f"python_code {name!r} calling-convention metadata is malformed; "
+                "it must be a Python literal."
+            ) from e
+
+    tracer = literal("TRACER") if "TRACER" in assigns else None
+    if tracer == "dynamo":
+        wanted = {
+            "BACKEND",
+            "FN_NAME",
+            "FRAMES",
+            "DROPPED_GUARDS",
+            "RISKY_DROPPED_GUARDS",
+            "WONT_GENERALIZE",
+            "_FRAMES",
+            "_BACKENDS",
+            "_DYNAMO_PYTHON_VERSION",
+            "_ENTRY_BINDING",
+            "TORCH_VERSION",
+        }
+        mode = literal("SERVING_MODE") if "SERVING_MODE" in assigns else None
+        if mode == "installed":
+            wanted -= {"_FRAMES", "_BACKENDS"}
+            wanted |= {"_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL"}
+    else:
+        wanted = {
+            "BACKEND",
+            "MODULE_POSITIONS",
+            "NUM_POSITIONAL_ARGS",
+            "PARAM_NAMES",
+            "BUFFER_NAMES",
+            "PARAM_SHAPES",
+            "BUFFER_SHAPES",
+            "PARAM_DTYPES",
+            "BUFFER_DTYPES",
+            "PARAM_DEVICES",
+            "BUFFER_DEVICES",
+            "GRAD_PARAM_INDICES",
+            "IN_SPEC",
+            "OUT_SPEC",
+            "USER_INPUT_SHAPES",
+            "USER_INPUT_DTYPES",
+            "USER_INPUT_DEVICES",
+            "USER_INPUT_BOUNDS",
+        }
+    # Parsed when present but never required, so older artifacts load unchanged:
+    # TRACER and SERVING_MODE already selected the required set above, and
+    # the guard-audit sections come back as data.
+    optional = {
+        "TRACER",
+        "SERVING_MODE",
+        "POLICY_DROPPED_GUARDS",
+        "DROPPED_GUARD_CODE",
+    }
+    found = {name: literal(name) for name in assigns if name in wanted | optional}
+    for name in assigns.keys() - wanted - optional - {"forward"}:
+        # Not a metadata name we consume (``forward = ...`` is the multi-graph
+        # driver's own binding, emitted later in this stack). Skipped by design,
+        # but log it at debug so a malformed / renamed artifact is diagnosable
+        # rather than silently dropped.
+        log.debug(
+            "precompile: ignoring unrecognized top-level assignment %r while "
+            "parsing artifact calling-convention metadata",
+            name,
+        )
     missing = wanted - found.keys()
     if missing:
         raise PrecompileError(
             f"python_code is missing calling-convention metadata {sorted(missing)}; "
             "it does not look like a torch.compiler.precompile artifact."
         )
+    # Artifacts predating the installed serving mode carry no SERVING_MODE, and
+    # they were all standalone.
+    found.setdefault("SERVING_MODE", "standalone")
     return found
 
 
@@ -1144,23 +1309,27 @@ def _build_python_source(
     compiled: PrecompiledModule,
     graph_python: str,
 ) -> str:
-    parts = [_GENERATED_HEADER, ""]
-    parts.append("# " + "=" * 70)
-    parts.append("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
-    parts.append("# " + "=" * 70)
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
+
+    buf = PySourceBuilder()
+    buf.writeline(_GENERATED_HEADER)
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
+    buf.writeline("# " + "=" * 70)
     # The composed graph module from aot_autograd.compile_to_python: the inlined
     # Inductor kernels plus AOTAutograd's codegen'd prelude/epilogue, exposing
     # ``call(flat_inputs) -> outputs`` (subclass + mutation handled inside).
-    parts.append(graph_python)
-    parts.append("")
-    parts.extend(_build_metadata_section(compiled))
-    parts.append("# " + "=" * 70)
-    parts.append(
+    buf.writeline(graph_python)
+    buf.writeline("")
+    _build_metadata_section(buf, compiled)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
         "# 3. Driver: module params/buffers + grad scatter + calling convention"
     )
-    parts.append("# " + "=" * 70)
-    parts.append(_emit_driver_source("_inductor_forward"))
-    return "\n".join(parts)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_driver_source("_inductor_forward"))
+    return buf.getvalue()
 
 
 _EAGER_GENERATED_HEADER = """\
@@ -1193,10 +1362,14 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     graph_src = gm.code.replace("def forward(", "def _graph_forward(", 1)
     in_spec_str = pytree.treespec_dumps(in_spec)
     out_spec_str = pytree.treespec_dumps(out_spec)
-    parts = [_EAGER_GENERATED_HEADER, ""]
-    parts.append("# " + "=" * 70)
-    parts.append("# 1. Captured ATen graph (eager backend) -- executable and readable")
-    parts.append("# " + "=" * 70)
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
+
+    buf = PySourceBuilder()
+    buf.writeline(_EAGER_GENERATED_HEADER)
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
+    buf.writeline("# " + "=" * 70)
     # gm.code relies on fx's custom builtins (torch, device, inf, nan, NoneType,
     # fx_pytree, pytree) being in scope -- fx injects them when a real GraphModule
     # runs. Reproduce the FULL set (not just torch/pytree) so a graph that bakes a
@@ -1205,24 +1378,24 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     from torch.fx.graph import _custom_builtins
 
     for _cb in _custom_builtins.values():
-        parts.append(_cb.import_str)
-    parts.append(graph_src)
-    parts.append("")
-    parts.append("class _GraphSelf:")
-    parts.append(f"    _in_spec = pytree.treespec_loads({in_spec_str!r})")
-    parts.append(f"    _out_spec = pytree.treespec_loads({out_spec_str!r})")
-    parts.append("")
-    parts.append("")
-    parts.append("def call(args):")
-    parts.append("    out = _graph_forward(_GraphSelf(), list(args))")
-    parts.append("    return list(out) if isinstance(out, (list, tuple)) else [out]")
-    parts.append("")
-    parts.extend(_build_metadata_section(compiled))
-    parts.append("# " + "=" * 70)
-    parts.append("# 3. Driver: run the inlined captured graph eagerly")
-    parts.append("# " + "=" * 70)
-    parts.append(_emit_driver_source("_eager_forward"))
-    return "\n".join(parts)
+        buf.writeline(_cb.import_str)
+    buf.writeline(graph_src)
+    buf.writeline("")
+    buf.writeline("class _GraphSelf:")
+    buf.writeline(f"    _in_spec = pytree.treespec_loads({in_spec_str!r})")
+    buf.writeline(f"    _out_spec = pytree.treespec_loads({out_spec_str!r})")
+    buf.writeline("")
+    buf.writeline("")
+    buf.writeline("def call(args):")
+    buf.writeline("    out = _graph_forward(_GraphSelf(), list(args))")
+    buf.writeline("    return list(out) if isinstance(out, (list, tuple)) else [out]")
+    buf.writeline("")
+    _build_metadata_section(buf, compiled)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 3. Driver: run the inlined captured graph eagerly")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_driver_source("_eager_forward"))
+    return buf.getvalue()
 
 
 _DRIVER_MAIN = """\
@@ -1571,6 +1744,275 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     return cast("Callable[..., object]", module_ns["forward"])
 
 
+# The os.link failures that mean "this filesystem does not do hard links" (a
+# FAT/exFAT mount, a container overlay, a cross-device target), as opposed to one
+# about the path itself, which must not be papered over with a move. EPERM is in the
+# set only for a source the CALLER owns (the ownership test at its use site).
+_NO_HARD_LINK_ERRNOS = frozenset(
+    {errno.EPERM, errno.EOPNOTSUPP, errno.EMLINK, errno.EXDEV}
+)
+
+
+def _same_inode(
+    path: str | os.PathLike[str], other: str | os.PathLike[str] | os.stat_result
+) -> bool:
+    """True when ``path`` resolves now to ``other`` (a path or a recorded stat).
+
+    False whenever either st_ino is 0: an inode number identifies a file only if it is
+    non-zero (a FAT/exFAT mount, CIFS mounted noserverino, Windows without
+    FILE_ID_INFO), and every name the writer compares lives in one directory, so
+    st_dev alone would call two DIFFERENT files the same one. Unknown identity must
+    never read as "same file".
+    """
+    try:
+        st = other if isinstance(other, os.stat_result) else os.stat(other)
+        here = os.stat(path)
+        if not st.st_ino or not here.st_ino:
+            return False
+        return os.path.samestat(here, st)
+    except OSError:
+        return False
+
+
+def _unlink_quietly(path: str | os.PathLike[str]) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _write_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    python_code: str,
+    cache: bytes,
+) -> None:
+    """Write the matched (python_code, cache) pair, creating parent directories.
+
+    Each half is written beside its target and renamed into place, so neither named file
+    is ever truncated or half-written. The two renames are not one atomic step: the
+    previous source is hard-linked to a backup first and put back if the second rename
+    raises, so a Python exception (a full disk, a permission error) leaves the previous
+    pair intact. Without hard links the previous source is MOVED aside instead, so an
+    interrupt before the undo's probes have run leaves the artifact NAME empty with that
+    source only in the ``.bak``, unreported and one rename from recovered. Which undo
+    runs, and whether it is reported, is read off the DISK, not from flags (the comment
+    on the undo has the reasoning). Process death between the renames is not covered, nor
+    a reader or a second writer racing them: that can leave one source beside the other's
+    cache, which ``load`` refuses on the cache's sha256, and can cost the previous source.
+    Nor is a SYMLINKED artifact name: ``os.link`` follows it, so the backup holds the
+    link's target while ``os.replace`` replaces the link itself, and an undo therefore
+    restores a regular file where the symlink stood.
+    The parent directory is fsync'd after, best effort.
+    """
+    written = []
+    new_stats: list[os.stat_result] = []
+    try:
+        for path, payload in ((artifact_path, python_code), (cache_path, cache)):
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # A unique name per writer: two captures targeting one path must not share a
+            # scratch file. Beside the target, so the rename stays on one filesystem.
+            tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            written.append((tmp, path))
+            # The temp is CREATED with the mode of the file its rename replaces: chmod'ing
+            # it down only after the write would publish the whole new payload at the umask
+            # mode, in a directory the caller chose. Permission bits only: setuid/setgid on a
+            # new inode owned by the WRITING user name a different principal. O_BINARY:
+            # os.open on Windows translates the newlines code_hash covers.
+            try:
+                mode: int | None = stat.S_IMODE(os.stat(path).st_mode) & 0o777
+            except OSError:
+                mode = None
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+            perm = 0o666 if mode is None else mode
+            # opener=, not a bare os.open: an fd is unowned until open() wraps it.
+            with open(tmp, "wb", opener=lambda p, _: os.open(p, flags, perm)) as f:
+                f.write(payload.encode() if isinstance(payload, str) else payload)
+                f.flush()
+                os.fsync(f.fileno())
+            if mode is not None:
+                # O_CREAT's mode is umask-masked, so the exact bits need this too; best
+                # effort, a filesystem that drops modes must not fail the write.
+                try:
+                    os.chmod(tmp, mode)
+                except OSError:
+                    pass
+            # Name the bytes about to be renamed in by inode, for the undo below.
+            new_stats.append(os.stat(tmp))
+    except BaseException:
+        for tmp, _ in written:
+            _unlink_quietly(tmp)
+        raise
+    (artifact_tmp, _), (cache_tmp, _) = written
+    backup = f"{os.fspath(artifact_path)}.{os.getpid()}.{uuid.uuid4().hex}.bak"
+    try:
+        # A hard link, not a move: the named path must resolve to the previous or the new
+        # source at every instant.
+        try:
+            os.link(artifact_path, backup)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            # No hard links here: fall back to moving aside, only for the errnos that mean
+            # unsupported and only for a regular file (os.link on a DIRECTORY also fails EPERM).
+            if e.errno not in _NO_HARD_LINK_ERRNOS or not os.path.isfile(artifact_path):
+                raise
+            # EPERM is also what fs.protected_hardlinks=1 (a Linux default) raises for a
+            # source the caller does not OWN, and chattr +i for one it cannot write -- on a
+            # filesystem that does have hard links. Moving such a file out from under its
+            # name is what the fallback must not do to someone else's artifact, so on POSIX
+            # that errno means "no hard links" only for a source the caller owns.
+            if (
+                e.errno == errno.EPERM
+                and hasattr(os, "geteuid")
+                and os.stat(artifact_path).st_uid != os.geteuid()
+            ):
+                raise
+            os.replace(artifact_path, backup)
+        os.replace(artifact_tmp, artifact_path)
+        os.replace(cache_tmp, cache_path)
+        # Any backup taken above is superseded; inside the try, so an interrupt here is handled.
+        _unlink_quietly(backup)
+    except BaseException:
+        # Put the previous source back (or remove the new one on a first write) so the named
+        # files stay loadable, best effort; then drop every temp and re-raise. Every predicate
+        # that CHOOSES the undo is read off the DISK, never from a flag set after its own
+        # syscall, and ``probed`` says all four reads RAN: an interrupt among them leaves the
+        # rest half-set, so neither the report nor the drop below may consult one. ``kept``:
+        # the backup name carries this call's pid and a uuid, so its existing is this call's.
+        # ``complete`` (both names are this call's temps) means written even though this block
+        # ran; ``aside`` (a backup with the artifact NAME gone) is the move-aside fallback
+        # holding the previous source's only copy; ``landed`` says the FIRST rename happened.
+        # ``undone`` says the undo RETURNED, the finally's unlink safe under it.
+        complete = kept = landed = aside = probed = undone = False
+        try:
+            # Where st_ino is 0 no inode read can say whose source a name holds, so the
+            # temps stand in for the renames: os.replace CONSUMED the one it renamed, so a
+            # temp that is GONE is its rename having run. Only consulted there, since a
+            # temp says nothing about a SECOND writer repointing the name afterwards, which
+            # is what the inode read sees and what the restore below must not overwrite.
+            # Per HALF: the two names are independent arguments, so one can be on a
+            # filesystem with inodes and the other not.
+            blind_artifact = not new_stats[0].st_ino
+            blind_cache = not new_stats[1].st_ino
+            landed = _same_inode(artifact_path, new_stats[0]) or (
+                blind_artifact and not os.path.lexists(artifact_tmp)
+            )
+            complete = landed and (
+                _same_inode(cache_path, new_stats[1])
+                or (blind_cache and not os.path.lexists(cache_tmp))
+            )
+            kept = os.path.lexists(backup)
+            aside = kept and not os.path.lexists(artifact_path)
+            probed = True
+            try:
+                if complete or not (landed or kept):
+                    undone = True
+                elif kept and (landed or aside):
+                    os.replace(backup, artifact_path)
+                    undone = True
+                elif kept:
+                    # The artifact name is neither this call's new source nor gone, so it
+                    # cannot tell the previous source still under the hard link (a failed FIRST
+                    # rename) from one a second WRITER repointed here. Neither wants a restore:
+                    # the first already IS the previous pair, the second a THIRD, older source.
+                    undone = True
+                elif landed:
+                    # A first write, so there is no previous pair to restore: drop the new
+                    # source rather than leave it named with no cache beside it. An unlink, not
+                    # a rename: a rename needs a directory entry, which ENOSPC just exhausted.
+                    os.unlink(artifact_path)
+                    undone = True
+            except OSError:
+                pass
+        finally:
+            # Keyed on that same on-disk outcome: a report NAMES a file, so it fires only
+            # while that file is there and ``probed`` says the reads that chose it ran.
+            named = backup if kept else artifact_path
+            if probed:
+                drop_backup = kept
+            else:
+                # An interrupt among the reads never set ``kept``, so the drop reads the
+                # name itself and fires only while it resolves to the backup's inode.
+                drop_backup = _same_inode(artifact_path, backup)
+            if probed and not undone and os.path.lexists(named):
+                if kept:
+                    # Reached from both shapes the undo's rename serves, so the wording
+                    # names only what holds in both: the .bak, and the one rename back.
+                    log.warning(
+                        "precompile could not put the previous artifact back at %s; that "
+                        "previous source is kept at %s, and the pair does not load until "
+                        "that file is moved back over the first path (the cache at %s is "
+                        "the one that matches it).",
+                        os.fspath(artifact_path),
+                        backup,
+                        os.fspath(cache_path),
+                    )
+                else:
+                    log.warning(
+                        "precompile wrote the artifact at %s and then failed to write "
+                        "its cache at %s, and could not remove the artifact again; no "
+                        "cache beside it matches that file, so the pair does not load.",
+                        os.fspath(artifact_path),
+                        os.fspath(cache_path),
+                    )
+            elif drop_backup:
+                # Reached only where the named pair came out loadable, so the backup is not a
+                # copy anyone still needs: an undo rename consumed it, or nothing needed undoing
+                # because the previous source is still under its own name (a failed FIRST rename).
+                _unlink_quietly(backup)
+            for tmp, _ in written:
+                _unlink_quietly(tmp)
+        raise
+    parents = {os.path.dirname(os.fspath(path)) or "." for _, path in written}
+    # Durably record the renames: without an fsync of the containing directory a crash
+    # just after os.replace returns can still lose the new entry and resurrect the old.
+    for parent in parents:
+        try:
+            fd = os.open(parent, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            # Best effort like the os.open above, close included: by here both renames have
+            # returned, so an error out of either would fail an already loadable pair.
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _read_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+) -> tuple[str, bytes]:
+    r"""Read back a pair written by :func:`_write_artifact`.
+
+    Bytes, then decoded: the exact inverse of the byte-mode write, so a ``\r`` in
+    python_code survives the round trip instead of being translated to ``\n`` by a
+    text-mode read and failing the cache's code_hash. An ``OSError`` from either open (a
+    missing half, a path the filesystem cannot open) or a ``UnicodeDecodeError`` from the
+    decode (a readable file that is not the source half -- transposed arguments, say) is
+    a ``PrecompileError`` naming both paths, with the original as its ``__cause__``.
+    """
+    try:
+        with open(artifact_path, "rb") as f:
+            python_code = f.read().decode()
+        with open(cache_path, "rb") as f:
+            cache = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise PrecompileError(
+            f"precompile could not read the artifact pair (artifact_path="
+            f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
+        ) from e
+    return python_code, cache
+
+
 class _PrecompileApi:
     """Callable namespace implementing ``torch.compiler.precompile`` and ``.load``.
 
@@ -1716,8 +2158,10 @@ class _PrecompileApi:
         example, and control flow / shapes are specialized to ``example_inputs``
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
         tensor baked
-        as a constant (invariant 1), effectful ops (invariant 4), and -- for the
-        inductor backend -- a runtime input whose stride / memory format differs from
+        as a constant (invariant 1), effectful ops (invariant 4), a nested example input,
+        which capture does not support on either path (invariant 3), an UNBACKED capture
+        attempted inside another trace (invariant 3 in the Note has the reason), and -- for
+        the inductor backend -- a runtime input whose stride / memory format differs from
         the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
