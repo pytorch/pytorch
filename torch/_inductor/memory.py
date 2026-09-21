@@ -93,6 +93,11 @@ def get_freeable_input_buf(
     """
     Create and keep track of all input buffers that can be freed during the program
 
+    This is a naming-based ownership estimate.
+    Assumptions:
+    Inputs that ``is_nonfreeable_buffers`` are treated as persistent
+    All other graph inputs are assumed freeable after their last use.
+
     Returns:
         A dictionary containing all freeable input buffers, keyed by their names.
     """
