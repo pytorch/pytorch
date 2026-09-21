@@ -1095,9 +1095,14 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
+        # A single guard type, or a tuple of them when the case under test
+        # needs two (a by-value dict key: the key's own TYPE_MATCH puts it in
+        # the guard tree, DICT_KEYS_MATCH is what compares it by value).
+        kept = (guard_type,) if isinstance(guard_type, str) else tuple(guard_type)
+
         def guard_filter_fn(guards):
             ret = [
-                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                g.guard_type in kept or any(t in g.derived_guard_types for t in kept)
                 for g in guards
             ]
             self.assertTrue(any(ret))
@@ -1225,6 +1230,17 @@ class _GenericHolder(Generic[_T]):
     def __init__(self):
         self.it = (i for i in range(3))
         self.cfg = {"a": 1}
+
+
+@dataclasses.dataclass(frozen=True)
+class _KeyCfg:
+    # Hashable by name, compared by every field: a plain object that ends up as
+    # a dict key and is therefore compared by value at run time.
+    name: str
+    tags: list
+
+    def __hash__(self):
+        return hash(self.name)
 
 
 class _OuterHolder:
@@ -4303,6 +4319,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
         state = load_guards_state(self._cached_guards_state).output_graph
         self.assertIsInstance(state.local_scope["h"].it, _Missing)
         self.assertEqual(state.local_scope["h"].cfg, {"a": 1})
+
+    def test_a_guarded_dict_key_travels_whole_and_its_guards_still_pass(self):
+        # A non-const dict key is compared by value at run time through the key
+        # manager, a door that does not go through GuardBuilder.EQUALS_MATCH;
+        # its own TYPE_MATCH puts it in the guard tree, so the pruning gate
+        # would hollow it and the rebuilt guard would miss forever.
+        def fn(d, x):
+            for v in d.values():
+                x = x + v
+            return x
+
+        d, x = {_KeyCfg("a", ["t"]): 1.0}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH"), fn, d, x
+        )
+        self._test_check_fn(ref, loaded, {"d": d, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(next(iter(state.local_scope["d"])).tags, ["t"])
 
     def test_grad_mode(self):
         def fn(x):
