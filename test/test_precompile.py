@@ -556,6 +556,72 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, r"closes over \['scale'\]"):
             reject("step", [code_entry(step, variants=[variant])])
 
+    def test_static_capture_rejects_data_dependent_ops(self):
+        # A static make_fx capture traces on fake tensors, so a value the trace
+        # cannot know must be refused cleanly, naming the op, rather than baked
+        # from the example or leaked as a raw fake-tensor exception. .item() and
+        # a tensor-value branch raise DataDependentOutputException; .nonzero()
+        # raises the sibling DynamicOutputShapeException, which neither inherits
+        # from the other.
+        from torch._precompile import _capture
+
+        model = torch.nn.Linear(4, 4)
+
+        def branches(m, x):
+            return m(x) if x.sum() > 0 else m(-x)
+
+        def items(m, x):
+            return m(x) * x.sum().item()
+
+        def nonzero(m, x):
+            return m(x)[x.nonzero()[:, 0]]
+
+        scalar = "_local_scalar_dense"
+        for fn, op in ((branches, scalar), (items, scalar), (nonzero, "aten.nonzero")):
+            with self.assertRaisesRegex(PrecompileError, f"data-dependent.*{op}"):
+                _capture(fn, (model, torch.randn(3, 4)), None)
+        # The other way a fake trace fails where a real one ran: an op with no
+        # fake/meta kernel, outside the namespaces fake mode falls back for.
+        with torch.library._scoped_library("precompile_test", "DEF") as lib:
+            lib.define("nometa(Tensor t) -> Tensor")
+            lib.impl("nometa", lambda t: t.clone(), "CPU")
+
+            def nometa(m, x):
+                return m(torch.ops.precompile_test.nometa(x))
+
+            with self.assertRaisesRegex(PrecompileError, "nometa.*register_fake"):
+                _capture(nometa, (model, torch.randn(3, 4)), None)
+
+    def test_static_capture_runs_no_real_compute(self):
+        # The static trace runs on fakes: an in-place op in fn leaves the example
+        # model's buffer and the example input untouched (a revert to
+        # tracing_mode="real" fails both). .grad is not an observable here:
+        # _capture restores it from its snapshot in either mode.
+        from torch._precompile import _capture
+
+        model = torch.nn.Linear(4, 4)
+        model.register_buffer("counter", torch.zeros(1))
+        x = torch.randn(3, 4)
+        expected = x.clone()
+        _capture(lambda m, x: m(x.add_(1)) + m.counter.add_(1), (model, x), None)
+        self.assertEqual(model.counter, torch.zeros(1))
+        self.assertEqual(x, expected)
+
+    def test_cache_envelope_carries_the_tracer_tag(self):
+        # The envelope is what a loader checks before trusting a (python_code,
+        # cache) pair; the eager backend has no compiled artifact, so the tag
+        # set is all it holds.
+        from torch._precompile import PrecompiledModule
+
+        pm = PrecompiledModule(lambda m, x: m(x), backend="eager")
+        pm._compile((torch.nn.Linear(4, 4), torch.randn(3, 4)))
+        env = torch.load(io.BytesIO(pm.to_cache_bytes()), weights_only=True)
+        keys = ["format", "version", "backend", "tracer", "code_hash", "artifact"]
+        self.assertEqual(list(env), keys)
+        self.assertEqual(env["backend"], "eager")
+        self.assertEqual(env["tracer"], "make_fx")
+        self.assertIsNone(env["artifact"])
+
     def test_precompiled_module_is_a_standalone_runnable(self):
         # A loaded make_fx artifact is the standalone PrecompiledRunnable: it
         # installs nothing, so entering and unloading it are no-ops, and it hands
@@ -1050,9 +1116,8 @@ class TestPrecompile(TestCase):
                 PrecompileError, "unbacked capture cannot run inside another trace"
             ):
                 _precompile_pair(lambda m, t: m(t), model, marked)
-            # The STATIC path traces on the real example tensors (make_fx's "real" mode
-            # resolves no fake mode at all), so it has no mode of its own to lose to the
-            # ambient one and is NOT refused.
+            # The STATIC path builds the same hardened mode but is NOT refused: with
+            # backend="eager" it captures inside another trace as it does outside one.
             _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
         # detect_fake_mode also ranks the dispatch-mode stack, so an enclosing
         # `with FakeTensorMode()` -- no TracingContext at all -- gets the same named refusal
@@ -1087,7 +1152,8 @@ class TestPrecompile(TestCase):
         # otherwise have FakeTensorMode's unsafe fallback run its real kernel on
         # zero-filled substitutes and bake whatever shape that produced. The op is called
         # on the UNMARKED input on purpose: the fallback declines symbolic-sized arguments
-        # by itself, so only a static one exercises the flag. Raw out of the trace here too.
+        # by itself, so only a static one exercises the flag. The fake-trace conversion
+        # relabels the raw UnsupportedOperatorException as a PrecompileError naming the op.
         from torch._subclasses.fake_tensor import UnsupportedOperatorException
         from torch.library import _scoped_library
 
@@ -1098,7 +1164,27 @@ class TestPrecompile(TestCase):
             qlib.define("mlprecompile_unbacked_no_meta(Tensor x) -> Tensor")
             qlib.impl("mlprecompile_unbacked_no_meta", lambda t: t * 2, "CPU")
             op = torch.ops.quantized.mlprecompile_unbacked_no_meta
-            with self.assertRaises(UnsupportedOperatorException):
+            with self.assertRaisesRegex(
+                PrecompileError, "mlprecompile_unbacked_no_meta.*register_fake"
+            ) as cm:
+                _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
+            self.assertIsInstance(cm.exception.__cause__, UnsupportedOperatorException)
+
+    def test_static_capture_refuses_a_meta_less_op_in_an_allowlisted_namespace(self):
+        # The STATIC path builds its mode through the same constructor, so it carries
+        # allow_fallback_kernels=False too; with the default True the real kernel runs on
+        # zero-filled substitutes and the capture silently succeeds.
+        from torch.library import _scoped_library
+
+        m = torch.nn.Linear(4, 3).eval()
+        x, y = torch.randn(8, 4), torch.randn(2, 3)
+        with _scoped_library("quantized", "FRAGMENT") as qlib:
+            qlib.define("mlprecompile_static_no_meta(Tensor x) -> Tensor")
+            qlib.impl("mlprecompile_static_no_meta", lambda t: t * 2, "CPU")
+            op = torch.ops.quantized.mlprecompile_static_no_meta
+            with self.assertRaisesRegex(
+                PrecompileError, "mlprecompile_static_no_meta.*register_fake"
+            ):
                 _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
 
 
