@@ -322,6 +322,11 @@ jobs:
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
           TORCH_TPU_TEXT_FILE: /var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt
           USE_ARC: "1"
+          # TEMPORARY: measure what a CUDA shard actually needs. Runs on the
+          # 104Gi runner where nothing is OOM-killed, so the summary is reached
+          # and printed -- on the 41Gi pod the container dies and every
+          # buffered line dies with it.
+          PYTORCH_TEST_MEM_PROFILE: "1"
         shell: bash
         run: |
           set -x

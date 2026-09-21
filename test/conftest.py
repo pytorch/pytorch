@@ -6,6 +6,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from pathlib import Path
 from types import MethodType
 from typing import Any, TYPE_CHECKING, TypeGuard
 
@@ -278,6 +279,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
                     terminalreporter.write_sep("_", msg, red=True, bold=True)
                     terminalreporter._outrep_summary(rep)
                     terminalreporter._handle_teardown_sections(rep.nodeid)
+    _report_memory_profile(terminalreporter)
     yield
 
 
@@ -379,6 +381,110 @@ def _spawns_multiple_processes(
     )
 
     return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
+
+
+def _prefer_this_process_to_the_oom_killer() -> None:
+    """Make the kernel kill this test process rather than the container.
+
+    A cgroup OOM kill picks the highest-badness process. When that turns out to
+    be the container's init, the whole container dies: the job reports only
+    "Container job was OOMKilled (exit code 137)", and every line run_test.py
+    had buffered for this file is lost with it, so the failure names no test.
+
+    Raising oom_score_adj here makes this process the preferred victim. The
+    container survives, run_test.py sees the SIGKILL and reports which file
+    died, and the output captured up to that point still gets printed. An
+    unprivileged process may raise its own oom_score_adj; only lowering it
+    needs CAP_SYS_RESOURCE, so this works in an ordinary pod.
+
+    Confined to ARC pods, where the cgroup limit is the thing being hit.
+    """
+    if not os.getenv("USE_ARC"):
+        return
+    try:
+        Path("/proc/self/oom_score_adj").write_text("1000\n")
+    except OSError:
+        # Not Linux, or the file is not writable. Nothing to fall back to, and
+        # failing to tune the OOM killer must not fail the test run.
+        pass
+
+
+_prefer_this_process_to_the_oom_killer()
+
+
+def _cgroup_memory_mib() -> int | None:
+    """Container memory use in MiB, or None outside a cgroup.
+
+    memory.current is what the OOM killer watches and covers every process in
+    the container, not just this pytest worker.
+    """
+    for path in (
+        "/sys/fs/cgroup/memory.current",
+        "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+    ):
+        try:
+            return int(Path(path).read_text().strip()) // (1024 * 1024)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+# (peak_mib_during, delta_mib, nodeid), filled only when PYTORCH_TEST_MEM_PROFILE
+# is set. Printing happens at the end, so this is only usable on a runner large
+# enough not to be OOM-killed -- on a pod that dies, nothing is ever flushed.
+_MEM_PROFILE: list[tuple[int, int, str]] = []
+_MEM_AT_START: dict[str, int] = {}
+
+
+def pytest_runtest_logstart(nodeid: str, location: Any) -> None:
+    if not os.getenv("PYTORCH_TEST_MEM_PROFILE"):
+        return
+    used = _cgroup_memory_mib()
+    if used is not None:
+        _MEM_AT_START[nodeid] = used
+
+
+def pytest_runtest_logfinish(nodeid: str, location: Any) -> None:
+    if not os.getenv("PYTORCH_TEST_MEM_PROFILE"):
+        return
+    before = _MEM_AT_START.pop(nodeid, None)
+    after = _cgroup_memory_mib()
+    if before is not None and after is not None:
+        _MEM_PROFILE.append((after, after - before, nodeid))
+
+
+def _report_memory_profile(terminalreporter: Any) -> None:
+    """Write the profile to test-reports, which CI uploads as an artifact.
+
+    Not to the terminal: run_test.py captures each file's output and drops it
+    when the file passes, which is why pytest's own summary is absent from a
+    green job's log. A file under test/test-reports survives regardless and is
+    picked up by the existing "Upload test artifacts" step.
+    """
+    if not os.getenv("PYTORCH_TEST_MEM_PROFILE") or not _MEM_PROFILE:
+        return
+    peak, _, at_peak = max(_MEM_PROFILE, key=lambda row: row[0])
+    lines = [f"container peaked at {peak}MiB, after {at_peak}"]
+    lines += [
+        f"  +{delta:>6}MiB -> {level:>6}MiB  {nodeid}"
+        for level, delta, nodeid in sorted(_MEM_PROFILE, key=lambda row: -row[1])[:15]
+    ]
+    body = "\n".join(lines)
+
+    # The terminal copy is free and shows up when a file fails, which is
+    # exactly the case we most want it in.
+    terminalreporter.write_sep("=", "MEMORY PROFILE")
+    for line in lines:
+        terminalreporter.write_line(line)
+
+    try:
+        out = Path("test-reports")
+        out.mkdir(parents=True, exist_ok=True)
+        # One file per test process; the run is sharded and parallel.
+        stem = os.path.basename(sys.argv[0] if sys.argv else "pytest")
+        (out / f"mem-profile-{stem}-{os.getpid()}.txt").write_text(body + "\n")
+    except OSError:
+        pass
 
 
 def pytest_itemcollected(item: Any) -> None:
