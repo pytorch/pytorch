@@ -29,8 +29,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import _get_dim0_padded_size
-from torch.distributed.fsdp._fully_shard._fsdp_extensions import _AllGatherOutputLayout
-from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
+from torch.distributed.fsdp._fully_shard._fsdp_param import (
+    _AllGatherOutputLayout,
+    FSDPParam,
+)
 
 
 __all__ = [

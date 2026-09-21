@@ -14,11 +14,12 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     AllGatherResult,
     foreach_reduce_scatter_copy_in,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_extensions import (
+from torch.distributed.fsdp._fully_shard._fsdp_param import (
     _get_all_gather_output_layout,
     _normalize_all_gather_inputs,
+    FSDPParam,
+    ShardedState,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_intermediate_copy,
     reduce_scatter_input_fn_with_intermediate_copy,
