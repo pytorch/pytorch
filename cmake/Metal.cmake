@@ -54,8 +54,8 @@ set(BFLOAT_METAL_CODE "
   }
 ")
 # Probes what the Metal 4.0 pass actually needs, rather than the language
-# standard alone. Two things drifted apart before: the pass compiles every
-# native/mps/*.metal shader with -std=metal4.0 -mmacos-version-min=26.2, and
+# standard alone. Two things drifted apart before: the pass compiles
+# METAL_40_SHADERS with -std=metal4.0 -mmacos-version-min=26.2, and
 # some SDKs accept that standard while not providing the cooperative-tensor
 # input accessors MppAttention.h calls. A language-only probe then passes and
 # Attention_40.air fails to build.
