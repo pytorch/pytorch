@@ -11,7 +11,7 @@ from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
 from torch.distributed.tensor import DTensor
 
-from ._fsdp_api import _ReduceOp, ReduceScatterInput
+from ._fsdp_api import _ReduceOp
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
@@ -450,8 +450,7 @@ def _default_all_gather_output_fn(
         )
         fsdp_param.alloc_all_gather_outputs()
         copy_outputs.extend(fsdp_param.all_gather_outputs)
-        for layout in fsdp_param.all_gather_copy_layouts:
-            num_prefixes.append(layout.num_prefixes)
+        num_prefixes.extend(fsdp_param.all_gather_num_prefixes)
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
         torch.ops.fsdp._all_gather_copy_out_(
@@ -508,12 +507,12 @@ def _copy_all_gather_outputs(
         )
 
 
-def _default_reduce_scatter_input_fn(
+def _prepare_reduce_scatter_inputs(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> ReduceScatterInput:
-    r"""Prepare gradients and select their reduce-scatter copy.
+) -> tuple[list[torch.Size], list[int]]:
+    r"""Prepare gradients and native reduce-scatter copy metadata.
 
     Contiguous nonzero-dimension shards copy directly into the collective buffer.
     Noncontiguous gradients use the existing chunk-and-concatenate reorder.
@@ -543,22 +542,32 @@ def _default_reduce_scatter_input_fn(
         padded_unsharded_sizes.append(
             _get_dim0_padded_size(unsharded_grad.size(), world_size)
         )
-    copy_in = foreach_reduce_scatter_copy_in
-    if any(num_leading_dims):
+    return padded_unsharded_sizes, num_leading_dims
 
-        def copy_in(
-            unsharded_grads: list[torch.Tensor],
-            output: torch.Tensor,
-            world_size: int,
-        ) -> None:
-            torch.ops.fsdp._reduce_scatter_copy_in_(
-                output.view(world_size, -1),
-                unsharded_grads,
-                num_leading_dims,
-                world_size,
-            )
 
-    return ReduceScatterInput(padded_unsharded_sizes, copy_in)
+def _default_reduce_scatter_input_fn(
+    fsdp_params: list[FSDPParam],
+    unsharded_grads: list[torch.Tensor],
+    world_size: int,
+) -> tuple[torch.Size, ...]:
+    """Reorder nonzero-dimension shards for dimension-0 chunk_cat."""
+    if world_size > 1:
+        for i, (fsdp_param, unsharded_grad) in enumerate(
+            zip(fsdp_params, unsharded_grads)
+        ):
+            if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
+                continue
+            if unsharded_grad.size(shard_dim) % world_size != 0:
+                raise AssertionError(
+                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+                )
+            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
+            unsharded_grads[i] = torch.cat(chunks, dim=0)
+
+    padded_unsharded_sizes = tuple(
+        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+    )
+    return padded_unsharded_sizes
 
 
 @torch.no_grad()
@@ -621,10 +630,15 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    prepared_inputs = prepare_reduce_scatter_inputs(
-        fsdp_params, unsharded_grads, world_size
-    )
-    padded_unsharded_sizes = prepared_inputs.padded_unsharded_sizes
+    if prepare_reduce_scatter_inputs is _default_reduce_scatter_input_fn:
+        padded_unsharded_sizes, num_leading_dims = _prepare_reduce_scatter_inputs(
+            fsdp_params, unsharded_grads, world_size
+        )
+    else:
+        padded_unsharded_sizes = prepare_reduce_scatter_inputs(
+            fsdp_params, unsharded_grads, world_size
+        )
+        num_leading_dims = []
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
     reduce_scatter_input = reduce_scatter_comm.allocate(
@@ -633,8 +647,17 @@ def foreach_reduce(
         device=device,
     )
 
-    prepared_inputs.copy_in(unsharded_grads, reduce_scatter_input, world_size)
-    del prepared_inputs
+    if any(num_leading_dims):
+        torch.ops.fsdp._reduce_scatter_copy_in_(
+            reduce_scatter_input.view(world_size, -1),
+            unsharded_grads,
+            num_leading_dims,
+            world_size,
+        )
+    else:
+        foreach_reduce_scatter_copy_in(
+            unsharded_grads, reduce_scatter_input, world_size
+        )
 
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
