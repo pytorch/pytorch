@@ -353,17 +353,20 @@ def helper(x):
         "reduction_type,identity,reduction_fn",
         (("sum", "0", "tl.sum"), ("prod", "1", "triton_helpers.prod")),
     )
+    @parametrize(
+        "xnumel,optimize_mask",
+        ((sympy.Integer(40961), False), (sympy.Integer(1), True)),
+    )
     def test_mix_order_partial_accumulate_masks_x(
-        self, reduction_type, identity, reduction_fn
+        self, reduction_type, identity, reduction_fn, xnumel, optimize_mask
     ):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
-        xnumel = sympy.Integer(40961)
         rnumel = sympy.Integer(129)
         kernel = TritonKernel(
             {"x": xnumel, "r0_": rnumel},
             features=SIMDKernelFeatures([], xnumel, rnumel),
             mix_order_reduction=True,
-            optimize_mask=False,
+            optimize_mask=optimize_mask,
             override_persistent_reduction=True,
             override_cooperative_reduction=False,
         )
