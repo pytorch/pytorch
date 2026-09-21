@@ -235,7 +235,7 @@ it.
 #
 # 7. Both python_code and the cache are trusted, EXECUTABLE input to load(). The cache
 #    outer envelope is a plain {"artifact": bytes, ...} dict (read with
-#    weights_only=True) carrying a format/version + backend tag AND a code_hash
+#    weights_only=True) carrying a format/version + backend + tracer tag AND a code_hash
 #    (sha256 of the python_code it accelerates) that load() verifies (raising
 #    PrecompileError on mismatch). load() feeds those bytes to
 #    torch.compiler.load_cache_artifacts to PRIME the inductor kernel caches, then always
@@ -260,8 +260,8 @@ it.
 # artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
-# python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair that did not come from the same capture() call.
+# python_code) alongside the format/version + backend + tracer tags, so load()
+# rejects a (python_code, cache) pair that did not come from the same capture() call.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -349,6 +349,14 @@ __all__: list[str] = []
 # model], invariant 7.
 _CACHE_FORMAT = "torch.compiler.precompile"
 _CACHE_VERSION = 1
+
+# The renderer below emits the make_fx capture only, and standalone artifacts only (one
+# that serves by installing onto its captured code objects arrives with the dynamo
+# front-end), so both tags are literals here: the artifact's TRACER line names the
+# renderer that produced python_code and pairs with the cache envelope's tracer tag,
+# and SERVING_MODE tells load() how to serve it.
+_MAKE_FX_TRACER_TAG = "make_fx"
+_STANDALONE_SERVING_MODE = "standalone"
 
 
 # Index into the caller's positional nn.Module arguments (0-based over the modules,
@@ -2079,6 +2087,12 @@ def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -
     # cache holds ONLY the compiled/captured artifact. load() reads these
     # constants back out of python_code (see _parse_artifact_metadata).
     buf.writeline(f"BACKEND = {compiled._backend!r}")
+    # The capture front-end that produced this source, paired against the cache
+    # envelope's tracer tag by load(), and how load() serves it: a standalone artifact
+    # carries its own entry, while the installing shape (SERVING_MODE = 'installed')
+    # arrives with the dynamo front-end and load() refuses it for now.
+    buf.writeline(f"TRACER = {_MAKE_FX_TRACER_TAG!r}")
+    buf.writeline(f"SERVING_MODE = {_STANDALONE_SERVING_MODE!r}")
     buf.writeline(f"MODULE_POSITIONS = {compiled._module_positions!r}")
     # Number of positional args the traced fn took (modules + runtime inputs); the
     # driver checks the runtime call passes the same count up front, so a wrong
@@ -2408,7 +2422,8 @@ class PrecompiledModule(PrecompiledRunnable):
         decompositions: dict | None = None,
     ) -> None:
         # This class renders the make_fx capture only (the DynamoTracer front-end is
-        # routed elsewhere before it gets here), so it takes no tracer parameter.
+        # routed elsewhere before it gets here), so the tracer tag it writes into
+        # python_code and into the cache envelope is _MAKE_FX_TRACER_TAG, not a parameter.
         # ``fn`` is the whole computation: an nn.Module, or a callable that closes
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
         # step that computes a loss and torch.autograd.grad).
@@ -2641,6 +2656,7 @@ class PrecompiledModule(PrecompiledRunnable):
                 "format": _CACHE_FORMAT,
                 "version": _CACHE_VERSION,
                 "backend": self._backend,
+                "tracer": _MAKE_FX_TRACER_TAG,
                 "code_hash": code_hash,
                 "artifact": self._artifact_bytes,
             },
@@ -2943,6 +2959,29 @@ def _read_artifact(
     return python_code, cache
 
 
+def _looks_like_artifact_contents(value: object) -> bool:
+    """Whether a path argument looks like artifact CONTENTS rather than a path.
+
+    A heuristic, and hedged deliberately, because both shapes have legitimate
+    path spellings: ``bytes`` is a real path type (``os.fsencode``,
+    ``os.listdir(b'.')``) and a POSIX filename may contain a newline. So bytes
+    only look like the cache half when they do not name an existing file, and a
+    newline-bearing str only looks like the source half when it parses as Python
+    source or is longer than any path the platform could hold.
+    """
+    if isinstance(value, (bytes, bytearray)):
+        return not os.path.exists(bytes(value))
+    if not isinstance(value, str) or "\n" not in value:
+        return False
+    if len(value) > 4096:  # PATH_MAX; nothing this long is a path
+        return True
+    try:
+        compile(value, "<precompile>", "exec")
+    except (SyntaxError, ValueError):
+        return False
+    return True
+
+
 def _check_path_pair(
     who: str,
     artifact_path: str | os.PathLike[str],
@@ -2950,12 +2989,27 @@ def _check_path_pair(
 ) -> None:
     """Refuse an artifact_path / cache_path pair no entry point accepts.
 
-    Two ways a pair is refused: one file named for both halves after resolving links, and
-    a path that exists but is not a regular file. The same file for both halves is what
-    capture() cannot do at all (the cache write would clobber the source it just wrote);
-    load() could in fact degrade its way through such a pair, and refuses it so that the
-    two entry points accept exactly the same pairs.
+    Three ways a pair is refused: artifact CONTENTS passed where a path belongs (the
+    in-memory ``(python_code, cache)`` pair an earlier ``load`` took under the same
+    name), one file named for both halves after resolving links, and a path that exists
+    but is not a regular file. The same file for both halves is what capture() cannot
+    do at all (the cache write would clobber the source it just wrote); load() could in
+    fact degrade its way through such a pair, and refuses it so that the two entry
+    points accept exactly the same pairs.
     """
+    # Ahead of the path handling below, which would report a multi-kilobyte source
+    # string or a cache blob as an unreadable path. Only what cannot plausibly be a
+    # path is diverted here (see _looks_like_artifact_contents), and the message
+    # hedges, since the caller may have meant an odd but real path.
+    for name, value in (("artifact_path", artifact_path), ("cache_path", cache_path)):
+        if _looks_like_artifact_contents(value):
+            raise PrecompileError(
+                f"{who} takes two file PATHS, but {name} looks like artifact "
+                f"contents rather than a path. capture() writes python_code and its "
+                f"cache to the artifact_path / cache_path files and load() reads "
+                f"them back from those paths; the in-memory (python_code, cache) "
+                f"pair is not accepted."
+            )
     # fsdecode first: realpath is type-preserving, so a bytes spelling and a str
     # spelling of one file would never compare equal.
     artifact_resolved = os.path.normcase(os.path.realpath(os.fsdecode(artifact_path)))
@@ -2977,13 +3031,18 @@ def _runnable_from_pair(
     cache: bytes,
     *,
     who: str,
+    fn: Callable[..., object] | None = None,
     _trusted: bool = False,
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
     The shared core of :func:`load` (which reads the pair off disk first) and the
     capture-time self-load in :class:`_MakeFxCapture`, so ``who`` names the entry
-    point the caller actually called rather than the other. ``_trusted`` is set only for
+    point the caller actually called rather than the other. ``fn`` is :func:`load`'s
+    ``fn=``, passed through unconditionally: it names the function object an
+    INSTALLING artifact installs onto, and every artifact this build produces is
+    standalone, so it is refused below -- which is what makes ``load(..., fn=...)``
+    a ``PrecompileError`` rather than a ``TypeError``. ``_trusted`` is set only for
     that self-load, where the source was just produced in-process, to suppress the
     exec warning.
     """
@@ -2998,7 +3057,24 @@ def _runnable_from_pair(
     # _parse_artifact_metadata still runs to validate python_code is a precompile
     # artifact and to read BACKEND for the cache-pairing check below.
     meta = _parse_artifact_metadata(python_code)
+    # Both refusals need only the metadata, so they come before the cache read and
+    # the exec below: an artifact that will not be served is never JIT'd.
+    if meta.get("SERVING_MODE") == "installed":
+        raise PrecompileError(
+            "python_code declares SERVING_MODE='installed'; serving an artifact "
+            "by installing onto its captured code objects is not available yet."
+        )
+    if fn is not None:
+        raise PrecompileError(
+            "fn= applies only to an artifact with SERVING_MODE='installed'; a "
+            "standalone artifact carries its own entry and takes the captured "
+            "arguments directly."
+        )
     backend = cast(str, meta["BACKEND"])
+    # TRACER is absent on artifacts predating the tracer tag, which are all make_fx
+    # (matching the cache-envelope default), so the pairing check below stays
+    # correct for older python_code.
+    tracer = cast(str, meta.get("TRACER", "make_fx"))
 
     # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
     # are the inductor save_cache_artifacts bundle, used below to prime the kernel
@@ -3028,6 +3104,15 @@ def _runnable_from_pair(
                 raise PrecompileError(
                     f"cache backend {blob.get('backend')!r} does not match the "
                     f"python_code backend {backend!r}; the cache and python_code "
+                    "came from different precompile captures."
+                )
+            # A tracer tag was added alongside the dynamo tracer; treat its absence as
+            # make_fx so an older make_fx cache still pairs with its python_code. A
+            # differing tag means a wrong (code, cache) pairing, so hard-fail.
+            if blob.get("tracer", "make_fx") != tracer:
+                raise PrecompileError(
+                    f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
+                    f"the python_code tracer {tracer!r}; the cache and python_code "
                     "came from different precompile captures."
                 )
             # Reject a cache whose code_hash does not match this python_code (a
@@ -3211,6 +3296,8 @@ def load(
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
     /,
+    *,
+    fn: Callable[..., object] | None = None,
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from the two files a precompile capture wrote.
 
@@ -3246,12 +3333,17 @@ def load(
     ``installed`` is ``False``. The other shape -- an artifact that serves by
     INSTALLING onto its captured code objects, which ``installed`` reports and
     ``unload()`` takes back out -- arrives with the dynamo tracer and is not
-    available in this build.
+    available in this build: ``load`` refuses an artifact whose ``SERVING_MODE`` is
+    ``'installed'``. ``fn=`` is reserved for that shape (the function object to
+    install onto when it is not importable from where it was captured); a standalone
+    artifact rejects it with ``PrecompileError``.
 
-    Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
+    Raises ``PrecompileError`` if either half cannot be read (a missing or
+    unreadable file, or one of the two paths handed artifact contents instead), if
+    ``python_code`` is malformed or is not a
     ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
-    calling-convention metadata), if the cache's ``backend`` tag does not match
-    ``python_code``, or if the cache's ``code_hash`` does not match
+    calling-convention metadata), if the cache's ``backend`` or ``tracer`` tag does
+    not match ``python_code``, or if the cache's ``code_hash`` does not match
     ``sha256(python_code)`` -- i.e. the cache and python_code came from different
     precompile captures. A cache whose ``format``/``version`` does not match (a
     foreign or different-build envelope) is NOT fatal: the cache is acceleration
@@ -3267,7 +3359,9 @@ def load(
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     _check_path_pair("torch.compiler.precompile.load", artifact_path, cache_path)
     python_code, cache = _read_artifact(artifact_path, cache_path)
-    return _runnable_from_pair(python_code, cache, who="torch.compiler.precompile.load")
+    return _runnable_from_pair(
+        python_code, cache, who="torch.compiler.precompile.load", fn=fn
+    )
 
 
 # The capture/load surface is a module (torch.compiler.precompile); these functions
