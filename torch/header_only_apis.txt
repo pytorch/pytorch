@@ -6,14 +6,8 @@
 # torch/headeronly/util/shim_utils.h
 TORCH_ERROR_CODE_CHECK
 
-# torch/headeronly/util/TypeCast.h
-checked_convert
+# c10/util/TypeCast.h
 convert
-report_overflow
-unsafe_wrapping_convert
-
-# torch/headeronly/util/overflows.h
-overflows
 
 # torch/headeronly/util/bit_cast.h
 bit_cast
