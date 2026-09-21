@@ -6,7 +6,7 @@ C10_METAL_CONSTEXPR uint32_t scaled_mm_simdgroups = 4;
 C10_METAL_CONSTEXPR uint32_t scaled_mm_threads =
     scaled_mm_simdgroups * c10::metal::simdgroup_size;
 // Matrix A's max number of rows on which we dispatch gemv kernel
-// Higher values per-row ALU work outweights streaming matrix B once.
+// Higher values per-row ALU work outweighs streaming matrix B once.
 C10_METAL_CONSTEXPR uint32_t scaled_mm_gemv_max_rows = 4;
 // Number of fp8 values loaded at once by gemv kernel (one uint4).
 // K, leading strides and storage offsets must be multiples of this.
