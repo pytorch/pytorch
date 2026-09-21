@@ -8,6 +8,7 @@ from torch._inductor.heuristics.registry import register_template_heuristic
 from ...kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ...kernel.mm import (
     aten__fp8_mm,
+    aten__fp8_mm_v2,
     aten__int_mm,
     aten_addmm,
     aten_bias_addmm,
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 @register_template_heuristic(aten_mm_dtype.uid, "cuda")
 @register_template_heuristic(aten_mm_dtype.uid, "xpu")
 @register_template_heuristic(aten__fp8_mm.uid, None)
+@register_template_heuristic(aten__fp8_mm_v2.uid, None)
 @register_template_heuristic(aten__int_mm.uid, None)
 @register_template_heuristic(aten_bmm.uid, None)
 @register_template_heuristic(aten_mm_plus_mm.uid, None)
