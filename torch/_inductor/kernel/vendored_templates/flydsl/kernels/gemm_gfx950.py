@@ -665,20 +665,33 @@ def make_mxfp_lds_layout(rows, block_k, is_k_major):
     return layout
 
 
+def make_mxfp_mma_atom(param):
+    dtype = (
+        fx.Float4E2M1FN
+        if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4)
+        else fx.Float8E4M3FN
+    )
+    return fx.make_mma_atom(
+        fx.rocdl.cdna4.MFMA_Scale(param.mma_m, param.mma_n, param.mma_k, dtype)
+    )
+
+
 def make_mxfp_tiled_mma(param):
+    compute_atom = make_mxfp_mma_atom(param)
     if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4):
-        # This TiledMma defines layouts only. One FP8 slot has the same 8-bit
-        # payload as two packed FP4 values, so its K/2 fragments are byte-identical
-        # to the 16x16x128 FP4 scaled-MFMA fragments consumed by mxfp_gemm.
-        op = fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k // 2, fx.Float8E4M3FN)
+        # TiledMma provides layouts only. One FP8 slot has the same 8-bit payload
+        # as two packed FP4 values, so the proxy produces byte-identical fragments.
+        layout_atom = fx.make_mma_atom(
+            fx.rocdl.MFMA(
+                param.mma_m, param.mma_n, param.mma_k // 2, fx.Float8E4M3FN
+            )
+        )
         k_layout = fx.make_layout((16, 4), (1, 16))
     else:
-        op = fx.rocdl.cdna4.MFMA_Scale(
-            param.mma_m, param.mma_n, param.mma_k, fx.Float8E4M3FN
-        )
+        layout_atom = compute_atom
         k_layout = fx.make_layout((16, 2, 4), (1, 64, 16))
     return fx.make_tiled_mma(
-        fx.make_mma_atom(op),
+        layout_atom,
         fx.make_layout((param.m_waves, param.n_waves, 1), (param.n_waves, 1, 0)),
         fx.make_tile(None, None, k_layout),
     )
@@ -742,14 +755,7 @@ def mxfp_gemm(
     32-element K scale group. opsel=0 consumes the low byte of each
     lane's i32 scale operand.
     """
-    dtype = (
-        fx.Float4E2M1FN
-        if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4)
-        else fx.Float8E4M3FN
-    )
-    mma_atom = fx.make_mma_atom(
-        fx.rocdl.cdna4.MFMA_Scale(param.mma_m, param.mma_n, param.mma_k, dtype)
-    )
+    mma_atom = make_mxfp_mma_atom(param)
     if const_expr(not scales_are_fragments):
         lane = tid % GFX950_WAVE_SIZE
         wave = tid // GFX950_WAVE_SIZE
