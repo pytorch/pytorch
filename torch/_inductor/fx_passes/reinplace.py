@@ -19,7 +19,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
 )
 from torch._inductor import config, inductor_prims
-from torch._inductor.fx_utils import get_node_storage, is_node_realized
+from torch._inductor.fx_utils import get_node_storage, get_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
@@ -497,6 +497,55 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
+def _auto_functionalized_v2_reads_and_writes(
+    node: torch.fx.Node,
+) -> tuple[list[Any], dict[int, list[torch.Tensor]]]:
+    """
+    For an auto_functionalized_v2 node: the arguments the op reads without
+    mutating them, and, for each base, the (fake) views of it the op mutates.
+    """
+    from torch._higher_order_ops.auto_functionalize import (
+        get_mutable_args,
+        read_view_information_from_args,
+    )
+
+    mutable_op = node.args[0]
+    kwargs = dict(node.kwargs)
+    all_bases = kwargs.pop("_all_bases")
+    fake_bases = [
+        base.meta["val"] if isinstance(base, torch.fx.Node) else base
+        for base in all_bases
+    ]
+    whole_bases = {
+        i: [base] for i, base in enumerate(fake_bases) if isinstance(base, torch.Tensor)
+    }
+    if not isinstance(mutable_op, torch._ops.OpOverload) or torch._library.utils.is_out(
+        mutable_op
+    ):
+        return list(kwargs.values()), whole_bases
+
+    # The view information may hold symbolic sizes: read it from the fake values.
+    fake_kwargs = pytree.tree_map_only(
+        torch.fx.Node, lambda arg: arg.meta["val"], kwargs
+    )
+    names, types = get_mutable_args(mutable_op)
+    view_info = read_view_information_from_args(names, types, fake_kwargs, fake_bases)
+    # read_view_information_from_args pops what describes the mutated args
+    read_args = [kwargs[name] for name in fake_kwargs]
+
+    written: dict[int, list[torch.Tensor]] = defaultdict(list)
+    fake_mode = detect_fake_mode(fake_bases)
+    with (
+        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+        if fake_mode and fake_mode.shape_env
+        else nullcontext()
+    ):
+        for info in pytree.tree_leaves(list(view_info.values())):
+            if info is not None:
+                written[info.base_index].append(info.regenerate_view(fake_bases))
+    return read_args, written
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -607,15 +656,33 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return True
         return False
 
-    def can_inplace(node, mutated_arg):
-        # ls should be a list of tensors that all shares the same storage.
-        def _overlap(ls) -> bool:
-            try:
-                return len(compute_overlapping_tensors(ls)) != 0
-            except GuardOnDataDependentSymNode:
-                # If we fail with data dependent error we assume they all overlap.
-                return True
+    # ls should be a list of tensors that all shares the same storage.
+    def _overlap(ls) -> bool:
+        try:
+            return len(compute_overlapping_tensors(ls)) != 0
+        except GuardOnDataDependentSymNode:
+            # If we fail with data dependent error we assume they all overlap.
+            return True
 
+    def reads_what_it_mutates(read_args, written) -> bool:
+        # functional_op(src=x, dst=x), which mutates only dst, reads x as it was
+        # before the call. That is what
+        # >>> y = x.clone()
+        # >>> op(src=y, dst=x)
+        # becomes once the clone has been removed as a no-op. Reinplaced into
+        # op(src=x, dst=x), the op would read what it is writing.
+        for read in pytree.tree_leaves(read_args):
+            if not isinstance(read, torch.fx.Node):
+                continue
+            storage = get_node_storage(read)
+            if storage is None:
+                continue
+            for val in written:
+                if get_storage(val) == storage and _overlap([read.meta["val"], val]):
+                    return True
+        return False
+
+    def can_inplace(node, mutated_arg):
         if isinstance(mutated_arg, (list, tuple)):
             # TODO Using _overlap here causes a several issues.
             unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
@@ -753,8 +820,28 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, trigger
+        old_tensors_to_clone,
+        kwargs,
+        node_name,
+        trigger,
+        read_args=None,
+        written_views=None,
     ):
+        # read_args: what the op reads and does not mutate (default: the other
+        # kwargs). written_views: for each mutated arg, the fake tensors the op
+        # writes through (default: the arg itself).
+        if read_args is None:
+            read_args = [v for k, v in kwargs.items() if k not in old_tensors_to_clone]
+
+        def written_through(arg, mutated_arg):
+            if written_views is not None:
+                return written_views.get(arg, [])
+            return [
+                a.meta["val"]
+                for a in pytree.tree_leaves(mutated_arg)
+                if isinstance(a, torch.fx.Node) and get_node_storage(a) is not None
+            ]
+
         tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[int | None]()
 
@@ -788,6 +875,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # should not reinplace into op(x, x[0]).
             should_attempt_reinplace = not tensor_with_same_storage_already_reinplaced(
                 mutated_arg
+            ) and not reads_what_it_mutates(
+                read_args, written_through(arg, mutated_arg)
             )
             if should_attempt_reinplace and can_inplace(node, mutated_arg):
                 # In general, we probably do not need those optimizations.
@@ -843,11 +932,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             all_bases = kwargs["_all_bases"]
             bases_to_clone = range(len(all_bases))
             base_tensors_dct = dict(enumerate(all_bases))
+            read_args, written_views = _auto_functionalized_v2_reads_and_writes(node)
             new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
                 bases_to_clone,
                 base_tensors_dct,
                 _mutable_op._name,
                 ReInplaceTrigger.AUTO_FUNC_V2,
+                read_args=read_args,
+                written_views=written_views,
             )
             # Stash the metadata. There is a pass later on where we decompose
             # auto_functionalized into clones + a mutable op; this metadata

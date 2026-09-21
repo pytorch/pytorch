@@ -13,6 +13,7 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -81,6 +82,13 @@ else:
 @torch.library.custom_op("test_view::boo", mutates_args={"x"})
 def boo(x: torch.Tensor) -> None:
     x.sin_()
+
+
+@torch.library.custom_op("_reinplacing::reverse_into", mutates_args={"dst"})
+def reverse_into(src: torch.Tensor, dst: torch.Tensor) -> None:
+    n = src.shape[0]
+    for i in range(n):
+        dst[n - 1 - i] = src[i]
 
 
 class TestReinplacingPassCorrectness(InductorTestCase):
@@ -424,6 +432,50 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                     self.assertEqual(res1, x.sin())
                     self.assertEqual(res2, x.cos())
                     self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_dont_reinplace_op_that_reads_clone_of_mutated_arg(self):
+        # remove_noop_ops drops the clone, which leaves functional_op(src=x, dst=x).
+        # Reinplaced, the op would read the x it is writing.
+        def f(x):
+            y = x.clone()
+            reverse_into(y, x)
+            return x * 2
+
+        def g(x):
+            reverse_into(x[:4].clone(), x[2:6])
+            return x * 2
+
+        for fn in [f, g]:
+            for enable_v2 in [False, True]:
+                with inductor_config.patch(
+                    {"enable_auto_functionalized_v2": enable_v2}
+                ):
+                    torch._dynamo.reset()
+                    x = torch.arange(8.0, device=device)
+                    eager_in, compiled_in = x.clone(), x.clone()
+                    expected = fn(eager_in)
+                    actual = torch.compile(fn)(compiled_in)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(compiled_in, eager_in)
+
+    def test_should_reinplace_op_that_reads_another_tensor(self):
+        def f(x, y):
+            reverse_into(y, x)
+            return x * 2
+
+        for enable_v2 in [False, True]:
+            with inductor_config.patch({"enable_auto_functionalized_v2": enable_v2}):
+                torch._dynamo.reset()
+                ReinplaceCounters.clear()
+                x = torch.arange(8.0, device=device)
+                y = torch.arange(8.0, device=device) + 8
+                compiled_in = x.clone()
+                _, (code,) = run_and_get_code(torch.compile(f), compiled_in, y)
+                self.assertEqual(compiled_in, y.flip(0))
+                self.assertEqual(num_reinplacing_failures(), 0)
+                # x is mutated in place: nothing is allocated before the op runs
+                call = code[code.index("def call(") :]
+                self.assertNotIn("empty_strided", call.split("reverse_into")[0])
 
     def test_multiple_mutations(self):
         ReinplaceCounters.clear()
