@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -74,7 +75,7 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
-from torch._dynamo.package import FunctionPicklerBase, SerializedCode
+from torch._dynamo.package import _Missing, FunctionPicklerBase, SerializedCode
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -102,6 +103,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
+from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
@@ -112,6 +114,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._indented_buffer import IndentedBuffer
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -4180,22 +4183,6 @@ class GuardsState:
     local_state: Any | None = None
 
 
-class _Missing:
-    def __init__(self, reason: str | None = None) -> None:
-        self._reason = reason
-
-    def __repr__(self) -> str:
-        return f"_Missing({self._reason})"
-
-    def __str__(self) -> str:
-        return f"_Missing({self._reason})"
-
-    # Sometimes _Missing object is used as the callable with functools.partial,
-    # so we add a dummy __call__ here to bypass TypeError from partial().
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return _Missing()
-
-
 class _LiveBuiltins:
     """Stands in a snapshot for builtins.__dict__: resolves to the loading
     process's own, by reference, rather than a copy of the saving one's."""
@@ -4217,10 +4204,44 @@ def _get_unsupported_types() -> tuple[type, ...]:
         weakref.ReferenceType,
     )
     try:
-        ret += (torch._C._distributed_c10d.ProcessGroup,)
+        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
+        # alone let an unguarded one fail the whole frame with "cannot pickle".
+        # The C++ Backend is also the Python backend extension point (a Python
+        # class subclasses it through its pybind trampoline), so a subclass
+        # carrying instance state is covered too, deliberately: it cannot be
+        # pickled either, and nothing rebuilds it at load.
+        ret += (
+            torch._C._distributed_c10d.ProcessGroup,
+            torch._C._distributed_c10d.Backend,
+        )
     except AttributeError:
         pass
     return ret
+
+
+def _is_shared_constant(value: Any) -> bool:
+    """Whether pruning ``value`` by id would poison unrelated references to it.
+
+    Pruning is keyed by ``id()``, and a literal such as ``torch.float32`` or
+    ``Ellipsis`` is one object process-wide, so registering an unguarded
+    reference as missing would turn EVERY other reference -- the dtype inside
+    every tensor's reducer payload, a code object's constant -- into the
+    sentinel. FunctionPicklerBase._is_literal names exactly those values (by
+    exact type, so an IntEnum member or a str subclass is still pruned). The
+    empty tuple is the one container CPython shares the same way (an empty
+    frozenset is not); it matters for the module attribute loop, since a pytree
+    leaf is never a tuple. A class is one object too (torch.Tensor is the pytype
+    of every tensor payload); that matters for the local-scope leaf loop, since
+    the module loop skips every callable. A class that pickle cannot find by
+    name (a <locals> class) stays prunable: pickling it by reference would fail
+    the dump, and the artifact would import its module at load.
+    """
+    if type(value) is tuple and not value:
+        return True
+    if inspect.isclass(value) and FunctionPicklerBase._fqn_resolves(value):
+        return True
+    return FunctionPicklerBase._is_literal(value)
 
 
 class GuardsStatePickler(FunctionPicklerBase):
@@ -4271,7 +4292,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
-        ret.grad = grad
+        # A .grad the guards never read is pruned to the _Missing sentinel on
+        # the way in (only a training capture has one to prune at all); it was
+        # not guarded on, so the rebuilt tensor does not need it, but assigning
+        # the sentinel raises.
+        ret.grad = grad if isinstance(grad, torch.Tensor) else None
         return ret
 
     @classmethod
@@ -4629,17 +4654,36 @@ class GuardsStatePickler(FunctionPicklerBase):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            ):
+            )
+            if is_fake:
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+                # _dispatch_keys() on a fake reports the Python and
+                # PythonTLSSnapshot keys of the fake itself; the converter may
+                # have recorded the real tensor's keys (from_meta_and_device
+                # always does, from_real_tensor only for an mkldnn source).
+                if obj.dispatch_keys is not None:
+                    dispatch_keys = obj.dispatch_keys
+            # A fake answers empty_like with another fake through its own
+            # __torch_dispatch__, whether or not its FakeTensorMode is active,
+            # and that fake would drag the mode and its converters into the
+            # pickle; no_dispatch makes the template a plain meta tensor.
+            with no_dispatch() if is_fake else contextlib.nullcontext():
+                meta = torch.empty_like(
+                    obj, device="meta", requires_grad=obj.requires_grad
+                )
 
             return type(self)._unpickle_tensor, (
-                torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
+                meta,
                 obj.device,
                 pytype,
-                torch._C._dispatch_keys(obj).raw_repr(),
-                obj.grad,
+                dispatch_keys.raw_repr(),
+                # Whatever .grad holds, without the non-leaf warning: a plain
+                # non-leaf has None, a retained-grad non-leaf (torch.optim permits
+                # one as a param) or a fake mirroring one has a real tensor.
+                safe_grad(obj),
             )
 
         elif isinstance(obj, torch.nn.Module):
@@ -4652,6 +4696,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if id(attr) in self.guard_tree_values:
                     continue
                 if callable(attr):
+                    continue
+                if _is_shared_constant(attr):
                     continue
                 self.missing_values[id(attr)] = attr
 
@@ -4681,7 +4727,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             and hasattr(obj, "_torch_handler_name")
         ):
             if not hasattr(obj, "_torch_unpickler"):
-                raise AssertionError(
+                # A reducer invariant, not a third-party value we cannot carry:
+                # raise PackageError so pickle_guards_state's broad catch, which
+                # rewraps everything else as a bypass, stays honest.
+                raise torch._dynamo.exc.PackageError(
                     f"sympy Function subclass {obj} must have _torch_unpickler attribute"
                 )
             return obj._torch_unpickler, (obj._torch_handler_name,)
@@ -4694,8 +4743,17 @@ class GuardsStatePickler(FunctionPicklerBase):
         ):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
-        elif isinstance(obj, torch.SymInt):
-            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+        elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # Unconditional on purpose. A bystander in a PRUNABLE position (a
+            # local_scope leaf, a direct nn.Module attribute) is registered in
+            # missing_values and pruned by the branch above before this one is
+            # reached. Anything that does arrive here -- the sizes of a guarded
+            # dynamic-shaped tensor's payload, or a scalar nested in a container
+            # carried verbatim -- is refused, because no position reached here
+            # can hold a sentinel safely.
+            raise torch._dynamo.exc.PackageError(
+                f"Cannot serialize {type(obj).__name__} {obj} (node: {obj.node})"
+            )
 
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
@@ -4728,6 +4786,14 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("capsule",)
 
         elif isinstance(obj, _get_unsupported_types()):
+            # Only when no guard reads it: a guarded one (a TYPE_MATCH on a
+            # stream local, a FAKE_SCRIPT_TYPE_MATCH on a process-group local)
+            # would otherwise load as a sentinel the rebuilt guard can never
+            # match, so it is refused by name.
+            if id(obj) in self.guard_tree_values:
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads a {type(obj).__name__}, which cannot be serialized"
+                )
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
@@ -4776,14 +4842,14 @@ class GuardsStatePickler(FunctionPicklerBase):
             if obj is not torch.distributed.fsdp._fully_shard.FSDPModule:
                 original_type = obj.__mro__[2]
                 if not issubclass(original_type, torch.nn.Module):
-                    raise AssertionError(
+                    raise torch._dynamo.exc.PackageError(
                         f"Expected nn.Module subclass, got {original_type}"
                     )
                 if (
                     original_type
                     not in torch.distributed.fsdp._fully_shard._fully_shard.get_cls_to_fsdp_cls()
                 ):
-                    raise AssertionError(
+                    raise torch._dynamo.exc.PackageError(
                         f"{original_type} not found in FSDP cls-to-fsdp-cls mapping"
                     )
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
@@ -4817,6 +4883,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
         orig_guard=guard,
+        code_parts=tuple(guard.code_list or ()),
     )
 
 
@@ -4846,7 +4913,7 @@ def pickle_guards_state(
                         empty_values[id(base)] = base
                     except:  # noqa: E722
                         pass
-            elif id(leaf) not in guard_tree_values:
+            elif id(leaf) not in guard_tree_values and not _is_shared_constant(leaf):
                 # TODO See if we have lift this branch as the first one.
                 # Prune more objects in pytree hierarchy.
                 missing_values[id(leaf)] = leaf
