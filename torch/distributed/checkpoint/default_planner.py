@@ -303,34 +303,6 @@ class DefaultLoadPlanner(LoadPlanner):
     original_state_dict: STATE_DICT_TYPE
     mappings: FLATTEN_MAPPING
 
-    @property
-    def supports_parallel_load(self) -> bool:
-        """See :attr:`LoadPlanner.supports_parallel_load`.
-
-        ``DefaultLoadPlanner`` qualifies: ``resolve_tensor`` is a read-only
-        lookup narrowed to the region the ``ReadItem`` owns, so distinct items
-        never share storage, and ``commit_tensor`` is a no-op.
-
-        A subclass that changes how tensors are resolved does not. The check
-        covers ``lookup_tensor`` and ``transform_tensor`` too, since
-        ``resolve_tensor`` delegates to them and both are documented extension
-        points. Such subclasses fall back to the sequential path; one that has
-        verified its own hooks can opt back in::
-
-            class MyPlanner(DefaultLoadPlanner):
-                supports_parallel_load = True
-        """
-        cls = type(self)
-        return all(
-            getattr(cls, name) is getattr(DefaultLoadPlanner, name)
-            for name in (
-                "resolve_tensor",
-                "commit_tensor",
-                "lookup_tensor",
-                "transform_tensor",
-            )
-        )
-
     def __init__(
         self,
         flatten_state_dict: bool = True,

@@ -12,7 +12,7 @@ import uuid
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from io import UnsupportedOperation
@@ -866,21 +866,11 @@ class FileSystemReader(StorageReader):
             self.path = self.fs.init_path(checkpoint_id)
         self.load_id = _generate_uuid()
 
-    def _load_item(
-        self,
-        req: ReadItem,
-        stream: IO[bytes],
-        planner: LoadPlanner,
-        load_bytes_lock: AbstractContextManager[Any] | None = None,
-    ) -> None:
-        """Load a single ``ReadItem`` into the tensor resolved by ``planner``.
+    def _decode_item(self, req: ReadItem, stream: IO[bytes]) -> Tensor | io.BytesIO:
+        """Deserialize one ``ReadItem``. Does not touch the planner.
 
-        ``load_bytes_lock`` serializes ``LoadPlanner.load_bytes``, which mutates
-        the planner's ``state_dict`` in place. The tensor path is deliberately
-        unlocked: locking ``resolve_tensor`` and ``commit_tensor`` would not
-        make resolve/copy/commit atomic, only look safe. Readers must check
-        ``LoadPlanner.supports_parallel_load`` before calling this from more
-        than one thread.
+        Split from :meth:`_apply_item` so that a reader can run this on a
+        worker pool while every planner hook stays on a single thread.
         """
         item_md: _StorageInfo = self.storage_data[req.storage_index]
         transform_from = self.transforms.transform_load_stream(
@@ -894,35 +884,47 @@ class FileSystemReader(StorageReader):
         if req.type == LoadItemType.BYTE_IO:
             read_bytes = io.BytesIO(transform_from.read(-1))
             read_bytes.seek(0)
-            lock = load_bytes_lock if load_bytes_lock is not None else nullcontext()
-            with lock:
-                planner.load_bytes(req, read_bytes)
+            return read_bytes
+
+        if transform_from.seekable():
+            seekable = transform_from
         else:
-            if transform_from.seekable():
-                seekable = transform_from
-            else:
-                # torch.load requires a seekable input, so read the transform
-                # stream now and store the output if needed
-                seekable = io.BytesIO(transform_from.read(-1))
-                seekable.seek(0)
+            # torch.load requires a seekable input, so read the transform
+            # stream now and store the output if needed
+            seekable = io.BytesIO(transform_from.read(-1))
+            seekable.seek(0)
 
-            tensor = cast(
-                Tensor,
-                torch.load(
-                    seekable,
-                    map_location="cpu",
-                    weights_only=True,
-                ),
+        tensor = cast(
+            Tensor,
+            torch.load(
+                seekable,
+                map_location="cpu",
+                weights_only=True,
+            ),
+        )
+        return narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
+
+    def _apply_item(
+        self, req: ReadItem, decoded: Tensor | io.BytesIO, planner: LoadPlanner
+    ) -> None:
+        """Hand a decoded ``ReadItem`` to the planner.
+
+        Planners are not required to be thread safe, so callers must invoke
+        this from a single thread.
+        """
+        if req.type == LoadItemType.BYTE_IO:
+            planner.load_bytes(req, cast(io.BytesIO, decoded))
+            return
+
+        tensor = cast(Tensor, decoded)
+        target_tensor = planner.resolve_tensor(req).detach()
+
+        if target_tensor.size() != tensor.size():
+            raise AssertionError(
+                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
             )
-            tensor = narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
-            target_tensor = planner.resolve_tensor(req).detach()
-
-            if target_tensor.size() != tensor.size():
-                raise AssertionError(
-                    f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                )
-            target_tensor.copy_(tensor)
-            planner.commit_tensor(req, target_tensor)
+        target_tensor.copy_(tensor)
+        planner.commit_tensor(req, target_tensor)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -939,7 +941,7 @@ class FileSystemReader(StorageReader):
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
                     file_slice = self._slice_file(stream, item_md)
-                    self._load_item(req, file_slice, planner)
+                    self._apply_item(req, self._decode_item(req, file_slice), planner)
 
         fut: Future = Future()
         fut.set_result(None)

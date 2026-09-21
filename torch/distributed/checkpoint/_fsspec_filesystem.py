@@ -4,7 +4,6 @@
 import concurrent.futures
 import io
 import os
-import threading
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -205,13 +204,7 @@ class FsspecReader(FileSystemReader):
         return cat_ranges_fn is not fsspec.AbstractFileSystem.cat_ranges
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        # The batched path writes into target tensors from several threads, so
-        # it needs ``LoadPlanner.supports_parallel_load``.
-        if (
-            not plan.items
-            or not getattr(planner, "supports_parallel_load", False)
-            or not self._supports_batched_cat_ranges()
-        ):
+        if not plan.items or not self._supports_batched_cat_ranges():
             return super().read_data(plan, planner)
 
         reqs = sorted(
@@ -250,14 +243,16 @@ class FsspecReader(FileSystemReader):
         if batch:
             batches.append((paths, starts, ends, batch))
 
-        # ``load_bytes`` mutates the planner's state_dict, so it stays
-        # serialized. The tensor path is covered by ``supports_parallel_load``,
-        # which guarantees distinct items resolve to non-overlapping storage.
-        load_bytes_lock = threading.Lock()
-
         def fetch_batch(b):
             bp, bs, be, br = b
             chunks = self.fs.fs.cat_ranges(bp, bs, be, on_error="raise")
+            # A short list means some ranges were dropped (``on_error="omit"``).
+            # Left unchecked, the zip below would silently skip those items and
+            # leave their tensors at whatever the caller initialized them to.
+            if len(chunks) != len(br):
+                raise RuntimeError(
+                    f"cat_ranges returned {len(chunks)} chunks for {len(br)} ranges"
+                )
             # ``on_error`` is advisory: fsspec honors it only since 2026.7.0 and
             # other backends may ignore it, returning exceptions in-band.
             # Unchecked, they reach ``io.BytesIO`` as an opaque TypeError.
@@ -268,10 +263,10 @@ class FsspecReader(FileSystemReader):
                     ) from chunk
             return chunks, br
 
-        def process_chunk(req, chunk_data):
-            self._load_item(
-                req, io.BytesIO(chunk_data), planner, load_bytes_lock=load_bytes_lock
-            )
+        def decode(req, chunk_data):
+            # Wrapping here rather than at submit time keeps the buffer copy
+            # off the calling thread.
+            return self._decode_item(req, io.BytesIO(chunk_data))
 
         with (
             concurrent.futures.ThreadPoolExecutor(
@@ -292,12 +287,14 @@ class FsspecReader(FileSystemReader):
                             fetch_batch, batches[idx + 1]
                         )
 
-                    futures = [
-                        cpu_executor.submit(process_chunk, req, chunk_data)
+                    # Only deserialization is parallel. Every planner hook runs
+                    # below on this thread, so planners need not be thread safe.
+                    decoded = [
+                        cpu_executor.submit(decode, req, chunk_data)
                         for req, chunk_data in zip(b_reqs, chunks)
                     ]
-                    for f in futures:
-                        f.result()
+                    for req, f in zip(b_reqs, decoded):
+                        self._apply_item(req, f.result(), planner)
             finally:
                 # __exit__ calls shutdown(wait=True) without ``cancel_futures``,
                 # so on failure it would drain the queue instead of dropping it.

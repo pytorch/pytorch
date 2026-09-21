@@ -375,29 +375,6 @@ class LoadPlanner:
     >>>         self.state_dict[read_item.dest_index.fqn] = tensor
     """
 
-    supports_parallel_load: bool = False
-    """
-    Whether a StorageReader may invoke this planner's per-item load hooks from
-    multiple threads concurrently.
-
-    Defaults to ``False``, which keeps every StorageReader on its sequential
-    path. A planner may set this to ``True`` only if, for distinct
-    ``ReadItem``s, it guarantees all of the following:
-
-    * ``resolve_tensor`` is safe to call concurrently and returns tensors whose
-      storage does not overlap, so the reader can write into them in parallel;
-    * ``commit_tensor`` is safe to call concurrently and does not depend on the
-      order in which items complete.
-
-    Planners that hand back a shared staging buffer from ``resolve_tensor`` and
-    flush it in ``commit_tensor`` must leave this ``False``: the reader copies
-    into the resolved tensor outside of any planner-held lock, so concurrent
-    items would overwrite each other.
-
-    ``load_bytes`` is exempt from this contract. It commonly mutates the
-    planner's ``state_dict`` in place, so readers serialize it regardless.
-    """
-
     @abc.abstractmethod
     def set_up_planner(
         self,
