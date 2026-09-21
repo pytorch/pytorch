@@ -875,7 +875,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     throw std::runtime_error(std::move(ss).str());
                                 }}
                             """)
-                    if not math.isinf(sym_range.upper):
+                    if config.aot_inductor.check_upperbound and not math.isinf(
+                        sym_range.upper
+                    ):
                         # Limit upper bound to max C long long value (2^63 - 1)
                         max_long_long = ctypes.c_longlong(2**63 - 1).value
                         upper_bound = min(sym_range.upper, max_long_long)
@@ -1561,7 +1563,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     @staticmethod
-    def _stringify_cpu_triton_call_arg(arg: Any) -> str:
+    def _stringify_cpu_triton_call_arg(
+        arg: str | bool | int | float | SymbolicCallArg | sympy.Expr,
+    ) -> str:
         """Render a Triton kernel call argument as a C++ expression."""
         if isinstance(arg, str):
             return arg
