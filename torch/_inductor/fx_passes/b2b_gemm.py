@@ -3,6 +3,10 @@ import functools
 from collections import deque
 
 import torch
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    optimization_hint,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
@@ -389,11 +393,17 @@ def is_b2b_gemm_good_on(
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
         return False
-    if not ((A.shape[1] == B.shape[0]) and (B.shape[1] == C.shape[0])):
+    if free_unbacked_symbols(fake_tensors):
         return False
     # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
     M, N = A.shape
+    B_N, B_O = B.shape
     O, P = C.shape
+    # The load ratio is only a profitability heuristic, so do not guard on the
+    # representative values of backed symbolic dimensions.
+    M, N, B_N, B_O, O, P = map(optimization_hint, (M, N, B_N, B_O, O, P))
+    if N != B_N or B_O != O:
+        return False
     ratios = []
     if is_left_assoc:
         for config in b2b_gemm_configs:
