@@ -229,6 +229,7 @@ import base64
 import dataclasses
 import errno
 import hashlib
+import inspect
 import io
 import logging
 import os
@@ -1486,7 +1487,6 @@ def _emit_driver_source(forward_fn_name: str) -> str:
     selected forward variant to the public ``forward``. Emitting the TEXT (rather than
     importing the module from the artifact) keeps python_code self-contained and
     version-frozen (Note [precompile programming model], invariant 7)."""
-    import inspect
 
     from torch import _precompile_driver as driver
 
@@ -1691,6 +1691,37 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"precompile.capture(step, ...), calling cap(model, x), with "
             f"'def step(model, x): return model(x)'."
         )
+
+
+def _entry_binding(fn: object) -> dict[str, Any]:
+    """The default arguments an entry's code object does not carry.
+
+    The artifact rebuilds its entry from that entry's code object, which holds
+    no default arguments. Without them a defaulted parameter is simply absent at
+    the served call -- which the guard check then cannot bind, so every variant
+    misses. Closure cells are not carried: an entry that closes over free
+    variables is refused before we reach here (a rebuilt cell is a new object
+    that Dynamo's identity guard would miss), so a valid entry has none, and
+    the driver refuses one that arrives anyway rather than rebuilding it over
+    empty cells.
+    """
+    return {
+        "defaults": getattr(fn, "__defaults__", None),
+        "kwdefaults": getattr(fn, "__kwdefaults__", None),
+    }
+
+
+def _emit_multigraph_driver_source() -> str:
+    """Emit the multi-graph driver as text, the same getsource path the others use.
+
+    The driver is a builder, so the section binds ``forward`` itself and then ends
+    in the same ``__main__`` hint as the single-graph drivers."""
+
+    from torch import _precompile_driver as driver
+
+    body = inspect.getsource(driver._build_multigraph_forward).rstrip()
+    forward = "forward = _build_multigraph_forward()"
+    return "\n" + body + "\n\n\n" + forward + "\n\n\n" + _DRIVER_MAIN
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
