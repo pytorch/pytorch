@@ -1217,6 +1217,73 @@ class TestScheduler(TestCase):
         resolver._layout.child_block.return_value = "GROUP"
         self.assertFalse(resolver.is_group_width_shape(("XBLOCK", "GROUP")))
 
+    def test_translated_shape_admission(self):
+        row, feature = sympy.symbols(
+            "admission_row admission_feature", integer=True, nonnegative=True
+        )
+
+        def prove_translation(parent_width, factor):
+            child_width = parent_width // factor
+            source = MemoryDep(
+                "buf0",
+                parent_width * row + feature,
+                (row, feature),
+                (2, parent_width),
+            )
+            consumer = MemoryDep(
+                "buf0",
+                parent_width * row + feature + child_width,
+                (row, feature),
+                (2, child_width),
+            )
+            return NestedReduction._prove_sub_parent_translation(
+                (source,),
+                consumer,
+                2,
+                parent_width,
+                factor,
+                {},
+            )
+
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            inductor_config.patch(polyhedral_fusion=True),
+        ):
+            self.assertIsNone(prove_translation(192, 3))
+            self.assertIsNotNone(prove_translation(256, 4))
+            self.assertIsNone(prove_translation(384, 6))
+
+    def test_translated_projection_geometry_separates_logical_and_physical(self):
+        row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
+        source = MemoryDep("buf0", 192 * row + feature, (row, feature), (2, 192))
+        leading = MemoryDep("buf0", 192 * row + feature, (row, feature), (2, 64))
+        trailing = MemoryDep("buf0", 192 * row + feature + 64, (row, feature), (2, 128))
+        stage = SubParentEpilogueStage(
+            factor=3,
+            access_relations=(
+                SubParentAccessRelation((source,), leading, None, True, (0, 0)),
+                SubParentAccessRelation((source,), trailing, None, False, (0, 64)),
+            ),
+            output_groups=(
+                SubParentOutputGroup(1, (Mock(),)),
+                SubParentOutputGroup(2, (Mock(),)),
+            ),
+        )
+        plan = StagedReductionPlan((), 2, 192, None, (stage,))
+
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            geometry = SIMDScheduling._translated_projection_geometry(plan)
+
+        self.assertEqual(
+            geometry,
+            _TranslatedProjectionGeometry(
+                logical_domain_factor=3,
+                logical_child_width=64,
+                physical_parent_block=256,
+                physical_split_factor=4,
+            ),
+        )
+
     def test_sub_parent_group_width_materialization_boundaries(self):
         group_shape = ("XBLOCK", "GROUP")
         child_shape = ("XBLOCK", "CHILD")

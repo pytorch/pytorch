@@ -11,10 +11,8 @@ from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
     FusedSchedulerNode,
-    FusedStagedReduction,
     Scheduler,
     SchedulerNode,
-    SubParentFusionResult,
 )
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
@@ -69,11 +67,8 @@ class CUDACombinedScheduling(BaseScheduling):
     def has_sub_parent_epilogue(
         self,
         nodes: Sequence[BaseSchedulerNode],
-        fusion_result: SubParentFusionResult | None = None,
     ) -> bool:
-        return self._triton_scheduling.has_sub_parent_epilogue(
-            nodes, fusion_result
-        )
+        return self._triton_scheduling.has_sub_parent_epilogue(nodes)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):
