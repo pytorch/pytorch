@@ -39,12 +39,14 @@ forward outputs' own metadata.
 
 ``guard_filter_fn`` rides on the optimize context rather than on the
 serializer, so the guards it drops leave the live check too and a capture
-recompiles less often than ordinary ``torch.compile`` would.
+recompiles less often than ordinary ``torch.compile`` would, and every dropped
+guard is reported in ``PrecompileSummary.dropped_guards``.
 
 A resume function only exists once the frame ahead of it has actually run, so
 every variant must be exercised. Whatever you do not run is not in the
-artifact: it covers what was observed, not every possible input to the
-callable.
+artifact, and ``summary().complete`` means complete only for the observed
+capture, not for every possible input to the callable. A captured call that
+raises marks the session incomplete even if caller code catches it.
 
 Know these before relying on an artifact in production:
 
@@ -57,10 +59,11 @@ Know these before relying on an artifact in production:
   by equality, so an int/bool/str argument or a break coming from ``.item()``
   yields an artifact that only serves calls reproducing those exact values.
   Exercise every value you need to serve with a ``cap(...)`` call, or expect
-  poor coverage on new data. ``dynamic=True`` helps with shapes but not with
-  pinned values.
+  poor coverage on new data.
+  ``dynamic=True`` helps with shapes but not with pinned values.
 * Identity guards cannot be serialized, so precompiling gives up on noticing
-  that a guarded object was rebound. Every model drops them, so a capture that
+  that a guarded object was rebound. ``summary().dropped_guards`` is the
+  authoritative list. Every model drops identity guards, so a policy that
   refused every drop would refuse essentially every real artifact.
 * Some models do not capture yet. For example, T5 raises ``PackageError: Cannot
   find module for code <code object __init__`` from ``_get_code_source``, which
@@ -73,6 +76,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import dataclasses
 import functools
 import hashlib
 import importlib.machinery
@@ -117,7 +121,7 @@ if TYPE_CHECKING:
     from .convert_frame import ConvertFrameReturn
     from .eval_frame import OptimizeContext
     from .hooks import Hooks
-    from .package import _BackendId, _DynamoCacheEntry
+    from .package import _BackendId, _DynamoCacheEntry, _DynamoCodeCacheEntry
     from .repro.after_dynamo import WrapBackendDebug
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
@@ -1944,6 +1948,29 @@ def _compose_with_default(
     return composed
 
 
+@dataclasses.dataclass(frozen=True)
+class _RecordedCompile:
+    """What one guard-filter call decided, held until that compile's outcome is
+    known.
+
+    A compile that bypasses -- static-address parameters, a guard that cannot be
+    serialized -- lands no guarded code, so no artifact enforces the guards the
+    filter kept and no artifact was widened by the ones it dropped. The filter
+    runs before either is decidable, so nothing is published when it runs: the
+    verdicts are recorded per compile here and _confirmed_compiles keeps the
+    ones whose guarded code reached the package entry.
+
+    ``guarded_codes_before`` is the length of ``entry.guarded_codes`` when the
+    filter ran, which is what makes "this compile landed" readable off the entry
+    afterwards: the list grew.
+    """
+
+    entry: _DynamoCodeCacheEntry
+    guarded_codes_before: int
+    kept: frozenset[tuple[str, str]]
+    dropped: frozenset[tuple[str, str]]
+
+
 def _entry_fn_of(fn: object) -> Callable[..., object]:
     if isinstance(fn, torch.nn.Module):
         forward = fn.forward
@@ -2118,9 +2145,13 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
+        # One record per guard-filter call, whether or not that compile went
+        # on to land anything; summary() reports the ones that did. See
+        # _RecordedCompile.
+        self._compiles: list[_RecordedCompile] = []
         self._capture_errors: list[str] = []
         self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
-        self._guard_filter_fn = (
+        self._guard_filter_fn = self._recording_filter(
             default_guard_filter_fn
             if guard_filter_fn is None
             else _compose_with_default(guard_filter_fn)
@@ -2141,6 +2172,10 @@ class PrecompileSession:
         self._compiled: Callable[..., object] | None = None
         self._state = threading.Condition()
         self._active_calls = 0
+        # thread id -> its in-flight calls, so summary() can tell "another
+        # thread is compiling, wait for it" from "the caller is inside the
+        # block's own callable", which it could only wait on forever.
+        self._active_call_threads: dict[int, int] = {}
         self._closing = False
         self._finished = False
 
@@ -2281,6 +2316,10 @@ class PrecompileSession:
                 raise RuntimeError("PrecompileSession is not active")
             compiled = self._compiled
             self._active_calls += 1
+            caller = threading.get_ident()
+            self._active_call_threads[caller] = (
+                self._active_call_threads.get(caller, 0) + 1
+            )
         try:
             with _capture_config(self._training):
                 result = compiled(*args, **kwargs)
@@ -2290,6 +2329,10 @@ class PrecompileSession:
         finally:
             with self._state:
                 self._active_calls -= 1
+                if self._active_call_threads[caller] > 1:
+                    self._active_call_threads[caller] -= 1
+                else:
+                    del self._active_call_threads[caller]
                 if self._active_calls == 0:
                     self._state.notify_all()
         return result
@@ -2334,6 +2377,14 @@ class PrecompileSession:
             # the callable is what releases it.
             self._compiled = None
             self._finished = True
+            if collect:
+                # The drain is over, so no compile can still land guarded code
+                # and a record that is unconfirmed by now never will be. What a
+                # later summary() reports is unchanged -- _confirmed_compiles
+                # keeps one record per key, so it is idempotent over its own
+                # output -- and a bypassed compile stops holding its entry for
+                # the session's life.
+                self._compiles = self._confirmed_compiles()
             self._state.notify_all()
         if not collect:
             return
@@ -2389,6 +2440,159 @@ class PrecompileSession:
         if isinstance(exc[1], BaseException):
             self._record_capture_error(exc[1])
         self._drain_then_close()
+
+    def _recording_filter(
+        self,
+        inner: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
+    ) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]:
+        """
+        Remember which guard types were discarded. A dropped guard does not
+        fail at serving time, it silently widens what a graph is reused for, so
+        the set has to be inspectable rather than invisible.
+        """
+
+        def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            decisions = inner(entries)
+            global_state_kept = any(
+                keep and e.guard_type == "GLOBAL_STATE"
+                for keep, e in zip(decisions, entries)
+            )
+            kept_slots: set[tuple[str, str]] = set()
+            dropped_slots: set[tuple[str, str]] = set()
+            for keep, entry in zip(decisions, entries):
+                # Normalized where the slot is RECORDED, not where it is read: a
+                # Dynamo per-process counter (__builtins_dict___14) otherwise
+                # makes one logical slot appear once per compilation, under names
+                # that change every run, and the two slot lists end up spelling
+                # one logical slot two different ways.
+                # _mask_keys as well because a source name interpolates the
+                # data key it reads (cfg['/home/me/w.pt']), and this name is
+                # what every slot list spells the source as.
+                slot = (entry.guard_type, _mask_keys(_normalize(entry.name)))
+                # A no-op type's marker is not what makes its check: GLOBAL_STATE's
+                # leaf is, so the leaf's verdict decides, not the marker's.
+                noop = entry.guard_type in _NOOP_GUARD_TYPES
+                # A precondition nothing checks however the filter voted:
+                # _is_noop_guard_type names the types GuardBuilder emits no check
+                # for beyond those markers -- EMPTY_NN_MODULE_HOOKS_DICT under
+                # skip_nnmodule_hook_guards, the default -- and FSDP_TRAINING_STATE
+                # is state GlobalStateGuard does not snapshot either. In neither
+                # list: no filter decision took them away.
+                unchecked = entry.guard_type == "FSDP_TRAINING_STATE" or (
+                    not noop and _is_noop_guard_type(entry.guard_type)
+                )
+                enforced = not unchecked and (global_state_kept if noop else keep)
+                if enforced:
+                    kept_slots.add(slot)
+                elif unchecked:
+                    # NEITHER list, which is what the two of them mean: the
+                    # filter's verdict is what they report, and no verdict took
+                    # this slot away -- nothing ever checked it. See
+                    # PrecompileSummary.
+                    pass
+                else:
+                    dropped_slots.add(slot)
+            # One filter call is one compilation, and only the package knows
+            # which entry is being compiled. Without it there is no entry to
+            # tell later whether this compile landed, so the verdicts go
+            # unrecorded rather than into a list that claims an artifact
+            # enforces them.
+            compiling = self._package._current_entry
+            if compiling is None:
+                return decisions
+            # Recorded under the lock a reader takes, in one step, because this
+            # runs on whatever thread is compiling. Nothing is merged into the
+            # report here -- whether this compile enforces anything is not
+            # decided yet, see _RecordedCompile.
+            with self._state:
+                self._compiles.append(
+                    _RecordedCompile(
+                        entry=compiling,
+                        guarded_codes_before=len(compiling.guarded_codes),
+                        kept=frozenset(kept_slots),
+                        dropped=frozenset(dropped_slots),
+                    )
+                )
+            return decisions
+
+        return filter_fn
+
+    def _confirmed_compiles(self) -> list[_RecordedCompile]:
+        """The recorded compiles whose guarded code reached the package entry.
+
+        A bypassed compile is dropped whole: its kept guards enforce nothing and
+        its dropped guards widened nothing. Keyed by (entry,
+        guarded_codes_before) with the last record winning, because a bypass and
+        a later compile of the same frame both see the same list length and only
+        the later one is evidence that guarded code landed. Call under _state.
+        """
+        latest: dict[tuple[int, int], _RecordedCompile] = {}
+        for compiled in self._compiles:
+            # The entry is unhashable (a mutable dataclass), and identity is what
+            # is wanted anyway: one live object per frame of this capture.
+            latest[(id(compiled.entry), compiled.guarded_codes_before)] = compiled
+        return [
+            compiled
+            for compiled in latest.values()
+            if len(compiled.entry.guarded_codes) > compiled.guarded_codes_before
+        ]
+
+    def summary(self) -> PrecompileSummary:
+        """The report for the capture so far.
+
+        Callable while the block is open, and it WAITS for the calls in flight:
+        reading the package's cache entry needs no compile holding it, which is
+        what ``CompilePackage.validate`` refuses, so a concurrent capture call
+        would otherwise make this raise ``AssertionError`` on the reader's
+        thread. A call from inside the block's own callable cannot be waited for
+        -- it would be waiting on itself -- so that raises instead of hanging.
+
+        ``truncated`` is left empty here because the recompile-limit bookkeeping
+        that fills it is not part of this build, so ``complete`` cannot see a
+        frame that hit the limit: read it as "complete apart from that".
+        ``risky_dropped_guards``, ``dropped_guard_code`` and ``wont_generalize``
+        are empty for the same reason: each is computed from the rendered check
+        and the compared value of a guard, which this build does not record.
+        """
+        # Aggregated under the lock because a compile on another thread records
+        # into _compiles, and a reader wants one consistent view. Only the
+        # compiles whose guarded code landed are counted, so a bypassed compile
+        # is in neither list: see _confirmed_compiles. The slots are already
+        # normalized, so both lists here spell one slot the same way.
+        with self._state:
+            if self._active_call_threads.get(threading.get_ident()):
+                raise RuntimeError(
+                    "PrecompileSession.summary() cannot be called from inside a "
+                    "capture call: it would wait for that call to finish. Call "
+                    "it from the block, or after it."
+                )
+            while self._active_calls:
+                self._state.wait()
+            dropped: set[tuple[str, str]] = set()
+            kept: set[tuple[str, str]] = set()
+            for compiled in self._confirmed_compiles():
+                kept |= compiled.kept
+                dropped |= compiled.dropped
+            capture_errors = list(self._capture_errors)
+            # Under the lock the drain above left held, so no call can start
+            # between the two and reach a compile while the entry is read.
+            entry = self._package.cache_entry()
+        return _summarize(
+            entry,
+            dropped=dropped,
+            kept=kept,
+            # Left empty because what fills them is not part of this build: the
+            # invariance policy behind policy_dropped, the recompile-limit
+            # bookkeeping behind truncated, and the rendered check and compared
+            # value of each guard, which is what risky_dropped_guards,
+            # dropped_guard_code and wont_generalize are computed from.
+            policy_dropped=set(),
+            risky=set(),
+            truncated=frozenset(),
+            capture_errors=capture_errors,
+            guard_sets={},
+            dropped_code={},
+        )
 
 
 def precompile_capture(
