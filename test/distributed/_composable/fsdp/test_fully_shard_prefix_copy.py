@@ -13,7 +13,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     AllGatherResult,
     foreach_reduce_scatter_copy_in,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 from torch.distributed.tensor import Shard
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -201,6 +201,64 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(
             counter.counts[torch.ops.fsdp.split_with_sizes_copy.default],
             0,
+        )
+        self.assertEqual(counter.counts[torch.ops.aten.cat.out], 0)
+
+    @parametrize("shard_dim", [1, 2])
+    @parametrize(
+        "cached_output,payload_matches_param",
+        [(True, False), (True, True), (False, False)],
+    )
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_all_gather_byte_input(
+        self, device, dtype, shard_dim, cached_output, payload_matches_param
+    ):
+        world_size = 2
+        expected = make_tensor((2, 4, 8), device=device, dtype=dtype)
+        shards = expected.chunk(world_size, dim=shard_dim)
+        inputs = [shard.contiguous().view(torch.uint8).flatten() for shard in shards]
+        padded_size = list(shards[0].size())
+        if payload_matches_param:
+            padded_size[shard_dim] *= expected.element_size()
+        param = Mock(
+            fsdp_placement=Shard(shard_dim),
+            padded_sharded_param_size=torch.Size(padded_size),
+            sharded_state=ShardedState.SHARDED,
+            _sharded_local_tensor=Mock(spec=["fsdp_pre_all_gather"]),
+            all_gather_outputs=[],
+        )
+        param.init_all_gather_outputs = FSDPParam.init_all_gather_outputs.__get__(param)
+        param.alloc_all_gather_outputs = FSDPParam.alloc_all_gather_outputs.__get__(
+            param
+        )
+        if cached_output:
+            param.init_all_gather_outputs(
+                [shards[0].numel()], [dtype], world_size, expected.device
+            )
+            (output,) = param.all_gather_outputs
+            version = output._version
+        result = AllGatherResult(
+            torch.cat(inputs),
+            None,
+            None,
+            [[torch.uint8]],
+            [[inputs[0].numel()]],
+            [inputs[0].numel()],
+        )
+        if not cached_output:
+            with self.assertRaisesRegex(
+                RuntimeError, "Shard.*all-gather output must have.*elements"
+            ):
+                _default_all_gather_output_fn([param], result, world_size)
+            return
+        with torch.no_grad(), _OpCounter() as counter:
+            _default_all_gather_output_fn([param], result, world_size)
+        self.assertIs(param.all_gather_outputs[0], output)
+        self.assertEqual(output.dtype, dtype)
+        self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
+        self.assertEqual(output._version, version)
+        self.assertEqual(
+            counter.counts[torch.ops.fsdp._all_gather_copy_out_.default], 1
         )
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], 0)
 
