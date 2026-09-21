@@ -80,6 +80,11 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
         yield "inlined", torch.compiler.precompile.load(code, _strip_artifact(cache))
 
 
+# A module-level global the multi-graph driver test's captured function reads,
+# so its EQUALS_MATCH guard is rooted at this module's live dict.
+_MULTIGRAPH_SCALE = 2
+
+
 # precompile drives make_fx internally, which cannot symbolically trace a
 # dynamo-optimized function; the whole suite is therefore incompatible with
 # PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
@@ -598,6 +603,123 @@ class TestPrecompile(TestCase):
         reject("fwd_loss_bwd", [])
         with self.assertRaisesRegex(PrecompileError, r"closes over \['scale'\]"):
             reject("step", [code_entry(step, variants=[variant])])
+
+    def test_multigraph_driver_dispatches_entry_frame(self):
+        # The driver rebuilds the entry frame's f_locals (a keyword-only default
+        # the call omits, *args) and guards them against this module's LIVE dict.
+        import inspect
+        from unittest import mock
+
+        from torch import _precompile_driver as driver
+        from torch._dynamo.output_graph import get_builtins_dict
+        from torch._dynamo.package import (
+            CompilePackage,
+            load_guards_state,
+            SerializedCode,
+        )
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _b64, _multigraph_frames, _serving_mode
+
+        def step(model, x, *rest, scale=2.0):
+            return model(x) * scale * _MULTIGRAPH_SCALE + len(rest)
+
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        package = CompilePackage(step)
+        compiled = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)
+        # len(rest) is a constant in the graph, so the second call recompiles the
+        # entry: two variants whose outputs differ by one, and dispatch has to pick.
+        expected = compiled(model, x)
+        expected_rest = compiled(model, x, torch.ones(1))
+        self.assertNotEqual(expected, expected_rest)
+        frames = _multigraph_frames(package.cache_entry())
+        self.assertEqual(_serving_mode(frames), "standalone")
+        self.assertEqual([len(f["variants"]) for f in frames], [2])
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=backend)
+            for backend_id, backend in package.cached_backends.items()
+        }
+        torch._dynamo.reset()
+        # A serving process never traced, so the names Dynamo minted into this
+        # module during capture must not be what makes the guards pass.
+        scope = step.__globals__
+        minted = ("__compiled_fn", "__builtins_dict__", "__import_")
+
+        def scrub():
+            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
+
+        removed = scrub()
+        self.addCleanup(lambda: (scrub(), scope.update(removed)))
+        # The records name this module, which is __main__ under a script run and
+        # the driver refuses that; serve them from an importable alias of it.
+        module = "precompile_test_captured_module"
+        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
+        self.addCleanup(alias.stop)
+        alias.start()
+        for frame in frames:
+            frame["python_module"] = module
+        binding = {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
+        ns = {
+            "__name__": "precompile_test_artifact",
+            "_FRAMES": _b64(frames),
+            "_BACKENDS": _b64(backends),
+            "_ENTRY_BINDING": _b64(binding),
+            "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
+            "TORCH_VERSION": torch.__version__,
+        }
+        exec(inspect.getsource(driver._build_multigraph_forward), ns)
+        build = ns["_build_multigraph_forward"]
+        forward = build()
+        self.assertEqual(forward(model, x), expected)
+        self.assertEqual(forward(model, x, torch.ones(1)), expected_rest)
+        # Rebinding a global the graph baked in has to fail its guard and refuse,
+        # not serve the stale graph (restored, it serves again); a call neither
+        # variant covers refuses the same way: no compiler backs the artifact.
+        entry_miss = "no captured variant of 'step'"
+        with mock.patch.dict(scope, {"_MULTIGRAPH_SCALE": 3}):
+            with self.assertRaisesRegex(PrecompileError, entry_miss):
+                forward(model, x)
+        self.assertEqual(forward(model, x), expected)
+        with self.assertRaisesRegex(PrecompileError, entry_miss):
+            forward(model, x, scale=3.0)
+        # The builtins dict Dynamo guards through is re-minted into the captured
+        # module, not the artifact's namespace, and a key bound to anything
+        # else is refused.
+        guards_state = load_guards_state(frames[0]["variants"][0]["guards_state"])
+        key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertNotIn(key, ns)
+        self.assertIs(scope[key], get_builtins_dict(scope))
+        with mock.patch.dict(scope, {key: {}}):
+            with self.assertRaisesRegex(PrecompileError, "other than the module's"):
+                build()
+        # Every other refusal is diagnosed by its cause at build: the two version
+        # locks, a __main__ or unimportable module, an entry with no variant
+        # (BYPASSED, or trivial and run eager), a closure entry, no entry at all.
+
+        def record(**edits):
+            return _b64([{**frames[0], **edits}])
+
+        def closes_over_model():
+            return model
+
+        closure = SerializedCode.from_code_object(closes_over_model.__code__)
+        refused = (
+            ("_DYNAMO_PYTHON_VERSION", (3, 9), "produced on Python 3.9"),
+            ("TORCH_VERSION", "0.0", "produced by torch 0.0"),
+            ("_FRAMES", record(python_module="__main__"), "__main__ module"),
+            ("_FRAMES", record(python_module="test_missing_module"), "not importable"),
+            ("_FRAMES", record(bypassed=True, variants=[]), "'step' was BYPASSED"),
+            ("_FRAMES", record(variants=[]), "produced no guarded code"),
+            ("_FRAMES", record(code=closure), "closes over"),
+            ("_FRAMES", record(is_entry=False), "no entry frame"),
+        )
+        for name, value, message in refused:
+            with mock.patch.dict(ns, {name: value}):
+                with self.assertRaisesRegex(PrecompileError, message):
+                    build()
 
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
