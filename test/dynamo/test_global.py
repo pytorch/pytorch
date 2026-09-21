@@ -667,6 +667,102 @@ fn = functools.partial(my_fn)
                 keys.index("order_marker"), keys.index("delete_then_store_value")
             )
 
+    def test_delete_global_crossfile_then_store_multi_order(self):
+        # `test_delete_global_crossfile_then_store_order` pins the re-store
+        # landing behind the pre-existing names. This pins the other half: a
+        # name the frame inserts while the re-stored name is still ahead of it
+        # in the module __dict__ has to keep that position. The replay runs the
+        # recorded mutations in insertion order, so a re-store that reused the
+        # slot its delete freed would replay ahead of the insert and put the two
+        # back to front.
+        with crossfile_globals(delete_then_store_multi=1) as mod:
+            mod.__dict__.pop("delete_then_store_multi_new", None)
+
+            def fn(x):
+                mod.delete_then_store_multi_fn()
+                return x + 1
+
+            def keys():
+                return [
+                    k for k in mod.__dict__ if k.startswith("delete_then_store_multi")
+                ]
+
+            self.assertEqual(
+                keys(), ["delete_then_store_multi", "delete_then_store_multi_fn"]
+            )
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(mod.delete_then_store_multi, 3)
+
+            self.assertEqual(
+                keys(),
+                [
+                    "delete_then_store_multi_fn",
+                    "delete_then_store_multi_new",
+                    "delete_then_store_multi",
+                ],
+            )
+
+    def test_delete_global_crossfile_created_then_deleted_in_stdlib(self):
+        # `test_delete_global_crossfile_created_then_deleted` covers the
+        # cancelled store on a normal module. This covers the stdlib case, where
+        # the source `store_attr` records is wrapped in SkipGuardSource: the
+        # frame has to drop that same wrapped source when the delete cancels the
+        # store, or it stays in mutated_sources and reports the module as
+        # mutated for the lifetime of the compiled artifact.
+        import collections.abc
+
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        name = "stdlib_store_then_delete"
+        exec(
+            compile(
+                f"""
+def fn():
+    global {name}
+    {name} = 1
+    del {name}
+    return 0
+""",
+                "<stdlib-globals>",
+                "exec",
+            ),
+            collections.abc.__dict__,
+        )
+        stdlib_fn = collections.abc.__dict__["fn"]
+        self.assertNotIn(name, collections.abc.__dict__)
+
+        mutated_sources = {}
+        orig_run = InstructionTranslator.run
+
+        def run(self, *args, **kwargs):
+            try:
+                return orig_run(self, *args, **kwargs)
+            finally:
+                mutated_sources["value"] = set(self.output.side_effects.mutated_sources)
+
+        InstructionTranslator.run = run
+        try:
+
+            def fn(x):
+                stdlib_fn()
+                return x + 1
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 1)
+        finally:
+            InstructionTranslator.run = orig_run
+            del collections.abc.__dict__["fn"]
+
+        self.assertFalse(
+            [s for s in mutated_sources["value"] if name in repr(s)],
+            "the cancelled store left its source in mutated_sources",
+        )
+        self.assertNotIn(name, collections.abc.__dict__)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -238,6 +238,8 @@ class SideEffects:
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
+    # The source registered in `mutated_sources` for each (item, name) store.
+    mutated_sources_by_attr: dict[tuple[VariableTracker, str], Source]
     keepalive: list[object]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
@@ -249,6 +251,8 @@ class SideEffects:
         store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
         | None = None,
         attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
+        | None = None,
+        mutated_sources_by_attr: dict[tuple[VariableTracker, str], Source]
         | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
@@ -273,6 +277,7 @@ class SideEffects:
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.attr_mutation_kinds = attr_mutation_kinds or {}
+        self.mutated_sources_by_attr = mutated_sources_by_attr or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
@@ -442,6 +447,7 @@ class SideEffects:
             attr_mutation_kinds={
                 k: dict(v) for k, v in self.attr_mutation_kinds.items()
             },
+            mutated_sources_by_attr=dict(self.mutated_sources_by_attr),
             mutation_user_stacks=self.mutation_user_stacks,
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
@@ -569,12 +575,19 @@ class SideEffects:
         self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
         self._capture_user_stack(item)
-        if mutated_source is not None:
-            self.mutated_sources.add(mutated_source)
-        else:
+        if mutated_source is None:
             item_source = getattr(item, "source", None)
-            if item_source is not None:
-                self.mutated_sources.add(AttrSource(item_source, name))
+            # The store is still tracked without one; there is just no source
+            # for readers of this object to intersect with.
+            if item_source is None:
+                self.mutated_sources_by_attr.pop((item, name), None)
+                return
+            mutated_source = AttrSource(item_source, name)
+        self.mutated_sources.add(mutated_source)
+        # Remember the source that was registered, so discard_attr_mutation can
+        # drop exactly this one instead of reconstructing it. The record has to
+        # be the source as passed in, wrapping and all.
+        self.mutated_sources_by_attr[(item, name)] = mutated_source
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -588,11 +601,13 @@ class SideEffects:
         if not isinstance(value, variables.DeletedVariable):
             existing = self.store_attr_mutations.get(item, {}).get(name)
             if isinstance(existing, variables.DeletedVariable):
-                # store_attr always writes both maps together, so the
+                # store_attr always writes these maps together, so the
                 # attr_mutation_kinds entry is guaranteed present here; use del
                 # for both to surface any invariant violation.
                 del self.store_attr_mutations[item][name]
                 del self.attr_mutation_kinds[item][name]
+                # Absent for an item store_attr registered no source for.
+                self.mutated_sources_by_attr.pop((item, name), None)
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
 
     def get_attr_mutation_kind(
@@ -722,17 +737,17 @@ class SideEffects:
         if isinstance(value, variables.DeletedVariable):
             return AttrMutationKind.GLOBAL_DELETE
         pending = self.store_attr_mutations.get(item, {}).get(name)
+        # A recorded GLOBAL_DELETE always pairs with a DeletedVariable value, so
+        # `pending` covers it; a recorded GLOBAL_REINSERT is sticky, since the
+        # delete it replays happened before this store.
         recorded = self.attr_mutation_kinds.get(item, {}).get(name)
-        if isinstance(pending, variables.DeletedVariable) or recorded in (
-            AttrMutationKind.GLOBAL_DELETE,
-            AttrMutationKind.GLOBAL_REINSERT,
+        if isinstance(pending, variables.DeletedVariable) or (
+            recorded is AttrMutationKind.GLOBAL_REINSERT
         ):
             return AttrMutationKind.GLOBAL_REINSERT
         return AttrMutationKind.GENERIC_SETATTR
 
-    def discard_attr_mutation(
-        self, item: VariableTracker, name: str, mutated_source: Source
-    ) -> None:
+    def discard_attr_mutation(self, item: VariableTracker, name: str) -> None:
         """Drop a recorded mutation that replayed as a no-op.
 
         Dropping the last name for `item` removes the `item` entries as well, so
@@ -741,8 +756,14 @@ class SideEffects:
         mutations = self.store_attr_mutations[item]
         del mutations[name]
         del self.attr_mutation_kinds[item][name]
+        # Looked up rather than handed in: the source store_attr registered is
+        # not always reconstructible from the call site, e.g. it is wrapped in
+        # SkipGuardSource for stdlib modules. An item with no source has no
+        # entry, and store_attr added nothing for it to drop.
+        discarded = self.mutated_sources_by_attr.pop((item, name), None)
+        if discarded is not None:
+            self.mutated_sources.discard(discarded)
         self.deferred_attr_mutations.pop((id(item), name), None)
-        self.mutated_sources.discard(mutated_source)
         if not mutations:
             del self.store_attr_mutations[item]
             del self.attr_mutation_kinds[item]
@@ -2144,7 +2165,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             and mutation_kind is AttrMutationKind.GLOBAL_REINSERT
         ):
             cg.add_push_null(
-                lambda: cg.load_import_from(utils.__name__, "store_global_in_module")
+                lambda: cg.load_import_from(utils.__name__, "reinsert_global_in_module")
             )
             cg(var.source)  # type: ignore[attr-defined]
             cg(variables.ConstantVariable(name))
