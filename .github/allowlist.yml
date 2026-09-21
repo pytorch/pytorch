@@ -43,7 +43,9 @@ L1:
   - Isalia20/pytorch-mps-ci
 
 L2:
-  - NVIDIA/pytorch-windows-ci
+  - NVIDIA/pytorch-windows-ci:
+      events:
+        - nightly
   - TorchedHat/pytorch-redhat-ci:
       events:
         - nightly
