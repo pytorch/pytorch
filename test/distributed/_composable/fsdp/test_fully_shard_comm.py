@@ -56,6 +56,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     patch_post_backward,
@@ -284,7 +285,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
         # Run the foreach reduce-scatter (including copy-in and view-out)
         torch.manual_seed(42)
-        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        # Keep sequential fp16 sums exactly representable in the threaded PG.
+        unsharded_grads = [
+            torch.ones_like(param) * (self.rank % 8) for param in orig_params
+        ]
+        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
@@ -324,7 +329,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             _,
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, reduce_scatter_dtype)
-        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
             _div_if_needed(grad, predivide_factor)
             dist.all_reduce(
@@ -2047,7 +2051,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
 
 @instantiate_parametrized_tests
-class TestFullyShardReduceOpWorldSize1(FSDPTest):
+class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return 1

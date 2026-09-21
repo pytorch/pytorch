@@ -53,7 +53,6 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_CUDA,
     TEST_WITH_ROCM,
-    xfailIf,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -530,14 +529,10 @@ class CPUReproTests(TestCase):
 
         with torch.no_grad():
             compiled_m = torch.compile(m)
-            # The cpp_wrapper C-shim can't utilize the Python error API, so error
-            # messages are printed to stderr directly, and the intercepted RuntimeError
-            # is significantly less verbose.
-            msg = (
-                r"aoti_torch_cpu_convolution\(.*\) API call failed"
-                if config.cpp_wrapper
-                else "output padding must be smaller than either stride or dilation"
-            )
+            # The meta kernel rejects the invalid output_padding during fake tensor
+            # propagation, before either wrapper backend is reached, so both
+            # configurations surface the same error.
+            msg = "output padding must be smaller than either stride or dilation"
             with self.assertRaisesRegex(RuntimeError, msg):
                 compiled_m(input)
 
@@ -5930,7 +5925,6 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
-    @xfailIf(IS_ARM64)  # see https://github.com/pytorch/pytorch/issues/168972
     def test_float32_to_uint8(self):
         # https://github.com/pytorch/pytorch/issues/156788
         @torch.compile
