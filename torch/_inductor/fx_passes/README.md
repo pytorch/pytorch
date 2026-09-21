@@ -4,6 +4,11 @@ Each FX node has metadata on it, and in particular, stores a faketensor represen
 
 Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning. Passes do not need to run `FakeTensorUpdater` before each metadata read.
 
+## Operator arguments
+For dispatcher-traced `OpOverload` nodes in AOT-produced graphs, supplied schema arguments are recorded in schema order in `node.args`, regardless of whether the original Python call used positional or keyword arguments. Schema arguments do not appear in `node.kwargs`, so passes may index `node.args` according to the operator schema.
+
+Passes that manually construct `OpOverload` nodes with `Graph.call_function`, including custom passes, must preserve this convention. This invariant does not apply to arbitrary Python functions or higher-order operators used as `call_function` targets.
+
 ## Alias analysis
 Passes should determine tensor aliasing from FakeTensor storage identity rather than operator schema alias annotations. Two tensor nodes with the same non-`None` storage ID alias. A `None` storage ID means aliasing is unknown and must not be used to establish an alias relationship.
 
@@ -51,12 +56,20 @@ if graph.find_nodes(op="call_function", target=aten.set_.default):
 
 Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
 
-## Order of random operations
-With the default `fallback_random=False`, Inductor uses functional RNG lowering whose state is represented explicitly. Passes may reorder independent random operations in this mode, provided they preserve their explicit operands and data dependencies and do not duplicate or remove them.
+## Topological order of nodes
+FX passes must NOT assume that the current graph-list order is topological. Earlier passes may leave dependencies out of list order, and passes are not generally required to restore topological order after each rewrite.
 
-When `fallback_random=True`, random operations consume the global CUDA RNG state, so all passes must preserve their relative order. Before `_chain_random_ops_for_ordering` runs, passes preserve the relative graph-list order of random operations, even when the graph is temporarily not topologically sorted. After it adds explicit control dependencies between random operations, passes preserve their order by respecting those dependencies. Passes may move deterministic nodes around random operations, but they must not reorder the random operations relative to one another.
+A pass that requires a topological traversal must either establish that ordering itself or be registered at a pipeline point whose preceding passes have been carefully verified to guarantee it. This registration-order dependency must be maintained when the pipeline changes.
 
-Before chaining, passes must also avoid introducing dependencies that require the opposite RNG order. For example, if the graph-list order is `rng_1` followed by `rng_2`, introducing a dependency `rng_2 -> rng_1` conflicts with the later ordering dependency `rng_1 -> rng_2` and creates a cycle during `_chain_random_ops_for_ordering` before `stable_topological_sort` runs.
+Rewrites must still keep the dataflow graph acyclic. The post-grad pipeline runs `stable_topological_sort` before lowering to restore topological node order.
+
+## Finding nodes
+When searching for nodes with a particular operation and target, use `Graph.find_nodes` instead of scanning `Graph.nodes`. It uses the graph's lookup table and avoids visiting unrelated nodes. By default, `find_nodes` sorts matches into current graph-list order, which is not necessarily topological order. Pass `sort=False` when match order does not matter to avoid that sorting cost.
+
+## Ordering dependencies
+Pass authors do not need to special-case ordering requirements that are not represented by ordinary dataflow. If correctness depends on an implicit execution order, the component responsible for that invariant must encode the order as explicit graph dependencies. Other passes then treat those dependencies like any other graph edges. Graph insertion APIs only choose node position; they do not infer hidden ordering requirements or add the required dependencies automatically.
+
+For example, when `fallback_random=True`, post-grad adds control dependencies between random operations before topological sorting and scheduling. Individual passes do not need to inspect `fallback_random` or reason about random-operation ordering.
 
 ## Tensor layouts
 The following invariants apply to intermediate tensors when Inductor is the backend; they are not general FX graph invariants:
