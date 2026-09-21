@@ -1285,7 +1285,7 @@ def dropout(input: Tensor, p: float, train: bool | None):
 @register_decomposition(aten.native_dropout)
 @out_wrapper("out0", "out1")
 def native_dropout(input: Tensor, p: float, train: bool | None):
-    if train and p != 0:
+    if (train is None or train) and p != 0:
         if p == 1:
             return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
         if not input.dtype.is_floating_point:

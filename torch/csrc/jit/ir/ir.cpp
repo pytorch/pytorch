@@ -1136,7 +1136,7 @@ bool Node::isNondeterministic() const {
   }
   torch::utils::SchemaInfo schema_info(*schema);
   if (hasNamedInput("train")) {
-    auto value = constant_as<bool>(namedInput("train"));
+    auto value = toIValue(namedInput("train"));
     if (value.has_value()) {
       schema_info.addArgumentValue("train", *value);
     }

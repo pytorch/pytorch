@@ -37,6 +37,24 @@ class _WithExport:
 class DynamoExporterTest(common_utils.TestCase, _WithExport):
     hw_classification = HardwareClassification.GENERIC
 
+    @common_utils.parametrize("train", [None, False, True])
+    @common_utils.parametrize("p", [0.0, 0.2, 0.5])
+    def test_native_dropout_optional_train(self, train, p):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.native_dropout.default(x, p, train)
+
+        x = torch.ones(256)
+        program = self.export(Model(), (x,))
+        output, mask = program(x)
+        scale = 1.0 if train is False else 1.0 / (1.0 - p)
+        self.assertEqual(output, x * mask * scale)
+        if train is False or p == 0:
+            self.assertEqual(mask, torch.ones_like(mask))
+        else:
+            self.assertTrue(mask.any())
+            self.assertFalse(mask.all())
+
     def test_insert_contiguous_between_transpose_and_view(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):

@@ -9329,12 +9329,12 @@ class TestMPS(TestCaseMPS):
         ]
         p_list = [0, 0.34, 0.78, 1]
 
-        for shape, p, train in itertools.product(shapes, p_list, [False, True]):
+        for shape, p, train in itertools.product(shapes, p_list, [None, False, True]):
             input = torch.randn(shape, device='mps', dtype=dtype, requires_grad=True)
             output, mask = torch.native_dropout(input, p, train=train)
 
             p_actual_mps = 1 - (mask.sum() / mask.numel())
-            if train:
+            if train is not False:
                 self.assertEqual(p_actual_mps, p, atol=1e-2, rtol=1e-2)
                 self.assertTrue((output[mask.logical_not()] == 0).all())
                 self.assertEqual(output[mask], input[mask] / (1 - p))
@@ -9346,7 +9346,7 @@ class TestMPS(TestCaseMPS):
             output.backward(output_grad)
 
             grad_scale = 0 if p == 1 else 1 / (1 - p)
-            if train:
+            if train is not False:
                 self.assertEqual(input.grad, output_grad * mask * grad_scale)
             else:
                 self.assertEqual(input.grad, output_grad)
