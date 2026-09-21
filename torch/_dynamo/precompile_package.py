@@ -4,27 +4,74 @@ artifact holding every frame Dynamo produces while the caller's calls run --
 the entry frame, the ``torch_dynamo_resume_in_*`` continuations graph breaks
 create, and the recompiled variants of each -- stored through CompilePackage
 (``torch/_dynamo/package.py``), a low-level component not meant to be used
-directly. It is not ``torch.compiler.precompile``, the ahead-of-time capture
-API this repository already has (``torch/_precompile.py``), which does not call
-into this module; nor ``torch._dynamo.config.caching_precompile``, which caches
+directly, the multi-graph counterpart of
+``torch.compile(fn, fullgraph=True).aot_compile(...)``. It is not
+``torch.compiler.precompile``, the ahead-of-time capture API this repository
+already has (``torch/_precompile.py``), which does not call into this module
+yet; nor ``torch._dynamo.config.caching_precompile``, which caches
 ``torch.compile`` artifacts transparently without an explicit capture and, when
 set, wraps every guard filter, this module's included (see
 ``default_guard_filter_fn``).
 
 ``default_guard_filter_fn`` is the guard filter a capture's serialized guards
-are written under. The rest of this module, added by the following commits of
-this stack, is the guard tooling that reports what that filter dropped and the
-configuration a capture runs under. The filter lives here, with that tooling,
-rather than beside the serializer's pre-check in ``guards.py``: it is the
-capture's policy over that pre-check, not part of it. Everything here is
-internal; the filter alone is unprefixed because the capture session passes it
-as the default a caller may name. The multi-graph Dynamo capture session that
-drives it is a follow-up stack; nothing under ``torch/`` calls into this module
-yet.
+are written under. Around it sits the guard tooling that reports what that
+filter dropped and the configuration a capture runs under. The filter lives
+here, with that tooling, rather than beside the serializer's pre-check in
+``guards.py``: it is the capture's policy over that pre-check, not part of it.
+Everything here is internal; the filter alone is unprefixed because the capture
+session passes it as the default a caller may name. ``PrecompileSession``, the
+multi-graph Dynamo capture session that drives it, is added here; the public
+entry point that reaches it lands later in this stack, so nothing under
+``torch/`` calls into the session yet.
+
+Capture is by execution, and the caller drives it: the session hands back a
+callable, the caller invokes it with real inputs inside their own loop, each
+``cap(...)`` returns the callable's own result, and every frame, break
+continuation and guarded variant the call exercises is recorded.
+
+``precompile_capture`` below is the entry point that starts one here.
+
+Calls run with the grad mode the caller sets -- capture does not force
+``no_grad()`` or ``enable_grad()``. ``training=True`` lowers the backward
+eagerly so the artifact carries one and a served output can be backpropagated.
+No loss is needed for that: the joint trace synthesizes tangents from the
+forward outputs' own metadata.
+
+``guard_filter_fn`` rides on the optimize context rather than on the
+serializer, so the guards it drops leave the live check too and a capture
+recompiles less often than ordinary ``torch.compile`` would.
+
+A resume function only exists once the frame ahead of it has actually run, so
+every variant must be exercised. Whatever you do not run is not in the
+artifact: it covers what was observed, not every possible input to the
+callable.
+
+Know these before relying on an artifact in production:
+
+* An inference artifact is the default: the caller runs the calls under
+  ``torch.no_grad()``. For a training artifact pass ``training=True``, which
+  traces with grad on and lowers the backward eagerly -- without it, AOTAutograd
+  defers the backward to the first ``.backward()`` call, so a grad-enabled
+  capture that never makes one records no backends and cannot be written.
+* A non-tensor argument, and any value that crosses a graph break, is guarded
+  by equality, so an int/bool/str argument or a break coming from ``.item()``
+  yields an artifact that only serves calls reproducing those exact values.
+  Exercise every value you need to serve with a ``cap(...)`` call, or expect
+  poor coverage on new data. ``dynamic=True`` helps with shapes but not with
+  pinned values.
+* Identity guards cannot be serialized, so precompiling gives up on noticing
+  that a guarded object was rebound. Every model drops them, so a capture that
+  refused every drop would refuse essentially every real artifact.
+* Some models do not capture yet. For example, T5 raises ``PackageError: Cannot
+  find module for code <code object __init__`` from ``_get_code_source``, which
+  is byte-identical to base and which plain ``caching_precompile`` also raises.
+* The model must live in an importable module. Source is checksummed, so a
+  class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
 """
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import functools
 import hashlib
@@ -34,8 +81,9 @@ import re
 import site
 import sys
 import sysconfig
+import threading
 import types
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._functorch.config as functorch_config
@@ -44,9 +92,10 @@ from torch.compiler._precompile_types import PrecompileSummary
 from torch.utils._config_module import ConfigModule
 
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
-from .convert_frame import ConvertFrame
+from .convert_frame import CatchErrorsWrapper, ConvertFrame
 from .exc import PackageError
 from .guards import CheckFunctionManager
+from .package import CompilePackage
 from .source import (
     AttrSource,
     DictGetItemSource,
@@ -54,6 +103,7 @@ from .source import (
     GlobalSource,
     LocalSource,
 )
+from .types import FrameAction
 
 
 if TYPE_CHECKING:
@@ -65,8 +115,9 @@ if TYPE_CHECKING:
     from torch.compiler._precompile_types import GuardFact as _GuardFact
 
     from .convert_frame import ConvertFrameReturn
+    from .eval_frame import OptimizeContext
     from .hooks import Hooks
-    from .package import _DynamoCacheEntry
+    from .package import _BackendId, _DynamoCacheEntry
     from .repro.after_dynamo import WrapBackendDebug
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
@@ -1084,7 +1135,10 @@ def _pins_a_value(guard_type: str, name: str) -> bool:
 # variants guarding different values render the same fact and invent an
 # invariant neither holds.
 _OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
-_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
+# There is deliberately no rule for the saved-tensors-hooks ids the guard
+# renders ("... top_saved_tensors_hooks ids == (139, 140)"): that rendering is
+# not an expression, so _mask_values below drops it whole and _normalize never
+# sees the ids. _value_fingerprint is what names those hooks.
 # Dynamo appends a per-process counter to the builtins dict it installs, so the
 # same guard reads __builtins_dict___6 in one compilation and ___8 in the next.
 # Of the globals Dynamo mints, only the three families in
@@ -1103,13 +1157,294 @@ _DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
 
 
 def _normalize(text: str) -> str:
-    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
     text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
     return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
 
 
+# A guard that pins a string pins it BY VALUE, so guards.py writes the value
+# into the check it renders: an EQUALS_MATCH on a system prompt renders as
+# L['self'].prompt == 'you are ...', and a dict keyed by a checkpoint path
+# renders the path inside the guard's own name. The report those renderings go
+# into is meant to be committed to a file and diffed, so every literal is masked
+# by type where the fact is recorded. What makes the report auditable is the
+# SHAPE of the check and the slot it names; that a value told two variants apart
+# is reported as a varying slot, never by printing the value.
+#
+# The mask is a string CONSTANT ('<str>', '<list:3>'), so a masked check still
+# parses and a caller that re-renders a recorded fact cannot collapse it into one
+# placeholder. What a placeholder is not is READ BACK: a user string can be
+# spelled exactly like one -- '<pad>' is an ordinary tokenizer token, and the
+# user is who chooses it -- so there is no shape a string can be trusted by here.
+# Every string constant is masked, and a second pass over a masked check rewrites
+# a typed placeholder as '<str>', losing the type and never a value. Nothing this
+# pass wrote is re-masked WITHIN a pass either, and not by its text: a masked
+# node is a fresh constant put in where the traversal has already been. The bare
+# <id> and <n> _normalize interpolates are the opposite case -- they run after
+# the parse, on text nothing reads back.
+#
+# A subscript key is data unless what it subscripts is keyed by NAME. L, G and
+# the builtins dict Dynamo installs are how a check spells a scope, and an
+# nn.Module attribute is read through the module's own name dicts (mod.lin is
+# rendered mod._modules['lin'], see GuardBuilder's __dict__ accessors), so those
+# keys spell a source too. A user dict does not: in self.cfg['/home/me/w.pt']
+# the value IS the key, and a secret field name is identifier-shaped exactly as
+# 'lin' is, so the shape of the key cannot decide this. The BASE decides, and a
+# kept key has to be name-shaped on top of that -- <> is allowed in it for the
+# caller that masks an ALREADY NORMALIZED name, which is the one that records a
+# slot, where a global reads as _<id>_c<n> inside the brackets; on the
+# _render_code path masking runs first, so a key there is still the raw
+# identifier.
+#
+# ONE implementation, on the tree: a source NAME is a Python expression too, so
+# _mask_keys parses it and masks it with the same pass rather than approximating
+# this rule over text, where a base is whatever precedes a bracket and every
+# spelling of it has to be guessed.
+_NAME_KEYED_SCOPES = frozenset({"L", "G"})
+_NAME_KEYED_DICTS = frozenset({"__dict__", "_modules", "_parameters", "_buffers"})
+_SLOT_KEY = re.compile(r"\A[A-Za-z_][\w<>]*\Z")
+# The other place a rendering spells part of the SOURCE rather than a value: the
+# argument of a call that carries an attribute NAME, by callable and position.
+# HASATTR renders hasattr(L['x'], 'act'), and NOT_PRESENT_IN_GENERIC_DICT renders
+# not ___dict_contains('act', L['x'].__dict__), which Dynamo installs once per
+# attribute name on ONE source -- so masking the name would collapse the several
+# facts that slot holds into one, and a slot that told two variants apart would
+# be reported invariant. ___dict_contains is kept only where the dict beside the
+# name is keyed by name, because DICT_CONTAINS renders the same helper over a
+# USER dict, where argument 0 is the key itself. __import__('torch') is
+# deliberately absent: a module name is a value like any other, and the ID_MATCH
+# a rendered import carries names the module in GuardFact.value anyway.
+_DICT_CONTAINS = "___dict_contains"
+_NAME_ARGUMENT = {"getattr": 1, "hasattr": 1, _DICT_CONTAINS: 0}
+# ___check_type_id renders as "<expr>, type=<class 'int'>", which is not one
+# expression, so the annotation comes off before the parse and goes back where
+# it was. Tolerant of a quote inside the class repr: an annotation left in the
+# body costs the whole check, not just the annotation.
+_CHECK_ANNOTATION = re.compile(r", type=<class '.*?'>")
+# What a check that does not parse is reported as. Its own text cannot go in:
+# masking needs the shape of an expression to tell a source from a value, and an
+# arbitrary __repr__ can carry a path with no quote anywhere in it.
+_UNPARSED_CHECK = "<unparsed check>"
+# The same for a source name, where it lands in a slot rather than in a check.
+_UNPARSED_SOURCE = "<unparsed source>"
+
+
+def _keyed_by_name(base: ast.expr) -> bool:
+    """Whether a subscript of ``base`` inside a check is keyed by a name."""
+    if isinstance(base, ast.Name):
+        return base.id in _NAME_KEYED_SCOPES
+    if isinstance(base, ast.Attribute):
+        return base.attr in _NAME_KEYED_DICTS
+    if isinstance(base, ast.Subscript):
+        # The builtins dict Dynamo installs, read out of a scope that is itself
+        # keyed by name: G['__builtins_dict___6']['print']. The prefix alone
+        # would hand the rule to whoever owns the dict, since a user dict may
+        # hold a key spelled that way, and a base whose own key was masked must
+        # not be able to keep the key under it.
+        key = base.slice
+        return (
+            _keyed_by_name(base.value)
+            and isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and key.value.startswith(_BUILTINS_DICT_PREFIX)
+        )
+    return False
+
+
+def _mask_expr(text: str) -> tuple[str, bool] | None:
+    """``(text with its values masked, whether anything was masked)``.
+
+    ``None`` when ``text`` is not one expression, which is the fail-closed
+    case: the shape of an expression is what tells a source from a value here,
+    so a text whose shape cannot be read is reported by its caller as a
+    placeholder rather than patched.
+    """
+    mask = _MaskValues()
+    try:
+        tree = mask.visit(ast.parse(text, mode="eval"))
+    except Exception:
+        # Not a SyntaxError alone: a pinned container nests without limit, so a
+        # deep enough one exhausts the stack in the parse or in this traversal,
+        # and reporting a fact must never be the thing that breaks a capture.
+        return None
+    if not mask.masked:
+        # Unparsing rewrites a text it has nothing to hide in -- it drops
+        # redundant parentheses and respells a string -- so one without a
+        # literal comes back exactly as its producer wrote it.
+        return text, False
+    try:
+        return ast.unparse(tree), True
+    except Exception:
+        # Defensive, and for the same reason: ast.unparse raises on trees this
+        # pass does not build (a non-string constant inside an f-string is one)
+        # and on a tree too deep to walk.
+        return None
+
+
+def _mask_keys(name: str) -> str:
+    """Mask the data keys a source name interpolates (cfg['/home/me/w.pt']).
+
+    The rule is the one a rendered check goes through, run by the same code: a
+    name is an expression, so it is parsed and masked as one, which is also
+    what makes a key the text could not read -- a tuple, a number, a nested
+    display -- masked rather than kept. A name that does not parse is reported
+    as ``<unparsed source>``, so two such names read as one slot instead of
+    reaching the report as their own text.
+    """
+    if not name:
+        # A guard checked against no source (SHAPE_ENV, GLOBAL_STATE). Not a
+        # name whose shape could not be read.
+        return name
+    masked = _mask_expr(name)
+    return _UNPARSED_SOURCE if masked is None else masked[0]
+
+
+class _MaskValues(ast.NodeTransformer):
+    """Replace the values a rendered check embeds with their type.
+
+    A node that is kept is mutated and returned, as ``generic_visit`` does; a
+    node that is masked is replaced by a fresh constant.
+    """
+
+    def __init__(self) -> None:
+        self.masked = False
+
+    def _mask(self, node: ast.expr, kind: str) -> ast.expr:
+        self.masked = True
+        return ast.copy_location(ast.Constant(value=f"<{kind}>"), node)
+
+    def _visit_expr(self, node: ast.expr) -> ast.expr:
+        visited = self.visit(node)
+        if not isinstance(visited, ast.expr):
+            raise AssertionError(f"masking produced a {type(visited).__name__}")
+        return visited
+
+    def _visit_children(self, node: ast.expr) -> ast.expr:
+        self.generic_visit(node)
+        return node
+
+    def visit_Constant(self, node: ast.Constant) -> ast.expr:
+        if isinstance(node.value, str):
+            # Every string, one shaped like a placeholder included: what this
+            # pass wrote and what a user pinned read alike, and keeping the ones
+            # that read alike would hand the rule to whoever picks the string.
+            return self._mask(node, "str")
+        if isinstance(node.value, bytes):
+            return self._mask(node, "bytes")
+        # A number, a bool and None stay: the number IS the check for a length
+        # or a shape, and neither is a value a report can leak.
+        return node
+
+    def _mask_display(
+        self, node: ast.List | ast.Set | ast.Dict | ast.Tuple
+    ) -> ast.expr:
+        # The whole display goes, not its elements: the names in a pinned list
+        # of names are the value, and a display nests without limit -- a list of
+        # dicts of names -- so a rule that had to look inside to stay safe is
+        # one an element shape it does not model defeats. Its LENGTH stays, so
+        # two variants pinning containers of different size still read
+        # differently; two of the same size read alike, and a display of NUMBERS
+        # (a marked-dims set, a pinned shape) reads as its length where a bare
+        # number would have been kept. That is what not looking inside costs.
+        items = node.keys if isinstance(node, ast.Dict) else node.elts
+        return self._mask(node, f"{type(node).__name__.lower()}:{len(items)}")
+
+    visit_List = visit_Set = visit_Dict = visit_Tuple = _mask_display
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> ast.expr:
+        # One value, masked whole. What a check compares against an f-string is
+        # the joined string, so rewriting the pieces in place would report a
+        # structure the value does not have -- and not every piece is a node a
+        # placeholder can stand in for, since a format spec is an f-string too.
+        return self._mask(node, "str")
+
+    def visit_Subscript(self, node: ast.Subscript) -> ast.expr:
+        key = node.slice
+        if (
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and _SLOT_KEY.match(key.value)
+            and _keyed_by_name(node.value)
+        ):
+            node.value = self._visit_expr(node.value)
+            return node
+        return self._visit_children(node)
+
+    def visit_Call(self, node: ast.Call) -> ast.expr:
+        name = node.func.id if isinstance(node.func, ast.Name) else ""
+        kept = _NAME_ARGUMENT.get(name)
+        if (
+            kept is None
+            or len(node.args) < 2
+            or (name == _DICT_CONTAINS and not _keyed_by_name(node.args[1]))
+        ):
+            return self._visit_children(node)
+        # The attribute name is part of the source being read, not a value being
+        # compared. That one argument only -- getattr's DEFAULT is a value like
+        # any other, as is the key a containment check on a user dict compares.
+        node.args = [
+            arg if i == kept else self._visit_expr(arg)
+            for i, arg in enumerate(node.args)
+        ]
+        for keyword in node.keywords:
+            keyword.value = self._visit_expr(keyword.value)
+        return node
+
+
+def _mask_values(text: str) -> str:
+    """Name what a rendered check compares by type instead of by value.
+
+    What it writes parses, so a caller that masks a recorded check again reads
+    it as a check rather than collapsing it whole; the placeholders in it are
+    masked again, a typed one reading as ``'<str>'``, because a user string can
+    be spelled like a placeholder and recognizing one by its shape is what let
+    such a string through. A display is masked whole rather than element by element
+    because a display can nest strings arbitrarily and a pass that stays safe
+    only by inspecting elements is defeated by an element shape it does not
+    model; it is named by its type and its length alone, so two variants pinning
+    containers of the same length -- two pinned shapes, two sets of marked dims
+    -- render the same check, and what told them apart has to come from
+    ``GuardFact.value`` or from the slot. The ``, type=<class 'int'>`` tail
+    ``___check_type_id`` appends is not part of the expression, so it comes off
+    before the parse and goes back where it was; a rendering carrying one
+    anywhere but at its end is reported as ``<unparsed check>``, since the
+    unparse regenerates the whole text and the position cannot be restored.
+    """
+    annotations = list(_CHECK_ANNOTATION.finditer(text))
+    masked = _mask_expr(_CHECK_ANNOTATION.sub("", text))
+    if masked is None:
+        # Fail closed. A rendering that is not an expression gives nothing to
+        # tell a source from a value: the saved-tensors-hooks guard renders
+        # prose, and an EQUALS_MATCH on a type pytree.register_constant admits
+        # renders that class's __repr__, which can carry a path with no quote
+        # anywhere in it for a textual pass to find. The text goes whole, and
+        # for the hooks guard _value_fingerprint still tells two hook sets
+        # apart. For an EQUALS_MATCH on a repr nothing does: its fingerprint is
+        # "" and _pins_a_value counts bare names only, so two variants pinning
+        # different objects on one slot report one fact and the slot reads
+        # invariant. A digest of the text would tell them apart and is
+        # deliberately not written: a stable fingerprint of the value this pass
+        # exists to hide, in a file meant to be committed, is an oracle for
+        # guessing that value.
+        return _UNPARSED_CHECK
+    body, anything_masked = masked
+    if not anything_masked:
+        # Nothing to hide, so the check is returned exactly as guards.py wrote
+        # it -- annotation included, in the place guards.py put it.
+        return text
+    if len(annotations) > 1 or (annotations and annotations[0].end() != len(text)):
+        # An annotation the unparse cannot put back where it was. Reordering it
+        # would change what the check reads as, and a ", type=<class '...'>"
+        # inside the body is likelier a false match on the pattern than an
+        # annotation, so this fails closed like any other shape the pass cannot
+        # read. No in-tree rendering puts one anywhere but at the end.
+        return _UNPARSED_CHECK
+    return body + (annotations[0].group(0) if annotations else "")
+
+
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
-    return tuple(_normalize(part) for part in (code_list or ()))
+    # Masked BEFORE normalizing: _normalize interpolates <id> and <n>
+    # placeholders that no longer parse as Python.
+    return tuple(_normalize(_mask_values(part)) for part in (code_list or ()))
 
 
 def _hash_text(text: str) -> str:
@@ -1378,8 +1713,9 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
     never checks.
     """
     if entry.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS":
-        # Its code renders tuple(map(id, hooks)), which _normalize has to erase
-        # or the file churns -- but erasing it alone would merge two variants
+        # Its code renders "... ids == tuple(map(id, hooks))", which is not an
+        # expression, so _mask_values drops it whole -- and dropping it alone
+        # would merge two variants
         # that differ ONLY in their hooks and report the guard that split them
         # as an invariant. Put back a discriminator derived from what the hooks
         # ARE rather than where they live, which is both stable across
@@ -1578,4 +1914,520 @@ def _summarize(
         risky_dropped_guards=tuple(sorted(risky)),
         policy_dropped_guards=tuple(sorted(policy_dropped)),
         capture_errors=tuple(capture_errors),
+    )
+
+
+def _compose_with_default(
+    user: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
+) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]:
+    """AND a caller's filter with the default rather than replacing it.
+
+    ``default_guard_filter_fn`` is not a default in the "sensible starting point"
+    sense -- it is what drops the identity guards that CANNOT be serialized at
+    all. Replacing it means a caller who wanted to drop three of their own guards
+    silently re-admits every unserializable one, and the failure surfaces as
+    "ID_MATCH guard cannot be serialized" in frames that have nothing to do with
+    their filter. A custom filter can only ever want to drop MORE, so composing
+    is the only reading that makes sense.
+    """
+
+    def composed(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+        base = default_guard_filter_fn(entries)
+        chosen = user(entries)
+        if len(chosen) != len(entries):
+            raise ValueError(
+                f"guard_filter_fn returned {len(chosen)} decisions for "
+                f"{len(entries)} guards; it must return one per entry."
+            )
+        return [bool(a) and bool(b) for a, b in zip(base, chosen)]
+
+    return composed
+
+
+def _entry_fn_of(fn: object) -> Callable[..., object]:
+    if isinstance(fn, torch.nn.Module):
+        forward = fn.forward
+        if not hasattr(forward, "__code__"):
+            raise TypeError(
+                f"{type(fn).__name__}.forward is a {type(forward).__name__}, which "
+                f"has no __code__ for Dynamo to capture or to load an artifact onto. "
+                f"Binding it in __init__ -- self.forward = functools.partial(...) -- "
+                f"shadows the class method and lands here; keep forward a method."
+            )
+        return forward
+    if not callable(fn):
+        raise TypeError(f"expected a callable or nn.Module, got {type(fn).__name__}")
+    if not hasattr(fn, "__code__"):
+        raise TypeError(
+            f"expected a function or nn.Module, got {type(fn).__name__}, which "
+            f"has no __code__ for Dynamo to capture or to load an artifact "
+            f"onto. Pass partial.func for a functools.partial, or obj.__call__ "
+            f"for an object that only defines __call__."
+        )
+    return fn  # type: ignore[return-value]
+
+
+class _PrecompileBackend:
+    """One session's own object wrapped around the inner backend.
+
+    It is not what gives the session a distinct cache identity: CacheEntry
+    stores get_backend(backend), which follows every _torchdynamo_orig_backend
+    link (torch/csrc/dynamo/cache_entry.cpp), so the entry ends up holding the
+    same inner eager/inductor function every other session gets; the isolation
+    comes from isolate_recompiles=True in _optimize_isolated. What the wrapper
+    provides is a per-session object on the compile path, for bookkeeping that
+    has to count or hold what the inner backend was handed.
+    """
+
+    def __init__(self, backend: str) -> None:
+        inner = torch._dynamo.lookup_backend(backend)
+        self._torchdynamo_orig_backend = inner
+        # Named the way get_compiler_fn derives a name, because a wrapper object
+        # has none: without it the minifier repro, the compile log and
+        # BackendCompilerFailed all report an unknown backend.
+        self.compiler_name = getattr(inner, "compiler_name", backend)
+        self.backend_ctx_ctor = getattr(
+            inner, "backend_ctx_ctor", contextlib.nullcontext
+        )
+
+    # Forwarded, as _TorchCompileWrapper and AotAutograd do, so the inner
+    # backend's one-time init still fires through the wrapper; read at fire time
+    # so the hook can be set after the session was built.
+    @property
+    def _dynamo_backend_init(self) -> Any | None:
+        return getattr(self._torchdynamo_orig_backend, "_dynamo_backend_init", None)
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor], **kwargs: Any
+    ) -> Any:
+        return self._torchdynamo_orig_backend(gm, inputs, **kwargs)
+
+    def get_compiler_config(self) -> Any:
+        getter = getattr(self._torchdynamo_orig_backend, "get_compiler_config", None)
+        return None if getter is None else getter()
+
+
+class _ReportLimitConvertFrame(_AllowEmptyGraphsConvertFrame):
+    """The package's frame converter, reporting a recompile-limit hit.
+
+    Hitting the cap truncates the capture: Dynamo refuses the variant, runs the
+    frame eagerly from then on, and says so only in a log warning, so a caller
+    would get an artifact with fewer variants than they exercised and no sign of
+    it. The converter's return value is the one in-process signal --
+    convert_frame._compile puts a RUN_ONLY strategy on the Unsupported it
+    raises for the cap, and nothing else in Dynamo sets FrameAction.RUN_ONLY --
+    so a RUN_ONLY return here means the cap was hit. Reported, never raised:
+    the calls keep running, as the limit's contract says.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        # Optional because the base class's package-less DDP clone rebuilds this
+        # type positionally; a session's converter always carries a package, so
+        # it takes the refusing clone instead.
+        on_recompile_limit: Callable[[], None] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._on_recompile_limit = on_recompile_limit
+
+    def __call__(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: CacheEntry | None,
+        hooks: Hooks,
+        frame_state: dict[str, int | FrameStateSizeEntry],
+        skip: int = 0,
+    ) -> ConvertFrameReturn:
+        result = super().__call__(frame, cache_entry, hooks, frame_state, skip=skip + 1)
+        if (
+            self._on_recompile_limit is not None
+            and result.frame_exec_strategy.cur_action == FrameAction.RUN_ONLY
+        ):
+            self._on_recompile_limit()
+        return result
+
+
+def _optimize_isolated(
+    backend: _PrecompileBackend,
+    package: CompilePackage,
+    *,
+    recompile_limit: int,
+    dynamic: bool | None,
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None,
+    on_recompile_limit: Callable[[], None],
+) -> OptimizeContext:
+    from .eval_frame import OptimizeContext
+
+    optimize_ctx = torch._dynamo.optimize(
+        backend,
+        package=package,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
+        guard_filter_fn=guard_filter_fn,
+        isolate_recompiles=True,
+    )
+    if not isinstance(optimize_ctx, OptimizeContext):
+        raise PackageError("torch.compiler.precompile requires Dynamo to be enabled")
+    callback = optimize_ctx.callback
+    if not isinstance(callback, CatchErrorsWrapper):
+        raise AssertionError(f"expected a CatchErrorsWrapper, got {type(callback)}")
+    converter = callback._torchdynamo_orig_backend
+    if not isinstance(converter, ConvertFrame):
+        raise AssertionError(f"expected a ConvertFrame, got {type(converter)}")
+    # Swap the wrapper's converter for the package's own, which patches
+    # allow_empty_graphs around every frame it compiles, refuses a DDPOptimizer
+    # frame by name and reports a recompile-limit hit. Rebuilt from the converter
+    # optimize() made so the backend, hooks and limit stay the ones it derived.
+    optimize_ctx.callback = CatchErrorsWrapper(
+        _ReportLimitConvertFrame(
+            converter._torchdynamo_orig_backend,
+            converter._hooks,
+            package=package,
+            recompile_limit=converter._recompile_limit,
+            on_recompile_limit=on_recompile_limit,
+        ),
+        callback.hooks,
+    )
+    return optimize_ctx
+
+
+class PrecompileSession:
+    """
+    A caller-driven capture in progress. Enter as a context manager to get the
+    callable to exercise and invoke it with real inputs inside the block. The
+    compiled region stays alive for the whole block, so every call reuses the
+    variants the earlier ones produced.
+    """
+
+    def __init__(
+        self,
+        fn: Callable[..., object],
+        *,
+        backend: str = "inductor",
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
+        recompile_limit: int = 256,
+        dynamic: bool | None = None,
+        training: bool = False,
+    ) -> None:
+        self._fn = fn
+        self._backend = backend
+        # A training capture traces with grad on and lowers the backward
+        # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
+        # calling .backward() on a served output runs precompiled code.
+        self._training = training
+        self._capture_errors: list[str] = []
+        self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
+        self._guard_filter_fn = (
+            default_guard_filter_fn
+            if guard_filter_fn is None
+            else _compose_with_default(guard_filter_fn)
+        )
+        self._recompile_limit = recompile_limit
+        self._dynamic = dynamic
+        self._entry_fn = _entry_fn_of(fn)
+        # The guard filter rides on the optimize context rather than the
+        # package, so it applies to the live guards as well as the serialized
+        # ones, exactly as caching_precompile does today.
+        self._package = CompilePackage(self._entry_fn)
+        self._backend_artifacts: dict[_BackendId, Any] = {}
+        # The ids whose compiled callable _take_backend_artifacts decided to
+        # leave on the package for a render to serialize off it; _release drops
+        # every other copy the package holds.
+        self._kept_backend_ids: set[_BackendId] = set()
+        self._entered = False
+        self._compiled: Callable[..., object] | None = None
+        self._state = threading.Condition()
+        self._active_calls = 0
+        self._closing = False
+        self._finished = False
+
+    def _take_backend_artifacts(self) -> None:
+        """Collect what each backend id the entry names actually filed.
+
+        Single-threaded by contract: this reads the package's cache entry and
+        pops out of the process-global staging area, both of which a compile
+        still running is using (see _drain_then_close). A caller must either
+        hold self._state or be the thread that has drained the session, which is
+        what _close is; a render collecting mid-block runs on the same terms.
+        """
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            PrecompileContext,
+            reduces_to_graph_source,
+        )
+
+        backend_ids = self._package.cache_entry().backend_ids
+        unfiled: list[_BackendId] = []
+        kept: set[_BackendId] = set()
+        for backend_id in backend_ids:
+            if backend_id in self._backend_artifacts:
+                # Already collected. A render can collect mid-block and again at
+                # exit, and take_artifact hands an artifact out once, so a second
+                # pass must not read an id it already holds as one that filed
+                # nothing.
+                continue
+            artifact = PrecompileContext.take_artifact(backend_id)
+            compiled = self._package.cached_backends.get(backend_id)
+            if artifact is not None:
+                self._backend_artifacts[backend_id] = artifact
+            elif compiled is noop_graph_call:
+                # output_graph short-circuits an empty graph to noop_graph_call
+                # without filing anything under its id, which the bytecode still
+                # names. Record the no-op so the served frame dispatches to it
+                # rather than running eager. Done here rather than at
+                # render time because _release drops the package's copy of every
+                # id whose artifact this pass took.
+                self._backend_artifacts[backend_id] = EagerCacheArtifact(
+                    key=backend_id, content=noop_graph_call
+                )
+            elif compiled is None:
+                # An id the bytecode names that no compile ever reached: a resume
+                # frame the capture never exercised has nothing to keep and
+                # nothing to file.
+                continue
+            elif reduces_to_graph_source(compiled):
+                # Filed nothing, but what it left on the package is the shape
+                # EagerCacheArtifact.__reduce__ carries, so a render serializes
+                # it straight off the package. Decided from the object rather
+                # than from the backend's name, which does not determine the
+                # shape: eager hands back a bound GraphModule.forward only while
+                # force_autograd_cache is off, and a caller's own backend may
+                # hand one back too.
+                kept.add(backend_id)
+            else:
+                unfiled.append(backend_id)
+        # Recomputed per pass rather than accumulated: an id that filed an
+        # artifact after an earlier pass left its callable here has no further
+        # use for a second copy on the package.
+        self._kept_backend_ids = kept
+        if unfiled:
+            # Only what was observed: these ids filed nothing and what they left
+            # behind is not the shape a render serializes, so the capture is
+            # short those graphs. Why they filed nothing is not checked here, so
+            # the causes stay a list of possibilities. Deduplicated on the
+            # condition rather than on the wording, which names the ids and so
+            # differs between a mid-block collection and the one at exit.
+            self._record_capture_error(
+                PackageError(
+                    "the capture recorded no artifact for backend id(s) "
+                    f"{', '.join(unfiled)}, and the callable backend "
+                    f"{self._backend!r} left on the package for each is not a "
+                    "bound GraphModule.forward, the one shape a render can "
+                    "serialize off the package; the usual causes are a "
+                    "grad-enabled capture without training=True, which leaves "
+                    "the backward lowering deferred past the end of the "
+                    "capture, caches turned off through force_disable_caches, "
+                    "and a backend that never files its compiled code -- any of "
+                    "them may apply, since nothing here diagnoses which"
+                ),
+                dedup_on="backend ids that filed no artifact",
+            )
+
+    def _record_recompile_limit(self) -> None:
+        # Deduplicated like every other capture error, so a cap hit once per
+        # frame and per call records one entry naming both limits rather than
+        # one per refused variant.
+        self._record_capture_error(
+            PackageError(
+                "the capture hit a recompile limit, so it holds fewer variants "
+                "than the calls exercised: Dynamo caps a code object at "
+                f"recompile_limit={self._recompile_limit} and at "
+                "torch._dynamo.config.accumulated_recompile_limit"
+                f"={torch._dynamo.config.accumulated_recompile_limit} counted "
+                "across every isolated region on it, whichever it reaches "
+                "first, and runs the frame eagerly from then on"
+            )
+        )
+
+    def _record_capture_error(
+        self, error: BaseException, *, dedup_on: str | None = None
+    ) -> None:
+        """Record one capture error, at most once per kind.
+
+        dedup_on names the stable part of a message whose text varies with how
+        far the capture has got, so that one condition observed twice records one
+        entry rather than one per wording.
+        """
+        message = str(error)
+        key = (type(error), dedup_on if dedup_on is not None else message)
+        # Under _state: the check-then-add IS the once-only invariant, so two
+        # concurrent calls raising the same exception must not both append. No
+        # caller holds _state when it gets here, and a Condition's default lock
+        # is an RLock, so a later re-entrant caller would not deadlock either.
+        with self._state:
+            if key in self._recorded_exception_keys:
+                return
+            self._recorded_exception_keys.add(key)
+            self._capture_errors.append(f"{type(error).__name__}: {message}")
+
+    def _release(self) -> None:
+        # The compiled variants stay in the entry's ordinary Dynamo cache, as
+        # they would after torch.compile; clearing them per capture needs the
+        # region-scoped cache entries that are not part of this build. What goes
+        # is the package's own copies, all but the ids _take_backend_artifacts
+        # decided to leave behind: it took an artifact for the rest or recorded a
+        # capture error naming them, so a second copy here serves no render.
+        for backend_id in list(self._package.cached_backends):
+            if backend_id not in self._kept_backend_ids:
+                del self._package.cached_backends[backend_id]
+
+    def _call(self, *args: object, **kwargs: object) -> object:
+        with self._state:
+            if self._compiled is None or self._closing:
+                raise RuntimeError("PrecompileSession is not active")
+            compiled = self._compiled
+            self._active_calls += 1
+        try:
+            with _capture_config(self._training):
+                result = compiled(*args, **kwargs)
+        except BaseException as e:
+            self._record_capture_error(e)
+            raise
+        finally:
+            with self._state:
+                self._active_calls -= 1
+                if self._active_calls == 0:
+                    self._state.notify_all()
+        return result
+
+    def _drain_then_close(self) -> None:
+        """Wait for the calls in flight, then close the session either way.
+
+        The drain has to come first: a call can still be compiling against a
+        borrowed cache entry, and collecting the artifacts mutates state that
+        compile reads. The close sits in the drain's finally so an interrupt
+        raised out of wait() (a KeyboardInterrupt) still closes the session
+        instead of leaving cap() callable past the block with the optimize
+        context alive to process exit -- at the price of abandoning the calls
+        still running, which is why _close then collects nothing for them.
+        """
+        drained = False
+        try:
+            with self._state:
+                self._closing = True
+                while self._active_calls:
+                    self._state.wait()
+            drained = True
+        finally:
+            self._close(collect=drained)
+
+    def _close(self, *, collect: bool) -> None:
+        """Close the session, and collect its artifacts if the drain completed.
+
+        Publishing the flags is all that is safe with calls still in flight,
+        which is what an interrupted drain leaves behind: taking the artifacts
+        reads the package's cache entry and _release clears its backends, both of
+        which a compile still running is using. So an interrupt abandons those
+        calls -- whatever they go on to file is not collected, and the artifact
+        this capture renders does not hold their variants -- while the session
+        still closes rather than staying open to process exit.
+        """
+        with self._state:
+            # _closing marks a drain in progress, and by here it is over.
+            self._closing = False
+            self._entered = False
+            # The optimize context lives on the compiled callable, so dropping
+            # the callable is what releases it.
+            self._compiled = None
+            self._finished = True
+            self._state.notify_all()
+        if not collect:
+            return
+        try:
+            self._take_backend_artifacts()
+        except BaseException as teardown:
+            # Recorded, never raised: a teardown failure must not replace the
+            # exception the caller's block is already propagating, and the
+            # capture errors are what a render gates on.
+            self._record_capture_error(teardown)
+        finally:
+            self._release()
+
+    def __enter__(self) -> Callable[..., object]:
+        # Under _state: the not-finished/not-entered check and the set that
+        # follows are one decision, which two concurrent entries must not both
+        # pass, and _call and _close read _entered and _compiled under it too.
+        with self._state:
+            if self._finished:
+                raise RuntimeError("PrecompileSession cannot be re-entered")
+            if self._entered:
+                raise PackageError(
+                    "PrecompileSession is already active: a session runs one capture "
+                    "block at a time, so serialize concurrent entries."
+                )
+            # The grad-mode/config patch is per call, in _call, not block-level:
+            # user code between calls (optimizer.step, data loading) must run in
+            # the ambient mode, not the capture's.
+            self._entered = True
+        try:
+            backend_obj = _PrecompileBackend(self._backend)
+            optimize_ctx = _optimize_isolated(
+                backend_obj,
+                self._package,
+                recompile_limit=self._recompile_limit,
+                dynamic=self._dynamic,
+                guard_filter_fn=self._guard_filter_fn,
+                on_recompile_limit=self._record_recompile_limit,
+            )
+            compiled = optimize_ctx(self._fn)
+            with self._state:
+                self._compiled = compiled
+        except BaseException as e:
+            self._record_capture_error(e)
+            # A __enter__ that raises never gets its __exit__, so without this
+            # the session is wedged: the block reads as still open. The same
+            # drain-then-close __exit__ runs, on the same terms.
+            self._drain_then_close()
+            raise
+        return self._call
+
+    def __exit__(self, *exc: object) -> None:
+        if isinstance(exc[1], BaseException):
+            self._record_capture_error(exc[1])
+        self._drain_then_close()
+
+
+def precompile_capture(
+    fn: Callable[..., object],
+    *,
+    backend: str = "inductor",
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
+    recompile_limit: int = 256,
+    dynamic: bool | None = None,
+    training: bool = False,
+) -> PrecompileSession:
+    r"""Begin capturing ``fn`` into a multi-graph artifact.
+
+    ``recompile_limit`` raises Dynamo's usual 8 because a precompile
+    deliberately wants one compiled variant per condition, whereas the normal
+    limit exists to catch runaway recompilation. Nothing raises the ambient
+    ``accumulated_recompile_limit`` (256), which Dynamo checks first and counts
+    across every isolated region on the code object, so it is the ceiling
+    whatever is passed here, and the default is that ceiling rather than a raise
+    above it. Reaching either cap does not refuse the call -- Dynamo runs the
+    frame eagerly from then on -- and the capture records the truncation as a
+    capture error, so an artifact holding fewer variants than were exercised
+    says so.
+
+    The capture is caller-driven: enter the session to get a callable, invoke it
+    exactly as you would ``fn`` inside the ``with`` body, and the calls fold into
+    the artifact in the ambient grad mode. The compiled region stays alive for
+    the whole block, so every call reuses the variants the earlier ones
+    produced.
+
+    ``guard_filter_fn`` narrows ``default_guard_filter_fn``, and the guards it
+    drops leave the live check as well as the serialized copy.
+    """
+    return PrecompileSession(
+        fn,
+        backend=backend,
+        guard_filter_fn=guard_filter_fn,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
+        training=training,
     )

@@ -2,6 +2,7 @@
 
 import builtins
 import collections
+import copy
 import dataclasses
 import enum
 import functools
@@ -10,6 +11,7 @@ import importlib.util
 import itertools
 import math
 import os
+import pickle
 import re
 import site
 import subprocess
@@ -1938,7 +1940,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             "G['__import_mod_140311678493200_c1']": "G['__import_mod_<id>_c<n>']",
             "G['___unnamed_scope_140311678493200_c1']": "G['___unnamed_scope_<id>_c<n>']",
             "G['_140311678493200_c3'] is not None": "G['_<id>_c<n>'] is not None",
-            "top_saved_tensors_hooks ids == (139, 140)": "top_saved_tensors_hooks ids == (<ids>)",
             # User constants and identifiers are not addresses.
             "L['dims'][0] == 140311678493200": "L['dims'][0] == 140311678493200",
             "L['w_1_c2'] == 3": "L['w_1_c2'] == 3",
@@ -2536,8 +2537,1077 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(seen, [(True, 2)])
         self.assertFalse(torch._dynamo.config.allow_empty_graphs)
 
+    def test_source_graph_module_copies_are_isolated(self):
+        # _src and the exec'd forward are shared between copies; everything else
+        # nn.Module keeps on an instance is state, hook dicts included, and a
+        # copy sharing it lets an update on one copy silently edit the other.
+        # __reduce__ used to pickle the SHARED _src, whose body aliases the
+        # original's parameter/buffer containers -- so mutating the original
+        # after a deepcopy round-tripped the mutated tensors into the copy's
+        # pickle even though live calls were isolated. __reduce__ now
+        # snapshots the instance's own state.
+        from torch._dynamo.precompile_context import (
+            _EagerGraphSource,
+            _SourceGraphModule,
+        )
+
+        src = _EagerGraphSource(
+            code="def forward(self, x):\n    return x + self.b\n",
+            import_block="",
+            body={"_buffers": {"b": torch.ones(3)}},
+        )
+        original = _SourceGraphModule(src)
+        dup = copy.deepcopy(original)
+        handle = dup.register_forward_hook(lambda *args: None)
+        dup._non_persistent_buffers_set.add("b")
+        self.assertEqual(len(original._forward_hooks), 0)
+        self.assertEqual(original._non_persistent_buffers_set, set())
+        self.assertIs(dup._src, original._src)
+
+        x = torch.randn(3)
+        original._buffers["b"].mul_(100)
+        self.assertEqual(original(x), x + 100)
+        self.assertEqual(dup(x), x + 1)  # live isolation
+        handle.remove()  # a lambda hook is unpicklable on any nn.Module
+        # And an instance pickles its CURRENT state, not the state it was built
+        # from: the mutated set survives dup's own round trip.
+        reloaded = pickle.loads(pickle.dumps(dup))
+        self.assertEqual(reloaded(x), x + 1)
+        self.assertEqual(reloaded._non_persistent_buffers_set, {"b"})
+        self.assertEqual(pickle.loads(pickle.dumps(original))(x), x + 100)
+
+    def test_eager_artifact_round_trips_a_hop_graph_as_source(self):
+        # GraphModule.__reduce__ re-traces the generated source at load; cond
+        # rejects the Proxy and autocast enter/exit EXECUTE and leave no node.
+        # The top level must travel as source, its HOP bodies as real Graphs.
+        from torch._dynamo.precompile_context import (
+            _SourceGraphModule,
+            EagerCacheArtifact,
+        )
+
+        def fn(x):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                y = torch.cond(x.sum() > 0, lambda t: t.sin(), lambda t: t.cos(), (x,))
+            return y + 1
+
+        gms = []
+
+        def backend(gm, example_inputs):
+            gms.append(gm)
+            return gm.forward
+
+        x = torch.randn(3)
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+        (gm,) = gms
+        artifact = EagerCacheArtifact(key="k", content=gm.forward)
+        loaded = pickle.loads(pickle.dumps(artifact)).after_deserialization()
+        module = loaded.__self__
+        self.assertIsInstance(module, _SourceGraphModule)
+        self.assertFalse(hasattr(module, "graph"))
+        self.assertTrue(module._modules)
+        for sub in module._modules.values():
+            self.assertIsInstance(sub, torch.fx.GraphModule)
+            self.assertGreater(len(sub.graph.nodes), 0)
+        self.assertEqual(loaded(x), gm.forward(x))
+        self.assertEqual(loaded(-x.abs()), gm.forward(-x.abs()))
+        # Re-serializing a loaded artifact goes through _SourceGraphModule.__reduce__.
+        reloaded = pickle.loads(pickle.dumps(pickle.loads(pickle.dumps(artifact))))
+        self.assertEqual(reloaded.after_deserialization()(x), gm.forward(x))
+
+    def test_take_artifact_removes_the_staged_backend(self):
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            PrecompileContext,
+        )
+
+        PrecompileContext.record_artifact(EagerCacheArtifact(key="k", content=None))
+        self.assertEqual(PrecompileContext.take_artifact("k").key, "k")
+        self.assertIsNone(PrecompileContext.take_artifact("k"))
+        self.assertIsNone(PrecompileContext.serialize_artifact_by_key("k"))
+
+
+class _SessionStep(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        y = self.lin(x)
+        if y.shape[0] > 2:
+            y = y * 2
+        return torch.relu(y)
+
+
+def _session_breaks(x):
+    y = x * 2
+    torch._dynamo.graph_break()
+    return y + 3
+
+
+def _session_raises(x, boom):
+    if boom:
+        raise ValueError("boom")
+    return x + 1
+
+
+class TestPrecompileSession(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _session(self, fn, **kwargs):
+        from torch._dynamo.precompile_package import precompile_capture
+
+        kwargs.setdefault("backend", "eager")
+        kwargs.setdefault("dynamic", False)
+        return precompile_capture(fn, **kwargs)
+
+    def _guard_entries(self, fn, *args):
+        """Real GuardFilterEntry objects, recorded off a live capture."""
+        recorded = []
+
+        def record(entries):
+            recorded.append(list(entries))
+            return [True] * len(entries)
+
+        session = self._session(fn, guard_filter_fn=record)
+        with session as cap:
+            cap(*args)
+        self.assertTrue(recorded)
+        return max(recorded, key=len)
+
+    def test_compose_with_default_can_only_narrow_what_the_default_keeps(self):
+        from torch._dynamo.precompile_package import (
+            _compose_with_default,
+            default_guard_filter_fn,
+        )
+
+        entries = self._guard_entries(_SessionStep(), torch.randn(3, 4))
+        base = default_guard_filter_fn(entries)
+        self.assertIn(True, base)
+        keep_all = _compose_with_default(lambda e: [True] * len(e))
+        self.assertEqual(list(keep_all(entries)), list(base))
+        keep_none = _compose_with_default(lambda e: [False] * len(e))
+        self.assertEqual(list(keep_none(entries)), [False] * len(entries))
+        # A custom filter cannot re-admit what the default dropped.
+        dropped = [i for i, kept in enumerate(base) if not kept]
+        self.assertTrue(dropped)
+        widened = _compose_with_default(lambda e: [True] * len(e))(entries)
+        self.assertFalse(any(widened[i] for i in dropped))
+
+    def test_compose_with_default_refuses_a_wrong_length_decision_list(self):
+        from torch._dynamo.precompile_package import _compose_with_default
+
+        entries = self._guard_entries(_SessionStep(), torch.randn(3, 4))
+        composed = _compose_with_default(lambda e: [True])
+        with self.assertRaisesRegex(ValueError, "must return one per entry"):
+            composed(entries)
+
+    @parametrize("training", (False, True))
+    def test_training_lowers_the_backward_eagerly_inside_the_block(self, training):
+        import torch._functorch.config as functorch_config
+
+        observed = []
+
+        def spy(entries):
+            observed.append(functorch_config.force_non_lazy_backward_lowering)
+            return [True] * len(entries)
+
+        session = self._session(
+            _SessionStep(), backend="inductor", training=training, guard_filter_fn=spy
+        )
+        with session as cap:
+            cap(torch.randn(3, 4))
+        self.assertTrue(observed)
+        self.assertEqual(set(observed), {training})
+        # The outcome, not just the flag: a lazy backward leaves the bundle
+        # unwritten until the first .backward() call, so a capture that never
+        # makes one files no artifact and records that it did not. The message
+        # lists the plausible causes rather than diagnosing one, so this pins
+        # the fact of the error, not a diagnosis.
+        self.assertEqual(bool(session._backend_artifacts), training)
+        if training:
+            self.assertEqual(session._capture_errors, [])
+        else:
+            (recorded,) = session._capture_errors
+            self.assertIn("recorded no artifact", recorded)
+            self.assertIn("the usual causes are", recorded)
+        self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
+
+    def test_a_pruned_empty_graph_is_recorded_as_a_no_op_backend(self):
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        def reads_one_symbolic_size(x):
+            x.size(0)
+            return None
+
+        # Dynamic shapes put a sym_size_int node in the graph, so the frame is
+        # compiled; pruning then empties it and output_graph substitutes
+        # noop_graph_call, filing nothing under the id the bytecode names.
+        session = self._session(reads_one_symbolic_size, dynamic=True)
+        with session as cap:
+            self.assertIsNone(cap(torch.randn(3, 4)))
+            # Read inside the block: the id's artifact is the no-op, so _release
+            # drops the package's own copy of it on the way out.
+            (inside,) = session._package.cache_entry().backend_ids
+            self.assertIs(session._package.cached_backends[inside], noop_graph_call)
+        (backend_id,) = session._package.cache_entry().backend_ids
+        self.assertEqual(session._package.cached_backends, {})
+        artifact = session._backend_artifacts[backend_id]
+        self.assertIsInstance(artifact, EagerCacheArtifact)
+        self.assertIs(artifact.content, noop_graph_call)
+
+    def test_each_call_folds_into_the_entry_as_a_guarded_variant(self):
+        model = _SessionStep()
+        session = self._session(model)
+        with session as cap:
+            for rows in (2, 3, 4):
+                x = torch.randn(rows, 4)
+                self.assertEqual(cap(x), model(x))
+        entry = session._package.cache_entry()
+        self.assertEqual(entry.fn_name, "_SessionStep.forward")
+        self.assertEqual(len(entry.codes), 1)
+        self.assertEqual(len(entry.codes[0].guarded_codes), 3)
+        self.assertFalse(entry.codes[0].bypassed)
+
+    def test_a_graph_break_records_the_resume_frame(self):
+        session = self._session(_session_breaks)
+        with session as cap:
+            self.assertEqual(cap(torch.ones(3)), torch.ones(3) * 2 + 3)
+        entry = session._package.cache_entry()
+        self.assertEqual(len(entry.codes), 2)
+        self.assertTrue(any(c.install_to_global for c in entry.codes))
+        self.assertEqual(len(entry.backend_ids), 2)
+
+    def test_recompile_limit_caps_the_variants_but_not_the_calls(self):
+        model = _SessionStep()
+        session = self._session(model, recompile_limit=2)
+        with session as cap:
+            for rows in (2, 3, 4, 5):
+                x = torch.randn(rows, 4)
+                self.assertEqual(cap(x), model(x))
+        entry = session._package.cache_entry()
+        self.assertEqual(len(entry.codes[0].guarded_codes), 2)
+        # The cap truncates the capture, so the session says so: the calls it
+        # refused to compile are variants the artifact does not hold.
+        (recorded,) = session._capture_errors
+        self.assertIn("hit a recompile limit", recorded)
+        self.assertIn("recompile_limit=2", recorded)
+
+    def test_session_is_one_shot_and_refuses_reentry(self):
+        from torch._dynamo.exc import PackageError
+
+        session = self._session(_session_breaks)
+        with session as cap:
+            with self.assertRaisesRegex(PackageError, "already active"):
+                session.__enter__()
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "not active"):
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
+            session.__enter__()
+
+    def test_an_interrupted_drain_still_closes_the_session(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        # The drain is the only place __exit__ blocks. An interrupt out of it
+        # must propagate and still close the session -- otherwise cap() stays
+        # callable past the block and the optimize context leaks to process
+        # exit -- while claiming nothing on behalf of the calls it abandons,
+        # which may still be compiling against the package.
+        self.addCleanup(PrecompileContext.clear)
+        session = self._session(_session_breaks, backend="inductor")
+
+        def interrupted(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            with session as cap:
+                cap(torch.ones(3))
+                # One call left in flight is what makes __exit__ wait at all.
+                session._active_calls += 1
+                session._state.wait = interrupted
+        # Closed, and the optimize context released with it: _compiled is the
+        # only thing holding that context.
+        self.assertTrue(session._finished)
+        self.assertFalse(session._entered)
+        self.assertFalse(session._closing)
+        self.assertIsNone(session._compiled)
+        with self.assertRaisesRegex(RuntimeError, "not active"):
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
+            session.__enter__()
+        # Nothing claimed: the artifacts of the abandoned call stay staged in
+        # PrecompileContext and its backends stay on the package, rather than
+        # being taken and cleared under a compile that is still running.
+        backend_ids = session._package.cache_entry().backend_ids
+        self.assertTrue(backend_ids)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(set(session._package.cached_backends), set(backend_ids))
+        for backend_id in backend_ids:
+            staged = PrecompileContext.serialize_artifact_by_key(backend_id)
+            self.assertIsNotNone(staged)
+
+    def test_entering_with_an_unknown_backend_closes_the_session(self):
+        from torch._dynamo.exc import InvalidBackend
+
+        # __enter__ raising before it resolved a backend is the one path that
+        # reaches teardown with nothing compiled: it still has to close the
+        # session and collect nothing, on a package whose cache entry holds no
+        # backend id at all.
+        session = self._session(_session_breaks, backend="no_such_backend")
+        with self.assertRaises(InvalidBackend):
+            with session:
+                self.fail("the block must not run")
+        self.assertTrue(session._finished)
+        self.assertFalse(session._entered)
+        self.assertIsNone(session._compiled)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        self.assertFalse(session._package.cache_entry().backend_ids)
+        (recorded,) = session._capture_errors
+        self.assertIn("InvalidBackend", recorded)
+
+    def test_an_error_inside_the_block_is_recorded_once_and_propagates(self):
+        session = self._session(_session_raises)
+        with session as cap:
+            self.assertEqual(cap(torch.ones(2), False), torch.ones(2) + 1)
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, "boom"):
+                    cap(torch.ones(2), True)
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+
+    def test_recording_an_error_runs_under_the_session_lock(self):
+        # The once-only dedup is a check-then-add on shared state, so it has to
+        # hold _state. Proven positively rather than by a window: the session's
+        # lock announces every acquire, so a recording thread that reached the
+        # lock says so, and one that never takes it never does.
+        reached = threading.Event()
+
+        class AnnouncingLock:
+            # A complete Condition lock, not just acquire/release: Condition
+            # probes for these three private hooks and otherwise installs
+            # plain-Lock defaults, whose _is_owned reports a reentrant lock the
+            # caller already holds as unowned and makes wait()/notify() raise.
+            def __init__(self):
+                self._lock = threading.RLock()
+
+            def acquire(self, blocking=True, timeout=-1):
+                reached.set()
+                return self._lock.acquire(blocking, timeout)
+
+            def release(self):
+                self._lock.release()
+
+            def __enter__(self):
+                return self.acquire()
+
+            def __exit__(self, *exc):
+                self.release()
+
+            def _is_owned(self):
+                return self._lock._is_owned()
+
+            def _release_save(self):
+                return self._lock._release_save()
+
+            def _acquire_restore(self, state):
+                self._lock._acquire_restore(state)
+
+        session = self._session(_session_raises)
+        session._state = threading.Condition(AnnouncingLock())
+        done = threading.Event()
+
+        def record():
+            session._record_capture_error(ValueError("boom"))
+            done.set()
+
+        with session._state:
+            # The substitute is a valid Condition lock, not just acquire and
+            # release: notify_all is what the plain-Lock default _is_owned would
+            # refuse on a reentrant lock this thread is holding.
+            session._state.notify_all()
+            reached.clear()
+            worker = threading.Thread(target=record)
+            worker.start()
+            self.assertTrue(reached.wait(10))
+            self.assertFalse(done.is_set())
+            self.assertEqual(session._capture_errors, [])
+        worker.join(60)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+        session._record_capture_error(ValueError("boom"))
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+
+    def test_eager_backends_survive_exit_for_the_render(self):
+        # eager files nothing under the backend ids, and its callables are the
+        # one shape a render serializes off the package (a bound
+        # GraphModule.forward), so they are kept and that is not a failed
+        # capture.
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            reduces_to_graph_source,
+        )
+
+        session = self._session(_session_breaks)
+        with session as cap:
+            cap(torch.ones(3))
+        entry = session._package.cache_entry()
+        self.assertTrue(entry.backend_ids)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
+        for backend_id, backend in session._package.cached_backends.items():
+            self.assertTrue(reduces_to_graph_source(backend))
+            # The premise of keeping them: the artifact a render builds off the
+            # package callable really does serialize.
+            artifact = EagerCacheArtifact(key=backend_id, content=backend)
+            self.assertIsNotNone(pickle.loads(pickle.dumps(artifact)).content)
+        self.assertEqual(session._capture_errors, [])
+
+    @parametrize("backend", ("eager_noexcept", "ts"))
+    def test_a_backend_that_files_nothing_unrenderable_records_an_error(self, backend):
+        # Neither files anything under the backend ids, and neither hands back
+        # something a render can serialize off the package -- eager_noexcept
+        # returns a local closure, ts a RecursiveScriptModule -- so the capture
+        # is short those graphs and says so, naming the ids, rather than silently
+        # keeping objects the render would choke on.
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            reduces_to_graph_source,
+        )
+
+        session = self._session(_session_breaks, backend=backend)
+        with session as cap:
+            cap(torch.ones(3))
+            # The premise, asserted rather than assumed, and before _release
+            # drops the callables: neither shape is the one a render serializes,
+            # and an artifact built on either fails to pickle at all.
+            self.assertTrue(session._package.cached_backends)
+            for backend_id, held in session._package.cached_backends.items():
+                self.assertFalse(reduces_to_graph_source(held))
+                with self.assertRaises(Exception):
+                    pickle.dumps(EagerCacheArtifact(key=backend_id, content=held))
+        entry = session._package.cache_entry()
+        self.assertTrue(entry.backend_ids)
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        (recorded,) = session._capture_errors
+        self.assertIn("recorded no artifact for backend id(s)", recorded)
+        for backend_id in entry.backend_ids:
+            self.assertIn(backend_id, recorded)
+        self.assertIn(f"the callable backend '{backend}' left", recorded)
+
+    def test_eager_is_classified_by_the_shape_it_returns_not_by_its_name(self):
+        # force_autograd_cache makes the eager backend hand back a
+        # GraphModuleSerializableCallable instead of a bound GraphModule.forward
+        # (backends/debugging.py), which EagerCacheArtifact.__reduce__ can only
+        # plain-pickle, lossily. The name is still "eager", so a decision taken
+        # by name would keep those callables and report a complete capture.
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.precompile_context import reduces_to_graph_source
+
+        session = self._session(_session_breaks)
+        with functorch_config.patch(force_autograd_cache=True):
+            with session as cap:
+                cap(torch.ones(3))
+                held = list(session._package.cached_backends.values())
+                self.assertTrue(held)
+                for backend in held:
+                    self.assertFalse(reduces_to_graph_source(backend))
+        self.assertEqual(session._backend_artifacts, {})
+        self.assertEqual(session._package.cached_backends, {})
+        (recorded,) = session._capture_errors
+        self.assertIn("recorded no artifact for backend id(s)", recorded)
+
+    def test_a_partly_unfiled_capture_names_only_the_ids_that_filed_nothing(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        session = self._session(_session_breaks, backend="inductor")
+        with session as cap:
+            cap(torch.ones(3))
+            first, second = session._package.cache_entry().backend_ids
+            # The staging area is process-global, so an id's artifact can be gone
+            # before this session collects. That id filed nothing as far as the
+            # collection can tell, while its sibling still has an artifact: the
+            # error has to name the one and not the other.
+            self.assertIsNotNone(PrecompileContext.take_artifact(first))
+        self.assertEqual(list(session._backend_artifacts), [second])
+        (recorded,) = session._capture_errors
+        self.assertIn(first, recorded)
+        self.assertNotIn(second, recorded)
+
+    def test_the_unfiled_error_is_recorded_once_across_two_collections(self):
+        # A render collects mid-block and exit collects again, by which time the
+        # capture has compiled more graphs, so the message names more ids. One
+        # condition, so one entry: the dedup keys on the condition, not on the
+        # wording.
+        session = self._session(_session_breaks, backend="ts")
+        with session as cap:
+            cap(torch.ones(3))
+            session._take_backend_artifacts()
+            (mid_block,) = session._capture_errors
+            early = list(session._package.cache_entry().backend_ids)
+            cap(torch.ones(4))
+        entry = session._package.cache_entry()
+        self.assertGreater(len(entry.backend_ids), len(early))
+        (recorded,) = session._capture_errors
+        self.assertEqual(recorded, mid_block)
+        for backend_id in early:
+            self.assertIn(backend_id, mid_block)
+        # The wording did move on, which is what the dedup had to survive.
+        late = [b for b in entry.backend_ids if b not in early]
+        self.assertTrue(late)
+        for backend_id in late:
+            self.assertNotIn(backend_id, recorded)
+
+    def test_inductor_artifacts_are_taken_from_the_precompile_context(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        session = self._session(_session_breaks, backend="inductor")
+        with session as cap:
+            cap(torch.ones(3))
+            # A render inside the block collects, exactly as save() does, and
+            # exit collects again. take_artifact hands each artifact out once,
+            # so the second pass has to read the ids it already holds as
+            # collected rather than as ids that filed nothing. Single-threaded,
+            # which is the contract _take_backend_artifacts states: no call is in
+            # flight here.
+            session._take_backend_artifacts()
+            mid_block = dict(session._backend_artifacts)
+            self.assertTrue(mid_block)
+        entry = session._package.cache_entry()
+        self.assertEqual(session._backend_artifacts, mid_block)
+        self.assertEqual(set(session._backend_artifacts), set(entry.backend_ids))
+        for backend_id in entry.backend_ids:
+            self.assertIsNone(PrecompileContext.serialize_artifact_by_key(backend_id))
+        self.assertEqual(session._package.cached_backends, {})
+        self.assertEqual(session._capture_errors, [])
+
+    def test_entry_fn_of_resolves_modules_and_refuses_the_rest(self):
+        from torch._dynamo.precompile_package import _entry_fn_of
+
+        model = _SessionStep()
+        self.assertIs(_entry_fn_of(model).__func__, _SessionStep.forward)
+        self.assertIs(_entry_fn_of(model).__self__, model)
+        self.assertIs(_entry_fn_of(_session_breaks), _session_breaks)
+        with self.assertRaisesRegex(TypeError, "has no __code__"):
+            _entry_fn_of(functools.partial(_session_breaks))
+        with self.assertRaisesRegex(TypeError, "expected a callable"):
+            _entry_fn_of(3)
+
+
+_PINNED_PROMPT = "p" * 80
+_PINNED_PATH = "/home/someone/secret_weights.pt"
+_PINNED_NAME = "alpha-secret"
+_PINNED_TAG = "tag-secret"
+# A literal whose repr is not itself: a backslash, a newline and a non-ASCII
+# character all come back escaped, so a report that leaked this one would not be
+# caught by searching for the literal as written.
+_PINNED_ESCAPED = "c:\\keys\nsecret-\u00e9"
+_PINNED = (_PINNED_PROMPT, _PINNED_PATH, _PINNED_NAME, _PINNED_TAG, _PINNED_ESCAPED)
+
+
+def _pinned_needles():
+    """Every spelling a pinned literal can reach a report as."""
+    for literal in _PINNED:
+        yield literal
+        escaped = literal.encode("unicode_escape").decode("ascii")
+        if escaped != literal:
+            yield escaped
+
+
+class _SessionPinsValues(torch.nn.Module):
+    """Every value-embedding guard type one capture can reach."""
+
+    def __init__(self):
+        super().__init__()
+        self.n = 3
+        self.on = True
+        self.prompt = _PINNED_PROMPT
+        self.path = _PINNED_PATH
+        self.tag = _PINNED_ESCAPED
+
+    def forward(self, x):
+        if self.on and self.prompt and self.path and self.tag:
+            return x * self.n
+        return x
+
+
+class _SessionPinsContainers(torch.nn.Module):
+    """Values a check renders as a container display, a keys list or a key."""
+
+    def __init__(self):
+        super().__init__()
+        self.names = [_PINNED_NAME]
+        self.tags = {_PINNED_TAG}
+        self.cfg = {_PINNED_PATH: 3}
+        self.keys = {_PINNED_PROMPT: 1}
+
+    def forward(self, x):
+        # The literal rather than the global on purpose: a containment check is
+        # rendered as SET_CONTAINS only when Dynamo knows the item while
+        # tracing, and that is the rendering which embeds it with repr.
+        if self.names[0] and "tag-secret" in self.tags:
+            x = x + 1
+        if list(self.keys.keys()) == [_PINNED_PROMPT]:
+            x = x * 2
+        return x + self.cfg[_PINNED_PATH]
+
+
+class TestGuardCodeMasking(torch._inductor.test_case.TestCase):
+    """The masking layer on its own: pure functions over checks and slot names."""
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _rendered(self, fn, *args):
+        """What _render_code makes of the checks a real capture of fn renders."""
+        from torch._dynamo.precompile_package import (
+            _mask_keys,
+            _normalize,
+            _render_code,
+            precompile_capture,
+        )
+
+        rendered = {}
+
+        def record(entries):
+            for entry in entries:
+                slot = (entry.guard_type, _mask_keys(_normalize(entry.name)))
+                rendered[slot] = _render_code(entry.orig_guard.code_list)
+            return [True] * len(entries)
+
+        session = precompile_capture(
+            fn, backend="eager", dynamic=False, guard_filter_fn=record
+        )
+        with session as cap:
+            cap(*args)
+        self.assertTrue(rendered)
+        return rendered
+
+    def _assert_nothing_pinned_reaches(self, rendered):
+        # Escaped as well as raw: a pinned value carrying a backslash reaches a
+        # repr as \\, so searching for it as written would miss it entirely.
+        for needle in _pinned_needles():
+            for slot, code in rendered.items():
+                self.assertNotIn(needle, repr(slot))
+                self.assertNotIn(needle, repr(code))
+
+    def test_a_pinned_string_or_bytes_is_named_by_type(self):
+        from torch._dynamo.precompile_package import _mask_values
+
+        self.assertEqual(
+            _mask_values("L['self'].prompt == 'you are a helpful assistant'"),
+            "L['self'].prompt == '<str>'",
+        )
+        self.assertEqual(_mask_values("L['k'] == b'secret'"), "L['k'] == '<bytes>'")
+
+    def test_a_number_a_bool_and_none_are_the_check_rather_than_a_value(self):
+        # The number IS what a length or a shape check compares, and a check
+        # with nothing to mask comes back exactly as guards.py wrote it rather
+        # than round-tripped through ast.unparse.
+        from torch._dynamo.precompile_package import _mask_values
+
+        for check in (
+            "len(L['x']) == 4",
+            "L['self'].on == True",
+            "L['self'].hook is None",
+            "(L['x'].size()[0]) == 2",
+        ):
+            self.assertEqual(_mask_values(check), check)
+
+    def test_a_container_display_is_masked_whole_but_keeps_its_length(self):
+        # Not element by element: the names in a pinned list of names are the
+        # value. The length stays, so containers of different size do not
+        # collapse into one check the report would read as invariant.
+        from torch._dynamo.precompile_package import _mask_values
+
+        self.assertEqual(
+            _mask_values("list(dict.keys(L['d'])) == ['alpha', 'beta']"),
+            "list(dict.keys(L['d'])) == '<list:2>'",
+        )
+        self.assertEqual(_mask_values("L['s'] == {'a'}"), "L['s'] == '<set:1>'")
+        self.assertEqual(_mask_values("L['d'] == {'a': 1}"), "L['d'] == '<dict:1>'")
+        self.assertEqual(_mask_values("L['t'] == ('a', 1)"), "L['t'] == '<tuple:2>'")
+        self.assertNotEqual(
+            _mask_values("L['s'] == {'a'}"), _mask_values("L['s'] == {'a', 'b'}")
+        )
+
+    def test_a_key_that_names_a_scope_is_kept_and_a_data_key_is_masked(self):
+        # The BASE decides, not the shape of the key: a scope, or an nn.Module
+        # name dict, is keyed by a name, and a user dict is keyed by data that
+        # is identifier-shaped as often as not.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        for name in (
+            "L['x']",
+            "G['CFG'].width",
+            "G['__builtins_dict___<n>']['print']",
+            "self._modules['lin']._parameters['weight']",
+        ):
+            self.assertEqual(_mask_keys(name), name)
+        # A bare ___dict__ name is not one of them: nothing renders a guard that
+        # subscripts one (the __dict__ reads all go through the attribute arm
+        # above), so an exemption for it would be a rule with no producer.
+        self.assertEqual(_mask_keys("___dict__['act']"), "___dict__['<str>']")
+        self.assertEqual(_mask_keys("self.cfg['/home/me/w.pt']"), "self.cfg['<str>']")
+        self.assertEqual(_mask_keys('self.cfg["/home/me/w.pt"]'), "self.cfg['<str>']")
+        self.assertEqual(
+            _mask_keys("self.cfg[b'/home/me/w.pt']"), "self.cfg['<bytes>']"
+        )
+        # Identifier-shaped, and still data: a field name is a secret as often
+        # as a path is.
+        self.assertEqual(_mask_keys("self.cfg['api_key']"), "self.cfg['<str>']")
+        self.assertEqual(_mask_keys("L['cfg']['api_key']"), "L['cfg']['<str>']")
+        # The same rule inside a rendered check, where the key is a subscript.
+        self.assertEqual(
+            _mask_values("L['self'].cfg['api_key'] == 3"),
+            "L['self'].cfg['<str>'] == 3",
+        )
+        self.assertEqual(
+            _mask_values("L['self']._modules['lin']._parameters['weight'] is None"),
+            "L['self']._modules['lin']._parameters['weight'] is None",
+        )
+
+    def test_a_dict_key_that_is_not_a_string_is_masked_in_a_slot_name(self):
+        # A key a textual rule cannot read is masked like any other, because the
+        # slot name is PARSED: a config dict keyed by ("model", "api_key") is a
+        # literal to Dynamo (ConstantVariable.is_literal recurses into a tuple),
+        # so DictGetItemSource reprs the whole tuple into the name.
+        from torch._dynamo.precompile_package import _mask_keys
+
+        self.assertEqual(
+            _mask_keys("L['self'].cfg[('model', 'api_key')]"),
+            "L['self'].cfg['<tuple:2>']",
+        )
+        self.assertEqual(_mask_keys("self.cfg[('a', 1)]"), "self.cfg['<tuple:2>']")
+        self.assertEqual(
+            _mask_keys("self.cfg[(('a', 'b'), 'c')]"), "self.cfg['<tuple:2>']"
+        )
+        self.assertEqual(
+            _mask_keys("self.cfg[frozenset({'api_key'})]"),
+            "self.cfg[frozenset('<set:1>')]",
+        )
+        # A number names no data here any more than it does in a check.
+        self.assertEqual(_mask_keys("L['dims'][0]"), "L['dims'][0]")
+        # A name whose shape cannot be read goes whole, and the empty name of a
+        # guard checked against no source is not such a name.
+        self.assertEqual(_mask_keys("<ephemeral: fake tensor>"), "<unparsed source>")
+        self.assertEqual(_mask_keys(""), "")
+
+    def test_a_user_string_shaped_like_a_placeholder_is_masked_too(self):
+        # The placeholders are not read back, and this is why: a tokenizer's
+        # special tokens are spelled exactly like one, and EQUALS_MATCH renders
+        # any string with repr, so recognizing a placeholder by its SHAPE made
+        # the rule the user's to spell and handed such a string back verbatim.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        self.assertEqual(
+            _mask_values("L['self'].pad_token == '<pad>'"),
+            "L['self'].pad_token == '<str>'",
+        )
+        # As a dict key it is not even name-shaped, so the keep rule refuses it
+        # and only the sentinel was keeping it.
+        self.assertEqual(
+            _mask_values("L['self'].vocab['<pad>'] == 0"),
+            "L['self'].vocab['<str>'] == 0",
+        )
+        self.assertEqual(
+            _mask_keys("L['self'].vocab['<eos>']"), "L['self'].vocab['<str>']"
+        )
+        # And the other direction: a user string reading as a container
+        # placeholder in a committed report is the same ambiguity.
+        self.assertEqual(_mask_values("L['x'] == '<list:3>'"), "L['x'] == '<str>'")
+
+    def test_the_attribute_name_an_absent_attribute_check_reads_is_kept(self):
+        # NOT_PRESENT_IN_GENERIC_DICT puts an attribute NAME in a call too, and
+        # Dynamo installs one per attribute name on ONE source, so masking the
+        # name would collapse the several facts that slot holds into one and
+        # report a slot that split two variants as invariant.
+        from torch._dynamo.precompile_package import _mask_values
+
+        for attr in ("forward", "act"):
+            check = f"not ___dict_contains({attr!r}, L['self'].__dict__)"
+            self.assertEqual(_mask_values(check), check)
+        self.assertNotEqual(
+            _mask_values("not ___dict_contains('a', L['self'].__dict__)"),
+            _mask_values("not ___dict_contains('b', L['self'].__dict__)"),
+        )
+        # The same helper over a USER dict has the compared KEY in that
+        # argument, which is why the dict beside it decides: DICT_CONTAINS and
+        # DICT_NOT_CONTAINS render ___dict_contains(key, dict_ref).
+        self.assertEqual(
+            _mask_values("___dict_contains('api_key', L['self'].cfg)"),
+            "___dict_contains('<str>', L['self'].cfg)",
+        )
+        self.assertEqual(
+            _mask_values("not ___dict_contains('api_key', L['cfg'])"),
+            "not ___dict_contains('<str>', L['cfg'])",
+        )
+        # A module name is a value like any other: nothing keeps this one, and
+        # the ID_MATCH an import carries names the module in GuardFact.value.
+        self.assertEqual(_mask_values("__import__('torch')"), "__import__('<str>')")
+
+    def test_a_check_too_deep_to_walk_is_dropped_rather_than_raised(self):
+        # Failing closed over the whole traversal, not just the parse: the pass
+        # recurses over whatever guards.py rendered, and a deep enough
+        # expression exhausts the stack with a RecursionError, which no syntax
+        # rule catches. Reporting a fact must never break a capture.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        self.assertEqual(
+            _mask_values("L['x'] == 'secret'" + " + 1" * 2000), "<unparsed check>"
+        )
+        self.assertEqual(_mask_keys("L['x']" + "[0]" * 2000), "<unparsed source>")
+
+    def test_the_slot_name_and_the_check_are_masked_by_one_rule(self):
+        # One rule, one implementation, so the two cannot drift: the slot name
+        # goes through the same pass the check does. These are the cases where a
+        # textual rule -- one that matched the END of the base text -- kept a key
+        # the tree masks: an attribute NAMED like a scope, and a user key spelled
+        # like the builtins dict Dynamo installs, whose own key is masked.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        for name, expected in (
+            ("L['self'].G['api_key']", "L['self'].G['<str>']"),
+            ("L['self'].L['api_key']", "L['self'].L['<str>']"),
+            ("L['x'].___dict__['api_key']", "L['x'].___dict__['<str>']"),
+            (
+                "L['self'].cfg['__builtins_dict__x']['api_key']",
+                "L['self'].cfg['<str>']['<str>']",
+            ),
+            (
+                "G['__builtins_dict___<n>']['print']",
+                "G['__builtins_dict___<n>']['print']",
+            ),
+            (
+                "self._modules['lin']._parameters['weight']",
+                "self._modules['lin']._parameters['weight']",
+            ),
+            ("self.cfg[('model', 'api_key')]", "self.cfg['<tuple:2>']"),
+        ):
+            self.assertEqual(_mask_keys(name), expected, name)
+            self.assertEqual(_mask_values(f"{name} == 3"), f"{expected} == 3", name)
+
+    def test_the_saved_tensors_hooks_check_fails_closed_and_leaves_no_ids(self):
+        # The one rendering in the tree that is not an expression, and why
+        # _normalize carries no rule for the ids it interpolates: masking runs
+        # first and drops the text whole, so the ids never reach _normalize.
+        # AUTOGRAD_SAVED_TENSORS_HOOKS is named by GuardFact.value instead.
+        from torch._dynamo.precompile_package import _normalize, _render_code
+
+        hooks = (
+            "torch._functorch.aot_autograd.utils.top_saved_tensors_hooks"
+            " ids == (139, 140)"
+        )
+        self.assertEqual(_render_code([hooks]), ("<unparsed check>",))
+        self.assertEqual(
+            _render_code([hooks.replace("(139, 140)", "None")]), ("<unparsed check>",)
+        )
+        # Nothing downstream scrubs those ids, which is what makes failing
+        # closed the thing that keeps them out of the report.
+        self.assertEqual(_normalize(hooks), hooks)
+
+    def test_the_attribute_name_a_hasattr_reads_is_part_of_the_source(self):
+        from torch._dynamo.precompile_package import _mask_values
+
+        for check in ("hasattr(L['x'], 'act')", "getattr(L['x'], 'act', None) == 3"):
+            self.assertEqual(_mask_values(check), check)
+        # The NAME only. A default getattr falls back to is a value, as is a
+        # string the call compares.
+        self.assertEqual(
+            _mask_values("getattr(L['x'], 'act', 'SECRET_DEFAULT') == 3"),
+            "getattr(L['x'], 'act', '<str>') == 3",
+        )
+        self.assertEqual(
+            _mask_values("getattr(L['x'], 'act', default='SECRET') == 3"),
+            "getattr(L['x'], 'act', default='<str>') == 3",
+        )
+        self.assertEqual(
+            _mask_values("set.__contains__(L['self'].tags, 'tag-secret')"),
+            "set.__contains__(L['self'].tags, '<str>')",
+        )
+
+    def test_a_type_annotated_check_keeps_the_annotation_where_it_sat(self):
+        # ___check_type_id renders "<expr>, type=<class 'int'>", which is not one
+        # expression: the annotation comes off before the parse and goes back
+        # where it was, with a quote inside the class repr tolerated.
+        from torch._dynamo.precompile_package import _mask_values
+
+        self.assertEqual(
+            _mask_values("L['self'].prompt == 'secret', type=<class 'str'>"),
+            "L['self'].prompt == '<str>', type=<class 'str'>",
+        )
+        self.assertEqual(
+            _mask_values("L['x'] == 'secret', type=<class 'M'quoted'>"),
+            "L['x'] == '<str>', type=<class 'M'quoted'>",
+        )
+        # A check the pass has nothing to mask in keeps guards.py's own
+        # spelling, so an annotation inside the body stays inside it.
+        self.assertEqual(
+            _mask_values("f(L['x'], type=<class 'int'>) == 3"),
+            "f(L['x'], type=<class 'int'>) == 3",
+        )
+        # But the unparse regenerates the text, so an annotation that did not
+        # sit at the end cannot be put back where it was -- and moving it to the
+        # end changes what the check reads as. Dropped whole instead.
+        self.assertEqual(
+            _mask_values("f(L['x'], type=<class 'int'>) == 'secret'"),
+            "<unparsed check>",
+        )
+
+    def test_a_check_that_does_not_parse_is_dropped_rather_than_patched(self):
+        # Failing closed: a rendering whose shape the pass cannot read gives it
+        # nothing to tell a source from a value, and a repr can carry a path
+        # with no quote anywhere in it for a textual pass to find. So the text
+        # goes whole, at the documented cost that two such checks on one slot
+        # read alike -- a digest of the text would tell them apart and would be
+        # a stable fingerprint of the value this masks.
+        from torch._dynamo.precompile_package import _mask_values
+
+        for check in (
+            "top_saved_tensors_hooks ids == 'pack', 'unpack'",
+            f"L['self'].cfg == <Cfg ckpt={_PINNED_PATH}>",
+            f"masked ! it's '{_PINNED_TAG}' here",
+        ):
+            self.assertEqual(_mask_values(check), "<unparsed check>")
+
+    def test_an_fstring_is_masked_as_one_value(self):
+        # The value is the joined string, not the pieces: masking them one at a
+        # time would report a shape the compared value does not have.
+        from torch._dynamo.precompile_package import _mask_values
+
+        self.assertEqual(
+            _mask_values("""L['x'] == f'{L["y"]}-secret'"""), "L['x'] == '<str>'"
+        )
+
+    def test_masking_what_is_masked_already_writes_no_value(self):
+        # The placeholder is a string CONSTANT, so a masked check still parses
+        # and a second pass reads it as a check: with a placeholder that did not
+        # parse, that pass would read the slot names as values instead and
+        # collapse every slot into one. It is not a strict no-op, because a
+        # placeholder cannot be told from a user string spelled like one -- the
+        # pass masks its own '<str>' again, to itself.
+        from torch._dynamo.precompile_package import _mask_keys, _mask_values
+
+        for check in (
+            "L['self'].prompt == 'secret'",
+            "L['self'].cfg['/home/me/w.pt'] == 3",
+            "L['self'].prompt == 'secret', type=<class 'str'>",
+            "top_saved_tensors_hooks ids == 'pack'",
+        ):
+            once = _mask_values(check)
+            self.assertEqual(_mask_values(once), once, check)
+        # What makes that hold: the masked check is still an expression.
+        compile("L['self'].cfg['<str>'] == '<list:2>'", "<check>", "eval")
+        for name in ("self.cfg['api_key']", "L['x']", "<ephemeral: fake tensor>"):
+            once = _mask_keys(name)
+            self.assertEqual(_mask_keys(once), once, name)
+        # A TYPED placeholder is what a second pass rewrites, and only ever
+        # downwards: it reads as the string it is spelled as, so the type and
+        # the length go and no value comes back.
+        self.assertEqual(
+            _mask_values(_mask_values("L['s'] == {'a', 'b'}")), "L['s'] == '<str>'"
+        )
+        self.assertEqual(
+            _mask_values(_mask_values("L['k'] == b'secret'")), "L['k'] == '<str>'"
+        )
+        self.assertEqual(
+            _mask_keys(_mask_keys("self.cfg[('a', 'b')]")), "self.cfg['<str>']"
+        )
+
+    def test_render_code_masks_before_it_normalizes(self):
+        # Not interchangeable: _normalize interpolates <id> and <n> placeholders
+        # that no longer parse as Python, so a normalized check could not be
+        # masked at all -- and a name-like key it rewrites is why a kept key is
+        # allowed to carry <> inside the brackets.
+        from torch._dynamo.precompile_package import _render_code
+
+        self.assertEqual(
+            _render_code(
+                [
+                    "___check_type_id(G['__builtins_dict___14']['print'], 94125),"
+                    " type=<class 'int'>",
+                    "G['_123456789_c0'].prompt == 'secret'",
+                ]
+            ),
+            (
+                "___check_type_id(G['__builtins_dict___<n>']['print'], <id>),"
+                " type=<class 'int'>",
+                "G['_<id>_c<n>'].prompt == '<str>'",
+            ),
+        )
+        self.assertEqual(_render_code(None), ())
+
+    def test_pinned_values_do_not_reach_the_checks_a_real_capture_renders(self):
+        rendered = self._rendered(_SessionPinsValues(), torch.ones(2, 4))
+        self.assertEqual(
+            rendered[("CONSTANT_MATCH", "self.prompt")],
+            ("L['self'].prompt == '<str>'",),
+        )
+        self.assertEqual(
+            rendered[("CONSTANT_MATCH", "self.path")], ("L['self'].path == '<str>'",)
+        )
+        # A value whose repr escapes is masked like any other, so neither
+        # spelling of it reaches the check.
+        self.assertEqual(
+            rendered[("CONSTANT_MATCH", "self.tag")], ("L['self'].tag == '<str>'",)
+        )
+        self.assertEqual(rendered[("EQUALS_MATCH", "self.n")], ("L['self'].n == 3",))
+        self.assertEqual(
+            rendered[("CONSTANT_MATCH", "self.on")], ("L['self'].on == True",)
+        )
+        self._assert_nothing_pinned_reaches(rendered)
+
+    def test_a_pinned_container_and_the_key_in_a_slot_name_are_masked(self):
+        rendered = self._rendered(_SessionPinsContainers(), torch.ones(2, 4))
+        for slot, code in [
+            (("CONSTANT_MATCH", "self.names[0]"), ("L['self'].names[0] == '<str>'",)),
+            (("CONSTANT_MATCH", "self.tags"), ("L['self'].tags == '<set:1>'",)),
+            (
+                ("SET_CONTAINS", "self.tags"),
+                ("set.__contains__(L['self'].tags, '<str>')",),
+            ),
+            (
+                ("DICT_KEYS_MATCH", "self.keys"),
+                (
+                    "len(L['self'].keys) == 1",
+                    "list(dict.keys(L['self'].keys)) == '<list:1>'",
+                ),
+            ),
+            # The key is masked in the slot NAME as well, since that name is what
+            # a report spells the source as.
+            (
+                ("EQUALS_MATCH", "self.cfg['<str>']"),
+                ("L['self'].cfg['<str>'] == 3",),
+            ),
+        ]:
+            self.assertEqual(rendered[slot], code, slot)
+        self._assert_nothing_pinned_reaches(rendered)
+
+    def test_the_tensor_match_parts_a_real_capture_renders(self):
+        # The most common code_list there is, and the one masking rewrites: the
+        # set of dims mark_dynamic marked is a display, so it is masked with its
+        # size, while the hasattr parts have nothing to mask and keep guards.py's
+        # own spelling (a code_list can mix the two).
+        def adds_one(x):
+            return x + 1
+
+        x = torch.ones(4, 4)
+        torch._dynamo.mark_dynamic(x, 0)
+        parts = self._rendered(adds_one, x)[("TENSOR_MATCH", "x")]
+        self.assertIn(
+            "getattr(L['x'], '_dynamo_dynamic_indices', set()).issubset('<set:1>')"
+            " if hasattr(L['x'], '_dynamo_dynamic_indices') else True",
+            parts,
+        )
+        self.assertIn("hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False", parts)
+
 
 instantiate_parametrized_tests(TestPrecompilePackage)
+instantiate_parametrized_tests(TestPrecompileSession)
 
 
 if __name__ == "__main__":

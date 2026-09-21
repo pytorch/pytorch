@@ -262,23 +262,86 @@ def _resolve_global(
     return emit_value(obj, imports)
 
 
+# Statement / expression kinds reused below. ``_DEFS`` / ``_IMPORTS`` / ``_COMPS`` are the
+# def-or-class, import and comprehension kinds; ``_SCOPE_NODES`` are the scopes of their own
+# (a name bound in one is not bound in the scope holding it) and ``_NAMED_BINDERS`` the nodes
+# carrying their name as a bare ``str`` (None for ``case _``). ``_MODULE_LEVEL`` is the
+# allowlist of module-level shapes verified against the wrapper codegen as it is TODAY --
+# ``PythonWrapperCodegen.write_header`` / ``write_constant`` / ``add_meta_once`` /
+# ``write_async_compile_wait`` / ``generate_after_suffix`` -- not a promise about future
+# codegen: anything outside it raises, see ``namespace_module_names``.
+_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+_IMPORTS = (ast.Import, ast.ImportFrom)
+_COMPS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+_SCOPE_NODES = _DEFS + _COMPS + (ast.Lambda,)
+_NAMED_BINDERS = _DEFS + (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)
+_MODULE_LEVEL = _DEFS + _IMPORTS + (ast.Assign, ast.AnnAssign, ast.Expr, ast.Delete)
+
+
+def _imported_names(node: ast.Import | ast.ImportFrom) -> set[str]:
+    """Names an import statement binds."""
+    return {a.asname or a.name.split(".")[0] for a in node.names}
+
+
+def _target_names(target: ast.expr) -> set[str] | None:
+    """Names a store / delete target binds, or None if it is not a plain name nor a tuple /
+    list / starred unpacking of them -- i.e. an attribute or subscript target, which binds
+    no new name at all and whose base must not be mistaken for one (``cfg.flag = 1`` binds
+    nothing, least of all ``cfg``)."""
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    if not isinstance(target, (ast.Tuple, ast.List)):
+        return None
+    names: set[str] = set()
+    for elt in target.elts:
+        inner = _target_names(elt)
+        if inner is None:
+            return None
+        names |= inner
+    return names
+
+
+def _store_targets(node: ast.stmt) -> list[ast.expr]:
+    """The store / delete targets of a statement that binds (or unbinds) by target."""
+    if isinstance(node, (ast.Assign, ast.Delete)):
+        return node.targets
+    if isinstance(node, ast.AnnAssign):
+        return [node.target]
+    return []
+
+
+def _assigned_names(node: ast.stmt) -> set[str]:
+    """Names a module-level statement binds by definition or assignment: a def / class
+    name, or an assignment's plain-name targets, tuple / list / starred unpacking
+    (``a, b = ...`` / ``first, *rest = ...``) included. Imports are excluded (see
+    ``_imported_names``) and so is ``del``, which unbinds -- both callers handle it
+    themselves. Shared by ``_module_level_names`` and ``namespace_module_names`` so the two
+    cannot drift."""
+    if isinstance(node, _DEFS):
+        return {node.name}
+    if isinstance(node, ast.Delete):
+        return set()
+    names: set[str] = set()
+    for t in _store_targets(node):
+        names |= _target_names(t) or set()
+    return names
+
+
 def _module_level_names(tree: ast.Module) -> set[str]:
     """Names bound at module scope by a parsed module. Used to seed ``_reserve`` so an
     inlined wrapper's def name or hoisted global (chain wrapper or orchestration) cannot
-    silently shadow a top-level name the inner Inductor module already binds."""
+    silently shadow a top-level name the inner Inductor module already binds.
+
+    Enumerates bindings with ``_assigned_names``, like ``namespace_module_names``; the one
+    deliberate difference is ``del``, subtracted here and kept there (see that function).
+    """
     names: set[str] = set()
     for n in tree.body:
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(n.name)
-        elif isinstance(n, ast.Assign):
-            # Walk each target so tuple/list/starred unpacking (``a, b = ...`` /
-            # ``first, *rest = ...``) is covered, not just bare-name targets.
-            for t in n.targets:
-                names.update(x.id for x in ast.walk(t) if isinstance(x, ast.Name))
-        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
-            names.add(n.target.id)
-        elif isinstance(n, (ast.Import, ast.ImportFrom)):
-            names.update(a.asname or a.name.split(".")[0] for a in n.names)
+        names |= _assigned_names(n)
+        if isinstance(n, _IMPORTS):
+            names |= _imported_names(n)
         elif isinstance(n, ast.Delete):
             # Inductor's inner module does ``async_compile = AsyncCompile()`` then
             # ``del async_compile`` at module scope; a del'd name does not survive, so it
@@ -286,9 +349,7 @@ def _module_level_names(tree: ast.Module) -> set[str]:
             # trip a spurious collision). Body order is assign-then-del, so removing here
             # leaves only names that actually persist.
             for t in n.targets:
-                names.difference_update(
-                    x.id for x in ast.walk(t) if isinstance(x, ast.Name)
-                )
+                names -= _target_names(t) or set()
     return names
 
 
@@ -857,6 +918,314 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
             ):
                 return True
     return False
+
+
+def _same_scope_nodes(node: ast.AST) -> Iterator[ast.AST]:
+    """Every descendant of ``node`` belonging to the SAME scope, i.e. without entering a
+    nested scope (``_SCOPE_NODES``), each of which binds in a scope of its own."""
+    for child in ast.iter_child_nodes(node):
+        yield child
+        if not isinstance(child, _SCOPE_NODES):
+            yield from _same_scope_nodes(child)
+
+
+def _enclosing_scope_nodes(node: ast.stmt) -> Iterator[ast.AST]:
+    """Every node of ``node`` that EVALUATES in the scope HOLDING it: all of a simple
+    statement, but for a def / class only its decorators, defaults, annotations, bases and
+    keywords -- a body runs in a scope of its own, so a walrus there binds there."""
+    for field, value in ast.iter_fields(node):
+        for item in value if isinstance(value, list) else [value]:
+            if field != "body" and isinstance(item, ast.AST):
+                yield item
+                yield from _same_scope_nodes(item)
+
+
+def _scope_bindings(node: ast.AST) -> tuple[set[str], set[str], set[str]]:
+    """``(declared, opaque, stored)``: every name bound in ``node``'s own scope, by one
+    generic rule -- whatever ``ast`` reports as a binding. ``stored`` is each ``ast.Name``
+    store or delete, which a rewrite editing ``ast.Name`` nodes follows; ``declared`` is a
+    ``global`` / ``nonlocal`` name, which is a bare ``str`` AND rebinds an OUTER scope's
+    name rather than this scope's; ``opaque`` is every other binding, each carrying its
+    name as a bare ``str`` no such rewrite can follow: an ``ast.arg`` parameter, the
+    ``.name`` of a ``_NAMED_BINDERS`` node, an import alias, the ``.rest`` of a mapping
+    pattern. ``with ... as``, ``for`` and comprehension targets are ``ast.Name`` stores and
+    need no case of their own.
+
+    One walk (``_same_scope_nodes``) serves both intents this file needs: pass a SCOPE node
+    for that scope's own bindings, or a module-level statement for the bindings it
+    contributes to module scope -- a def nested in an ``if`` contributes its name, which is
+    what would collide, and not its body, which binds elsewhere.
+    """
+    declared: set[str] = set()
+    opaque: set[str] = set()
+    stored: set[str] = set()
+    for child in _same_scope_nodes(node):
+        if isinstance(child, ast.Name):
+            if not isinstance(child.ctx, ast.Load):
+                stored.add(child.id)
+        elif isinstance(child, ast.arg):
+            opaque.add(child.arg)
+        elif isinstance(child, _IMPORTS):
+            opaque |= _imported_names(child)
+        elif isinstance(child, (ast.Global, ast.Nonlocal)):
+            declared.update(child.names)
+        elif isinstance(child, _NAMED_BINDERS):
+            if child.name is not None:
+                opaque.add(child.name)
+        elif isinstance(child, ast.MatchMapping) and child.rest is not None:
+            opaque.add(child.rest)
+    return declared, opaque, stored
+
+
+# Calls that bind into a namespace keyed by a runtime ``str``, which no rewrite of ``ast.Name``
+# nodes follows. A ``globals()[...]`` / ``sys.modules[...]`` store needs no entry here: it is
+# already refused as a target that is not a plain name.
+_STRING_BINDERS = ("setattr", "exec")
+
+
+def _string_bound_name(node: ast.stmt, targets: set[str]) -> str | None:
+    """How a statement evaluating in module scope binds a module-level name through a runtime
+    ``str`` rather than through an ``ast.Name`` the rewrite renames, or None if it does not.
+
+    Two shapes. A ``_STRING_BINDERS`` call can bind any name at all (``eval`` is NOT one:
+    it evaluates an expression and binds nothing, so refusing it would only fail captures).
+    And ``AsyncCompile.metal``
+    only REGISTERS its kernel -- it returns None, and the compiled function is injected by the
+    later ``async_compile.wait(globals())`` under the kernel name it was handed as a string
+    literal, so renaming the assignment and every reader would leave them reading None at the
+    first call. Every other ``async_compile`` registrar either returns the kernel or returns a
+    future that ``wait`` replaces under the SAME key it read, so a string argument matching a
+    target is inert there and must not raise.
+
+    Only bindings written INSIDE the module are visible here, which makes one shape a
+    non-goal rather than a guard: ``write_constant``'s ``{name} = None  # {hashed}`` is
+    filled in from outside by ``PyCodeCache.load_by_key_path(attrs=...)`` under the
+    unrenamed name, and the hash that would identify it lives in a comment ``ast`` discards,
+    so a name the host rebinds after exec is the caller's contract, not this rewrite's.
+    """
+    for child in _enclosing_scope_nodes(node):
+        if not isinstance(child, ast.Call):
+            continue
+        if isinstance(child.func, ast.Name) and child.func.id in _STRING_BINDERS:
+            return f"calls {child.func.id}(), which binds a name given as a string"
+        if isinstance(child.func, ast.Attribute) and child.func.attr == "metal":
+            literals = {
+                a.value
+                for a in child.args
+                if isinstance(a, ast.Constant) and isinstance(a.value, str)
+            }
+            registered = sorted(literals & targets)
+            if registered:
+                return (
+                    f"registers {registered} as a string literal with a kernel compiler "
+                    "that injects it into the namespace under that string"
+                )
+    return None
+
+
+def namespace_module_names(sources: Sequence[str]) -> list[str]:
+    """Suffix every top-level name each module DEFINES, per module.
+
+    Splicing several Inductor modules into ONE namespace is only safe if their top-level
+    names are disjoint, because the code inside a module resolves its siblings as late-bound
+    globals: a module's ``call`` looks up its kernels and its ``_runtime_wrapper`` when
+    INVOKED, not when defined. Two modules of the same computation -- a forward and its
+    backward, or two shape variants of one frame -- otherwise define the same names, and the
+    first silently runs the second's code. Snapshotting each module's entry is not enough
+    for the same reason.
+
+    Rewriting is driven by AST positions rather than a text match, which is what keeps three
+    lookalikes out of it: an attribute (``runner.call`` is an ``Attribute``, not a ``Name``),
+    a nested binding (``def call`` inside ``class Runner`` is not module-level), and an
+    import (the header's ``from ... import AsyncCompile`` binds a name this module does not
+    define -- while the sibling ``async_compile = AsyncCompile()`` IS ours, renamed together
+    with the later ``del async_compile``).
+
+    Shapes the rewrite cannot express raise NotImplementedError rather than emit a silently
+    wrong module, like the other guards on unrecognized Inductor codegen here. At module
+    level that is an ALLOWLIST -- ``_MODULE_LEVEL`` statements, with plain-name targets and
+    no walrus in a value, decorator, default, annotation or base -- rather than a list of
+    rejected binder forms, because Python binds a module-level name in more ways than a
+    rewrite can enumerate and every shape whose bindings are NOT enumerated is one whose
+    names would still collide. A compound statement is the single exception, accepted while
+    it binds nothing but import aliases (never renamed anyway), so a version-conditional
+    import is a no-op rather than a failed capture. Five further shapes raise: a statement
+    that binds a module-level name through a runtime string instead of an ``ast.Name``, whose
+    binding is invisible here and would be left behind under the old name (see
+    ``_string_bound_name``); a name both imported and assigned at module level, whose import
+    line is not renamed; a nested scope that rebinds a target through a ``global`` /
+    ``nonlocal``, stores one in a class body whose readers are attributes, or reads one it
+    also binds opaquely (see ``_scope_bindings``); a target whose suffixed name the module -- or
+    a scope of it that reads a target -- already uses; and a def / class header the rename
+    cannot locate on the statement's own line.
+
+    A source with no module-level definitions has an empty ``targets`` and is returned
+    UNCHANGED: there is nothing to make disjoint, and no slot suffix appears in it, so a
+    caller keying on ``call_s<slot>`` must not assume one. Run this AFTER
+    ``_compose_standalone_module``, whose ``call`` is then the composed entry that gets
+    renamed, together with the ``_inner_call = call`` splice inside it.
+    """
+    out: list[str] = []
+    for slot, source in enumerate(sources):
+        tree = ast.parse(source)
+        imported: set[str] = set()
+        defined: set[str] = set()
+        headers: list[tuple[int, str]] = []
+        # Unlike _module_level_names, a del'd name is deliberately NOT subtracted below:
+        # Inductor's ``async_compile = AsyncCompile()`` / ``del async_compile`` pair has to
+        # be renamed TOGETHER, and the del target is an ``ast.Name`` the walk further down
+        # rewrites anyway.
+        for node in tree.body:
+            if not isinstance(node, _MODULE_LEVEL):
+                declared, opaque, stored = _scope_bindings(node)
+                aliases: set[str] = set()
+                for child in _same_scope_nodes(node):
+                    if isinstance(child, _IMPORTS):
+                        aliases |= _imported_names(child)
+                # Import aliases are excluded from ``targets`` anyway, so a statement
+                # binding only those needs no rename; a name that is BOTH an alias and
+                # stored (``import foo`` then ``foo = wrap(foo)``) does, so keep ``stored``.
+                bound = sorted(stored | ((declared | opaque) - aliases))
+                if bound:
+                    raise NotImplementedError(
+                        f"namespace_module_names: the module-level "
+                        f"{type(node).__name__} on line {node.lineno} binds {bound}, "
+                        "which is not renamed (unrecognized inductor codegen), so it "
+                        "would still collide across spliced modules."
+                    )
+                continue
+            if isinstance(node, _IMPORTS):
+                imported |= _imported_names(node)
+                continue
+            if any(isinstance(c, ast.NamedExpr) for c in _enclosing_scope_nodes(node)):
+                raise NotImplementedError(
+                    f"namespace_module_names: the module-level statement on line "
+                    f"{node.lineno} binds a name with a walrus, which is not enumerated as "
+                    "a target, so it would still collide across spliced modules."
+                )
+            if any(_target_names(t) is None for t in _store_targets(node)):
+                raise NotImplementedError(
+                    f"namespace_module_names: the module-level statement on line "
+                    f"{node.lineno} does not store into a plain name; an attribute or "
+                    "subscript target binds nothing to rename and its base must not be "
+                    "suffixed as if it did."
+                )
+            defined |= _assigned_names(node)
+            if isinstance(node, _DEFS):
+                # A def / class name is a bare ``str`` with no position of its own, so its
+                # header is located textually below.
+                headers.append((node.lineno, node.name))
+        both = sorted(defined & imported)
+        if both:
+            raise NotImplementedError(
+                f"namespace_module_names: {both} are both imported and assigned at module "
+                "level; the assignment is this module's own binding, but the import line "
+                "is not renamed, so the name would still collide across spliced modules."
+            )
+        targets = defined - imported
+        if not targets:
+            out.append(source)
+            continue
+        for node in tree.body:
+            through_str = _string_bound_name(node, targets)
+            if through_str is not None:
+                raise NotImplementedError(
+                    f"namespace_module_names: the module-level statement on line "
+                    f"{node.lineno} {through_str}, which no rename of an ast.Name node "
+                    "follows, so that binding would be left behind under the old name."
+                )
+        suffix = f"_s{slot}"
+        # Each nested scope paired with its own bindings and the names it reads, computed
+        # ONCE: both guards below want them, and ``ast.walk`` over wrapper-sized source is
+        # not free.
+        scopes = [
+            (
+                node,
+                _scope_bindings(node),
+                {
+                    n.id
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                },
+            )
+            for node in ast.walk(tree)
+            if isinstance(node, _SCOPE_NODES)
+        ]
+        # Every name the module uses, counting bindings that are no ``ast.Name``: a
+        # parameter, nested def / class or local import named ``<target><suffix>`` would
+        # otherwise be invisible here and capture every renamed load in its scope. Only
+        # scopes that READ a target count: a same-named binder in a scope that never reads
+        # one captures nothing, so raising on it would fail the capture for nothing.
+        used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        used |= defined | imported
+        for _node, (declared, opaque, stored), read in scopes:
+            if read & targets:
+                used |= declared | opaque | stored
+        clash = sorted(n + suffix for n in targets if n + suffix in used)
+        if clash:
+            raise NotImplementedError(
+                f"namespace_module_names: module already uses {clash}, so suffixing with "
+                f"{suffix!r} would collapse two distinct names."
+            )
+        for scope, (declared, opaque, stored), read in scopes:
+            # Two of the three are hazards whether or not that scope READS the target,
+            # because the rewrite renames something there. A ``global`` / ``nonlocal``
+            # rebinds the module-level name, and ``ast.Global`` carries a bare ``str``: the
+            # store under it is renamed while the declaration is not, so the write lands on
+            # a function LOCAL and module-level ``<target>`` keeps its old value. A
+            # class-body store binds an ATTRIBUTE and IS renamed, so ``Runner_s0.call_s0``
+            # no longer answers to the ``Runner_s0.call`` its external readers spell (they
+            # are ``Attribute`` nodes outside this body, hence never in ``read``).
+            # ``opaque`` is the reverse: nothing renames it, so it only breaks the loads
+            # this scope renames on top of it -- a class-body ``def call`` beside a
+            # module-level one is fine, which is graph_partition's shape. An ``ast.Name``
+            # store in a non-class scope is renamed with its loads and stays consistent,
+            # including a comprehension's own target.
+            shadowed = (declared & targets) | (opaque & read & targets)
+            if isinstance(scope, ast.ClassDef):
+                shadowed |= stored & targets
+            if shadowed:
+                raise NotImplementedError(
+                    f"namespace_module_names: a nested scope rebinds {sorted(shadowed)} "
+                    "with a binder the rewrite cannot follow -- a global / nonlocal "
+                    "declaration, a class-body store also read as an attribute, or an "
+                    "opaque binder (parameter, except-as, nested def / class, local import, "
+                    "match capture) whose name this scope also reads."
+                )
+        # ``col_offset`` is a UTF-8 BYTE offset, so spans are spliced in bytes.
+        edits: dict[int, list[tuple[int, int, bytes]]] = {}
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Name)
+                and node.id in targets
+                and node.end_col_offset is not None
+            ):
+                edits.setdefault(node.lineno, []).append(
+                    (node.col_offset, node.end_col_offset, (node.id + suffix).encode())
+                )
+        lines = source.split("\n")
+        for lineno, name in headers:
+            if name not in targets:
+                continue
+            found = re.search(
+                rb"\b" + re.escape(name.encode()) + rb"\b", lines[lineno - 1].encode()
+            )
+            if found is None:
+                raise NotImplementedError(
+                    f"namespace_module_names: the header of {name!r} is not on its own "
+                    f"line {lineno}, so every call site would be renamed with the "
+                    "definition left behind."
+                )
+            edits.setdefault(lineno, []).append(
+                (found.start(), found.end(), (name + suffix).encode())
+            )
+        for lineno, spans in edits.items():
+            raw = lines[lineno - 1].encode()
+            for begin, finish, text in sorted(spans, reverse=True):
+                raw = raw[:begin] + text + raw[finish:]
+            lines[lineno - 1] = raw.decode()
+        out.append("\n".join(lines))
+    return out
 
 
 def compile_to_python(

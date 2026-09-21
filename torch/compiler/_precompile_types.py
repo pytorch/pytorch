@@ -26,14 +26,49 @@ class GuardFact:
             the ``Guard.name`` with local scope stripped (``L['x']`` -> ``x``),
             the same spelling as the ``(guard_type, source)`` slots of
             ``PrecompileSummary``: ``"x"``, ``"self.eps"``, ``"G['CFG'].width"``.
-            Empty for a guard checked against no source.
+            Empty for a guard checked against no source. A data key the name
+            interpolates is masked by type, exactly as the values in ``code``
+            below are and for the same reason, so a dict slot reads
+            ``"self.cfg['<str>']"``; a key that names a scope or an nn.Module
+            name dict is kept (``"G['CFG']"``, ``"self._modules['lin']"``), since
+            that one spells the source rather than a value. A name that is not a
+            Python expression -- the ``<ephemeral: ...>`` source of a symbol
+            Dynamo expects to simplify away is one -- is reported as
+            ``"<unparsed source>"``, so two such sources read as one slot.
         code: The rendered check parts, with the addresses Dynamo interpolates
-            scrubbed by the producer, e.g.
-            ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``; empty
-            when the guard renders none.
+            scrubbed by the producer and the values the check embeds masked by
+            type, e.g. ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``
+            and ``("L['self'].prompt == '<str>'",)``; empty when the guard
+            renders none. A guard that pins a string pins it BY VALUE, so the
+            check guards.py renders carries the string itself, and these reports
+            are written to a file to be committed and diffed: what a check
+            compares is named by type, and that it differed between variants is
+            reported by the slot (``PrecompileSummary.risky_dropped_guards``)
+            rather than by printing the value. A container is named by its type
+            and its length (``'<list:3>'``), so two variants pinning containers
+            of the same length render one check and only the slot says they
+            differed, and a rendering that is not a Python expression at all
+            becomes ``"<unparsed check>"``, since nothing can be masked in a
+            shape the producer cannot read -- which makes two such checks on one
+            slot read alike, a digest of the text being a fingerprint of what the
+            masking exists to hide. An attribute NAME a call reads stays -- a
+            ``hasattr`` or ``getattr``, and the ``___dict_contains`` an absent
+            attribute renders -- as does a key that names a scope or an
+            nn.Module attribute (``L['x']``, ``self._modules['lin']``); every
+            other argument and every other subscript key is masked, its shape
+            notwithstanding, since the check is parsed rather than
+            pattern-matched.
         value: A rendered fragment for what the check compares that its code does
-            not show: a tensor's dtype and shape line, or ``"is <callable>"`` for
-            an identity guard. Empty when the code says it all.
+            not show: the ``check_tensor`` line for a tensor guard (python type,
+            dispatch keys, dtype, size and stride), ``"is <callable>"`` for an
+            identity guard -- module, qualname and definition site of the object,
+            never the data bound to it -- the flags a global-state guard
+            snapshots, and a digest of the saved-tensors hooks. Empty when the
+            code says it all. Unlike ``code`` this is not masked, and does not
+            need to be: every shape it takes is metadata, a name or a digest
+            derived from the guarded object rather than a literal the guard
+            pinned, and it is what still tells two variants apart once ``code``
+            has masked what they compared.
         enforced: Whether the artifact still checks this guard (it was serialized).
     """
 
@@ -59,7 +94,9 @@ class PrecompileSummary:
 
     The guard fields hold ``(guard_type, source)`` slots, the source spelled as
     ``GuardFilterEntry.name``, i.e. the ``Guard.name`` with local scope stripped
-    (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged). Each list
+    (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged) and its
+    data keys masked as ``GuardFact.source`` describes (``self.cfg['<str>']``,
+    or ``"<unparsed source>"`` for a name that is not an expression). Each list
     holds a slot once, however many frames or variants carried it, so
     ``dropped_guard_types`` counts distinct slots, not occurrences. The relations
     between the lists hold within one frame variant, where the producer applies
