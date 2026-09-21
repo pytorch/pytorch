@@ -1328,12 +1328,18 @@ class TestFP8Lowering(TestCase):
         recipe_a, recipe_b = (recipe_names[r] for r in recipes.split("_"))
 
         torch.manual_seed(0)
-        a = torch.randint(-4, 5, (M, K), device=device).to(torch.float8_e4m3fn)
-        b_nk = torch.randint(-4, 5, (N, K), device=device).to(torch.float8_e4m3fn)
+        a = torch.randint(-4, 5, (M, K), device=device)
+        b_nk = torch.randint(-4, 5, (N, K), device=device)
+        if path == "software":
+            # Make the first partial positive so decoding E8M0 NaN as inf fails.
+            a[0, :128] = 1
+            b_nk[0, :128] = 1
+        a = a.to(torch.float8_e4m3fn)
+        b_nk = b_nk.to(torch.float8_e4m3fn)
         b = b_nk.t()
         contraction_dim = (1, 0) if host_side_tma else ()
 
-        def make_scale(outer, recipe, modulus, offset):
+        def make_scale(outer, recipe, modulus, offset, include_nan=False):
             # Per-row codes drive the reference; storage holds one code per
             # (block_rows rows, K block) with the K block fastest: the contiguous
             # caller-facing v2 layout is [blocks, k_blocks] for both operands.
@@ -1344,11 +1350,15 @@ class TestFP8Lowering(TestCase):
                 % modulus
                 + offset
             ).to(torch.uint8)
+            if include_nan:
+                codes[0, 0] = 255
             storage = codes.view(torch.float8_e8m0fnu)
             row_codes = codes.repeat_interleave(block_rows, dim=0)[:outer]
             return storage, row_codes.view(torch.float8_e8m0fnu)
 
-        scale_a, scale_a_values = make_scale(M, recipe_a, 7, 124)
+        scale_a, scale_a_values = make_scale(
+            M, recipe_a, 7, 124, include_nan=path == "software"
+        )
         scale_b, scale_b_values = make_scale(N, recipe_b, 5, 125)
 
         expected = torch.zeros((M, N), device=device, dtype=torch.float32)
@@ -1362,6 +1372,8 @@ class TestFP8Lowering(TestCase):
                 * scale_b_values[:, block].float()[None, :]
             )
         expected = expected.bfloat16()
+        if path == "software":
+            self.assertTrue(torch.isnan(expected[0, 0]))
 
         def fn(a, b, scale_a, scale_b):
             return scaled_mm(

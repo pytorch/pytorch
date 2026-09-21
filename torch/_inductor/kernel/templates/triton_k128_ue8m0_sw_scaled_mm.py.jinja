@@ -103,7 +103,9 @@
 
 @triton.jit
 def _e8m0_to_fp32(code):
-    # UE8M0 code c is exactly 2 ** (c - 127); build the fp32 bit pattern directly.
+    # E8M0 exponent bits map directly to FP32; encodings 0 and 255 are special.
     code = code.to(tl.int32)
-    value = (code << 23).to(tl.float32, bitcast=True)
-    return tl.where(code == 0, 2.0 ** -127, value)
+    bits = code << 23
+    bits = tl.where(code == 0, 0x00400000, bits)
+    bits = tl.where(code == 255, 0x7F800001, bits)
+    return bits.to(tl.float32, bitcast=True)
