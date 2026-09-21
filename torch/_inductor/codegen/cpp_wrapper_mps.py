@@ -46,6 +46,7 @@ class CppWrapperMps(CppWrapperGpu):
         inductor_meta: dict[str, Any] | None = None,
         graph_name: str = "",
         original_fxnode_name: str | None = None,
+        aggregate_type_metadata: dict[str, Any] | None = None,
         current_stream_idx: int | None = None,
     ) -> None:
         """
@@ -77,6 +78,7 @@ class CppWrapperMps(CppWrapperGpu):
                 raw_args=raw_args,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
+                aggregate_type_metadata=aggregate_type_metadata,
             )
 
         if device.type != "mps":

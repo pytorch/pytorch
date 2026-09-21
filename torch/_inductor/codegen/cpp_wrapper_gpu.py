@@ -1893,6 +1893,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
+        aggregate_type_metadata=None,
         current_stream_idx=None,
     ):
         """
@@ -1914,6 +1915,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 raw_args=raw_args,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
+                aggregate_type_metadata=aggregate_type_metadata,
             )
 
         if (
@@ -1934,6 +1936,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
                 original_fxnode_name=original_fxnode_name,
+                aggregate_type_metadata=aggregate_type_metadata,
             )
 
         if (

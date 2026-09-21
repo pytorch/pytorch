@@ -1244,12 +1244,15 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         def early_config_prune(configs, named_args, **kwargs):
             config = named_args["config"]
-            assert isinstance(config, Config)
-            assert config.x_size > 0
+            if not isinstance(config, Config):
+                raise AssertionError(f"expected Config, got {type(config)}")
+            if config.x_size <= 0:
+                raise AssertionError(f"expected positive x_size, got {config.x_size}")
             return configs
 
         def perf_model(config, CONFIG_ID, **kwargs):
-            assert isinstance(config, Config)
+            if not isinstance(config, Config):
+                raise AssertionError(f"expected Config, got {type(config)}")
             return abs(CONFIG_ID - config.preferred_config)
 
         heuristic = {
@@ -1444,6 +1447,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
     def test_generate_ttir_namedtuple_nested_constexpr(self):
         import triton
         import triton.language as tl
+
         from torch._higher_order_ops import triton_kernel_wrap
         from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1508,6 +1512,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
     def test_generate_ttir_namedtuple_with_tma_fake_tensor_leaves(self):
         import triton
         import triton.language as tl
+
         from torch._higher_order_ops import triton_kernel_wrap
         from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1617,8 +1622,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(graph_args["config"].tensor, "tensor")
         self.assertEqual(graph_args["config"].nested, ("materialized descriptor", 4))
+        self.assertEqual(graph_args["static_config"], (8,))
         self.assertEqual(graph_args["out"], "output")
-        self.assertEqual(reconstructed_constant_args["static_config"], (8,))
         self.assertEqual(reconstructed_constant_args["BLOCK_SIZE"], 16)
         for flat_key in (
             "flat_tensor",
@@ -1631,6 +1636,53 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Reconstruction must not mutate values owned by the FX node.
         self.assertEqual(graph_kwargs["flat_descriptor"], "descriptor base tensor")
         self.assertEqual(constant_args["flat_static"], 8)
+
+    def test_aggregate_flatten_and_reconstruct(self):
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("source", "parameters"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_source"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (
+                        triton_kernel_wrap.create_leaf_spec("flat_scale"),
+                        triton_kernel_wrap.create_leaf_spec("flat_bias"),
+                    )
+                ),
+            ),
+        )
+        flat_values = {"flat_source": 0, "flat_scale": 2, "flat_bias": 3}
+        aggregate = triton_kernel_wrap.reconstruct_aggregate(spec, flat_values)
+        self.assertEqual(
+            triton_kernel_wrap.flatten_aggregate(spec, aggregate), flat_values
+        )
+
+        transformed_values = {
+            leaf_spec[1]: flat_values[leaf_spec[1]] + len(leaf_spec[1])
+            for leaf_spec in triton_kernel_wrap.get_aggregate_leaf_specs(spec)
+        }
+        transformed_values["flat_scale"] = 7
+        materialized = triton_kernel_wrap.reconstruct_aggregate(
+            spec, transformed_values
+        )
+
+        self.assertEqual(materialized.source, len("flat_source"))
+        self.assertEqual(materialized.parameters, (7, 3 + len("flat_bias")))
+
+        none_spec = triton_kernel_wrap.create_tuple_spec(
+            (triton_kernel_wrap.create_leaf_spec("flat_none"),)
+        )
+        self.assertEqual(
+            triton_kernel_wrap.reconstruct_aggregate(none_spec, {"flat_none": None}),
+            (None,),
+        )
+        empty_spec = triton_kernel_wrap.create_tuple_spec(())
+        self.assertEqual(triton_kernel_wrap.reconstruct_aggregate(empty_spec, {}), ())
+        self.assertEqual(triton_kernel_wrap.flatten_aggregate(empty_spec, ()), {})
+        with self.assertRaisesRegex(AssertionError, "Expected aggregate value"):
+            triton_kernel_wrap.flatten_aggregate(spec, 1)
 
     def test_aggregate_type_metadata_uses_fx_literals(self):
         from torch._higher_order_ops import triton_kernel_wrap

@@ -131,7 +131,7 @@ def signature_of(
     size_dtype: Any,
     use_fp64_for_python_float: bool = True,
 ) -> Any:
-    """Return the Triton signature type for an Inductor kernel argument."""
+    """Return the Triton signature value for a kernel argument."""
     if isinstance(arg, NamedTupleArg):
         fields = (
             signature_of(arg=child, size_dtype=child_size_dtype)

@@ -188,6 +188,39 @@ TMADescriptorMetadata = dict[
 ]
 
 
+def reconstruct_tensor_descriptor_from_metadata(
+    tensor: Tensor,
+    metadata: TMAExperimentalMetadata | TMAStableMetadata,
+) -> Any:
+    if (exp_meta := maybe_unpack_tma_experimental_metadata(metadata)) is not None:
+        from triton.tools.experimental_descriptor import (
+            create_1d_tma_descriptor,
+            create_2d_tma_descriptor,
+        )
+
+        dims, block_dims, element_size = exp_meta
+        create_tma_descriptor = (
+            create_1d_tma_descriptor if len(dims) == 1 else create_2d_tma_descriptor
+        )
+        return create_tma_descriptor(
+            tensor.data_ptr(),
+            *dims,
+            *block_dims,
+            element_size,
+        )
+    stable_meta = maybe_unpack_tma_stable_metadata(metadata)
+    if stable_meta is None:
+        raise AssertionError("Failed to unpack TMA descriptor metadata")
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
+    block_shape = stable_meta[0]
+    return TensorDescriptor.from_tensor(tensor, block_shape)
+
+
+###############################################################################
+# Aggregate Arguments
+
+
 # Aggregate specs are represented using only FX-native tuple literals. In
 # particular, dataclass instances passed to an FX tracer are represented as
 # call_function nodes that reconstruct the dataclass, while tuples are
@@ -211,6 +244,7 @@ AggregateSpec = LeafSpec | TupleSpec | NamedTupleSpec
 # Only top-level aggregate parameters have entries. Ordinary scalar/tensor/TMA
 # parameters are represented solely by the existing argument maps.
 AggregateTypeMetadata = dict[str, TupleSpec | NamedTupleSpec]
+
 
 UDTK_AGGREGATE_VERSION_ERROR = (
     "Tuple and NamedTuple arguments to user-defined Triton kernels require "
@@ -260,6 +294,179 @@ def aggregate_spec_children(
     if spec[0] == "namedtuple":
         return spec[3]
     raise AssertionError(f"Expected an aggregate container spec, got {spec!r}")
+
+
+@functools.cache
+def _namedtuple_type_from_spec(
+    type_name: str, field_names: tuple[str, ...]
+) -> type[tuple]:
+    return collections.namedtuple(type_name, field_names)
+
+
+def get_aggregate_leaf_specs(spec: AggregateSpec) -> tuple[LeafSpec, ...]:
+    if spec[0] == "leaf":
+        return (spec,)
+    children = aggregate_spec_children(spec)
+    return tuple(
+        itertools.chain.from_iterable(
+            get_aggregate_leaf_specs(child) for child in children
+        )
+    )
+
+
+def get_aggregate_leaf_keys(spec: AggregateSpec) -> tuple[str, ...]:
+    return tuple(leaf_spec[1] for leaf_spec in get_aggregate_leaf_specs(spec))
+
+
+def flatten_aggregate(spec: AggregateSpec, value: Any) -> dict[str, Any]:
+    """Flatten an aggregate value into the leaf names defined by its spec."""
+    flat_values: dict[str, Any] = {}
+
+    def visit(child_spec: AggregateSpec, child_value: Any) -> None:
+        if child_spec[0] == "leaf":
+            key = child_spec[1]
+            if key in flat_values:
+                raise AssertionError(
+                    f"Aggregate leaf {key!r} is referenced more than once"
+                )
+            flat_values[key] = child_value
+            return
+        if not isinstance(child_value, tuple):
+            raise AssertionError(f"Expected aggregate value, got {type(child_value)}")
+
+        children = aggregate_spec_children(child_spec)
+        if len(child_value) != len(children):
+            raise AssertionError(
+                f"Aggregate has {len(child_value)} values but its spec has "
+                f"{len(children)} children"
+            )
+        for nested_spec, nested_value in zip(children, child_value, strict=True):
+            visit(nested_spec, nested_value)
+
+    visit(spec, value)
+    return flat_values
+
+
+def reconstruct_aggregate(
+    spec: AggregateSpec,
+    flat_values: dict[str, Any],
+    *,
+    wrap_with_constexpr: bool = False,
+) -> Any:
+    """Reconstruct an aggregate value from leaves keyed by its spec."""
+
+    def maybe_wrap(child_spec: AggregateSpec, value: Any) -> Any:
+        if child_spec[-1] and wrap_with_constexpr:
+            import triton.language as tl
+
+            return tl.constexpr(value)
+        return value
+
+    def visit(child_spec: AggregateSpec) -> Any:
+        if child_spec[0] == "leaf":
+            key = child_spec[1]
+            if key not in flat_values:
+                raise ValueError(
+                    f"Aggregate leaf {key!r} was not found in the arguments"
+                )
+            return maybe_wrap(child_spec, flat_values[key])
+
+        children = tuple(visit(child) for child in aggregate_spec_children(child_spec))
+        if child_spec[0] == "tuple":
+            value = children
+        elif child_spec[0] == "namedtuple":
+            _, type_name, field_names, _, _ = child_spec
+            if len(field_names) != len(children):
+                raise ValueError(
+                    f"NamedTuple {type_name!r} has {len(field_names)} fields but "
+                    f"its aggregate spec has {len(children)} children"
+                )
+            value = _namedtuple_type_from_spec(type_name, field_names)(*children)
+        else:
+            raise NotImplementedError(
+                f"Aggregate type {child_spec[0]!r} is not supported"
+            )
+        return maybe_wrap(child_spec, value)
+
+    leaf_keys = get_aggregate_leaf_keys(spec)
+    if len(set(leaf_keys)) != len(leaf_keys):
+        raise AssertionError("An aggregate spec references a leaf more than once")
+    return visit(spec)
+
+
+def reconstruct_triton_kernel_aggregates(
+    graph_kwargs: dict[str, Any],
+    aggregate_type_metadata: AggregateTypeMetadata,
+    *,
+    constant_args: dict[str, Any] | None = None,
+    wrap_with_constexpr: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Construct Python aggregate values from already-materialized flat leaves."""
+    if constant_args is None:
+        constant_args = {}
+    else:
+        duplicate_keys = constant_args.keys() & graph_kwargs.keys()
+        if duplicate_keys:
+            raise AssertionError(
+                "Triton constant and graph arguments have duplicate keys: "
+                f"{sorted(duplicate_keys)!r}"
+            )
+        constant_args = constant_args.copy()
+    graph_kwargs = graph_kwargs.copy()
+    flat_args = {**constant_args, **graph_kwargs}
+
+    aggregate_leaf_keys: set[str] = set()
+    for name, spec in aggregate_type_metadata.items():
+        leaf_keys = get_aggregate_leaf_keys(spec)
+        for key in leaf_keys:
+            if key in aggregate_leaf_keys:
+                raise AssertionError(
+                    f"Aggregate leaf {key!r} is referenced more than once"
+                )
+            aggregate_leaf_keys.add(key)
+        if name in flat_args:
+            raise AssertionError(
+                f"Aggregate argument {name!r} also appears in the arguments"
+            )
+
+        graph_kwargs[name] = reconstruct_aggregate(
+            spec,
+            flat_args,
+            wrap_with_constexpr=wrap_with_constexpr,
+        )
+        for key in leaf_keys:
+            graph_kwargs.pop(key, None)
+            constant_args.pop(key, None)
+
+    return graph_kwargs, constant_args
+
+
+def reconstruct_triton_kernel_args(
+    graph_kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    aggregate_type_metadata: AggregateTypeMetadata,
+    *,
+    constant_args: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Materialize runtime TMA leaves, then reconstruct top-level aggregates."""
+    graph_kwargs = graph_kwargs.copy()
+
+    # TMA is a leaf-level storage transform. Resolve every descriptor once before
+    # interpreting aggregate structure, regardless of whether the leaf is nested.
+    for key, metadata in tma_descriptor_metadata.items():
+        if key not in graph_kwargs:
+            raise AssertionError(
+                f"TMA descriptor argument {key!r} was not found in graph kwargs"
+            )
+        graph_kwargs[key] = reconstruct_tensor_descriptor_from_metadata(
+            graph_kwargs[key], metadata
+        )
+
+    return reconstruct_triton_kernel_aggregates(
+        graph_kwargs,
+        aggregate_type_metadata,
+        constant_args=constant_args,
+    )
 
 
 ###############################################################################
@@ -445,8 +652,8 @@ def generate_ttir(
             return a
 
     # TMA metadata and aggregate specs are keyed by flat argument names. Convert
-    # while those names are still available. Unlike the runtime path, TTIR
-    # generation must not construct a descriptor backed by a fake tensor.
+    # while those names are still available, then reconstruct the aggregates at
+    # the Triton specialization boundary.
     kwargs = {
         name: convert_type_for_ttir_generation(name, arg)
         for name, arg in kwargs.items()
@@ -454,6 +661,7 @@ def generate_ttir(
     kwargs, _constant_args = reconstruct_triton_kernel_aggregates(
         graph_kwargs=kwargs,
         aggregate_type_metadata=aggregate_type_metadata,
+        wrap_with_constexpr=True,
     )
 
     if len(kwargs) != len(kernel.arg_names):
@@ -1692,177 +1900,6 @@ triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 def get_kernel(kernel_idx: int) -> "TritonKernelType":
     return kernel_side_table.get_kernel(kernel_idx)
-
-
-def reconstruct_tensor_descriptor_from_metadata(
-    tensor: Tensor,
-    metadata: TMAExperimentalMetadata | TMAStableMetadata,
-) -> Any:
-    if (exp_meta := maybe_unpack_tma_experimental_metadata(metadata)) is not None:
-        from triton.tools.experimental_descriptor import (
-            create_1d_tma_descriptor,
-            create_2d_tma_descriptor,
-        )
-
-        dims, block_dims, element_size = exp_meta
-        create_tma_descriptor = (
-            create_1d_tma_descriptor if len(dims) == 1 else create_2d_tma_descriptor
-        )
-        return create_tma_descriptor(
-            tensor.data_ptr(),
-            *dims,
-            *block_dims,
-            element_size,
-        )
-    stable_meta = maybe_unpack_tma_stable_metadata(metadata)
-    if stable_meta is None:
-        raise AssertionError("Failed to unpack TMA descriptor metadata")
-    from triton.tools.tensor_descriptor import TensorDescriptor
-
-    block_shape = stable_meta[0]
-    return TensorDescriptor.from_tensor(tensor, block_shape)
-
-
-@functools.cache
-def _namedtuple_type_from_spec(
-    type_name: str, field_names: tuple[str, ...]
-) -> type[tuple]:
-    return collections.namedtuple(type_name, field_names)
-
-
-def get_aggregate_leaf_keys(spec: AggregateSpec) -> tuple[str, ...]:
-    if spec[0] == "leaf":
-        return (spec[1],)
-    children = aggregate_spec_children(spec)
-    return tuple(
-        itertools.chain.from_iterable(get_aggregate_leaf_keys(child) for child in children)
-    )
-
-
-def _reconstruct_aggregate(
-    spec: AggregateSpec,
-    graph_kwargs: dict[str, Any],
-    constant_args: dict[str, Any],
-) -> Any:
-    def maybe_wrap_with_tl_constexpr(value, *, is_constexpr: bool):
-        if is_constexpr:
-            import triton.language as tl
-
-            return tl.constexpr(value)
-        return value
-
-    if spec[0] == "leaf":
-        _, flat_key, is_constexpr = spec
-        if flat_key in graph_kwargs:
-            value = graph_kwargs[flat_key]
-        elif flat_key in constant_args:
-            value = constant_args[flat_key]
-        else:
-            raise ValueError(
-                f"Aggregate leaf {flat_key!r} was not found in the arguments"
-            )
-        return maybe_wrap_with_tl_constexpr(value, is_constexpr=is_constexpr)
-
-    children_specs = aggregate_spec_children(spec)
-    children = tuple(
-        _reconstruct_aggregate(child, graph_kwargs, constant_args)
-        for child in children_specs
-    )
-    if spec[0] == "tuple":
-        reconstructed_value = children
-    elif spec[0] == "namedtuple":
-        _, type_name, field_names, _, _ = spec
-        if len(field_names) != len(children):
-            raise ValueError(
-                f"NamedTuple {type_name!r} has {len(field_names)} fields but "
-                f"its aggregate spec has {len(children)} children"
-            )
-        namedtuple_type = _namedtuple_type_from_spec(type_name, field_names)
-        reconstructed_value = namedtuple_type(*children)
-    else:
-        # TODO(mwizak): improve error message
-        raise NotImplementedError(f"{spec[-1]} aggregate type not yet implemented.")
-
-    return maybe_wrap_with_tl_constexpr(reconstructed_value, is_constexpr=spec[-1])
-
-
-def reconstruct_triton_kernel_aggregates(
-    graph_kwargs: dict[str, Any],
-    aggregate_type_metadata: AggregateTypeMetadata,
-    *,
-    constant_args: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Reconstruct top-level aggregates from already-materialized flat leaves."""
-    if constant_args is None:
-        constant_args = {}
-    else:
-        duplicate_keys = constant_args.keys() & graph_kwargs.keys()
-        if duplicate_keys:
-            raise AssertionError(
-                "Triton constant and graph arguments have duplicate keys: "
-                f"{sorted(duplicate_keys)!r}"
-            )
-        constant_args = constant_args.copy()
-    graph_kwargs = graph_kwargs.copy()
-
-    aggregate_leaf_keys: set[str] = set()
-    for name, spec in aggregate_type_metadata.items():
-        leaf_keys = get_aggregate_leaf_keys(spec)
-        for key in leaf_keys:
-            if key in aggregate_leaf_keys:
-                raise AssertionError(
-                    f"Aggregate leaf {key!r} is referenced more than once"
-                )
-            aggregate_leaf_keys.add(key)
-
-        if name in graph_kwargs or name in constant_args:
-            raise AssertionError(
-                f"Aggregate argument {name!r} also appears in the arguments"
-            )
-        aggregate = _reconstruct_aggregate(spec, graph_kwargs, constant_args)
-
-        # An aggregate with any graph-owned leaf must remain in graph kwargs.
-        # A wholly constant (including empty) aggregate stays in constant_args.
-        destination = (
-            graph_kwargs
-            if any(key in graph_kwargs for key in leaf_keys)
-            else constant_args
-        )
-        destination[name] = aggregate
-
-        for key in leaf_keys:
-            graph_kwargs.pop(key, None)
-            constant_args.pop(key, None)
-
-    return graph_kwargs, constant_args
-
-
-def reconstruct_triton_kernel_args(
-    graph_kwargs: dict[str, Any],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    aggregate_type_metadata: AggregateTypeMetadata,
-    *,
-    constant_args: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Materialize runtime TMA leaves, then reconstruct top-level aggregates."""
-    graph_kwargs = graph_kwargs.copy()
-
-    # TMA is a leaf-level storage transform. Resolve every descriptor once before
-    # interpreting aggregate structure, regardless of whether the leaf is nested.
-    for key, metadata in tma_descriptor_metadata.items():
-        if key not in graph_kwargs:
-            raise AssertionError(
-                f"TMA descriptor argument {key!r} was not found in graph kwargs"
-            )
-        graph_kwargs[key] = reconstruct_tensor_descriptor_from_metadata(
-            graph_kwargs[key], metadata
-        )
-
-    return reconstruct_triton_kernel_aggregates(
-        graph_kwargs,
-        aggregate_type_metadata,
-        constant_args=constant_args,
-    )
 
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
