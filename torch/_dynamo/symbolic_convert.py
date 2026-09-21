@@ -183,6 +183,7 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
@@ -2443,7 +2444,7 @@ class InstructionTranslatorBase(
         name: str,
         item: VariableTracker,
         present: bool,
-        mutated_source: Source | None = None,
+        mutated_source: Source,
     ) -> bool:
         """Shared DELETE_GLOBAL prelude for the root and inlined handlers.
 
@@ -2475,6 +2476,18 @@ class InstructionTranslatorBase(
         # The delete cancels that pending store and there is nothing to replay.
         side_effects.discard_attr_mutation(item, name, mutated_source)
         return False
+
+    def raise_name_error(self, name: str) -> NoReturn:
+        # The NameError paths (missing name, double delete) are raised while
+        # tracing rather than recorded and replayed as a side effect, so the
+        # enclosing handler and statement ordering match eager. A successful
+        # delete of a bound name is a separate path: it is recorded and replayed.
+        raise_observed_exception(
+            NameError,
+            self,
+            args=[f"name '{name}' is not defined"],
+            kwargs={"name": ConstantVariable.create(name)},
+        )
 
     def _install_globals_membership_guard(self, name: str, present: bool) -> None:
         # DELETE_GLOBAL bakes the trace-time `name in f_globals` decision into
@@ -2635,18 +2648,6 @@ class InstructionTranslatorBase(
     def IMPORT_FROM(self, inst: Instruction) -> None:
         self.DUP_TOP(inst)
         self._load_attr(inst.argval)
-
-    def raise_name_error(self, name: str) -> NoReturn:
-        # The NameError paths (missing name, double delete) are raised while
-        # tracing rather than recorded and replayed as a side effect, so the
-        # enclosing handler and statement ordering match eager. A successful
-        # delete of a bound name is a separate path: it is recorded and replayed.
-        raise_observed_exception(
-            NameError,
-            self,
-            args=[f"name '{name}' is not defined"],
-            kwargs={"name": ConstantVariable.create(name)},
-        )
 
     # Cache note: This cache only exists for the duration of this
     # InstructionTranslator - so it should be safe to do.
@@ -6147,7 +6148,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+        if isinstance(
+            func, (UserFunctionVariable, UserMethodVariable)
+        ) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
             msg = inspect.getattr_static(
@@ -6212,12 +6215,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func,
             (
                 UserFunctionVariable,
+                UserMethodVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
             ),
         ):
             raise AssertionError(
-                "expected isinstance( func, ( UserFunctionVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
+                "expected isinstance( func, ( UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
             )
         code: types.CodeType = func.get_code()
         result = None
@@ -6620,7 +6624,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     ),
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
-            self.output.side_effects.store_attr(fglobals_vt, name, value)
+            side_effects = self.output.side_effects
+            side_effects.store_attr(
+                fglobals_vt,
+                name,
+                value,
+                side_effects.global_store_mutation_kind(fglobals_vt, name, value),
+            )
 
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
         if self.output.global_scope is self.f_globals:
@@ -6641,7 +6651,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         present = name in self.f_globals
         self._install_globals_membership_guard(name, present)
-        if not self._check_global_delete(name, fglobals_vt, present):
+        if not self._check_global_delete(name, fglobals_vt, present, global_source):
             return
         self.output.side_effects.store_attr(
             fglobals_vt,

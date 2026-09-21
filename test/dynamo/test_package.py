@@ -4,10 +4,12 @@ import functools
 import gc
 import importlib
 import os
+import pickle
 import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -16,12 +18,20 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.guards import CheckFunctionManager
+from torch._dynamo.package import (
+    _collapse_device_types,
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -32,6 +42,14 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
 )
+
+
+def import_from_path(module_name, file_path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def compute_loss_helper(x):
@@ -103,6 +121,12 @@ class StaticParamModule(torch.nn.Module):
         return x.sin()
 
 
+# A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
+# global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
+PKG_DYN_ROWS = torch.randn(4, 3)
+torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
+
+
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
@@ -133,6 +157,102 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    def test_collapse_device_types_prefers_an_accelerator(self):
+        # The single string both callers record. Among several accelerators
+        # one SystemInfo.check_compatibility checks wins: alphabetical order
+        # would record "mps" for {"mps", "xpu"}, and a name outside CHECK_GPUS
+        # skips every host check the way the old "cpu" did.
+        self.assertEqual(_collapse_device_types(frozenset()), "cpu")
+        self.assertEqual(_collapse_device_types(frozenset(("cpu",))), "cpu")
+        self.assertEqual(_collapse_device_types(frozenset(("cpu", "cuda"))), "cuda")
+        self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
+        self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
+        self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
+
+    def test_package_records_the_devices_a_graph_names(self):
+        # The recording side of the scan, which is what the artifact carries. A
+        # stand-in for a dynamic-shape cuda capture, whose first meta value is a
+        # SymInt with no device, has to record cuda: reading the first leaf
+        # recorded "cpu", which skips every GPU check at load. Both graphs are
+        # fake and never run, so this needs no accelerator.
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            cuda = torch.empty(2, device="cuda")
+            s0 = shape_env.create_unbacked_symint()
+            meta = torch.empty(2, device="meta")
+
+        def fn(x):
+            return x + 1
+
+        graph = torch.fx.Graph()
+        graph.placeholder("s0").meta["val"] = s0
+        x = graph.placeholder("x")
+        x.meta["val"] = cuda
+        graph.call_function(torch.ops.aten.add.Tensor, (x, 1)).meta["val"] = cuda
+
+        package = CompilePackage(fn)
+        # A package that has scanned no graph starts at cpu, so the flip below
+        # is this scan's answer rather than that initial value.
+        self.assertEqual(package.cache_entry().device_type, "cpu")
+        package.update_device_type(graph)
+        self.assertEqual(package.cache_entry().device_type, "cuda")
+
+        meta_graph = torch.fx.Graph()
+        meta_graph.placeholder("x").meta["val"] = meta
+        package = CompilePackage(fn)
+        package.update_device_type(meta_graph)
+        # Dropping meta leaves no device named, which reads as cpu rather than
+        # as no answer.
+        self.assertEqual(package.cache_entry().device_type, "cpu")
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_package_keeps_a_device_a_later_frame_does_not_name(self):
+        # update_device_type runs once per compiled frame and a package spans
+        # frames, so recording only the last answer let the cpu-only resume
+        # frame of this cuda compile erase the cuda the first frame named. The
+        # input is fake, so the compile needs no accelerator.
+        def fn(x):
+            _y = x.sin()
+            torch._dynamo.graph_break()
+            return torch.ones(2) + 1
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            torch.compile(fn, backend="eager")(torch.randn(3, 2, device="cuda"))
+
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        names = [n for code in entry.codes for n in code.function_names]
+        self.assertTrue(any("resume" in n for n in names))
+        self.assertEqual(entry.device_type, "cuda")
+
+    def test_package_keeps_a_loaded_device_a_recompile_does_not_name(self):
+        # A package rebuilt from a saved entry keeps the entry's codes, so its
+        # union has to start from the device those codes recorded: started at
+        # frozenset(), one cpu-only recompile after a reload re-snapshotted the
+        # entry as "cpu" and the cuda code still in it lost its GPU load check.
+        # The graphs are fake and never run; is_available is patched so
+        # check_versions accepts the cuda entry on a host without one.
+        with FakeTensorMode():
+            cuda = torch.empty(2, device="cuda")
+            cpu = torch.empty(2)
+
+        def fn(x):
+            return x + 1
+
+        cuda_graph = torch.fx.Graph()
+        cuda_graph.placeholder("x").meta["val"] = cuda
+        cpu_graph = torch.fx.Graph()
+        cpu_graph.placeholder("x").meta["val"] = cpu
+
+        package = CompilePackage(fn)
+        package.update_device_type(cuda_graph)
+        saved = pickle.loads(pickle.dumps(package.cache_entry()))
+        self.assertEqual(saved.device_type, "cuda")
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            package = CompilePackage(fn, dynamo=saved)
+        self.assertEqual(package.cache_entry().device_type, "cuda")
+        package.update_device_type(cpu_graph)
+        self.assertEqual(package.cache_entry().device_type, "cuda")
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
@@ -491,6 +611,45 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args2)
 
+    def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
+        # install() roots the guards at sys.modules[...].__dict__, and a package
+        # keeps every guard, so the serialized scope holds the global as a
+        # FakeTensor with the traced sizes. A SHAPE_ENV lambda over that scope
+        # agreed with the artifact whatever the module bound: a one-row global
+        # was served the graph built for 2 <= rows. The lambda has to read the
+        # same dict the C++ tree does. Fresh tensors on both arms, since the
+        # loaded TENSOR_MATCH rejects the marked original.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x * 2 + PKG_DYN_ROWS.sum(0)
+
+        x = torch.randn(3)
+        module_dict = sys.modules[__name__].__dict__
+        self.addCleanup(module_dict.__setitem__, "PKG_DYN_ROWS", PKG_DYN_ROWS)
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            module_dict["PKG_DYN_ROWS"] = torch.randn(7, 3)
+            self.assertEqual(fn(x), compiled_fn(x))
+
+            module_dict["PKG_DYN_ROWS"] = torch.randn(1, 3)
+            # The stance message dumps the whole tree, LAMBDA_GUARD line included;
+            # only the failed parts follow verbose_code_parts=.
+            failed_part = r"verbose_code_parts=\[\"2 <= G\['PKG_DYN_ROWS'\]"
+            with self.assertRaisesRegex(RuntimeError, failed_part):
+                compiled_fn(x)
+
     def test_install_survives_stale_cleanup_hooks(self):
         # The first compile installs its generated functions -- and, on every
         # compile, a builtins-dict global (see install_builtins_dict_in_fglobals)
@@ -569,15 +728,117 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(expected, compiled_fn(*args))
 
+    def test_uninstall_keeps_a_global_it_did_not_bind(self):
+        # An aot_compile load seeds the __import_* aliases its kept guards are
+        # rooted at into the live module scope those guards then hold BY
+        # REFERENCE, and leaves an already-bound name alone. A package that
+        # installs the same alias afterwards did not create the binding:
+        # deleting it on uninstall() breaks the loaded artifact's guards for
+        # good, since nothing re-seeds them.
+        alias = "__import_torch_dot_nn_dot_modules_dot_module"
+        module_name = "torch.test_package_alias_helper"
+        # Calling through nn.Module.__call__ is what roots a kept guard at the
+        # alias. The module lives in a file so that re-importing it gives a
+        # scope with none of the names a load has to seed.
+        source = """
+import torch
+
+
+class Child(torch.nn.Module):
+    def forward(self, x):
+        return x.sin()
+
+
+CHILD = Child()
+
+
+def fn(x):
+    return CHILD(x)
+"""
+
+        def guard_filter_fn(guards):
+            # Keep the global guards, which is what puts the alias in the
+            # artifact, minus the types the serializer rejects.
+            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            return [
+                guard.guard_type not in unsupported
+                and not any(d in unsupported for d in guard.derived_guard_types)
+                for guard in guards
+            ]
+
+        ctx = DiskDynamoStore()
+        self.addCleanup(sys.modules.pop, module_name, None)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            helper_path = os.path.join(tmp_dir, "package_alias_helper.py")
+            with open(helper_path, "w") as f:
+                f.write(source)
+            module = import_from_path(module_name, helper_path)
+            args = (torch.randn(3),)
+            expected = module.fn(*args)
+
+            aot_path = os.path.join(tmp_dir, "aot_fn.pt")
+            torch.compile(
+                module.fn,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": guard_filter_fn},
+            ).aot_compile((args, {})).save_compiled_function(aot_path)
+
+            torch._dynamo.reset()
+            package = CompilePackage(module.fn)
+            compiled_fn = torch._dynamo.optimize(
+                backend="eager", package=package, guard_filter_fn=guard_filter_fn
+            )(module.fn)
+            compiled_fn(*args)
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+
+            torch._dynamo.reset()
+            # A fresh import, as the loading process would see the module: the
+            # alias is unbound there until the load seeds it.
+            module = import_from_path(module_name, helper_path)
+            scope = vars(module)
+            self.assertNotIn(alias, set(scope))
+            with open(aot_path, "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+            self.assertIn(alias, set(scope))
+
+            package, backends = ctx.load_package(module.fn, self.path())
+            # Not a vacuous test: install() really does write this alias.
+            installs_alias = any(
+                alias in entry.import_sources for entry in package._codes.values()
+            )
+            self.assertTrue(installs_alias)
+            # The gate is scoped to the aliases: the backend ids go through
+            # the default record_only_if_new=False, so they are recorded and
+            # removed however the module scope looked beforehand.
+            backend_ids = set(backends)
+            self.assertTrue(backend_ids)
+            self.assertEqual(backend_ids & set(scope), set())
+            package.install(backends)
+            self.assertIn(alias, set(scope))
+            self.assertTrue(backend_ids <= set(scope))
+            package.uninstall()
+            self.assertIn(alias, set(scope))
+            self.assertEqual(backend_ids & set(scope), set())
+            self.assertEqual(loaded(*args), expected)
+
+            # The other arm of the record, which needs a scope where the alias
+            # is still unbound when install() runs: another fresh import gives
+            # one, and there the package IS the first binder, so uninstall()
+            # takes the alias back out.
+            module = import_from_path(module_name, helper_path)
+            unseeded_scope = vars(module)
+            self.assertNotIn(alias, set(unseeded_scope))
+            package, backends = ctx.load_package(module.fn, self.path())
+            package.install(backends)
+            self.assertIn(alias, set(unseeded_scope))
+            package.uninstall()
+            self.assertNotIn(alias, set(unseeded_scope))
+
     def test_file_change(self):
         ctx = DiskDynamoStore()
-
-        def import_from_path(module_name, file_path):
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-            return module
 
         mock_module_add_original = """
 def add(x, y):
