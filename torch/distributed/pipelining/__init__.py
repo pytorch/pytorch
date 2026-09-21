@@ -10,7 +10,7 @@ from .schedules import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from .stage import build_stage, PipelineStage
+from .stage import build_stage, PipelineStage, PipelineStageInfo
 
 
 __all__ = [
@@ -19,6 +19,7 @@ __all__ = [
     "SplitPoint",
     "pipeline",
     "PipelineStage",
+    "PipelineStageInfo",
     "build_stage",
     "Schedule1F1B",
     "ScheduleGPipe",
