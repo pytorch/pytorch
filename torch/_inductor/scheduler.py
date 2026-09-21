@@ -3009,14 +3009,6 @@ class NestedReductionStage:
     pointwise_domains: tuple[tuple[SchedulerNode, NestedReduction.PointwiseDomain], ...]
 
 
-class SubParentAccessKind(enum.Enum):
-    """The coordinate mapping proved for one sub-parent access."""
-
-    DIRECT = enum.auto()
-    LANE = enum.auto()
-    IDENTITY_TRANSLATION = enum.auto()
-
-
 @dataclasses.dataclass(frozen=True)
 class SubParentAccessRelation:
     """A source-to-consumer relation used for sub-parent register forwarding.
@@ -3051,14 +3043,6 @@ class SubParentAccessRelation:
             raise AssertionError("sub-parent accesses must share one buffer name")
         if self.parent_lane is not None and self.translation is not None:
             raise AssertionError("sub-parent relation cannot have lane and translation")
-
-    @property
-    def mapping_kind(self) -> SubParentAccessKind:
-        if self.parent_lane is not None:
-            return SubParentAccessKind.LANE
-        if self.translation is not None:
-            return SubParentAccessKind.IDENTITY_TRANSLATION
-        return SubParentAccessKind.DIRECT
 
     @classmethod
     def prove_translation(
@@ -7893,12 +7877,14 @@ class Scheduler:
         nested = NestedReduction._is_dependent_reduction_pair(
             node1, node2
         ) and NestedReduction.can_fuse(node1, node2)
-        standalone = False
-        if device is not None and NestedReduction._is_enabled_for(node1, node2):
-            standalone = self.get_backend(device).has_sub_parent_epilogue(
-                fused_nodes
+        if (
+            staged
+            or nested
+            or (
+                device is not None
+                and self.get_backend(device).has_sub_parent_epilogue(fused_nodes)
             )
-        if staged or nested or standalone:
+        ):
             return FusionResult.fuse(True)
 
         if (
