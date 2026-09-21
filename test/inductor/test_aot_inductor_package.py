@@ -34,7 +34,11 @@ from torch.testing._internal.common_cuda import (
     requires_triton_ptxas_compat,
     TRITON_PTXAS_VERSION,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_FBCODE,
+    TEST_CUDA,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils import _pytree as pytree
 
@@ -78,20 +82,36 @@ def compile(
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 @parameterized_class(
     [
-        {"device": "cpu", "package_cpp_only": False},
+        {
+            "device": "cpu",
+            "package_cpp_only": False,
+            "hw_classification": HardwareClassification.GENERIC,
+        },
     ]
     + (
         [
             # FIXME: AssertionError: AOTInductor compiled library does not exist at
-            {"device": "cpu", "package_cpp_only": True}
+            {
+                "device": "cpu",
+                "package_cpp_only": True,
+                "hw_classification": HardwareClassification.GENERIC,
+            }
         ]
         if not IS_FBCODE
         else []
     )
     + (
         [
-            {"device": GPU_TYPE, "package_cpp_only": False},
-            {"device": GPU_TYPE, "package_cpp_only": True},
+            {
+                "device": GPU_TYPE,
+                "package_cpp_only": False,
+                "hw_classification": HardwareClassification.ACCELERATOR,
+            },
+            {
+                "device": GPU_TYPE,
+                "package_cpp_only": True,
+                "hw_classification": HardwareClassification.ACCELERATOR,
+            },
         ]
         if sys.platform != "darwin"
         else []
@@ -224,8 +244,8 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     def test_int64_floor_divide_tensor_constant_divisor(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
