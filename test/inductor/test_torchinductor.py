@@ -6899,7 +6899,11 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(2, 4, 4, 4),),
         )
 
-    @skip_if_gpu_halide  # slow
+    # halide/mps take the non-logical-index path in _pool_argmax_inner_fn, so the
+    # window offsets are still physical there; halide additionally fails to schedule
+    # the fallback argmax for this shape.
+    @skip_if_halide
+    @skip_if_mps
     def test_adaptive_max_pool2d_transposed_indices(self):
         # transposed input, indices must be logical and not physical offsets
         def fn(x):
