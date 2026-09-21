@@ -5,9 +5,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <stdexcept>
 
 #if defined(__linux__)
 #include <fmt/printf.h>
