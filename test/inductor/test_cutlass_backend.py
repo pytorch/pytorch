@@ -81,8 +81,8 @@ from torch.testing._internal.common_cuda import (
     SM120OrLater,
     SM80OrLater,
     SM90OrLater,
-    xfailIfSM12X,
     xfailIfSM120OrLater,
+    xfailIfSM12X,
 )
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
 from torch.testing._internal.common_utils import (
