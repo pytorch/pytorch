@@ -28,7 +28,10 @@ void topk_impl_loop(
     return;
   }
   using elem_t = std::pair<accscalar_t, int64_t>;
-  std::vector<elem_t> queue(dim_size);
+  // Reused across topk_impl_loop calls on this thread (e.g. once per decoded
+  // token) so a steady-state dim_size doesn't pay a fresh malloc/free each time.
+  static thread_local std::vector<elem_t> queue;
+  queue.resize(dim_size);
   for (const auto i : c10::irange(n)) {
     TensorAccessor<scalar_t, 1> mode_values(
         reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
@@ -43,46 +46,90 @@ void topk_impl_loop(
     auto n_2 = dim_size;
     auto use_partial_sort = k * 64 <= n_2;
 
+    // NaN is rare in practice (e.g. model logits), so fold the check into
+    // this already-required pass and let every comparator below skip it.
+    bool has_nan = false;
     for (const auto j : c10::irange(n_2)) {
       queue[j].first = tmp_values[j];
       queue[j].second = j;
+      has_nan = has_nan || _isnan<accscalar_t>(queue[j].first);
     }
 
     // we want nan to be sorted as top for numpy compatibility
     if (use_partial_sort) {
       if (largest) {
-        std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-          });
-      } else {
-        std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-          });
-      }
-    } else {
-      if (largest) {
-        std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-          });
-        if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k - 1,
+        if (has_nan) {
+          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
             [](const elem_t& x, const elem_t& y) -> bool {
               return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
             });
+        } else {
+          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+            [](const elem_t& x, const elem_t& y) -> bool {
+              return x.first > y.first;
+            });
         }
       } else {
-        std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-          });
-        if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k -1,
+        if (has_nan) {
+          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
             [](const elem_t& x, const elem_t& y) -> bool {
               return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
             });
+        } else {
+          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+            [](const elem_t& x, const elem_t& y) -> bool {
+              return x.first < y.first;
+            });
+        }
+      }
+    } else {
+      if (largest) {
+        if (has_nan) {
+          std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
+            [](const elem_t& x, const elem_t& y) -> bool {
+              return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
+            });
+          if (sorted) {
+            std::sort(queue.begin(), queue.begin() + k - 1,
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
+              });
+          }
+        } else {
+          std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
+            [](const elem_t& x, const elem_t& y) -> bool {
+              return x.first > y.first;
+            });
+          if (sorted) {
+            std::sort(queue.begin(), queue.begin() + k - 1,
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first > y.first;
+              });
+          }
+        }
+      } else {
+        if (has_nan) {
+          std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
+            [](const elem_t& x, const elem_t& y) -> bool {
+              return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
+            });
+          if (sorted) {
+            std::sort(queue.begin(), queue.begin() + k -1,
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
+              });
+          }
+        } else {
+          std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
+            [](const elem_t& x, const elem_t& y) -> bool {
+              return x.first < y.first;
+            });
+          if (sorted) {
+            std::sort(queue.begin(), queue.begin() + k -1,
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first < y.first;
+              });
+          }
         }
       }
     }
