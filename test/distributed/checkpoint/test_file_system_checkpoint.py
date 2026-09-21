@@ -385,6 +385,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         if dist.get_rank() == 0:
             shutil.rmtree(path, ignore_errors=True)
             os.makedirs(path)
+        dist.barrier()
 
         model_to_save = MyShardedModel3(src_spec).to(dist.get_rank())
         model_to_save._register_state_dict_hook(state_dict_hook)
