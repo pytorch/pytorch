@@ -56,7 +56,8 @@ _EXTERNAL_DATA_HINT = (
 _UNBOUND = object()
 
 # What a raise can cost the tree it came out of, as the no-match report's caveat
-# states it. Hedged, because only a throw skips the reset on
+# states it. Phrased for one tree or several, since the report's caveat names
+# every tree it rests on. Hedged, because only a throw skips the reset on
 # check_nopybind_template's exits: a tree that returns with an error set (the
 # SystemError _unwrapped_raise reads through) reset on its way out, and neither
 # the last-resort veto nor this clause tells the two apart.
@@ -166,25 +167,34 @@ def _quoted(reason: BaseException) -> str:
     # one wrapping an interrupt included: nothing is unwrapped here, so a bare
     # KeyboardInterrupt or SystemExit out of __str__ propagates while a
     # SystemError raised from one is quoted as the raise it is. What a bare
-    # interrupt costs differs by caller: the report path was already failing,
-    # while the warning's quote is built over a graph whose guards passed, so
-    # the warning spends its one-shot only after the record is out.
+    # interrupt costs differs by caller: on the two _raised_line sites and on the
+    # advice's caveat -- which quotes a dispatch raise whose own entry line quotes
+    # something else, so this may be the first str() of it -- the interrupt
+    # escapes the report the caller was about to get, a report path that was
+    # already failing; the warning's quote is built over a graph whose guards
+    # passed, so the warning spends its one-shot only after the record is out.
     try:
         return str(reason)
     except Exception as exc:
         return f"<str() raised {type(exc).__name__}>"
 
 
-def _raised_line(index: int, e: Exception) -> str:
+def _raise_text(e: Exception) -> str:
     kind, reason = _unwrapped_raise(e)
     # Keyed on that chain, not on where the raise came from: the clause explains
-    # why the line quotes a chained exception rather than the tree's own, so a
+    # why the text quotes a chained exception rather than the tree's own, so a
     # raise with nothing chained (a TORCH_CHECK, which pybind translates at the
-    # same boundary into a plain RuntimeError) gets the line without it.
+    # same boundary into a plain RuntimeError) gets the text without it.
     boundary = "" if reason is e else " (through the guard tree's pybind boundary)"
-    line = f"  [{index}] <guard check raised {kind}: {_quoted(reason)}{boundary}>"
-    # User text again: the report is read back with splitlines().
-    return " ".join(line.splitlines())
+    # Both halves are user text -- the kind is a class __name__, which a class
+    # built with type() can put a separator in -- and the report is read back
+    # with splitlines(); collapsed before the boundary clause is appended so a
+    # reason ending in a separator leaves no stray space before it.
+    return f"{' '.join(f'{kind}: {_quoted(reason)}'.splitlines())}{boundary}"
+
+
+def _raised_line(index: int, e: Exception) -> str:
+    return f"  [{index}] <guard check raised {_raise_text(e)}>"
 
 
 class _GuardScope(enum.Enum):
@@ -1883,22 +1893,18 @@ class AOTCompiledModel:
     tree reached an answer, or the artifact holds no input at all -- the advice
     to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
     When every rejection that advice rests on followed a raise from its own
-    tree, it says so and says to fix the raise first; when no checked tree ever
-    answered and two or more trees raised, a line saying every guard tree
-    raised replaces it, unless an opted-out result's line has already said the
-    raise withheld it; a single raiser's own line already says as much. When
-    some guard tree raised in dispatch, the last raise of the first input that
-    raised is the
-    ``__cause__`` of the ``RuntimeError`` rather than the exception the caller
-    sees: an ``except RuntimeError`` (a ``TORCH_CHECK``) catches the report
-    with the tree's raise one hop down, and an ``except SystemError`` no longer
-    catches a boundary wrap whose cause is an ``Exception``; a wrap around a
-    ``KeyboardInterrupt`` or ``SystemExit`` still reaches the caller as itself.
-    A raise only out of ``check_verbose`` here is quoted on its line and
-    chained nowhere; so is one recorded in dispatch that the next evaluation of
-    the same tree answered: the caveat says only that a raise came before the
-    rejection the advice rests on, and a follow-up change makes it name those
-    trees and quote their raises.
+    tree, it names and quotes those raises and says to fix them first; when no
+    checked tree ever answered and two or more trees raised, a line saying
+    every guard tree raised replaces it, unless an opted-out result's line has
+    already said the raise withheld it; a single raiser's own line already says
+    as much. When some guard tree raised in dispatch, the last raise of the
+    first input that raised is the ``__cause__`` of the ``RuntimeError`` rather
+    than the exception the caller sees: an ``except RuntimeError`` (a
+    ``TORCH_CHECK``) catches the report with the tree's raise one hop down, and
+    an ``except SystemError`` no longer catches a boundary wrap whose cause is
+    an ``Exception``; a wrap around a ``KeyboardInterrupt`` or ``SystemExit``
+    still reaches the caller as itself. A raise only out of ``check_verbose``
+    here is quoted on its line and chained nowhere.
     """
 
     model: torch.nn.Module
@@ -2207,8 +2213,8 @@ class AOTCompiledModel:
         raiser = next((i for i in raised if enabled[i]), None)
         # An entry that answered in either dispatch pass rejected this call, so a
         # ModelInput could have covered it even where its line below is a raise.
-        coverable = any(results[i]._guard_check_enabled for i in answered)
-        trusted_rejection = any(results[i]._guard_check_enabled for i in trusted)
+        coverable = any(enabled[i] for i in answered)
+        trusted_rejection = any(enabled[i] for i in trusted)
         withheld = not all(enabled)
         for i, result in enumerate(results):
             if not enabled[i]:
@@ -2230,10 +2236,11 @@ class AOTCompiledModel:
                 # survives in the chain when it was recorded first of all, and in
                 # the footer's fix-or-drop line when it was recorded first of the
                 # inputs nobody opted out. When it is neither -- another checked
-                # tree raised before it -- this report carries that raise
-                # nowhere: the caveat below says only that a raise came before
-                # the rejection the advice rests on, and a follow-up change
-                # makes it name such trees and quote their raises.
+                # tree raised before it -- the caveat below is the only line that
+                # can carry that raise, naming such trees and quoting their raises;
+                # it does not fire where another enabled tree rejected before any
+                # raise from its own tree, whether or not it raised after, and
+                # then this report carries that raise nowhere.
                 lines.append(_raised_line(i, raised[i]))
                 continue
             manager = result._live_guard_manager()
@@ -2314,11 +2321,26 @@ class AOTCompiledModel:
                 "not be the one that loaded them."
             )
             if coverable and not trusted_rejection:
-                # Keyed on what dispatch recorded, not on the entry lines: the
-                # re-check may have printed a raise or an accept instead.
+                # Keyed on what dispatch recorded, not on the entry lines: an
+                # entry line carries only the re-check's own verdict, the raiser
+                # line names the first enabled raiser, and the chain carries the
+                # last raise of the first index that raised, so nothing else on
+                # the report quotes these raises. Bracketed as on the entry line
+                # and joined with a semicolon: the quoted text is arbitrary user
+                # text that may hold commas, and _raise_text has a parenthetical
+                # of its own. Filtered on the `enabled` snapshot the entry lines
+                # and both gates read, so the list agrees with them; because the
+                # gates read that same snapshot, it is never empty.
+                untrusted = [
+                    f"[{i}] <{_raise_text(raised[i])}>"
+                    for i in sorted(answered)
+                    if enabled[i]
+                ]
+                plural = "s" if len(untrusted) > 1 else ""
                 advice += (
-                    " Fix the raise first: every rejection this advice rests on "
-                    f"followed a raise from its own tree, and {_STALE_AFTER_THROW}."
+                    f" Fix the raise{plural} out of {'; '.join(untrusted)} first: "
+                    "every rejection this advice rests on followed a raise from "
+                    f"its own tree, and {_STALE_AFTER_THROW}."
                 )
             lines.append(advice)
         if len(raised) > 1 and not withheld and not coverable:
