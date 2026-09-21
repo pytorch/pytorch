@@ -39,6 +39,8 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -67,21 +69,21 @@ else:
     LOOPBACK = "lo"
 
 
-_PRIOR_FP32_PRECISION: str | None = None
+_PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
 
 
 def setUpModule():
     global _PRIOR_FP32_PRECISION
-    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
-    # exact original; writing allow_tf32 back can't reproduce the "none" default.
-    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+    # backend-specific fp32_precision, so snapshot and restore all of it.
+    _PRIOR_FP32_PRECISION = _snapshot_fp32_precision()
     torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def tearDownModule():
     global _PRIOR_FP32_PRECISION
     if _PRIOR_FP32_PRECISION is not None:
-        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _restore_fp32_precision(_PRIOR_FP32_PRECISION)
         _PRIOR_FP32_PRECISION = None
 
 
@@ -219,9 +221,9 @@ class TimeoutTest(TestCase):
                 error_list.append(e)
 
         world_size = 4
-        error_list = []
+        errors_by_type = {name: [] for name in ("file", "tcp", "hash")}
         threads = []
-        for init_type in ["file", "tcp", "hash"]:
+        for init_type, error_list in errors_by_type.items():
             for rank in range(world_size):
                 t = threading.Thread(
                     target=thread_work,
@@ -236,18 +238,17 @@ class TimeoutTest(TestCase):
                 threads.append(t)
                 t.start()
 
-            for thread in threads:
-                thread.join()
+        for thread in threads:
+            thread.join()
 
+        for init_type, error_list in errors_by_type.items():
             # we expect the world_size-1 threads to have failed
-            self.assertEqual(len(error_list), world_size - 1)
+            self.assertEqual(len(error_list), world_size - 1, init_type)
             for error in error_list:
                 self.assertTrue(
                     "Timed out initializing process group in store based barrier"
                     in error.args[0]
                 )
-            error_list = []
-            threads = []
 
 
 class BackendEntryPointTest(TestCase):

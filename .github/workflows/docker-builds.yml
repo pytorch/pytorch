@@ -88,6 +88,15 @@ jobs:
           pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
         ]
         include:
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.10-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             runner_label: mt-l-arm64g4-16-62

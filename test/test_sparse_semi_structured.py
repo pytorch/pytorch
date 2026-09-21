@@ -35,6 +35,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and_complex
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -1166,7 +1168,9 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if dtype == torch.float32:
             # Inputs are converted to TF32 internally for sparse GEMM,
             # so make dense GEMM to do the same for matching results.
-            orig = torch.backends.cuda.matmul.fp32_precision
+            # allow_tf32 writes both the legacy Float32MatmulPrecision enum
+            # and the backend-specific fp32_precision, so save all of it.
+            orig = _snapshot_fp32_precision()
             torch.backends.cuda.matmul.allow_tf32 = True
 
         batch_shapes = [[], [3], [3, 1]]
@@ -1206,7 +1210,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             )
 
         if dtype == torch.float32:
-            torch.backends.cuda.matmul.fp32_precision = orig
+            _restore_fp32_precision(orig)
 
     @unittest.skipIf(
         TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS"
@@ -1271,7 +1275,9 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if dtype == torch.float32:
             # Inputs are converted to TF32 internally for sparse GEMM,
             # so make dense GEMM to do the same for matching results.
-            orig = torch.backends.cuda.matmul.fp32_precision
+            # allow_tf32 writes both the legacy Float32MatmulPrecision enum
+            # and the backend-specific fp32_precision, so save all of it.
+            orig = _snapshot_fp32_precision()
             torch.backends.cuda.matmul.allow_tf32 = True
 
         dtype_out = {
@@ -1294,7 +1300,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             run_test(m, n, k, device, dtype, dtype_out[dtype], use_input, rtol, atol)
 
         if dtype == torch.float32:
-            torch.backends.cuda.matmul.fp32_precision = orig
+            _restore_fp32_precision(orig)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
