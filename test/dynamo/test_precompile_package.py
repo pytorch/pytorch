@@ -2685,15 +2685,21 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         entries = self._guard_entries(_SessionStep(), torch.randn(3, 4))
         base = default_guard_filter_fn(entries)
         self.assertIn(True, base)
-        keep_all = _compose_with_default(lambda e: [True] * len(e))
-        self.assertEqual(list(keep_all(entries)), list(base))
-        keep_none = _compose_with_default(lambda e: [False] * len(e))
-        self.assertEqual(list(keep_none(entries)), [False] * len(entries))
+        keep_all, reported = _compose_with_default(lambda e: [True] * len(e))(entries)
+        self.assertEqual(list(keep_all), list(base))
+        # The default's own decisions come back with the composition, which is
+        # what lets the recorder judge a drop without running it again.
+        self.assertEqual(list(reported), list(base))
+        keep_none, _ = _compose_with_default(lambda e: [False] * len(e))(entries)
+        self.assertEqual(list(keep_none), [False] * len(entries))
+        # No custom filter at all: the default's decisions ARE the composition.
+        composed, reported = _compose_with_default(None)(entries)
+        self.assertEqual(list(composed), list(base))
+        self.assertEqual(list(reported), list(base))
         # A custom filter cannot re-admit what the default dropped.
         dropped = [i for i, kept in enumerate(base) if not kept]
         self.assertTrue(dropped)
-        widened = _compose_with_default(lambda e: [True] * len(e))(entries)
-        self.assertFalse(any(widened[i] for i in dropped))
+        self.assertFalse(any(keep_all[i] for i in dropped))
 
     def test_compose_with_default_refuses_a_wrong_length_decision_list(self):
         from torch._dynamo.precompile_package import _compose_with_default
@@ -3616,8 +3622,32 @@ class _SessionReadsAttr(torch.nn.Module):
         return self.lin(x) * self.scale
 
 
+def _drop_scale(entries):
+    return ["scale" not in e.name for e in entries]
+
+
 def _session_reads_optional(x, obj):
     return x + 1 if obj is None else x + obj.k
+
+
+def _hook_double(x):
+    return x * 2
+
+
+def _hook_increment(x):
+    return x + 1
+
+
+# Rebound by the tests through _rebind_hook, never in place.
+_SESSION_HOOK = _hook_double
+
+
+def _session_calls_hook(x):
+    return _SESSION_HOOK(x)
+
+
+# The identity guard the default filter drops for _session_calls_hook.
+_HOOK_SLOT = ("CLOSURE_MATCH", "G['_SESSION_HOOK']")
 
 
 class _FakeCompile:
@@ -3644,6 +3674,34 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         kwargs.setdefault("dynamic", False)
         return precompile_capture(fn, **kwargs)
 
+    def _risky_session(self):
+        """A capture whose custom filter drops self.scale, so the drop is risky."""
+        session = self._session(_SessionReadsAttr(), guard_filter_fn=_drop_scale)
+        with session as cap:
+            cap(torch.randn(2, 4))
+        return session
+
+    def _facts(self, session):
+        """Every fact the recorder confirmed, by slot."""
+        by_slot = {}
+        for variants in session._confirmed_facts().values():
+            for facts in variants:
+                for fact in facts:
+                    by_slot[(fact.guard_type, fact.source)] = fact
+        return by_slot
+
+    def _assert_no_literal_reaches(self, session):
+        """No pinned literal reaches a slot name, a check, or the digest."""
+        summary = session.summary()
+        written = [str(summary), repr(summary.dropped_guard_code)]
+        written += [
+            repr(slot) + repr(fact) for slot, fact in self._facts(session).items()
+        ]
+        written += [repr(summary.kept_guards), repr(summary.dropped_guards)]
+        for literal in _pinned_needles():
+            for text in written:
+                self.assertNotIn(literal, text)
+
     def _keep(self, session):
         """Finish the compile the last filter call recorded, as a real one does.
 
@@ -3663,6 +3721,12 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         finally:
             session._package._current_entry = compiling
 
+    def _rebind_hook(self, fn):
+        """Rebind the global _session_calls_hook reads, restored after the test."""
+        previous = globals()["_SESSION_HOOK"]
+        self.addCleanup(globals().__setitem__, "_SESSION_HOOK", previous)
+        globals()["_SESSION_HOOK"] = fn
+
     def test_summary_counts_frames_variants_and_guards(self):
         model = _SessionReadsAttr()
         session = self._session(model)
@@ -3681,14 +3745,102 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.risky_dropped_guards, ())
         self.assertEqual(summary.policy_dropped_guards, ())
 
+    def test_a_custom_filter_composes_with_the_default_and_its_drops_are_risky(self):
+        session = self._risky_session()
+        summary = session.summary()
+        self.assertTrue(any("scale" in name for _, name in summary.dropped_guards))
+        self.assertTrue(
+            any("scale" in name for _, name in summary.risky_dropped_guards)
+        )
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
+        self.assertTrue(
+            any("scale" in name for _, name, _ in summary.dropped_guard_code)
+        )
+
+    def test_a_dropped_slot_keeps_the_first_rendering(self):
+        # One rendering per slot, whatever the variants: see
+        # PrecompileSummary.dropped_guard_code.
+        session = self._session(_SessionReadsAttr())
+        # Through the real composition, because the verdict PAIR is what the
+        # risky rail reads: a hand-built pair can say the default rejected an
+        # EQUALS_MATCH, which it never does, and then no test drives the rail
+        # with the pair a capture produces.
+        record = session._recording_filter(
+            precompile_package._compose_with_default(lambda es: [False] * len(es))
+        )
+        session._package._current_entry = _FakeCompile(
+            _SessionReadsAttr.forward.__code__
+        )
+        for value in (3, 4):
+            entry = _entry(LocalSource("n"), value, "EQUALS_MATCH")
+            entry.orig_guard.code_list = [f"L['n'] == {value}"]
+            record([entry])
+            self._keep(session)
+        self.assertEqual(
+            self._summary(session).dropped_guard_code,
+            (("EQUALS_MATCH", "n", "L['n'] == 3"),),
+        )
+        # A guard that rendered no check is a dropped slot with no entry here.
+        record([_entry(LocalSource("x"), torch.ones(2), "TENSOR_MATCH")])
+        self._keep(session)
+        summary = self._summary(session)
+        self.assertIn(("TENSOR_MATCH", "x"), summary.dropped_guards)
+        self.assertEqual([name for _, name, _ in summary.dropped_guard_code], ["n"])
+        # The default kept both slots, so every drop here is one the custom
+        # filter added: the by-filter rail of risky_dropped_guards.
+        self.assertIn(("EQUALS_MATCH", "n"), summary.risky_dropped_guards)
+        self.assertIn(("TENSOR_MATCH", "x"), summary.risky_dropped_guards)
+
+    def test_two_frames_dropping_a_same_named_slot_are_not_risky(self):
+        # entry.name is frame-local, so the same name in two frames is two
+        # slots: one fact set for both would read a rebind that never happened,
+        # and the default gate would refuse a valid artifact.
+        session = self._session(_SessionReadsAttr())
+        # No custom filter: a CLOSURE_MATCH is one the DEFAULT drops, so this is
+        # the pair a capture really produces for it, and the drop is not risky by
+        # filter -- which leaves the value rail below on its own.
+        record = session._recording_filter(
+            precompile_package._compose_with_default(None)
+        )
+        slot = ("CLOSURE_MATCH", "fn")
+        keys = {}
+        for fn in (_hook_double, _hook_increment):
+            compiling = _FakeCompile(fn.__code__)
+            session._package._current_entry = compiling
+            code = compiling.python_code
+            keys[fn] = (code.co_name, code.co_filename, code.co_firstlineno)
+            record([_entry(LocalSource("fn"), fn, "CLOSURE_MATCH")])
+            self._keep(session)
+        self.assertIn(slot, self._summary(session).dropped_guards)
+        self.assertEqual(session._value_varying_slots(), set())
+        # A second value in ONE frame is the variation the rail exists for, and
+        # it belongs to that frame alone: _current_entry is still the second
+        # frame's, so the first frame's slot still held.
+        record([_entry(LocalSource("fn"), _hook_double, "CLOSURE_MATCH")])
+        self._keep(session)
+        self.assertEqual(session._value_varying_slots(), {slot})
+        # The report intersects the value rail with dropped_guards, and this slot
+        # is the one thing in both.
+        self.assertEqual(
+            self._summary(session).risky_dropped_guards, (("CLOSURE_MATCH", "fn"),)
+        )
+        varying = session._value_varying_slots
+        self.assertEqual(varying(keys[_hook_increment]), {slot})
+        self.assertEqual(varying(keys[_hook_double]), set())
+
     def test_a_guard_nothing_checks_is_not_enforced_however_the_filter_votes(self):
         # FSDP_TRAINING_STATE's GuardBuilder body is `pass` and GlobalStateGuard
         # snapshots no training state, so the default filter keeping it does not
         # make it a condition anything rechecks at load time. It lands in NEITHER
         # slot list, since both report a filter verdict and no verdict took this
-        # one away. Not risky either, for the same reason.
+        # one away. Not risky either, for the same reason. Its type is unmodelled
+        # as well, so the recorder files no fact for it; the enforced flag on a
+        # slot nothing checks is covered where a MODELLED one turns into a no-op
+        # (EMPTY_NN_MODULE_HOOKS_DICT, below).
         session = self._session(_SessionReadsAttr())
-        record = session._recording_filter(precompile_package.default_guard_filter_fn)
+        record = session._recording_filter(
+            precompile_package._compose_with_default(None)
+        )
         compiling = _FakeCompile(_SessionReadsAttr.forward.__code__)
         session._package._current_entry = compiling
         record([_entry(LocalSource("self"), None, "FSDP_TRAINING_STATE")])
@@ -3698,6 +3850,7 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertNotIn(slot, summary.dropped_guards)
         self.assertNotIn(slot, summary.kept_guards)
         self.assertEqual(summary.risky_dropped_guards, ())
+        self.assertNotIn(slot, self._facts(session))
 
     def test_a_no_op_marker_is_enforced_only_with_the_leaf_that_checks_it(self):
         # GRAD_MODE's own check is `pass`: GLOBAL_STATE's leaf is what compares
@@ -3724,6 +3877,30 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         # check away here, which is what dropped_guards reports.
         self.assertIn(("GRAD_MODE", "x"), summary.dropped_guards)
         self.assertNotIn(("GRAD_MODE", "x"), summary.kept_guards)
+
+    def test_a_dropped_slot_whose_value_changed_between_variants_is_risky(self):
+        # Through the DEFAULT filter, with no custom one to make the drop risky
+        # by construction. The filter drops the identity guard from the live
+        # guards as well, so the rebind cannot recompile on its own: the shape is
+        # what produces the second variant, and the rebind is what the artifact
+        # will not notice.
+        session = self._session(_session_calls_hook)
+        with session as cap:
+            cap(torch.ones(2, 4))
+            self._rebind_hook(_hook_increment)
+            cap(torch.ones(3, 4))
+        summary = session.summary()
+        self.assertIn(_HOOK_SLOT, summary.dropped_guards)
+        self.assertIn(_HOOK_SLOT, summary.risky_dropped_guards)
+
+    def test_a_dropped_slot_whose_value_held_is_not_risky(self):
+        session = self._session(_session_calls_hook)
+        with session as cap:
+            cap(torch.ones(2, 4))
+            cap(torch.ones(3, 4))
+        summary = session.summary()
+        self.assertIn(_HOOK_SLOT, summary.dropped_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
 
     def test_a_bypassed_compile_is_in_neither_slot_list(self):
         # The filter runs during the guard BUILD, so a compile the serializer
@@ -3755,10 +3932,13 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         slots = summary.kept_guards + summary.dropped_guards
         self.assertFalse([slot for slot in slots if slot[1].startswith("obj.")])
         self.assertFalse([slot for slot in slots if slot[0] == "TYPE_MATCH"])
-        # The block's exit collapsed the records to the confirmed one, so the
-        # bypassed compile stops holding its entry for the session's life.
+        # The facts of the dropped compile are gone too, so nothing it guarded
+        # tells the frame's variants apart. The block's exit collapsed the
+        # records to the confirmed one, so the bypassed compile stops holding its
+        # entry and its facts for the session's life.
         self.assertEqual(len(session._compiles), 1)
         self.assertEqual(len(session._confirmed_compiles()), 1)
+        self.assertEqual([len(v) for v in session._confirmed_facts().values()], [1])
 
     def test_a_bypass_before_a_landed_compile_keeps_only_the_landed_verdicts(self):
         # A bypass and the compile after it see the same guarded_codes length, so
@@ -3769,7 +3949,9 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         # prevent -- and the kept-then-bypassed order above collides on nothing,
         # so this order is what pins the last-wins half of it.
         session = self._session(_SessionReadsAttr())
-        record = session._recording_filter(precompile_package.default_guard_filter_fn)
+        record = session._recording_filter(
+            precompile_package._compose_with_default(None)
+        )
         session._package._current_entry = _FakeCompile(
             _SessionReadsAttr.forward.__code__
         )
@@ -3782,6 +3964,7 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertEqual(len(session._confirmed_compiles()), 1)
         summary = self._summary(session)
         self.assertEqual(summary.kept_guards, (("TENSOR_MATCH", "x"),))
+        self.assertEqual([len(v) for v in session._confirmed_facts().values()], [1])
 
     def test_summary_of_a_capture_that_landed_nothing_reads_empty(self):
         # A report that raised on its own bookkeeping would lose the coverage it
@@ -3807,6 +3990,52 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.kept_guards, ())
         self.assertEqual(summary.dropped_guards, ())
         self.assertFalse(summary.complete)
+
+    def test_a_guard_the_config_turns_into_a_no_op_is_not_enforced(self):
+        # EMPTY_NN_MODULE_HOOKS_DICT passes the serializer pre-check, so the
+        # filter keeps it, but under skip_nnmodule_hook_guards GuardBuilder emits
+        # no check for it and GlobalStateGuard holds no hook state: nothing
+        # rechecks it at load time, and a report of unchecked preconditions must
+        # not print it as enforced. It is not risky -- no filter decision dropped it.
+        self.assertTrue(torch._dynamo.config.skip_nnmodule_hook_guards)
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.ones(2, 4))
+        summary = session.summary()
+        hooks = [
+            slot
+            for slot, fact in self._facts(session).items()
+            if slot[0] == "EMPTY_NN_MODULE_HOOKS_DICT" and not fact.enforced
+        ]
+        self.assertTrue(hooks)
+        # In neither list, per the slot invariants of PrecompileSummary: the
+        # filter kept the slot, so calling it dropped names a verdict nothing
+        # made, and nothing checks it, so calling it kept is false too.
+        self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.dropped_guard_types)
+        self.assertNotIn("EMPTY_NN_MODULE_HOOKS_DICT", summary.kept_guard_types)
+        self.assertEqual(summary.risky_dropped_guards, ())
+
+    def test_no_pinned_value_reaches_the_summary_it_reports(self):
+        # What _render_code masks in one check is verified where the masking
+        # lives; what this checks is the report built on top of it: the key a
+        # GetItemSource interpolates is masked in the guard's own NAME, which is
+        # what the recorder files the slot as and what every list the summary
+        # prints then spells, and no pinned literal reaches any of them.
+        for model in (_SessionPinsValues(), _SessionPinsContainers()):
+            with self.subTest(model=type(model).__name__):
+                torch._dynamo.reset()
+                session = self._session(model)
+                with session as cap:
+                    cap(torch.ones(2, 4))
+                facts = self._facts(session)
+                # The SLOT, not the check: the filter enforces these, and the
+                # report spells an enforced guard as its slot alone, so nothing
+                # renders it (see _recording_filter).
+                if isinstance(model, _SessionPinsContainers):
+                    self.assertIn(("EQUALS_MATCH", "self.cfg['<str>']"), facts)
+                else:
+                    self.assertIn(("CONSTANT_MATCH", "self.prompt"), facts)
+                self._assert_no_literal_reaches(session)
 
     def test_summary_refuses_a_read_from_inside_a_capture_call(self):
         # The read waits for the calls in flight, so a read from inside one would
