@@ -4721,10 +4721,12 @@ def delete_global_from_module(module: types.ModuleType, name: str) -> None:
     try:
         del module.__dict__[name]
     except KeyError:
+        # A better error than the raw KeyError; the membership guard means a
+        # replayed delete always finds the name present.
         raise NameError(f"name '{name}' is not defined", name=name) from None
 
 
-def store_global_in_module(module: types.ModuleType, name: str, value: Any) -> None:
+def reinsert_global_in_module(module: types.ModuleType, name: str, value: Any) -> None:
     # Eager `del g; g = 2` re-adds the name at the end of the module __dict__,
     # which a plain setattr on a still-present name would not reproduce.
     module.__dict__.pop(name, None)
