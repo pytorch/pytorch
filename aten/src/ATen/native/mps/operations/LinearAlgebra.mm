@@ -1641,8 +1641,10 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   // Call tiled implementation if the number of elements exceeds 2^32
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
   if (resultSize > pow(2, 32)) {
-    // Tiled path uses MPSNDArray directly, so resolve conjugate views upfront
-    result = tiled_bmm_out_mps_impl(batch1.resolve_conj(), batch2.resolve_conj(), result);
+    // Tiled path uses raw MPSNDArray directly from buffers, so we must resolve conjugate views
+    // and explicitly enforce contiguous memory layouts to prevent silent math corruption
+    // on transposed or sliced views (which also breaks the backward pass).
+    result = tiled_bmm_out_mps_impl(batch1.resolve_conj().contiguous(), batch2.resolve_conj().contiguous(), result);
     return result;
   }
 
