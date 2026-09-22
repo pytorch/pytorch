@@ -370,12 +370,7 @@ class StaticallyLaunchedTritonKernel:
                     restore_current = (
                         self.cubin_raw is not None
                         and not candidate_restored
-                        and (
-                            path_missing
-                            or missing_file_error
-                            or not stable_load
-                            or not invalid_image
-                        )
+                        and (path_missing or missing_file_error or not stable_load)
                     )
                     if restore_current:
                         # A cache artifact can disappear after materialization.

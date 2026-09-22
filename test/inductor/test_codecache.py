@@ -1220,8 +1220,7 @@ class TestFxGraphCache(TestCase):
                 artifacts.kernel_hash,
                 binary.filename,
             )
-            with open(cubin_path, "rb") as file:
-                self.assertEqual(file.read(), invalid_payload)
+            self.assertFalse(os.path.exists(cubin_path))
             graph.after_deserialization(CompiledFxGraphConstants())
             loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
             self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
@@ -1272,13 +1271,17 @@ class TestFxGraphCache(TestCase):
             artifacts.kernel_hash,
             binary.filename,
         )
-        if bundle_damage == "ambiguous_after_emit":
+        if bundle_damage == "valid_alternate":
+            shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        elif bundle_damage == "ambiguous_after_emit":
             os.remove(local_cubin_path)
         else:
             write_atomic(local_cubin_path, alternate_binary.payload, make_dirs=True)
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
+        if bundle_damage == "valid_alternate":
+            self.assertFalse(os.path.exists(local_cubin_path))
         if bundle_damage == "ambiguous_after_emit":
             write_atomic(local_cubin_path, alternate_binary.payload, make_dirs=True)
         graph.after_deserialization(CompiledFxGraphConstants())
@@ -1752,6 +1755,32 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(graph.current_callable([x.clone()])[0], expected)
         with open(cubin_path, "rb") as file:
             self.assertEqual(file.read(), expected_cubin)
+
+    @requires_cuda_and_triton
+    @config.patch({**STATIC_TRITON_BUNDLE_CONFIG, "keep_static_cubin_raw": True})
+    def test_mismatched_retained_cubin_falls_back_to_jit(self):
+        def alternate_fn(x):
+            return x + 2
+
+        alternate_binary = self.compile_alternate_unary_binary(alternate_fn)
+
+        def fn(x):
+            return x + 1
+
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
+        _, _, binary = self.find_bundled_binary(bundle)
+        self.assertEqual(binary.filename, alternate_binary.filename)
+        compile_result = static_autotuner.kernel.compile_results[0]
+        compile_result.kernel.cubin_raw = alternate_binary.payload
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
+        self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
 
     @requires_cuda_and_triton
     @parametrize("load_device", (0, 1))

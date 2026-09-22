@@ -97,13 +97,11 @@ class TritonBundle:
 class _BundledBinaryIndex:
     """Device-specific and device-agnostic views of bundled GPU binaries."""
 
-    by_identity: dict[_BinaryArtifactIdentity, OrderedSet[bytes]]
-    by_name: dict[_BinaryArtifactName, OrderedSet[bytes]]
-    groups_by_name: dict[_BinaryArtifactName, OrderedSet[_BinaryArtifactGroup]]
+    by_name: dict[_BinaryArtifactName, dict[int, OrderedSet[bytes]]]
 
     @classmethod
     def from_bundle(cls, bundle: TritonBundle) -> "_BundledBinaryIndex":
-        index = cls({}, {}, {})
+        index = cls({})
         for artifacts in bundle.kernel_artifacts:
             for artifact in artifacts.artifacts:
                 if (
@@ -111,33 +109,30 @@ class _BundledBinaryIndex:
                     not in GPU_KERNEL_BIN_EXTS.values()
                 ):
                     continue
-                identity = (
-                    artifacts.device,
-                    artifacts.kernel_hash,
-                    artifact.filename,
-                )
                 name = artifacts.kernel_hash, artifact.filename
-                group = artifacts.device, artifacts.kernel_hash
-                index.by_identity.setdefault(identity, OrderedSet()).add(
-                    artifact.payload
-                )
-                index.by_name.setdefault(name, OrderedSet()).add(artifact.payload)
-                index.groups_by_name.setdefault(name, OrderedSet()).add(group)
+                index.by_name.setdefault(name, {}).setdefault(
+                    artifacts.device, OrderedSet()
+                ).add(artifact.payload)
         return index
 
     def matching_payloads(self, identity: _BinaryArtifactIdentity) -> OrderedSet[bytes]:
         device, kernel_hash, filename = identity
-        if device is None:
-            return self.by_name.get((kernel_hash, filename), OrderedSet())
-        return self.by_identity.get(identity, OrderedSet())
+        by_device = self.by_name.get((kernel_hash, filename), {})
+        if device is not None:
+            return by_device.get(device, OrderedSet())
+        payloads = OrderedSet()
+        for device_payloads in by_device.values():
+            payloads.update(device_payloads)
+        return payloads
 
     def matching_groups(
         self, identity: _BinaryArtifactIdentity
     ) -> OrderedSet[_BinaryArtifactGroup]:
         device, kernel_hash, filename = identity
+        by_device = self.by_name.get((kernel_hash, filename), {})
         if device is None:
-            return self.groups_by_name.get((kernel_hash, filename), OrderedSet())
-        if identity in self.by_identity:
+            return OrderedSet((entry_device, kernel_hash) for entry_device in by_device)
+        if device in by_device:
             return OrderedSet(((device, kernel_hash),))
         return OrderedSet()
 
@@ -275,20 +270,22 @@ class TritonBundler:
             return cls._static_autotuners, static_autotuner_names
 
     @staticmethod
-    def _ambiguous_binary_artifact_groups(
+    def _untrusted_binary_artifact_groups(
         static_autotuners: list[StaticallyLaunchedAutotuner] | None,
         binary_index: _BundledBinaryIndex,
     ) -> OrderedSet[_BinaryArtifactGroup]:
-        """Find bundle cache groups that cannot be emitted unambiguously."""
-        ambiguous_groups: OrderedSet[_BinaryArtifactGroup] = OrderedSet()
+        """Find bundle cache groups that cannot be trusted by a static result."""
+        untrusted_groups: OrderedSet[_BinaryArtifactGroup] = OrderedSet()
         for result in static_autotuners or ():
             for compile_result in result.kernel.compile_results:
-                if compile_result.kernel.cubin_raw is not None:
-                    continue
                 identity = compile_result.bundled_artifact_identity()
-                if len(binary_index.matching_payloads(identity)) > 1:
-                    ambiguous_groups.update(binary_index.matching_groups(identity))
-        return ambiguous_groups
+                payloads = binary_index.matching_payloads(identity)
+                if len(payloads) > 1 or (
+                    len(payloads) == 1
+                    and not compile_result.matches_expected_cubin(next(iter(payloads)))
+                ):
+                    untrusted_groups.update(binary_index.matching_groups(identity))
+        return untrusted_groups
 
     @classmethod
     def load_autotuners(
@@ -321,6 +318,15 @@ class TritonBundler:
                         has_retained_cubin = kernel.cubin_raw is not None
                         kernel._use_stable_cubin_path = True
                         if has_retained_cubin:
+                            if not compile_result.matches_expected_cubin(
+                                kernel.cubin_raw
+                            ):
+                                log.warning(
+                                    "Ignoring mismatched retained binary for %s",
+                                    result.kernel_name,
+                                )
+                                force_recompile = True
+                                break
                             compile_result.set_cubin_path()
                             continue
 
@@ -501,18 +507,21 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
-            binary_index = _BundledBinaryIndex.from_bundle(bundle)
-            ambiguous_artifact_groups = cls._ambiguous_binary_artifact_groups(
-                bundle.static_autotuners, binary_index
-            )
+            binary_index = None
+            untrusted_artifact_groups: OrderedSet[_BinaryArtifactGroup] = OrderedSet()
+            if config.use_static_triton_launcher and bundle.static_autotuners:
+                binary_index = _BundledBinaryIndex.from_bundle(bundle)
+                untrusted_artifact_groups = cls._untrusted_binary_artifact_groups(
+                    bundle.static_autotuners, binary_index
+                )
 
             for artifacts in bundle.kernel_artifacts:
                 if (
                     artifacts.device,
                     artifacts.kernel_hash,
-                ) in ambiguous_artifact_groups:
+                ) in untrusted_artifact_groups:
                     log.warning(
-                        "Skipping ambiguous bundled Triton cache group %s",
+                        "Skipping untrusted bundled Triton cache group %s",
                         artifacts.kernel_hash,
                     )
                     continue
