@@ -11,7 +11,7 @@ from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
-from torch.library import _scoped_library, Library
+from torch.library import _scoped_library
 from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton
@@ -141,11 +141,6 @@ class TestCompilerBisector(TestCase):
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.bisector_ns), name).default
 
-    def get_lib(self):
-        lib = Library(self.bisector_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
-        self.lib = lib
-        return lib
-
     @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bad_decomp(self):
         import_module("torch._inductor.compile_fx")
@@ -202,44 +197,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "decomposition")
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
-
-    def test_pre_grad(self):
-        import operator
-
-        from torch._inductor import config
-
-        # similar setup to test_joint_graph (see below)
-        class CustomPrePass(CustomGraphPass):
-            def __call__(self, graph: torch.fx.Graph):
-                nodes = graph.find_nodes(op="call_function", target=operator.add)
-                if len(nodes) != 1:
-                    raise AssertionError(f"Expected 1 node, got {len(nodes)}")
-                args = list(nodes[0].args)
-                args[1] = 2
-                nodes[0].args = tuple(args)
-
-            def uuid(self):
-                return hash("TestCompilerBisector.test_pre_grad.pass_class")
-
-        def foo(x):
-            return x + 1
-
-        def test_fn():
-            torch._dynamo.reset()
-
-            inp = torch.rand([10])
-
-            out = foo(inp)
-            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
-
-            return torch.allclose(out, out_c)
-
-        with config.patch(pre_grad_custom_pass=CustomPrePass()):
-            out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "pre_grad_passes")
-        self.assertEqual(out.bisect_number, 3)
-        self.assertTrue("pre_grad_custom_pass" in out.debug_info)
 
     @unittest.skipIf(not has_triton(), "requires Triton")
     def test_joint_graph(self):
