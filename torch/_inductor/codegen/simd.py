@@ -4475,8 +4475,6 @@ class SIMDScheduling(BaseScheduling):
         has_translated_relations = any(
             relation.translation is not None for relation in stage.access_relations
         )
-        if has_translated_relations:
-            metrics.codegen_translated_staged_reduction += 1
         numel = plan.parent_numel
         rnumel = plan.parent_rnumel
         sub_parent_epilogue_nodes = stage.epilogue_nodes
