@@ -8,8 +8,6 @@ from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-logger.setLevel(logging.DEBUG)
-
 
 def _find_hop_subgraph_outputs(gm: torch.fx.GraphModule) -> tuple[torch.fx.Node]:
     output_node_args = gm.graph.find_nodes(op="output")[0].args

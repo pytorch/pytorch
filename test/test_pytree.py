@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import unittest
+import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass, field
 from enum import auto
@@ -18,6 +19,7 @@ from typing import Any, NamedTuple
 import torch
 import torch.utils._pytree as python_pytree
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.return_types import all_return_types
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -152,7 +154,7 @@ class TestGenericPytree(TestCase):
                                 str(python_param.annotation),
                             ),
                             msg=(
-                                f"C++ parameter {cxx_param} "
+                                lambda msg: f"{msg}\nC++ parameter {cxx_param} "
                                 f"does not match Python parameter {python_param} "
                                 f"for API `{name}`"
                             ),
@@ -162,7 +164,7 @@ class TestGenericPytree(TestCase):
                             cxx_param.annotation,
                             python_param.annotation,
                             msg=(
-                                f"C++ parameter {cxx_param} "
+                                lambda msg: f"{msg}\nC++ parameter {cxx_param} "
                                 f"does not match Python parameter {python_param} "
                                 f"for API `{name}`"
                             ),
@@ -499,6 +501,21 @@ class TestGenericPytree(TestCase):
         self.assertEqual(type(result), type(expected))
         self.assertEqual(result, expected)
 
+    @parametrize(
+        "return_type",
+        [subtest(cls, name=cls.__name__) for cls in all_return_types],
+    )
+    @parametrize_pytree_module
+    def test_return_types_treespec_roundtrip(self, pytree, return_type):
+        expected = return_type(range(return_type.n_sequence_fields))
+        values, spec = pytree.tree_flatten(expected)
+        roundtrip_spec = pytree.treespec_loads(pytree.treespec_dumps(spec))
+        self.assertEqual(roundtrip_spec, spec)
+
+        result = pytree.tree_unflatten(values, roundtrip_spec)
+        self.assertIs(type(result), return_type)
+        self.assertEqual(result, expected)
+
     @parametrize_pytree_module
     def test_flatten_unflatten_nested(self, pytree):
         def run_test(tree):
@@ -623,12 +640,12 @@ class TestGenericPytree(TestCase):
             self.assertEqual(
                 list(result.keys()),
                 list(tree.keys()),
-                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+                msg=lambda msg: f"{msg}\nDictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
             )
             self.assertEqual(
                 list(result.values()),
                 list(tree.values()),
-                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+                msg=lambda msg: f"{msg}\nDictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
             )
 
     @parametrize_pytree_module
@@ -854,6 +871,21 @@ class TestGenericPytree(TestCase):
 
 
 class TestPythonPytree(TestCase):
+    def test_leafspec_copy_pickle_no_deprecation_warning(self):
+        # LeafSpec is @deprecated, so reconstructing it via copy/pickle used to
+        # re-invoke the constructor and leak a FutureWarning to users who never
+        # wrote an isinstance check. __reduce__ rebuilds via the factory, which
+        # both silences the warning and reuses the shared singleton.
+        leaf = python_pytree.treespec_leaf()
+        for reconstruct in (
+            lambda: copy.deepcopy(leaf),
+            lambda: pickle.loads(pickle.dumps(leaf)),
+        ):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", FutureWarning)
+                reconstructed = reconstruct()
+            self.assertIs(reconstructed, leaf)
+
     def test_deprecated_register_pytree_node(self):
         class DummyType:
             def __init__(self, x, y):
