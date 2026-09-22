@@ -11,7 +11,6 @@ Distinct from ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
 guard-serialization caching mode), despite the shared word.
 """
 
-import dataclasses
 import typing
 
 from torch._precompile import (
@@ -37,17 +36,14 @@ for _t in (Capture, MakeFxTracer, PrecompiledRunnable, PrecompileSummary):
     # typing.get_type_hints resolves a class's string annotations through its
     # __module__. Resolving against the DEFINING module before the re-homing keeps
     # every class-level annotation resolvable (Capture has none, so for it this is
-    # the __module__ assignment alone). A dataclass also snapshots each field's
-    # annotation string as ``Field.type`` at decoration, so those are resolved too
-    # rather than left as a second source of truth.
-    _hints = typing.get_type_hints(_t)
-    _t.__annotations__ = _hints
-    if dataclasses.is_dataclass(_t):
-        for _field in dataclasses.fields(_t):
-            _field.type = _hints[_field.name]
+    # the __module__ assignment alone). The strings a dataclass snapshotted at
+    # decoration (``Field.type``, ``__init__.__annotations__``) are left as they
+    # are: nothing here reads them, and ``__annotations__`` is what get_type_hints
+    # and the public-members test consult.
+    _t.__annotations__ = typing.get_type_hints(_t)
     _t.__module__ = "torch.compiler.precompile"
-del _t, _hints
-del dataclasses, typing  # not part of the public surface
+del _t
+del typing  # not part of the public surface
 
 # PrecompileError is intentionally NOT in __all__: its home is torch.compiler
 # (torch.compiler.PrecompileError, for the conventional ``except`` spelling), so
