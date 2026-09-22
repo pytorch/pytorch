@@ -1734,6 +1734,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(file.read(), expected_cubin)
 
     @requires_cuda_and_triton
+    @parametrize("load_device", (0, 1))
     @config.patch(
         {
             **STATIC_TRITON_BUNDLE_NO_RAW_CONFIG,
@@ -1741,12 +1742,15 @@ class TestFxGraphCache(TestCase):
             "autotune_remote_cache": False,
         }
     )
-    def test_partial_static_autotuner_load_is_released_before_jit(self):
+    def test_partial_static_autotuner_load_is_released_before_jit(self, load_device):
+        if load_device == 1 and not TEST_MULTIGPU:
+            self.skipTest("cross-device cleanup requires two GPUs")
+
         def fn(x):
             return x.sin()
 
         x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
-            fn
+            fn, device=load_device
         )
 
         self.reset()
@@ -1759,7 +1763,9 @@ class TestFxGraphCache(TestCase):
         missing_result.kernel.cubin_raw = None
         cached_autotuner.compile_results.append(missing_result)
 
-        graph.after_deserialization(CompiledFxGraphConstants())
+        with torch.cuda.device(0):
+            graph.after_deserialization(CompiledFxGraphConstants())
+            self.assertEqual(torch.cuda.current_device(), 0)
         self.assertIsNone(loaded_result.kernel.module)
         self.assertEqual(cached_autotuner.compile_results, [])
         self.assertIsNot(
