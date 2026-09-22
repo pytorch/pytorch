@@ -30,6 +30,7 @@ import io
 import itertools
 import logging
 import math
+import os
 import sys
 import textwrap
 import traceback
@@ -144,6 +145,7 @@ from .source import (
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
+    EnvVarSource,
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
@@ -2778,6 +2780,61 @@ class GuardBuilder(GuardBuilderBase):
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    # Ambient environment-variable guard - not source-specific, checked
+    # separately at runtime. Installed when a read of os.environ (os.getenv,
+    # os.environ.get, subscript, "in") is baked into the graph as a constant;
+    # recompiles if the variable's value changes. The expected value is the
+    # trace-time snapshot carried by EnvVarSource - do not re-read os.environ
+    # here: guards are built after the backend compiler runs (which can set
+    # env vars) and re-run from serialized state on precompile load.
+    @skip_guard_check_spec
+    def ENV_MATCH(self, guard: Guard) -> None:
+        source = guard.originating_source
+        if not isinstance(source, EnvVarSource):
+            raise AssertionError(f"ENV_MATCH expects EnvVarSource, got {type(source)}")
+        key = source.key
+        value = source.value
+        code = f"{source.name} == {value!r}"
+        if code in self.already_added_code_parts:
+            return
+        self.already_added_code_parts.add(code)
+        self._set_guard_export_info(guard, [code])
+
+        def fn(x: Any) -> bool:
+            return os.environ.get(key) == value
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts([code], guard), guard.user_stack
+        )
+
+    # Weaker sibling of ENV_MATCH for ``key in os.environ``: guards only on the
+    # variable's presence, not its value, so changing the value of a variable
+    # that is already set does not recompile a graph that only tested
+    # membership. Like ENV_MATCH, the presence is taken from the trace-time
+    # snapshot carried by EnvVarSource (value is None iff unset) - do not
+    # re-read os.environ here.
+    @skip_guard_check_spec
+    def ENV_CONTAINS(self, guard: Guard) -> None:
+        source = guard.originating_source
+        if not isinstance(source, EnvVarSource):
+            raise AssertionError(
+                f"ENV_CONTAINS expects EnvVarSource, got {type(source)}"
+            )
+        key = source.key
+        present = source.value is not None
+        code = f"({source.name} is not None) == {present!r}"
+        if code in self.already_added_code_parts:
+            return
+        self.already_added_code_parts.add(code)
+        self._set_guard_export_info(guard, [code])
+
+        def fn(x: Any) -> bool:
+            return (os.environ.get(key) is not None) == present
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts([code], guard), guard.user_stack
         )
 
     # Global state guard — not source-specific, checked separately at runtime.
