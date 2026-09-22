@@ -12,11 +12,13 @@ wheel built from it (e.g. CUDA nightly wheels).
 from __future__ import annotations
 
 import os
+import sysconfig
 from typing import Any, TYPE_CHECKING
 
 # _common is resolved at build time via scikit-build-core's provider path,
 # not statically importable from the repo root.
 from _common import get_torch_version  # pyrefly: ignore[missing-import]
+from packaging.requirements import Requirement
 
 
 if TYPE_CHECKING:
@@ -59,6 +61,10 @@ def dynamic_metadata(
     extra = os.environ.get("PYTORCH_EXTRA_INSTALL_REQUIREMENTS")
     if extra:
         deps.extend(r.strip() for r in extra.split("|") if r.strip())
+
+    # cupti-python has no free-threaded wheels; PEP 508 cannot express this ABI constraint.
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        deps = [dep for dep in deps if Requirement(dep).name != "cupti-python"]
 
     return {"dependencies": deps}
 
