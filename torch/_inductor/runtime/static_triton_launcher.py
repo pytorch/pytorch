@@ -18,30 +18,28 @@ class InvalidTritonKernelArtifactError(MissingTritonKernelError):
     pass
 
 
+def _cubin_stat_identity(cubin_path: str) -> tuple[int, int, int, int] | None:
+    try:
+        stat = os.stat(cubin_path)
+    except OSError:
+        return None
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
 def _read_cubin_snapshot(
     cubin_path: str,
 ) -> tuple[tuple[int, int, int, int], bytes] | None:
     """Read bytes with enough file identity to detect an atomic replacement."""
+    before_identity = _cubin_stat_identity(cubin_path)
+    if before_identity is None:
+        return None
     try:
-        before = os.stat(cubin_path)
         with open(cubin_path, "rb") as file:
             payload = file.read()
-        after = os.stat(cubin_path)
     except OSError:
         return None
 
-    before_identity = (
-        before.st_dev,
-        before.st_ino,
-        before.st_size,
-        before.st_mtime_ns,
-    )
-    after_identity = (
-        after.st_dev,
-        after.st_ino,
-        after.st_size,
-        after.st_mtime_ns,
-    )
+    after_identity = _cubin_stat_identity(cubin_path)
     if before_identity != after_identity:
         return None
     return after_identity, payload
@@ -320,15 +318,22 @@ class StaticallyLaunchedTritonKernel:
             )
         except RuntimeError as error:
             invalid_image = _is_invalid_kernel_image_error(error)
-            path_missing = not os.path.exists(cubin_path)
-            if (
-                self.cubin_raw is not None
-                and (path_missing or invalid_image)
+            path_missing = _cubin_stat_identity(cubin_path) is None
+            failed_snapshot = (
+                _read_cubin_snapshot(cubin_path)
+                if self.cubin_raw is not None and invalid_image and not path_missing
+                else None
+            )
+            should_restore = path_missing or (
+                invalid_image
                 and (
                     attempted_snapshot is None
                     or attempted_snapshot[1] != self.cubin_raw
+                    or failed_snapshot is None
+                    or failed_snapshot[1] != self.cubin_raw
                 )
-            ):
+            )
+            if self.cubin_raw is not None and should_restore:
                 # A cache artifact can disappear or be truncated after its path
                 # was validated. Restore the retained bytes and retry once.
                 self.reload_cubin_from_raw(cubin_path, force=True)
@@ -360,7 +365,7 @@ class StaticallyLaunchedTritonKernel:
             # Prefer bytes that the native loader just proved valid. Recheck
             # identity so an atomic replacement cannot become our recovery
             # payload accidentally.
-            if _read_cubin_snapshot(cubin_path) == attempted_snapshot:
+            if _cubin_stat_identity(cubin_path) == attempted_snapshot[0]:
                 self.cubin_raw = attempted_snapshot[1]
         return loaded_kernel
 
