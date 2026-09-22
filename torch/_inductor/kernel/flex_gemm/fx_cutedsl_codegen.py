@@ -393,6 +393,14 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
     """Add PyTorch NaN propagation to the shared TensorSSA operation lowering."""
 
     @staticmethod
+    def erf(x: Any) -> Any:
+        return CuteDSLOpOverrides.erf(x)
+
+    @staticmethod
+    def sigmoid(x: Any) -> Any:
+        return CuteDSLOpOverrides.sigmoid(x)
+
+    @staticmethod
     def nan_propagating_minmax(a: Any, b: Any, op: str) -> Any:
         """Add FlexGEMM-specific NaN-propagating clamp semantics."""
         match op:
