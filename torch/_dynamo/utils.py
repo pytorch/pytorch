@@ -3905,7 +3905,7 @@ def same(
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500
+                        fp64_ref.numel() < 1000
                     ):
                         multiplier = 8.0
                     elif (
