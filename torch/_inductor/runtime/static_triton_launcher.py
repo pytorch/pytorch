@@ -13,7 +13,6 @@ from .triton_helpers import get_constexprs
 
 
 log = logging.getLogger(__name__)
-_load_lock_init_lock = threading.Lock()
 
 
 class MissingTritonKernelError(RuntimeError):
@@ -22,16 +21,6 @@ class MissingTritonKernelError(RuntimeError):
 
 class InvalidTritonKernelArtifactError(MissingTritonKernelError):
     pass
-
-
-def _get_load_lock(kernel):
-    """Lazily add the lock for old pickles and lightweight kernel owners."""
-    with _load_lock_init_lock:
-        lock = getattr(kernel, "_load_lock", None)
-        if lock is None:
-            lock = threading.Lock()
-            kernel._load_lock = lock
-        return lock
 
 
 def _cubin_stat_identity(cubin_path: str) -> tuple[int, int, int, int] | None:
@@ -342,21 +331,9 @@ class StaticallyLaunchedTritonKernel:
         load_from_binary = self.cubin_raw is not None
         try:
             if load_from_binary:
-                loaded_kernel = self.C_impl._load_kernel_from_binary(
+                return self.C_impl._load_kernel_from_binary(
                     self.cubin_raw, self.name, self.shared, device
                 )
-                # Keep the ordinary Triton disk cache populated when possible,
-                # but never make a writable temporary directory a prerequisite
-                # for loading the already-retained binary.
-                try:
-                    self.reload_cubin_from_raw(cubin_path, force=True)
-                except OSError:
-                    log.warning(
-                        "Failed to publish validated Triton kernel %s",
-                        cubin_path,
-                        exc_info=True,
-                    )
-                return loaded_kernel
             return self.C_impl._load_kernel(cubin_path, self.name, self.shared, device)
         except RuntimeError as error:
             if _is_invalid_kernel_image_error(error):
@@ -372,7 +349,7 @@ class StaticallyLaunchedTritonKernel:
             raise
 
     def load_kernel(self, device: int) -> None:
-        with _get_load_lock(self):
+        with self._load_lock:
             if self.device_agnostic:
                 if device in self.functions:
                     return
@@ -401,7 +378,7 @@ class StaticallyLaunchedTritonKernel:
         raise NotImplementedError
 
     def close(self) -> None:
-        with _get_load_lock(self):
+        with self._load_lock:
             # Clear Python-visible handles first so repeated cleanup is harmless even
             # if the driver reports an error while unloading.
             modules = list(self.modules.values())
@@ -697,7 +674,7 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
     def load_kernel(self, device: int) -> None:
         # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
         # not a separate module/function pair like the CUDA/HIP launcher.
-        with _get_load_lock(self):
+        with self._load_lock:
             if self.device_agnostic:
                 if device in self.functions:
                     return
@@ -728,7 +705,7 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         return torch.xpu.current_device()
 
     def close(self) -> None:
-        with _get_load_lock(self):
+        with self._load_lock:
             self.module = None
             # Drop the PyCapsule references so their destructors can release
             # sycl::kernel.
