@@ -1456,7 +1456,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.feature_alpha_dropout", "without_train"),
                 xfail("svd_lowrank", ""),
                 xfail("nn.functional.max_unpool2d", ""),
-                xfail("nn.functional.multi_margin_loss", ""),
                 xfail("nn.functional.multilabel_margin_loss", ""),
                 xfail("nn.functional.pdist", ""),
                 xfail("nn.functional.max_unpool1d", ""),
