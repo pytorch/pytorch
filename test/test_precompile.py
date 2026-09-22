@@ -1681,6 +1681,17 @@ class TestPrecompile(TestCase):
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
 
+    @parametrize("backend", ("inductor", "eager"))
+    def test_callable_api_end_to_end(self, backend):
+        # The helpers above bypass the public callable, so this is its one end-to-end
+        # check until the callable is retired.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(2, 4)
+        python_code, cache = torch.compiler.precompile(
+            lambda model, xx: model(xx), m, x, backend=backend, decompositions={}
+        )
+        self.assertEqual(torch.compiler.precompile.load(python_code, cache)(m, x), m(x))
+
     def test_tracer_default_and_explicit_make_fx(self):
         # tracer defaults to "make_fx"; passing it explicitly is equivalent and works.
         m = torch.nn.Linear(4, 3).eval()
