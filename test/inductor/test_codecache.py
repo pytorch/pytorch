@@ -1219,6 +1219,78 @@ class TestFxGraphCache(TestCase):
                 self.assertNotEqual(file.read(), invalid_payload)
 
     @requires_cuda_and_triton
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
+    def test_dynamic_rblock_candidate_rejects_wrong_bundled_binary(self):
+        def body(x, scale):
+            y = x
+            for _ in range(5):
+                y = torch.sin(y) * torch.cos(y) + torch.sigmoid(y) + y * y * scale
+            return y
+
+        def fn(x):
+            return body(x, 0.1).sum(dim=1)
+
+        def alternate_fn(x):
+            return body(x, 0.9).sum(dim=1)
+
+        def find_dynamic_binary(bundle, static_autotuner):
+            initial_result = max(
+                static_autotuner.kernel.compile_results,
+                key=lambda result: result.config.kwargs["R0_BLOCK"],
+            )
+            initial_identity = initial_result.bundled_artifact_identity()
+            dynamic_binaries = [
+                (artifacts, index, artifact)
+                for artifacts in bundle.kernel_artifacts
+                for index, artifact in enumerate(artifacts.artifacts)
+                if os.path.splitext(artifact.filename)[1]
+                in GPU_KERNEL_BIN_EXTS.values()
+                and (
+                    artifacts.device,
+                    artifacts.kernel_hash,
+                    artifact.filename,
+                )
+                != initial_identity
+            ]
+            self.assertEqual(len(dynamic_binaries), 1)
+            return dynamic_binaries[0]
+
+        with fresh_cache():
+            alternate_x = torch.randn(8192, 2048, device="cuda") * 0.01
+            torch.compile(alternate_fn, fullgraph=True)(alternate_x)
+            _, alternate_bundle, alternate_autotuner = (
+                self.load_cached_graph_and_static_autotuner()
+            )
+            _, _, alternate_binary = find_dynamic_binary(
+                alternate_bundle, alternate_autotuner
+            )
+        self.reset()
+
+        x = torch.randn(8192, 2048, device="cuda") * 0.01
+        expected = fn(x)
+        alternate = alternate_fn(x)
+        self.assertNotEqual(expected, alternate, atol=1e-3, rtol=1e-3)
+        self.assertEqual(
+            torch.compile(fn, fullgraph=True)(x), expected, atol=1e-3, rtol=1e-3
+        )
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        target_artifacts, binary_index, target_binary = find_dynamic_binary(
+            bundle, static_autotuner
+        )
+        self.assertEqual(target_binary.filename, alternate_binary.filename)
+        target_artifacts.artifacts[binary_index] = TritonKernelArtifact(
+            target_binary.filename, alternate_binary.payload
+        )
+
+        self.reset()
+        shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        actual = graph.current_callable([x.clone()])[0]
+        self.assertEqual(actual, expected, atol=1e-3, rtol=1e-3)
+        self.assertNotEqual(actual, alternate, atol=1e-3, rtol=1e-3)
+
+    @requires_cuda_and_triton
     @parametrize(
         "bundle_damage",
         (
