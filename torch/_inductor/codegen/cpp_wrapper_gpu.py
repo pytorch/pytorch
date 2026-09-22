@@ -1371,6 +1371,9 @@ class CppWrapperGpu(CppWrapperCpu):
         if V.graph.is_dual_wrapper_mode:
             return name
 
+        if graph_name:
+            name = f"{graph_name}_{name}"
+
         self.writeline(
             maybe_hipify_code_wrapper(
                 f"{self.device_codegen.cpp_stream_type()} {name};"
