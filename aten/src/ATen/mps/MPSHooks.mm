@@ -71,28 +71,18 @@ Generator MPSHooks::getNewGenerator([[maybe_unused]] DeviceIndex device_index) c
 }
 
 void MPSHooks::deviceSynchronize() const {
-  auto stream = at::mps::getDefaultMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-  });
+  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
 void MPSHooks::commitStream() const {
-  auto stream = at::mps::getDefaultMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT);
-  });
+  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT);
 }
 
 void* MPSHooks::getCommandBuffer() const {
   auto stream = at::mps::getDefaultMPSStream();
-  __block void* buffer = nullptr;
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    // Release pending computeCommandEncoder, as extensions is likely to allocate new one
-    stream->endKernelCoalescing();
-    buffer = stream->commandBuffer();
-  });
-  return buffer;
+  // Release pending computeCommandEncoder, as extensions is likely to allocate new one
+  stream->endKernelCoalescing();
+  return stream->commandBuffer();
 }
 
 void* MPSHooks::getDispatchQueue() const {
