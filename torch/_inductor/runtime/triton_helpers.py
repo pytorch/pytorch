@@ -278,19 +278,16 @@ def fmaximum(a, b):
 
 @triton.jit
 def nextafter(x, y):
-    if not is_floating(x):
-        return libdevice.nextafter(x, y)
-    if x.dtype.primitive_bitwidth != 16 and x.dtype.primitive_bitwidth != 32:
+    bitwidth: tl.constexpr = x.dtype.primitive_bitwidth
+    if not is_floating(x) or (bitwidth != 16 and bitwidth != 32):
         return libdevice.nextafter(x, y)
 
     # libdevice.nextafterf honors CUDA FTZ and skips fp32 subnormals. For
     # fp16/bf16, stepping must happen before values are promoted to fp32.
-    idtype: tl.constexpr = tl.core.get_int_dtype(
-        x.dtype.primitive_bitwidth, signed=False
-    )
+    idtype: tl.constexpr = tl.core.get_int_dtype(bitwidth, signed=False)
     ix = x.to(idtype, bitcast=True)
     iy = y.to(idtype, bitcast=True)
-    sign_mask: tl.constexpr = 1 << (x.dtype.primitive_bitwidth - 1)
+    sign_mask: tl.constexpr = 1 << (bitwidth - 1)
 
     x_is_zero = (ix & (sign_mask - 1)) == 0
     y_is_zero = (iy & (sign_mask - 1)) == 0

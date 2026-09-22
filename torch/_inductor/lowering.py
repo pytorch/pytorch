@@ -8809,22 +8809,21 @@ register_pointwise_op("nextafter")
 
 def nextafter(x, y):
     dtype = x.get_dtype()
+    is_low_precision = dtype in (torch.float16, torch.bfloat16)
     if dtype not in (
         torch.float16,
         torch.bfloat16,
         torch.float32,
         torch.float64,
-    ) or (dtype in (torch.float16, torch.bfloat16) and not is_triton(x)):
+    ) or (is_low_precision and not is_triton(x)):
         return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)
 
-    nextafter_fn = ops_wrapper("nextafter")
-
     def inner_fn(x, y):
-        if dtype in (torch.float16, torch.bfloat16):
+        if is_low_precision:
             x = ops.to_dtype(x, dtype, use_compute_types=False)
             y = ops.to_dtype(y, dtype, use_compute_types=False)
-            return ops.to_dtype(nextafter_fn(x, y), dtype)
-        return nextafter_fn(x, y)
+            return ops.to_dtype(ops.nextafter(x, y), dtype)
+        return ops.nextafter(x, y)
 
     return make_pointwise(inner_fn)(x, y)
 
