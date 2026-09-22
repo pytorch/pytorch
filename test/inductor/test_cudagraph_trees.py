@@ -739,6 +739,51 @@ if HAS_CUDA_AND_TRITON:
                     "skipping cudagraphs due to graph with symbolic shapes inputs"
                 ).run(utils_log_stream.getvalue())
 
+        @torch._inductor.config.patch(
+            {
+                "graph_partition": True,
+                "triton.cudagraph_skip_dynamic_graphs": True,
+            }
+        )
+        def test_skip_symbolic_static_shapes(self):
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            scheduler_log_stream, scheduler_ctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            with scheduler_ctx():
+                actual = self.run_twc(
+                    foo,
+                    torch.rand([10], device="cuda"),
+                    torch.rand([10], device="cuda"),
+                )
+
+            self.assertEqual(actual.shape, (10,))
+            FileCheck().check_not("reason=dynamic shape ops").check(
+                "Created 1 graph partitions: 1 cudagraphable"
+            ).run(scheduler_log_stream.getvalue())
+
+        @torch._inductor.config.patch(
+            {
+                "graph_partition": True,
+                "triton.cudagraph_skip_dynamic_graphs": True,
+            }
+        )
+        def test_skip_symbolic_precomputed_size(self):
+            @torch.compile(fullgraph=True)
+            def fn(x, y):
+                p = y.shape[0] // 2
+                return torch.nn.functional.pad(x, (p, -p))
+
+            x = torch.randn(32, device="cuda")
+            y = torch.randn(8, device="cuda")
+            torch._dynamo.mark_static(x)
+            torch._dynamo.mark_dynamic(y, 0)
+
+            self.assertEqual(fn(x, y), torch.nn.functional.pad(x, (4, -4)))
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
@@ -2713,6 +2758,37 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(
                 wrapped_functions[0].cudagraph_managed_input_rerecord_action, "skip"
             )
+
+        @parametrize("compile_options", (False, True))
+        def test_initial_mempool_allocation(self, compile_options):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return [x + 1]
+
+            inp = torch.rand([2 * (1 << 20)], device="cuda")
+            option = {"triton.cudagraph_initial_mempool_allocation_gb": 40 / 1024}
+            if compile_options:
+                foo_cg = torch.compile(
+                    lambda x: x + 1, options={"triton.cudagraphs": True, **option}
+                )
+                self.assertEqual(foo_cg(inp), inp + 1)
+            else:
+                with torch._inductor.config.patch(option):
+                    foo_cg = self.cudagraphify_impl(foo, [inp], ())
+                    self.assertEqual(foo_cg([inp])[0], inp + 1)
+
+            # The 8 MiB output should be carved out of the primed 40 MiB
+            # segment rather than growing the pool with a new large segment.
+            # Sub-1MiB allocations still go to separate 2 MiB small-pool
+            # segments, so only check large segments.
+            large_segments = [
+                s
+                for s in get_all_cudagraph_segments()
+                if s["total_size"] > 2 * (1 << 20)
+            ]
+            self.assertEqual(len(large_segments), 1)
+            self.assertEqual(large_segments[0]["total_size"], 40 * (1 << 20))
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._inductor.config.patch(
