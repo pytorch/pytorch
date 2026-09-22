@@ -2447,8 +2447,9 @@ def load(
         format may change between releases without a deprecation cycle.
 
     Name the two files a precompile capture wrote -- the ``python_code`` artifact
-    and its ``cache``. They load only as a matched pair (the cache carries a sha256 of
-    exactly the python_code bytes it was emitted with).
+    and its ``cache``. A readable, current-format cache loads only
+    against the ``python_code`` it was emitted with (it carries a sha256 of exactly
+    those bytes); an unreadable or other-format cache is ignored with a warning.
 
     The driver runs from ``python_code`` -- the single source of truth for the whole
     calling convention. ``load`` reads the source's ``BACKEND``, checks the cache's
