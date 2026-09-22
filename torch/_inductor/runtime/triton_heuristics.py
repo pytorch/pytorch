@@ -3112,7 +3112,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 raise e
             return None
 
-    def reload_cubin_path(self):
+    def reload_cubin_path(self, *, force: bool = False):
         """
         When loading from cache on disk, we want to reload cubin
         files from their appropriate location on disc.
@@ -3128,7 +3128,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
             kernel_hash,
             binary_filename,
         )
-        self.kernel.reload_cubin_from_raw(cubin_location)
+        self.kernel.reload_cubin_from_raw(cubin_location, force=force)
 
     def make_launcher(self) -> LauncherType:
         # If at least one static make_launcher call occurs,

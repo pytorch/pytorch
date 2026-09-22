@@ -49,6 +49,7 @@ from torch._inductor.codecache import (
     PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
+    write_atomic,
 )
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
 from torch._inductor.cpp_builder import normalize_path_separator
@@ -62,6 +63,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.output_code import CompiledFxGraphConstants
 from torch._inductor.runtime.runtime_utils import cache_dir, triton_cache_dir
+from torch._inductor.runtime.static_triton_launcher import _read_cubin_snapshot
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.triton_bundler import (
     TritonBundle,
@@ -131,6 +133,17 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
 STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
+STATIC_TRITON_BUNDLE_CONFIG = {
+    "bundle_triton_into_fx_graph_cache": True,
+    "compile_threads": 1,
+    "fx_graph_cache": True,
+    "fx_graph_remote_cache": False,
+    "use_static_triton_launcher": True,
+}
+STATIC_TRITON_BUNDLE_NO_RAW_CONFIG = {
+    **STATIC_TRITON_BUNDLE_CONFIG,
+    "keep_static_cubin_raw": False,
+}
 
 
 @instantiate_parametrized_tests
@@ -747,6 +760,24 @@ class TestFxGraphCache(TestCase):
         self.assertGreater(len(bundle.static_autotuners), 0)
         return graph, bundle, bundle.static_autotuners[0]
 
+    def compile_unary_static_graph(self, fn, *, device=0):
+        """Compile a real unary graph and return its cached static bundle."""
+        with torch.cuda.device(device):
+            x = torch.randn(32, device="cuda")
+            expected = fn(x)
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+        return (
+            x,
+            expected,
+            *self.load_cached_graph_and_static_autotuner(),
+        )
+
+    @staticmethod
+    def loaded_static_autotuner(graph, static_autotuner):
+        if graph.current_callable is None:
+            raise AssertionError("cached graph callable is not loaded")
+        return graph.current_callable.__globals__[static_autotuner.kernel_name]
+
     @staticmethod
     def clear_retained_static_binaries(bundle, cached_autotuner):
         """Exercise source fallback as if the bundle omitted GPU binaries."""
@@ -1072,24 +1103,14 @@ class TestFxGraphCache(TestCase):
                     )
 
     @requires_cuda_and_triton
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_CONFIG)
     def test_bundle_without_cubin_uses_local_binary(self):
         def fn(x):
             return x.sin()
 
-        x = torch.randn(32, device="cuda")
-        expected = fn(x)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
 
         self.reset()
         triton_dir = os.path.join(cache_dir(), "triton")
@@ -1110,31 +1131,19 @@ class TestFxGraphCache(TestCase):
         self.assertFalse(os.path.exists(missing_libdevice_path))
         with _set_env("TRITON_LIBDEVICE_PATH", missing_libdevice_path):
             graph.after_deserialization(CompiledFxGraphConstants())
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIs(loaded_autotuner, static_autotuner.kernel)
         self.assertEqual(graph.current_callable([x.clone()])[0], expected)
 
     @requires_cuda_and_triton
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_CONFIG)
     def test_bundle_and_cache_without_cubin_falls_back_to_jit(self):
         def fn(x):
             return x.sin()
 
-        x = torch.randn(32, device="cuda")
-        expected = fn(x)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
 
         self.reset()
         triton_dir = os.path.join(cache_dir(), "triton")
@@ -1149,9 +1158,7 @@ class TestFxGraphCache(TestCase):
 
         graph.after_deserialization(CompiledFxGraphConstants())
         self.assertIsNotNone(graph.current_callable)
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
         device_type = "hip" if torch.version.hip else "cuda"
         binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
@@ -1166,24 +1173,14 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(actual[0], expected)
 
     @requires_cuda_and_triton
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_invalid_bundled_cubin_falls_back_to_jit(self):
         def fn(x):
             return x.sin()
 
-        x = torch.randn(32, device="cuda")
-        expected = fn(x)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
         artifacts, index, binary = self.find_bundled_binary(bundle)
         invalid_payload = b"invalid bundled binary"
         artifacts.artifacts[index] = TritonKernelArtifact(
@@ -1204,32 +1201,19 @@ class TestFxGraphCache(TestCase):
         with open(cubin_path, "rb") as file:
             self.assertEqual(file.read(), invalid_payload)
         graph.after_deserialization(CompiledFxGraphConstants())
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
         self.assertEqual(graph.current_callable([x.clone()])[0], expected)
         with open(cubin_path, "rb") as file:
             self.assertNotEqual(file.read(), invalid_payload)
 
     @requires_cuda_and_triton
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_loader_oom_does_not_rewrite_bundled_cubin(self):
         def fn(x):
             return x.sin()
 
-        x = torch.randn(32, device="cuda")
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        _, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(fn)
         artifacts, index, binary = self.find_bundled_binary(bundle)
         artifacts.artifacts[index] = TritonKernelArtifact(
             binary.filename, b"different bundled binary"
@@ -1252,24 +1236,14 @@ class TestFxGraphCache(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
     @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_device_agnostic_retains_successful_local_binary(self):
         def fn(x):
             return x.sin()
 
-        with torch.cuda.device(0):
-            x0 = torch.randn(32, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn, device=0
+        )
         artifacts, index, binary = self.find_bundled_binary(bundle)
         expected_cubin = binary.payload
         artifacts.artifacts[index] = TritonKernelArtifact(
@@ -1279,9 +1253,7 @@ class TestFxGraphCache(TestCase):
         self.reset()
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIs(loaded_autotuner, static_autotuner.kernel)
         static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
         self.assertEqual(static_kernel.cubin_raw, expected_cubin)
@@ -1301,28 +1273,16 @@ class TestFxGraphCache(TestCase):
     @requires_cuda_and_triton
     @parametrize("conflicting_device", ("same", "other"))
     @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_ambiguous_device_agnostic_bundle_falls_back_to_jit(
         self, conflicting_device
     ):
         def fn(x):
             return x.sin()
 
-        with torch.cuda.device(0):
-            x = torch.randn(32, device="cuda")
-            expected = fn(x)
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn, device=0
+        )
         original_artifacts, _, _ = self.find_bundled_binary(bundle)
         duplicate_device = (
             original_artifacts.device if conflicting_device == "same" else 1
@@ -1350,9 +1310,7 @@ class TestFxGraphCache(TestCase):
         )
         self.assertFalse(os.path.exists(emitted_binary))
         graph.after_deserialization(CompiledFxGraphConstants())
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
         with torch.cuda.device(duplicate_device):
             actual_x = x.clone().to(duplicate_device)
@@ -1361,25 +1319,14 @@ class TestFxGraphCache(TestCase):
     @requires_cuda_and_triton
     @parametrize("bundle_damage", ("corrupt", "ambiguous"))
     @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": True,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch({**STATIC_TRITON_BUNDLE_CONFIG, "keep_static_cubin_raw": True})
     def test_retained_cubin_ignores_damaged_bundle(self, bundle_damage):
         def fn(x):
             return x.sin()
 
-        with torch.cuda.device(0):
-            x0 = torch.randn(32, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn, device=0
+        )
         compile_result = static_autotuner.kernel.compile_results[0]
         retained_cubin = compile_result.kernel.cubin_raw
         self.assertIsNotNone(retained_cubin)
@@ -1405,9 +1352,7 @@ class TestFxGraphCache(TestCase):
         )
         self.assertEqual(compile_result.kernel.cubin_raw, retained_cubin)
         graph.after_deserialization(CompiledFxGraphConstants())
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIs(loaded_autotuner, static_autotuner.kernel)
         missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
         self.assertFalse(os.path.exists(missing_libdevice_path))
@@ -1422,24 +1367,72 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(file.read(), retained_cubin)
 
     @requires_cuda_and_triton
+    @config.patch({**STATIC_TRITON_BUNDLE_CONFIG, "keep_static_cubin_raw": True})
+    def test_retained_cubin_replaces_valid_alternate_binary(self):
+        def alternate_fn(x):
+            return x + 2
+
+        with fresh_cache():
+            _, _, _, alternate_bundle, _ = self.compile_unary_static_graph(alternate_fn)
+            _, _, alternate_binary = self.find_bundled_binary(alternate_bundle)
+
+        self.reset()
+
+        def fn(x):
+            return x + 1
+
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
+        compile_result = static_autotuner.kernel.compile_results[0]
+        retained_cubin = compile_result.kernel.cubin_raw
+        self.assertIsNotNone(retained_cubin)
+        artifacts, binary_index, binary = self.find_bundled_binary(bundle)
+        self.assertEqual(binary.filename, alternate_binary.filename)
+        self.assertNotEqual(retained_cubin, alternate_binary.payload)
+        artifacts.artifacts[binary_index] = TritonKernelArtifact(
+            binary.filename, alternate_binary.payload
+        )
+
+        self.reset()
+        shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        metadata = TritonBundler.read_and_emit(bundle)
+        self.assertIsNotNone(metadata)
+        self.assertIn(
+            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
+        )
+        cubin_path = compile_result.kernel.cubin_path
+        self.assertIsNotNone(cubin_path)
+        snapshot_reads = 0
+
+        def count_snapshot_reads(frame, event, arg):
+            nonlocal snapshot_reads
+            if event == "call" and frame.f_code is _read_cubin_snapshot.__code__:
+                snapshot_reads += 1
+            return count_snapshot_reads
+
+        sys.settrace(count_snapshot_reads)
+        try:
+            graph.after_deserialization(CompiledFxGraphConstants())
+        finally:
+            sys.settrace(None)
+        self.assertEqual(snapshot_reads, 0)
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
+        self.assertIs(loaded_autotuner, static_autotuner.kernel)
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
+        with open(cubin_path, "rb") as file:
+            self.assertEqual(file.read(), retained_cubin)
+
+    @requires_cuda_and_triton
     @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_ambiguous_bundle_recovers_preexisting_local_artifact(self):
         def fn(x):
             return x.sin()
 
-        x = torch.randn(32, device="cuda")
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
         original_artifacts, _, _ = self.find_bundled_binary(bundle)
         damaged_artifacts, binary_index = self.make_complete_conflicting_artifacts(
             bundle,
@@ -1465,11 +1458,9 @@ class TestFxGraphCache(TestCase):
             static_autotuner.kernel_name, metadata.statically_launched_kernel_names
         )
         graph.after_deserialization(CompiledFxGraphConstants())
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
-        self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
         with open(emitted_binary, "rb") as file:
             self.assertNotEqual(file.read(), b"damaged preexisting binary")
 
@@ -1477,35 +1468,28 @@ class TestFxGraphCache(TestCase):
     @requires_cuda_and_triton
     @parametrize(
         "cache_damage",
-        ("delete", "delete_after_snapshot", "truncate", "truncate_after_snapshot"),
+        (
+            "delete",
+            "delete_after_snapshot",
+            "delete_recreate_after_snapshot",
+            "truncate",
+            "truncate_after_snapshot",
+        ),
     )
     @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_bundled_cubin_on_second_device_recovers_without_jit(self, cache_damage):
         def fn(x):
             return x.sin()
 
-        with torch.cuda.device(0):
-            x0 = torch.randn(32, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn, device=0
+        )
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIs(loaded_autotuner, static_autotuner.kernel)
         static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
         cubin_path = static_kernel._agnostic_cubin_path()
@@ -1520,23 +1504,37 @@ class TestFxGraphCache(TestCase):
                 file.write(b"truncated")
         missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
         self.assertFalse(os.path.exists(missing_libdevice_path))
-        damaged_after_snapshot = False
+        damage_phase = "pending"
 
         def damage_after_snapshot(frame, event, arg):
-            nonlocal damaged_after_snapshot
+            nonlocal damage_phase
             if (
-                cache_damage in ("delete_after_snapshot", "truncate_after_snapshot")
-                and not damaged_after_snapshot
+                cache_damage
+                in (
+                    "delete_after_snapshot",
+                    "delete_recreate_after_snapshot",
+                    "truncate_after_snapshot",
+                )
+                and damage_phase == "pending"
                 and event == "line"
                 and frame.f_code is static_kernel._load_kernel_from_path.__code__
                 and frame.f_locals.get("attempted_snapshot") is not None
             ):
-                if cache_damage == "delete_after_snapshot":
+                if cache_damage.startswith("delete"):
                     os.remove(cubin_path)
                 else:
                     with open(cubin_path, "wb") as file:
                         file.write(b"truncated after snapshot")
-                damaged_after_snapshot = True
+                damage_phase = "damaged"
+            elif (
+                cache_damage == "delete_recreate_after_snapshot"
+                and damage_phase == "damaged"
+                and event == "line"
+                and frame.f_code is static_kernel._load_kernel_from_path.__code__
+                and "error" in frame.f_locals
+            ):
+                write_atomic(cubin_path, static_kernel.cubin_raw, make_dirs=True)
+                damage_phase = "recreated"
             return damage_after_snapshot
 
         with (
@@ -1549,30 +1547,26 @@ class TestFxGraphCache(TestCase):
                 self.assertEqual(graph.current_callable([x1])[0], fn(x1))
             finally:
                 sys.settrace(None)
-        self.assertEqual(
-            damaged_after_snapshot, cache_damage.endswith("after_snapshot")
+        expected_damage_phase = (
+            "recreated"
+            if cache_damage == "delete_recreate_after_snapshot"
+            else "damaged"
+            if cache_damage.endswith("after_snapshot")
+            else "pending"
         )
+        self.assertEqual(damage_phase, expected_damage_phase)
         with open(cubin_path, "rb") as file:
             self.assertEqual(file.read(), static_kernel.cubin_raw)
 
     @requires_cuda_and_triton
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_single_device_corrupt_bundled_cubin_recovers(self):
         def fn(x):
             return x.sin()
 
-        x = torch.randn(32, device="cuda")
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
 
         compile_result = static_autotuner.kernel.compile_results[0]
         device = compile_result.compile_meta["device"]
@@ -1596,36 +1590,27 @@ class TestFxGraphCache(TestCase):
             file.write(b"truncated")
 
         graph.after_deserialization(CompiledFxGraphConstants())
-        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
-            static_autotuner.kernel_name
-        ]
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIs(loaded_autotuner, cached_autotuner)
-        self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
         with open(cubin_path, "rb") as file:
             self.assertEqual(file.read(), expected_cubin)
 
     @requires_cuda_and_triton
     @config.patch(
         {
+            **STATIC_TRITON_BUNDLE_NO_RAW_CONFIG,
             "autotune_local_cache": False,
             "autotune_remote_cache": False,
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
         }
     )
     def test_partial_static_autotuner_load_is_released_before_jit(self):
         def fn(x):
             return x.sin()
 
-        x = torch.randn(32, device="cuda")
-        expected = fn(x)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
@@ -1641,8 +1626,7 @@ class TestFxGraphCache(TestCase):
         self.assertIsNone(loaded_result.kernel.module)
         self.assertEqual(cached_autotuner.compile_results, [])
         self.assertIsNot(
-            graph.current_callable.__globals__[static_autotuner.kernel_name],
-            cached_autotuner,
+            self.loaded_static_autotuner(graph, static_autotuner), cached_autotuner
         )
         self.assertEqual(graph.current_callable([x.clone()])[0], expected)
 

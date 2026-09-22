@@ -70,6 +70,11 @@ def _is_invalid_kernel_image_error(error: RuntimeError) -> bool:
     )
 
 
+def _is_missing_kernel_file_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return "file not found" in message or "failed to open kernel image" in message
+
+
 @functools.lru_cache(None)
 def _tma_arg_helpers():
     """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
@@ -272,10 +277,16 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        # Preserve an existing cache artifact until the native loader proves it
-        # unusable. This keeps valid read-only caches usable. A failed native
-        # load forces one atomic replacement from the retained bundled bytes.
-        if force or not os.path.exists(filepath):
+        # Usually preserve an existing cache artifact until the native loader
+        # proves it unusable. When a cached graph already retains the binary,
+        # that payload is authoritative and must replace any differing file
+        # before native loading can silently accept it.
+        if force:
+            snapshot = _read_cubin_snapshot(filepath)
+            needs_write = snapshot is None or snapshot[1] != self.cubin_raw
+        else:
+            needs_write = not os.path.exists(filepath)
+        if needs_write:
             if self.cubin_raw is None:
                 raise MissingTritonKernelError(
                     f"Triton kernel binary not found at {filepath}"
@@ -311,26 +322,33 @@ class StaticallyLaunchedTritonKernel:
         return self.reload_cubin_from_raw(self.cubin_path)
 
     def _load_kernel_from_path(self, cubin_path: str, device: int):
-        attempted_snapshot = _read_cubin_snapshot(cubin_path)
+        attempted_snapshot = (
+            _read_cubin_snapshot(cubin_path) if self.device_agnostic else None
+        )
         try:
             loaded_kernel = self.C_impl._load_kernel(
                 cubin_path, self.name, self.shared, device
             )
         except RuntimeError as error:
             invalid_image = _is_invalid_kernel_image_error(error)
+            missing_file_error = _is_missing_kernel_file_error(error)
             path_missing = _cubin_stat_identity(cubin_path) is None
             failed_snapshot = (
                 _read_cubin_snapshot(cubin_path)
                 if self.cubin_raw is not None and invalid_image and not path_missing
                 else None
             )
-            should_restore = path_missing or (
-                invalid_image
-                and (
-                    attempted_snapshot is None
-                    or attempted_snapshot[1] != self.cubin_raw
-                    or failed_snapshot is None
-                    or failed_snapshot[1] != self.cubin_raw
+            should_restore = (
+                path_missing
+                or missing_file_error
+                or (
+                    invalid_image
+                    and (
+                        attempted_snapshot is None
+                        or attempted_snapshot[1] != self.cubin_raw
+                        or failed_snapshot is None
+                        or failed_snapshot[1] != self.cubin_raw
+                    )
                 )
             )
             if self.cubin_raw is not None and should_restore:
@@ -343,7 +361,12 @@ class StaticallyLaunchedTritonKernel:
                     )
                 except RuntimeError as retry_error:
                     invalid_image = _is_invalid_kernel_image_error(retry_error)
-                    if not os.path.exists(cubin_path) or invalid_image:
+                    missing_file_error = _is_missing_kernel_file_error(retry_error)
+                    if (
+                        not os.path.exists(cubin_path)
+                        or missing_file_error
+                        or invalid_image
+                    ):
                         if invalid_image:
                             raise InvalidTritonKernelArtifactError(
                                 f"Triton kernel binary is unusable at {cubin_path}"
@@ -356,7 +379,7 @@ class StaticallyLaunchedTritonKernel:
                 raise InvalidTritonKernelArtifactError(
                     f"Triton kernel binary is unusable at {cubin_path}"
                 ) from error
-            if path_missing:
+            if path_missing or missing_file_error:
                 raise MissingTritonKernelError(
                     f"Triton kernel binary is unusable at {cubin_path}"
                 ) from error
