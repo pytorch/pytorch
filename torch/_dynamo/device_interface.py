@@ -154,15 +154,15 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def begin_allocate_to_pool(device_index: int, mempool_id: int) -> None:
+    def begin_allocate_to_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
         raise NotImplementedError
 
     @staticmethod
-    def end_allocate_to_pool(device_index: int, mempool_id: int) -> None:
+    def end_allocate_to_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
         raise NotImplementedError
 
     @staticmethod
-    def release_pool(device_index: int, mempool_id: int) -> None:
+    def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
         raise NotImplementedError
 
     @staticmethod
@@ -278,7 +278,6 @@ class CudaInterface(DeviceInterface):
     exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type, has-type]
     maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.cuda.memory_allocated)
-    get_mempool_type = staticmethod(torch.cuda.MemPool)
     is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
@@ -323,15 +322,19 @@ class CudaInterface(DeviceInterface):
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
 
     @staticmethod
-    def begin_allocate_to_pool(device_index: int, mempool_id: int) -> None:
+    def get_mempool_type() -> type:
+        return torch.cuda.MemPool
+
+    @staticmethod
+    def begin_allocate_to_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
         torch.cuda.memory._cuda_beginAllocateCurrentThreadToPool(device_index, mempool_id)
 
     @staticmethod
-    def end_allocate_to_pool(device_index: int, mempool_id: int) -> None:
+    def end_allocate_to_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
         torch.cuda.memory._cuda_endAllocateToPool(device_index, mempool_id)
 
     @staticmethod
-    def release_pool(device_index: int, mempool_id: int) -> None:
+    def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
         torch.cuda.memory._cuda_releasePool(device_index, mempool_id)
 
 

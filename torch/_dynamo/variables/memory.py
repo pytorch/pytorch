@@ -28,6 +28,15 @@ def _current_cuda_device_source() -> CallFunctionNoArgsSource:
     )
 
 
+def _get_mempool_iface() -> Any:
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        raise RuntimeError("No accelerator available for mempool operations")
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    return get_interface_for_device(acc.type)
+
+
 # These marker ops are intentional even though Inductor also annotates enclosed
 # FX nodes. The annotations tell Inductor which scheduler nodes allocate in a
 # user pool, while begin/end keep the pool lifetime visible as ordered FX
@@ -35,8 +44,7 @@ def _current_cuda_device_source() -> CallFunctionNoArgsSource:
 @custom_op("mempool::begin", mutates_args=())
 def begin_mempool(device_index: int, mempool_index: int) -> None:
     mempool = get_external_object_by_index(mempool_index)
-    from torch._dynamo.device_interface import get_interface_for_device
-    iface = get_interface_for_device(torch.accelerator.current_accelerator().type)
+    iface = _get_mempool_iface()
     if not isinstance(mempool, iface.get_mempool_type()):
         raise RuntimeError(
             f"use_mem_pool expected a {iface.get_mempool_type()} object at index {mempool_index}"
@@ -55,8 +63,7 @@ has_side_effect(torch.ops.mempool.begin.default)
 @custom_op("mempool::end", mutates_args=())
 def end_mempool(device_index: int, mempool_index: int) -> None:
     mempool = get_external_object_by_index(mempool_index)
-    from torch._dynamo.device_interface import get_interface_for_device
-    iface = get_interface_for_device(torch.accelerator.current_accelerator().type)
+    iface = _get_mempool_iface()
     if not isinstance(mempool, iface.get_mempool_type()):
         raise RuntimeError(
             f"use_mem_pool expected a {iface.get_mempool_type()} object at index {mempool_index}"
@@ -75,13 +82,12 @@ has_side_effect(torch.ops.mempool.end.default)
 
 class CUDAMemPoolVariable(VariableTracker):
     """Represents a torch.cuda.MemPool object."""
-    from torch._dynamo.device_interface import get_interface_for_device
-    iface = get_interface_for_device(torch.accelerator.current_accelerator().type)
+    iface = _get_mempool_iface()
 
     def __init__(
         self,
         proxy: Proxy,
-        value: iface.get_mempool_type(),
+        value: Any,
         user_object_index: int,
         **kwargs: Any,
     ) -> None:
