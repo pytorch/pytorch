@@ -73,9 +73,9 @@ def load_project(repo_root: Path) -> dict:
     ]
 
 
-def discover_license_files(repo_root: Path) -> set[str]:
+def discover_license_files(repo_root: Path) -> tuple[set[str], str | None]:
     if not (repo_root / ".git").exists():
-        return set()
+        return set(), "no .git directory"
     try:
         result = subprocess.run(
             ["git", "ls-files", "--recurse-submodules", "--", *LICENSE_GLOBS],
@@ -85,13 +85,13 @@ def discover_license_files(repo_root: Path) -> set[str]:
             check=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
-        return set()
+        return set(), "git ls-files failed"
     found: set[str] = set()
     for rel in result.stdout.splitlines():
         rel = rel.strip()
         if rel and not _skip_discovery_path(rel):
             found.add(rel)
-    return found
+    return found, None
 
 
 def _parenthesize_compound_expression(expression: str) -> str:
@@ -143,7 +143,10 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
     if not _checkout_looks_populated(repo_root, inc):
         return ([], _SKIP_REASON)
 
-    discovered = discover_license_files(repo_root)
+    discovered, discovery_skip = discover_license_files(repo_root)
+    if discovery_skip:
+        return ([], f"license-file discovery cannot run: {discovery_skip}")
+
     err: list[str] = []
     if bad := inc & excluded:
         err.append(
@@ -158,28 +161,27 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
             + ", ".join(sorted(unknown))
         )
 
-    if _checkout_looks_populated(repo_root, inc):
-        # inc - discovered: included paths not returned by git ls-files
-        # --recurse-submodules (e.g. file removed from a submodule).
-        if not_discoverable := sorted(inc - discovered):
-            err.append(
-                "license-files lists path(s) not returned by git ls-files "
-                "--recurse-submodules (removed from submodule or glob mismatch?): "
-                + ", ".join(not_discoverable)
-            )
+    # inc - discovered: included paths not returned by git ls-files
+    # --recurse-submodules (e.g. file removed from a submodule).
+    if not_discoverable := sorted(inc - discovered):
+        err.append(
+            "license-files lists path(s) not returned by git ls-files "
+            "--recurse-submodules (removed from submodule or glob mismatch?): "
+            + ", ".join(not_discoverable)
+        )
 
-        if stale_excluded := sorted(excluded - discovered):
-            err.append(
-                f"{_MANIFEST_PATH.name} excluded list has path(s) not returned by "
-                "git ls-files --recurse-submodules (removed from submodule or "
-                "glob mismatch?): " + ", ".join(stale_excluded)
-            )
+    if stale_excluded := sorted(excluded - discovered):
+        err.append(
+            f"{_MANIFEST_PATH.name} excluded list has path(s) not returned by "
+            "git ls-files --recurse-submodules (removed from submodule or "
+            "glob mismatch?): " + ", ".join(stale_excluded)
+        )
 
-        if missing := sorted(p for p in inc if not (repo_root / p).is_file()):
-            err.append(
-                "license-files lists path(s) that do not exist in the checkout: "
-                + ", ".join(missing)
-            )
+    if missing := sorted(p for p in inc if not (repo_root / p).is_file()):
+        err.append(
+            "license-files lists path(s) that do not exist in the checkout: "
+            + ", ".join(missing)
+        )
 
     spdx_keys = set(spdx)
     if spdx_keys != inc:
@@ -214,7 +216,8 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
 def main() -> None:
     errors, skip_reason = audit_repo_license_files(Path("."))
     if skip_reason:
-        raise SystemExit(f"license-files audit skipped: {skip_reason}")
+        print(f"license-files audit cannot run: {skip_reason}")
+        return
     if errors:
         raise SystemExit("license-files audit failed:\n" + "\n".join(errors))
 

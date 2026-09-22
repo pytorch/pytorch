@@ -185,6 +185,32 @@ class TestLicense(TestCase):
             msg=errors,
         )
 
+    def test_audit_no_git_dir_skips(self) -> None:
+        """Populated checkout without .git returns skip, not false errors."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # NO git init — simulates sdist / release tarball
+            (root / "pyproject.toml").write_text(
+                '[project]\nlicense = "MIT"\n'
+                'license-files = ["third_party/dep/LICENSE"]\n',
+                encoding="utf-8",
+            )
+            manifest = root / "manifest.toml"
+            manifest.write_text(
+                'excluded = []\n\n[[spdx]]\nexpression = "MIT"\n'
+                'paths = ["third_party/dep/LICENSE"]',
+                encoding="utf-8",
+            )
+            (root / "third_party" / "dep").mkdir(parents=True)
+            (root / "third_party" / "dep" / "LICENSE").write_text(
+                "MIT\n", encoding="utf-8"
+            )
+            with patch("tools.linter.license_files_audit._MANIFEST_PATH", manifest):
+                errors, skip_reason = audit_repo_license_files(root)
+            self.assertEqual(errors, [])
+            self.assertIsNotNone(skip_reason)
+            self.assertIn("cannot run", skip_reason)
+
     @unittest.skipIf(len(distinfo) == 0, "no installation in site-package to test")
     def test_distinfo_license(self):
         """Installed wheel ships pyproject.toml license-files."""
