@@ -107,7 +107,6 @@ from torch.testing._internal.common_utils import (
     TEST_MPS,
     TEST_WITH_ROCM,
     TEST_XPU,
-    xfailIf,
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
@@ -449,13 +448,14 @@ class AOTInductorTestsTemplate:
             example_inputs = (torch.randn(8, 8, device=self.device),)
             self.check_model(Model(), example_inputs)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5483")
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     def test_loaded_modules_tracking(self, embed_kernel_binary):
         # Verify that AOTI codegen on CUDA/HIP passes &kernels_.loaded_modules_
         # to loadKernel so CUmodule handles are tracked and unloaded on
         # destruction, preventing GPU code object leaks.
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA/HIP")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/HIP/XPU")
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -9241,7 +9241,6 @@ class AOTInductorTestsTemplate:
         for name, tensor in replacement_weights.items():
             self.assertEqual(tensor._use_count(), replacement_use_counts[name])
 
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5484
     def test_update_user_managed_buffer(self):
         if self.device not in ["cuda", "xpu"]:
             raise unittest.SkipTest("requires CUDA/XPU")
