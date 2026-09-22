@@ -1897,7 +1897,6 @@ class TestPrecompileDynamoCapture(TestCase):
         self.x3 = torch.randn(3, 4)
 
     def _capture(self, fn, **kwargs):
-        kwargs.setdefault("tracer", DynamoTracer())
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
     def _serve_in_fresh_process(self, calls):
