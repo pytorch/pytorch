@@ -344,3 +344,53 @@ def _preconnect_p2p_edge_groups(
         )
         for work in dist.batch_isend_irecv([op]):
             work.wait()
+
+
+def _preconnect_shared_p2p_edges(
+    parent: dist.ProcessGroup,
+    stage_index_to_group_rank: dict[int, int],
+    device: torch.device,
+) -> None:
+    """Preconnect every physical peer pair used by the shared parent group.
+
+    The schedule's parent all-reduce initializes the communicator used by
+    batched P2P. A lazy native backend selects separate bidirectional pair
+    channels for raw P2P, so one canonical exchange initializes each physical
+    pair before pipeline execution or CUDA-graph capture.
+
+    Args:
+        parent: Shared pipeline process group.
+        stage_index_to_group_rank: Mapping from logical stage index to rank in
+            ``parent``.
+        device: Device shared by every pipeline stage local to this rank.
+    """
+    assignment = _stage_rank_assignment(
+        stage_index_to_group_rank,
+        dist.get_world_size(parent),
+    )
+    group_rank = dist.get_rank(parent)
+    synchronization = torch.zeros(1, dtype=torch.int32, device=device)
+    payload = torch.zeros(1, dtype=torch.int32, device=device)
+
+    for matching in _physical_edge_matchings(assignment):
+        local_pair = next((pair for pair in matching if group_rank in pair), None)
+        if local_pair is not None:
+            lower_rank, higher_rank = local_pair
+            if group_rank == lower_rank:
+                work = dist.isend(
+                    payload,
+                    group=parent,
+                    group_dst=higher_rank,
+                )
+            else:
+                work = dist.irecv(
+                    payload,
+                    group=parent,
+                    group_src=lower_rank,
+                )
+            if work is not None:
+                work.wait()
+
+        # A rank not in this matching must not enter a later raw-P2P round
+        # while peers are still selecting their current pair channel.
+        dist.all_reduce(synchronization, group=parent)

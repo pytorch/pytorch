@@ -52,6 +52,7 @@ from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
+    requires_nccl,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -1991,6 +1992,99 @@ class PerEdgeScheduleTest(MultiProcContinuousTest):
 
 
 instantiate_parametrized_tests(PerEdgeScheduleTest)
+
+
+class NCCLLazyP2PInitializationTest(MultiProcContinuousTest):
+    """Exercise shared-parent P2P initialization on lazy NCCL channels."""
+
+    world_size = 4
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @property
+    def config(self) -> PipelineTestConfig:
+        return PipelineTestConfig(self.world_size, self.device, self.rank)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        not dist.is_backend_available("nccl-lazy"),
+        "nccl-lazy backend is unavailable",
+    )
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR,
+        "nccl-lazy pipeline test requires multiple GPUs",
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_dual_pipe_v_preconnects_physical_peers(self):
+        """Preconnect pair channels before running bidirectional PP traffic."""
+        num_stages = 2 * self.world_size
+        rank_stages = {
+            0: [0, 7],
+            1: [1, 6],
+            2: [2, 5],
+            3: [3, 4],
+        }
+        mod, ref_mod, x, target, loss_fn = setup_models_and_data(
+            self.config,
+            n_layers=num_stages,
+        )
+        ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
+        stage_indices = rank_stages[self.rank]
+        stages, stage_modules, submod_names = create_multi_stage_pipeline(
+            self.config,
+            mod,
+            len(stage_indices),
+            num_stages,
+            stage_indices,
+        )
+        schedule = ScheduleDualPipeV(
+            stages,
+            2 * self.world_size,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+
+        backend = dist.get_backend_impl(device=self.device)
+        channels_before = backend._num_active_channels()
+        # Isolate schedule-owned setup so the assertion cannot be satisfied by
+        # the first runtime send or receive creating a missing pair channel.
+        schedule._initialize_pipeline_distributed_state(
+            stages,
+            has_backward=True,
+            initialize_p2p=True,
+        )
+        # The following schedule steps must observe, not repeat, this setup.
+        schedule._p2p_initialized = True
+        expected_peers = 1 if self.rank in (0, self.world_size - 1) else 2
+        self.assertEqual(
+            backend._num_active_channels() - channels_before,
+            expected_peers,
+        )
+
+        out = None
+        losses = []
+        for _ in range(2):
+            zero_gradients(stage_modules)
+            if self.rank == 0:
+                out = schedule.step(x, target=target, losses=losses)
+            else:
+                schedule.step()
+
+        dist.barrier(device_ids=[self.rank])
+        if self.rank == 0:
+            torch.testing.assert_close(out, ref_out)
+            torch.testing.assert_close(sum(losses), ref_loss)
+        check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
 
 if __name__ == "__main__":
