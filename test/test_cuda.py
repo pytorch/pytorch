@@ -12364,6 +12364,8 @@ class TestCudaGreenContexts(TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "CUDA_ERROR_UNKNOWN"):
                     green_contexts._get_driver_version()
+                with self.assertRaisesRegex(RuntimeError, "CUDA_ERROR_UNKNOWN"):
+                    green_contexts.is_localization_supported()
         finally:
             green_contexts._get_driver_version.cache_clear()
 
@@ -12526,6 +12528,187 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
         source = SMPartition.from_device(torch.device(device).index)
         with self.assertRaisesRegex(ValueError, message):
             source.split(**kwargs)
+
+    def _require_locality_domains(self, device):
+        from torch.cuda import green_contexts
+
+        self._require_sm_splitting(device)
+        try:
+            green_contexts._ensure_locality_supported()
+        except RuntimeError as error:
+            self.skipTest(str(error))
+        count = green_contexts.get_num_locality_domains(torch.device(device).index)
+        if count < 2:
+            self.skipTest("Multiple locality domains are required")
+        return count
+
+    def test_greencontext_locality_query(self, device):
+        from torch.cuda import green_contexts
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+
+        device_id = torch.device(device).index
+        try:
+            green_contexts._ensure_locality_supported()
+        except RuntimeError:
+            self.assertFalse(green_contexts.is_localization_supported(device_id))
+            with self.assertRaisesRegex(RuntimeError, "13.4"):
+                green_contexts.get_num_locality_domains(device_id)
+            return
+        drv_device = _check_cuda_bindings(drv.cuDeviceGet(device_id))
+        count = _check_cuda_bindings(
+            drv.cuDeviceGetAttribute(
+                drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_COUNT,
+                drv_device,
+            )
+        )
+        self.assertEqual(green_contexts.get_num_locality_domains(device_id), count)
+        self.assertEqual(green_contexts.is_localization_supported(device_id), count > 1)
+        code = """
+import sys
+import torch
+from torch.cuda.green_contexts import get_num_locality_domains
+from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+count = get_num_locality_domains(int(sys.argv[1]))
+print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetCurrent())))
+"""
+        output = subprocess.check_output(
+            [sys.executable, "-c", code, str(device_id)], text=True
+        )
+        self.assertEqual(output.strip(), f"{count} False 0")
+        for query in (
+            green_contexts.get_num_locality_domains,
+            green_contexts.is_localization_supported,
+        ):
+            with self.assertRaises(RuntimeError):
+                query(torch.cuda.device_count())
+
+    @parametrize("visibility", ["ordinal", "uuid", "partial_uuid"])
+    def test_greencontext_locality_nvml(self, device, visibility):
+        from torch.cuda import green_contexts
+
+        try:
+            green_contexts._ensure_locality_supported()
+        except RuntimeError as error:
+            self.skipTest(str(error))
+        device_id = torch.device(device).index
+        uuid = f"GPU-{torch.cuda.get_device_properties(device).uuid}"
+        visible = str(device_id) if visibility == "ordinal" else uuid
+        if visibility == "partial_uuid":
+            visible = uuid[:20]
+        code = """
+import json
+import torch
+from torch.cuda import green_contexts as g
+from cuda.bindings import driver as drv
+nvml = g._is_localization_supported_nvml(0)
+supported = g.is_localization_supported(0)
+uninitialized = drv.cuDeviceGet(0)[0] == drv.CUresult.CUDA_ERROR_NOT_INITIALIZED
+count = g.get_num_locality_domains(0)
+print(json.dumps([nvml, supported, uninitialized, count, torch.cuda.is_initialized()]))
+"""
+        output = subprocess.check_output(
+            [sys.executable, "-c", code],
+            env={**os.environ, "CUDA_VISIBLE_DEVICES": visible},
+            text=True,
+        )
+        nvml, supported, uninitialized, count, torch_initialized = json.loads(output)
+        self.assertEqual(supported, count > 1)
+        self.assertEqual(uninitialized, nvml is not None)
+        self.assertFalse(torch_initialized)
+
+    @parametrize("visible", ["", "GPU-invalid"])
+    def test_greencontext_locality_invalid_visibility(self, visible):
+        from torch.cuda import green_contexts
+
+        try:
+            green_contexts._ensure_locality_supported()
+        except RuntimeError as error:
+            self.skipTest(str(error))
+        code = """
+from torch.cuda.green_contexts import is_localization_supported
+is_localization_supported(0)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env={**os.environ, "CUDA_VISIBLE_DEVICES": visible},
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertRegex(result.stderr, "CUDA_ERROR_(NO|INVALID)_DEVICE")
+
+    @serialTest()
+    def test_greencontext_locality_split(self, device):
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+        from torch.cuda.green_contexts import GreenContext
+
+        count = self._require_locality_domains(device)
+        device_id = torch.device(device).index
+        sms_per_domain = _check_cuda_bindings(
+            drv.cuDeviceGetAttribute(
+                drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_MULTIPROCESSOR_COUNT,
+                device_id,
+            )
+        )
+        contexts = GreenContext.split(
+            coscheduled_sm_count=2,
+            locality_domain_ids=tuple(range(count)),
+            device_id=device_id,
+        )
+        self.assertEqual(
+            [context.locality_domain_id for context in contexts], list(range(count))
+        )
+        self.assertEqual(
+            [context.sm_count for context in contexts], [sms_per_domain] * count
+        )
+        self._check_disjoint_sm_ids(contexts, device)
+
+    @serialTest()
+    def test_greencontext_locality_recursive_split(self, device):
+        from torch.cuda.green_contexts import GreenContext, SMPartition
+
+        count = self._require_locality_domains(device)
+        source = SMPartition.from_device(torch.device(device).index)
+        (first,), rest = source.split(
+            num_sms=4, coscheduled_sm_count=2, locality_domain_ids=0
+        )
+        rest_ctx = GreenContext(sm_partition=rest)
+        (second, unconstrained), rest = rest_ctx.sm_partition.split(
+            num_sms=(4, 4),
+            coscheduled_sm_count=2,
+            locality_domain_ids=(count - 1, None),
+        )
+        self.assertEqual(first.locality_domain_id, 0)
+        self.assertEqual(second.locality_domain_id, count - 1)
+        self.assertEqual(rest.sm_count, source.sm_count - 12)
+        parent = GreenContext(sm_partition=first)
+        (child,), rest = parent.sm_partition.split(
+            num_sms=2, coscheduled_sm_count=2, locality_domain_ids=0
+        )
+        self.assertEqual((child.sm_count, rest.sm_count), (2, 2))
+        self.assertEqual(child.locality_domain_id, 0)
+        contexts = [
+            GreenContext(sm_partition=p) for p in (child, second, unconstrained)
+        ]
+        self._check_disjoint_sm_ids(contexts, device)
+
+    def test_greencontext_locality_backfill(self, device):
+        from torch.cuda.green_contexts import SMPartition
+
+        self._require_locality_domains(device)
+        source = SMPartition.from_device(torch.device(device).index)
+        with self.assertRaises(RuntimeError):
+            source.split(
+                num_sms=source.sm_count, coscheduled_sm_count=2, locality_domain_ids=0
+            )
+        (partition,), rest = source.split(
+            num_sms=source.sm_count,
+            coscheduled_sm_count=2,
+            locality_domain_ids=0,
+            backfill=True,
+        )
+        self.assertEqual(partition.sm_count, source.sm_count)
+        self.assertIsNone(rest)
 
     def test_greencontext_set_pop_context_deprecation(self):
         # need to start on a side stream as we are comparing pointers and want to avoid
