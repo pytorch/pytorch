@@ -9025,6 +9025,19 @@ def sym_numel(a):
     return a.get_numel()
 
 
+@register_lowering(aten.sym_storage_offset.default)
+def sym_storage_offset(a):
+    # Read the value off the node's metadata, like sym_size / sym_stride above.
+    # Without a lowering this op falls back to being re-executed on a tensor
+    # rebuilt by ir_node_to_tensor(), which allocates with torch.empty_strided()
+    # and therefore always reports a storage offset of 0.
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
+
+
 def _unwrap_symbolic_magic_arg(x):
     if isinstance(x, SymTypes):
         return x.node.expr
