@@ -58,7 +58,9 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     device_sleep,
     get_cycles_per_ms,
+    instantiate_parametrized_tests,
     MI200_ARCH,
+    parametrize,
     run_tests,
     skipIfRocm,
     skipIfTorchInductor,
@@ -1785,9 +1787,11 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 
         torch.manual_seed(42 + self.rank)
         inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(2)]
-        model.set_requires_gradient_sync(False)
-        model(inputs[0]).sum().backward()
-        model.finalize_backward()
+        with CommDebugMode() as comm_mode:
+            model.set_requires_gradient_sync(False)
+            model(inputs[0]).sum().backward()
+            model.finalize_backward()
+        self.assertEqual(comm_mode.get_comm_counts()[c10d_ops._reduce_scatter_base_], 0)
         model.set_requires_gradient_sync(True)
         model(inputs[1]).sum().backward()
         model.finalize_backward()
@@ -1834,6 +1838,35 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         self.assertIn("must be called after backward completes", errors[0])
         model.finalize_backward()
         model.finalize_backward()
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    @parametrize("initial_mode", [False, True])
+    def test_manual_backward_finalization_mode_is_fixed(self, initial_mode):
+        model = nn.Linear(8, 8, bias=False).to(device_type)
+        fully_shard(model, reshard_after_forward=False)
+        model.set_manual_backward_finalization(initial_mode)
+        errors = []
+
+        def change_mode(grad):
+            try:
+                model.set_manual_backward_finalization(not initial_mode)
+            except RuntimeError as error:
+                errors.append(str(error))
+            return grad
+
+        loss = model(torch.randn(4, 8, device=device_type.type)).sum()
+        loss.register_hook(change_mode)
+        loss.backward()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("cannot change mode during backward", errors[0])
+        if initial_mode:
+            with self.assertRaisesRegex(RuntimeError, "after backward starts"):
+                model.set_manual_backward_finalization(False)
+            model.finalize_backward()
+        state = model._get_fsdp_state()
+        self.assertEqual(state._comm_ctx.reduce_scatter_states, [])
+        self.assertIsNone(state._state_ctx.manual_backward_finalization_active)
+        model.set_manual_backward_finalization(not initial_mode)
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_manual_backward_finalization_partial_group(self):
@@ -3073,6 +3106,9 @@ class TestFullyShardCudaGraph(FSDPTest):
                 graph.replay()
                 for graph_grad, ref_grad in zip(graph_grads, ref_grads):
                     self.assertEqual(graph_grad, ref_grad)
+
+
+instantiate_parametrized_tests(TestFullyShardGradientAccumulation)
 
 
 if __name__ == "__main__":

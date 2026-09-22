@@ -985,7 +985,7 @@ class _PipelineStageBase(ABC):
 
         composite_kwargs = kwargs or {}
 
-        if isinstance(self.submod, FSDPModule):
+        if isinstance(self.submod, FSDPModule) and self.has_backward:
             self.submod.set_manual_backward_finalization(True)
 
         if self._runtime_validate:
@@ -1277,10 +1277,11 @@ class _PipelineStageBase(ABC):
 
     def perform_reduce_grad(self, grad_scale_factor: int):
         r"""Finalize FSDP gradient accumulation and scale stage gradients."""
-        if isinstance(self.submod, FSDPModule):
+        if isinstance(self.submod, FSDPModule) and self.has_backward:
             self.submod.set_requires_gradient_sync(True)
             self.submod.set_reshard_after_backward(True)
             self.submod.finalize_backward()
+            self.submod.set_manual_backward_finalization(False)
         # Call gradient scaling at the end of the backward pass
         # NOTE: this must happen after FSDP post_backward is FSDP is enabled
         if grad_scale_factor != 1:

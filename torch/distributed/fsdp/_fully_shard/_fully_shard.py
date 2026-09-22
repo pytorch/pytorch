@@ -19,7 +19,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, is_bw, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -421,12 +421,24 @@ class FSDPModule:
         gradients may remain unreduced and backward iteration state is retained.
         Gradient synchronization and parameter resharding follow their current
         settings.
+
+        Set this before backward. The mode cannot change after backward starts
+        until the backward iteration is finalized or reset.
         """
         state = self._get_fsdp_state()
         if state._is_root is False:
             raise RuntimeError(
                 "set_manual_backward_finalization must be called on the root "
                 f"{state._state_name} module"
+            )
+        if enabled != state._state_ctx.manual_backward_finalization and is_bw():
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode during backward"
+            )
+        active_mode = state._state_ctx.manual_backward_finalization_active
+        if active_mode is not None and enabled != active_mode:
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode after backward starts"
             )
         state._state_ctx.manual_backward_finalization = enabled
 

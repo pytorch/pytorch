@@ -53,6 +53,8 @@ class FSDPStateContext(Generic[_StateType]):
         self.is_last_backward: bool = True
         # Whether backward finalization is owned by the caller
         self.manual_backward_finalization: bool = False
+        # Manual finalization mode selected when backward starts
+        self.manual_backward_finalization_active: bool | None = None
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
@@ -414,6 +416,11 @@ class FSDPState(_State):
     def _root_post_backward_final_callback(self) -> None:
         logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
+            manual_finalization = self._state_ctx.manual_backward_finalization_active
+            if manual_finalization is None:
+                raise AssertionError(
+                    "Expected manual backward finalization mode to be set"
+                )
             # Reset per-iteration state. With chunked loss, each standalone
             # per-chunk call repopulates an inner state's
             # ``_modules_to_run_forward`` (and claims ``iter_forward_root``)
@@ -429,10 +436,7 @@ class FSDPState(_State):
                 # per-param-mesh modules whose inputs lack gradients.
                 for fsdp_param_group in reversed(state._fsdp_param_groups):
                     if fsdp_param_group._training_state != TrainingState.POST_BACKWARD:
-                        if (
-                            self._state_ctx.manual_backward_finalization
-                            and fsdp_param_group.reduce_grads
-                        ):
+                        if manual_finalization and fsdp_param_group.reduce_grads:
                             fsdp_param_group._post_backward_pending = True
                         else:
                             # Run post-backward in case forward inputs did not require
@@ -440,10 +444,7 @@ class FSDPState(_State):
                             fsdp_param_group.post_backward()
                     fsdp_param_group._training_state = TrainingState.IDLE
                 state._training_state = TrainingState.IDLE
-            if (
-                self._state_ctx.is_last_backward
-                and not self._state_ctx.manual_backward_finalization
-            ):
+            if self._state_ctx.is_last_backward and not manual_finalization:
                 self._end_backward_iteration()
             self._state_ctx.post_backward_final_callback_queued = False
 
@@ -457,7 +458,10 @@ class FSDPState(_State):
                     "finalize_backward must be called on the root "
                     f"{self._state_name} module"
                 )
-            if not self._state_ctx.manual_backward_finalization:
+            manual_finalization = self._state_ctx.manual_backward_finalization_active
+            if manual_finalization is None:
+                manual_finalization = self._state_ctx.manual_backward_finalization
+            if not manual_finalization:
                 raise RuntimeError(
                     f"{self._state_name} finalize_backward requires manual backward "
                     "finalization. Call "
@@ -530,6 +534,7 @@ class FSDPState(_State):
             if rs_state.event is not None:
                 self._device_handle.current_stream().wait_event(rs_state.event)
         self._comm_ctx.reduce_scatter_states.clear()
+        self._state_ctx.manual_backward_finalization_active = None
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
@@ -566,6 +571,10 @@ class FSDPState(_State):
     def _register_root_post_backward_final_callback(self):
         if self._state_ctx.post_backward_final_callback_queued:
             return
+        if self._state_ctx.manual_backward_finalization_active is None:
+            self._state_ctx.manual_backward_finalization_active = (
+                self._state_ctx.manual_backward_finalization
+            )
         self._state_ctx.post_backward_final_callback_queued = True
         Variable._execution_engine.queue_callback(
             self._root_post_backward_final_callback
@@ -602,6 +611,7 @@ class FSDPState(_State):
                 fsdp_param_group._reset_iter_state()
         self._state_ctx.iter_forward_root = None
         self._state_ctx.post_backward_final_callback_queued = False
+        self._state_ctx.manual_backward_finalization_active = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:

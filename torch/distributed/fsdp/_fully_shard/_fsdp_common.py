@@ -189,7 +189,10 @@ def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
 
 
 def is_bw() -> bool:
-    return torch._C._current_graph_task_id() != -1
+    return (
+        torch._C._current_graph_task_id() != -1
+        or torch._dynamo.compiled_autograd.in_compiled_autograd_region
+    )
 
 
 @dataclass

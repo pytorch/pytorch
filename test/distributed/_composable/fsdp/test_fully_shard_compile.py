@@ -23,7 +23,11 @@ from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -122,6 +126,30 @@ class TestFullyShardCompileCompute(FSDPTest):
         #   graph break 1: _pre_backward tensor hook
         #   graph break 2: post_backward (from RegisterPostBackwardFunction)
         self.assertEqual(backend_count, 2)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @parametrize("initial_mode", [False, True])
+    def test_manual_finalization_mode_change_in_compiled_backward(self, initial_mode):
+        torch._dynamo.reset()
+        model = nn.Linear(8, 8, bias=False).to(device_type)
+        fully_shard(model, reshard_after_forward=False)
+        model.set_manual_backward_finalization(initial_mode)
+
+        def change_mode(grad):
+            model.set_manual_backward_finalization(not initial_mode)
+            return grad
+
+        loss = model(torch.randn(4, 8, device=device_type)).sum()
+        loss.register_hook(change_mode)
+
+        def compiler_fn(gm):
+            return torch.compile(gm, backend="eager")
+
+        with compiled_autograd._enable(compiler_fn):
+            with self.assertRaisesRegex(RuntimeError, "during backward"):
+                loss.backward()
+        model.reset_iter_state()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -287,6 +315,9 @@ class TestFullyShardCompile(FSDPTest):
         m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
         inp = torch.randn(32, 784, device=device_type)
         m(inp)
+
+
+instantiate_parametrized_tests(TestFullyShardCompileCompute)
 
 
 if __name__ == "__main__":
