@@ -2,6 +2,9 @@
 name: inductor-perf-b200
 
 on:
+  push:
+    tags:
+      - ciflow/b200/*
   schedule:
     - cron: 0 7 * * 1-6
     - cron: 0 7 * * 0
@@ -101,7 +104,7 @@ jobs:
           { config: "inductor_timm_perf_cuda_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
           { config: "inductor_torchbench_perf_cuda_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
-      selected-test-configs: ${{ inputs.benchmark_configs }}
+      selected-test-configs: ${{ github.event_name == 'push' && 'inductor_torchbench_perf_cuda_b200' || inputs.benchmark_configs }}
       build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
@@ -147,10 +150,10 @@ jobs:
     name: cuda13.0-py3.12-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
-    if: github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}
+      dashboard-tag: training-${{ github.event_name == 'push' || inputs.training }}-inference-${{ github.event_name == 'push' || inputs.inference }}-default-${{ github.event_name == 'push' || inputs.default }}-dynamic-${{ github.event_name == 'push' || inputs.dynamic }}-cudagraphs-${{ github.event_name == 'push' || inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only

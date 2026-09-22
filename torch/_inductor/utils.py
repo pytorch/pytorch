@@ -5466,17 +5466,20 @@ def python_subprocess_env() -> dict[str, str]:
     Get a base environment for running Python subprocesses.
     """
 
+    torch_source_root = os.path.dirname(os.path.dirname(os.path.abspath(torch.__file__)))
     torch_package_root = os.path.dirname(
-        os.path.dirname(os.path.abspath(torch.__file__))
+        os.path.dirname(os.path.abspath(torch._C.__file__))
+    )
+    python_path = (
+        torch_package_root
+        if torch_package_root != torch_source_root
+        else os.pathsep.join((torch_package_root, *sys.path))
     )
     env = {
         # Inherit the environment of the current process.
         **os.environ,
         # Set the PYTHONPATH so the subprocess can find torch.
-        "PYTHONPATH": os.environ.get(
-            "TORCH_CUSTOM_PYTHONPATH",
-            os.pathsep.join((torch_package_root, *sys.path)),
-        ),
+        "PYTHONPATH": os.environ.get("TORCH_CUSTOM_PYTHONPATH", python_path),
     }
 
     # Set PYTHONHOME for internal builds, to account for builds that bundle the
