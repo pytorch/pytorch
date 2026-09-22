@@ -56,12 +56,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfRocm,
-    TEST_WITH_ROCM,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -120,18 +115,11 @@ class RingAttentionTest(DTensorTestBase):
     )
     @with_comms
     def test_ring_attention_sdpa(self) -> None:
-        # On ROCm, efficient-attention fp32 diverges from the full-sequence result
-        # by up to 3e-4 through the context-parallel merge, above the 2e-6 tolerance.
-        ring_backends = [
-            b
-            for b in backends
-            if not (TEST_WITH_ROCM and b == SDPBackend.EFFICIENT_ATTENTION)
-        ]
         self.run_subtests(
             {
                 "is_causal": [True, False],
                 "compiled": [True, False],
-                "backend": ring_backends,
+                "backend": backends,
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
@@ -318,19 +306,16 @@ class RingAttentionTest(DTensorTestBase):
         )
 
         # Due to numerical error, we need to choose different atol for different
-        # attention kernels. The bf16 backends run into bf16's own quantization
-        # floor: dv sums the whole sequence, so with grad_out=ones it reaches
-        # ~10 under a causal mask, where one bf16 ulp is already 0.0625. That
-        # floor does not shrink with world_size the way an atol scaled by it
-        # does, so the bf16 backends need an rtol above bf16 eps (2**-8) to
-        # compare at all.
+        # attention kernels. Both scale with world_size: the merge accumulates one
+        # rescaling step per rank. The bf16 backends additionally run into bf16's
+        # own quantization floor: dv sums the whole sequence, so with grad_out=ones
+        # it reaches ~10 under a causal mask, where one bf16 ulp is already 0.0625.
+        # That floor does not shrink with world_size the way an atol scaled by it
+        # does, so they need an rtol above bf16 eps (2**-8) to compare at all.
         (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [seq_dim])
-        atol = (
-            2e-06
-            if backend == SDPBackend.EFFICIENT_ATTENTION
-            else 8e-3 * self.world_size
-        )
-        rtol = 1e-05 if backend == SDPBackend.EFFICIENT_ATTENTION else 2e-2
+        is_eff = backend == SDPBackend.EFFICIENT_ATTENTION
+        atol = self.world_size * (1e-06 if is_eff else 8e-3)
+        rtol = 1e-05 if is_eff else 2e-2
         torch.testing.assert_close(out, cp_out, atol=atol, rtol=rtol)
 
         if test_forward_only:
