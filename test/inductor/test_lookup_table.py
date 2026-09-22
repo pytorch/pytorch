@@ -171,9 +171,6 @@ class BaseLookupTableTest(TestCase):
 
 
 @unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
-# @skipIfXPU(
-#     msg="Lookup table returns empty on XPU: https://github.com/intel/torch-xpu-ops/issues/5442"
-# )
 @instantiate_parametrized_tests
 class TestLookupTable(BaseLookupTableTest):
     """Consolidated tests for lookup table functionality"""
