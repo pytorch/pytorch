@@ -141,12 +141,12 @@ class PrecompileSummary:
             that variant cannot notice whatever it checked. The default filter
             drops the guards the serializer cannot save: the identity guards
             (``ID_MATCH``, ``FUNCTION_MATCH``, ``NN_MODULE`` and the like),
-            ``DICT_VERSION`` and ``WEAKREF_ALIVE``, so a load cannot notice that
-            an object they checked was rebound, mutated or collected; a
-            caller-supplied filter decides its own set. A slot is listed under
-            the guard's own type whatever the reason for the drop, so a
-            ``TENSOR_MATCH`` rejected for what its check derives is a dropped
-            ``TENSOR_MATCH``.
+            ``WEAKREF_ALIVE`` and most ``DICT_VERSION`` guards, so a load cannot
+            notice that an object they checked was rebound, mutated or
+            collected; a caller-supplied filter decides its own set. A slot is
+            listed under the guard's own type whatever the reason for the drop,
+            so a ``TENSOR_MATCH`` rejected for what its check derives is a
+            dropped ``TENSOR_MATCH``.
         kept_guards: Slots the serialized copy's guard filter kept and the
             invariance policy left in place.
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
