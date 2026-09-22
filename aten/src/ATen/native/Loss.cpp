@@ -500,4 +500,22 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
+
+Tensor smape_loss(const Tensor& self, const Tensor& target, double eps, int64_t reduction) {
+  TORCH_CHECK(eps >= 0, "smape_loss does not support negative eps, got ", eps);
+  TORCH_CHECK(
+      self.is_floating_point() && target.is_floating_point(),
+      "smape_loss is defined on floating point tensors");
+  auto diff = (self - target).abs();
+  auto denom = self.abs() + target.abs() + eps;
+  return apply_loss_reduction(diff / denom * 2, reduction);
+}
+
+Tensor squared_hinge_loss(const Tensor& self, const Tensor& target, int64_t reduction) {
+  TORCH_CHECK(
+      self.is_floating_point() && target.is_floating_point(),
+      "squared_hinge_loss is defined on floating point tensors");
+  auto margin = at::clamp_min(1 - self * target, 0);
+  return apply_loss_reduction(margin * margin, reduction);
+}
 }  // namespace at::native

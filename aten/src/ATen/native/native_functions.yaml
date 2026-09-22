@@ -2933,6 +2933,16 @@
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
 
+- func: smape_loss(Tensor self, Tensor target, float eps=1e-8, int reduction=Mean) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: smape_loss
+
+- func: squared_hinge_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: squared_hinge_loss
+
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
