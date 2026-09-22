@@ -15,11 +15,8 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
-from torch._dynamo.guards import GuardManagerWrapper
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
@@ -525,6 +522,43 @@ user_stack=None)
         self.assertTrue(
             "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
         )
+
+    def test_tensor_match_guard_throw_restores_torch_function(self):
+        # The root disables the TorchFunction TLS while its accessors run and
+        # restores it on scope exit, so a C++ throw out of an accessor leaves
+        # the state as it found it. TENSOR_MATCH on a strided nested tensor is
+        # such a throw: it fires a TORCH_CHECK reading the strides (check) or
+        # sizes (check_verbose). The guard is built from explicit size and
+        # stride lists because building it from the tensor reads the same
+        # strides, and the accessor is the root's own so nothing else can
+        # reject the input first.
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager("x", "L['x']", nested, default_mgr_enum)
+        manager.add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "x",
+            ["check_tensor(x)"],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        # Under a non-default state, so restoring the captured old state is
+        # told apart from resetting to ENABLED.
+        err = "NestedTensorImpl doesn't support"
+        with torch._C.DisableTorchFunctionSubclass():
+            state = torch._C._get_torch_function_state()
+            self.assertEqual(state, torch._C._TorchFunctionState.SUBCLASSES_DISABLED)
+            with self.assertRaisesRegex(RuntimeError, err):
+                root.check({"x": nested})
+            self.assertEqual(torch._C._get_torch_function_state(), state)
+            with self.assertRaisesRegex(RuntimeError, err):
+                root.check_verbose({"x": nested})
+            self.assertEqual(torch._C._get_torch_function_state(), state)
 
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
@@ -2440,62 +2474,6 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
 
         expected = handler.get_metadata_fn(guard, {float("nan"): None})
         self.assertTrue(handler.eval_fn({float("nan"): None}, expected))
-
-
-class GuardManagerWrapperTests(torch._dynamo.test_case.TestCase):
-    @parametrize("method", ["check", "check_verbose"])
-    @parametrize("exc", [RuntimeError, KeyboardInterrupt], name_fn=lambda e: e.__name__)
-    def test_restores_torch_function_after_the_root_raises(self, method, exc):
-        # A stub root stands in for RootGuardManager::check_nopybind_template's
-        # non-RAII exit: it leaves the TorchFunction TLS disabled and raises. The
-        # wrapper puts the state back and lets the raise through unchanged, for
-        # an interrupt as much as for the RuntimeError a C++ throw arrives as.
-        class LeaksThenRaises:
-            def check(self, f_locals):
-                torch._C._set_torch_function_state(
-                    torch._C._TorchFunctionState.ALL_DISABLED
-                )
-                raise exc("out of the tree")
-
-            check_verbose = check
-
-        wrapper = GuardManagerWrapper(LeaksThenRaises())
-        state = torch._C._get_torch_function_state()
-        with self.assertRaisesRegex(exc, "out of the tree"):
-            getattr(wrapper, method)({})
-        self.assertEqual(torch._C._get_torch_function_state(), state)
-
-    @parametrize("method", ["check", "check_verbose"])
-    def test_restores_torch_function_after_the_tree_throws(self, method):
-        # The exit the stub above stands in for. TENSOR_MATCH on a strided
-        # nested tensor fires a TORCH_CHECK reading its strides (check) or sizes
-        # (check_verbose); under an accessor that happens while the TLS is
-        # disabled, so the throw leaves it that way. The guard is built from
-        # explicit size and stride lists because building it from the tensor
-        # reads the same strides, and the accessor is the root's own so nothing
-        # else can reject the input first.
-        nested = torch.nested.nested_tensor(
-            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
-        )
-        root = RootGuardManager()
-        manager = root.dict_getitem_manager("x", "L['x']", nested, default_mgr_enum)
-        manager.add_tensor_match_guard(
-            nested,
-            [None] * 3,
-            [None] * 3,
-            "x",
-            ["check_tensor(x)"],
-            None,
-            type(nested),
-            torch._C._dispatch_keys(nested),
-        )
-        state = torch._C._get_torch_function_state()
-        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
-            getattr(GuardManagerWrapper(root), method)({"x": nested})
-        self.assertEqual(torch._C._get_torch_function_state(), state)
-
-
-instantiate_parametrized_tests(GuardManagerWrapperTests)
 
 
 if __name__ == "__main__":
