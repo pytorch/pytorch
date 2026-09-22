@@ -3302,7 +3302,8 @@ inline std::vector<std::optional<c10::SymInt>> to_opt_symint(
 // dtype, device, requires_grad, sizes, strides) for the dict-tag fast path.
 inline TensorCheck make_tensor_check(
     const LocalState& state,
-    const at::Tensor& tensor) {
+    const at::Tensor& tensor,
+    bool device_index_is_current) {
   auto layout = tensor.layout();
   bool sparse = layout == c10::kSparseCsr || layout == c10::kSparseCsc ||
       layout == c10::kSparseBsc || layout == c10::kSparseBsr;
@@ -3317,7 +3318,24 @@ inline TensorCheck make_tensor_check(
       tensor,
       tensor.key_set(),
       to_opt_symint(tensor.sizes()),
-      std::move(strides));
+      std::move(strides),
+      device_index_is_current);
+}
+
+// Mirrors _guard_device_index_is_current in torch/_dynamo/guards.py: under
+// compile_on_one_rank an accelerator tensor's index is the compiling rank's and
+// carries no information, so the snapshot has to compare against the runtime
+// current device the way the TENSOR_MATCH leaf does. Pinning it here instead
+// would let the unchanged-dict-tag fast path accept a tensor left behind on
+// another device, which the leaf itself rejects.
+inline bool coor_device_index_is_current(
+    bool compile_on_one_rank,
+    const at::Tensor& tensor) {
+  if (!compile_on_one_rank) {
+    return false;
+  }
+  auto acc = at::accelerator::getAccelerator(false);
+  return acc.has_value() && tensor.device().type() == acc.value();
 }
 
 struct RecordedTensorMetadata {
@@ -4646,10 +4664,20 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_tensor_metadata(PyObject* tensor_pointer) {
+    const at::Tensor& tensor = THPVariable_Unpack(tensor_pointer);
     _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
         py::reinterpret_borrow<py::object>(tensor_pointer),
-        make_tensor_check(_local_state, THPVariable_Unpack(tensor_pointer)),
+        make_tensor_check(
+            _local_state,
+            tensor,
+            coor_device_index_is_current(_compile_on_one_rank, tensor)),
     });
+  }
+
+  // Whether this graph was traced with compile_on_one_rank. Set from Python
+  // alongside guard construction; see record_tensor_metadata.
+  void set_compile_on_one_rank(bool value) {
+    _compile_on_one_rank = value;
   }
 
  public:
@@ -4657,6 +4685,9 @@ class RootGuardManager : public GuardManager {
   LocalState _local_state;
 
  private:
+  // See set_compile_on_one_rank.
+  bool _compile_on_one_rank = false;
+
   // All the relational guards under this guard manager. We only use these
   // when the guard evaluates to False. This ensures that guard state is reset
   // on guard failure so that next invocation is clean.
@@ -8852,6 +8883,8 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
       .def("get_local_state", &RootGuardManager::get_local_state)
       .def("set_local_state", &RootGuardManager::set_local_state)
+      .def(
+          "set_compile_on_one_rank", &RootGuardManager::set_compile_on_one_rank)
       .def("clone_manager", &RootGuardManager::clone_manager)
       // return by reference because GuardManager has the ownership of leaf
       // guards
