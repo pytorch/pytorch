@@ -555,6 +555,44 @@ user_stack=None)
             root.check_verbose({"x": nested})
         self.assertEqual(torch._C._get_torch_function_state(), state)
 
+    def test_relational_guard_state_resets_after_the_tree_throws(self):
+        # NO_TENSOR_ALIASING records every tensor it is handed and the root
+        # clears that record on scope exit. y's TENSOR_MATCH throws after x is
+        # recorded and before y is, so a reset that only ran on returning exits
+        # would leave x behind and the next check would fail on "Duplicate
+        # tensor" instead of reaching the throw again. check and check_verbose
+        # alternate so each one's exit is checked by the other's entry.
+        a = torch.randn(3)
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        root = RootGuardManager()
+        x_mgr = root.dict_getitem_manager("x", "L['x']", a, default_mgr_enum)
+        y_mgr = root.dict_getitem_manager("y", "L['y']", nested, default_mgr_enum)
+        y_mgr.add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "y",
+            ["check_tensor(y)"],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        install_no_tensor_aliasing_guard(
+            [x_mgr, y_mgr], ["x", "y"], ["no_aliasing(x, y)"], None
+        )
+        f_locals = {"x": a, "y": nested}
+        for _ in range(2):
+            with self.assertRaisesRegex(
+                RuntimeError, "NestedTensorImpl doesn't support"
+            ):
+                root.check(f_locals)
+            with self.assertRaisesRegex(
+                RuntimeError, "NestedTensorImpl doesn't support"
+            ):
+                root.check_verbose(f_locals)
+
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
