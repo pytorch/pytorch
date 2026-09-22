@@ -255,6 +255,46 @@ def get_example_inputs(key: str) -> list[Any]:
     return _EXAMPLE_INPUTS[key]
 
 
+_DELAYED_COMPILE_CACHE_SCOPES = threading.local()
+
+
+@dataclass
+class _DelayedCompileCacheScope:
+    cache_codes: set[types.CodeType]
+    observed_codes: set[types.CodeType]
+
+
+def _enter_delayed_compile_cache_scope() -> None:
+    scopes = getattr(_DELAYED_COMPILE_CACHE_SCOPES, "scopes", None)
+    if scopes is None:
+        scopes = []
+        _DELAYED_COMPILE_CACHE_SCOPES.scopes = scopes
+    scopes.append(_DelayedCompileCacheScope(set(), set()))
+
+
+def _record_delayed_compile_cache_code(code: types.CodeType) -> None:
+    scopes = getattr(_DELAYED_COMPILE_CACHE_SCOPES, "scopes", None)
+    if scopes:
+        scopes[-1].cache_codes.add(code)
+
+
+def _record_delayed_compile_observation(code: types.CodeType) -> bool:
+    scopes = getattr(_DELAYED_COMPILE_CACHE_SCOPES, "scopes", None)
+    if not scopes:
+        return True
+    if code in scopes[-1].observed_codes:
+        return False
+    scopes[-1].observed_codes.add(code)
+    return True
+
+
+def _exit_delayed_compile_cache_scope() -> None:
+    scopes = _DELAYED_COMPILE_CACHE_SCOPES.scopes
+    scope = scopes.pop()
+    for code in scope.cache_codes:
+        reset_code(code)
+
+
 @contextlib.contextmanager
 def _set_in_optimized_module() -> Generator[None, None, None]:
     # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
@@ -373,26 +413,73 @@ def _get_or_add_example_inputs(frame: DynamoFrameType) -> list[Any]:
     return example_inputs
 
 
+def _get_delayed_compile_phase(frame: DynamoFrameType) -> int:
+    context = code_context.get_context(frame.f_code)
+    phase = context.setdefault("delayed_compile_phase", 0)
+    if phase < 2 and _record_delayed_compile_observation(frame.f_code):
+        phase += 1
+        context["delayed_compile_phase"] = phase
+    return phase
+
+
+def _delayed_compile_uses_native_pgo(stance: StanceStr) -> bool:
+    # "eager_then_compile" never traces its first invocation, so native PGO has
+    # nothing to observe there; it always uses the legacy snapshot diff.
+    return stance == "aot_eager_then_compile" and config.delayed_compile_use_native_pgo
+
+
+def _aot_eager_safe_backward_compiler(
+    graph_module: torch.fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+) -> Callable[..., Any]:
+    # AOT eager executes this graph verbatim, without Inductor's unconditional
+    # view-to-reshape normalization. Runtime kernels can return a different
+    # stride than FakeTensor predicted, making an otherwise traced view invalid.
+    for node in graph_module.graph.find_nodes(
+        op="call_function",
+        target=torch.ops.aten.view.default,
+    ):
+        node.target = torch.ops.aten.reshape.default
+
+    from .backends.debugging import boxed_nop
+
+    return boxed_nop(graph_module, example_inputs)
+
+
 def _create_delayed_compile_callback(
     callback: DynamoCallback, stance: StanceStr
 ) -> Callable[..., Any]:
     def callback_fn(*args: Any, **kwargs: Any) -> convert_frame.ConvertFrameReturn:
         frame = args[0]
-        example_inputs = _get_or_add_example_inputs(frame)
 
-        if len(example_inputs) == 1:
-            if stance == "eager_then_compile":
-                return ConvertFrameReturn(
-                    frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.DEFAULT, FrameAction.DEFAULT
+        if _delayed_compile_uses_native_pgo(stance):
+            phase = _get_delayed_compile_phase(frame)
+            if phase == 1:
+                if stance == "aot_eager_then_compile":
+                    aot_eager_fn = functools.partial(
+                        get_compiler_fn("aot_eager"),
+                        bw_compiler=_aot_eager_safe_backward_compiler,
                     )
-                )
-            elif stance == "aot_eager_then_compile":
-                aot_eager_fn = get_compiler_fn("aot_eager")
-                return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
+                    result = _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
+                    if result.guarded_code is not None:
+                        _record_delayed_compile_cache_code(frame.f_code)
+                    return result
+        else:
+            example_inputs = _get_or_add_example_inputs(frame)
+            if len(example_inputs) == 1:
+                if stance == "eager_then_compile":
+                    return ConvertFrameReturn(
+                        frame_exec_strategy=FrameExecStrategy(
+                            FrameAction.DEFAULT, FrameAction.DEFAULT
+                        )
+                    )
+                elif stance == "aot_eager_then_compile":
+                    aot_eager_fn = get_compiler_fn("aot_eager")
+                    return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
 
-        dynamism = track_dynamism_across_examples(example_inputs)
-        code_context.get_context(frame.f_code)["dynamism"] = dynamism
+            dynamism = track_dynamism_across_examples(example_inputs)
+            code_context.get_context(frame.f_code)["dynamism"] = dynamism
+
         compiler_fn = callback._torchdynamo_orig_backend._torchdynamo_orig_backend  # type: ignore[union-attr]
         return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
 
@@ -1255,6 +1342,11 @@ class _TorchDynamoContext:
                 # balanced even if the inner finally itself raises (e.g. the
                 # fullgraph "found no compiled frames" error).
                 torch._C._dynamo_save_local_dispatch_key_set()
+                delayed_compile_cache_scope = _delayed_compile_uses_native_pgo(
+                    _stance.stance
+                )
+                if delayed_compile_cache_scope:
+                    _enter_delayed_compile_cache_scope()
                 try:
                     call_succeeded = False
                     try:
@@ -1316,6 +1408,8 @@ class _TorchDynamoContext:
                     # outer finally so it runs even if the inner finally raised,
                     # keeping the save/restore stack balanced.
                     torch._C._dynamo_restore_local_dispatch_key_set()
+                    if delayed_compile_cache_scope:
+                        _exit_delayed_compile_cache_scope()
                 return result
             finally:
                 if fullgraph_count_enabled:
