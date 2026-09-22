@@ -3382,7 +3382,7 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"list({ref}.keys()) == {list(value.keys())}")
         # The keys, not the values: the leaf snapshots them and compares the
         # list by value at run time.
-        for key in value:
+        for key in value.keys():
             self._compared_by_value(key)
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_mapping_keys_guard(
@@ -5031,7 +5031,7 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if (
             id(obj) in self.guard_tree_values
-            and _instance_dict(obj) is not None
+            and (fields := _instance_dict(obj)) is not None
             and not inspect.isfunction(obj)
             and type(obj).__qualname__ == type(obj).__name__
             and not _is_torch_type(type(obj))
@@ -5053,7 +5053,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             # fields no guard names) and pytree-registered or opaque constants
             # (EQUALS_MATCH compares the object by value at run time) travel
             # whole, and a local class falls through to the loud refusal below.
-            return type(obj).__new__, (type(obj),), self._pruned_state(obj)
+            return type(obj).__new__, (type(obj),), self._pruned_state(fields)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -5089,21 +5089,22 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _keeps_attribute(self, obj: Any, name: str, attr: Any) -> bool:
-        """Whether a guarded object's ``__dict__`` entry travels as is.
+    def _keeps_attribute(self, name: str, attr: Any, module_state: bool) -> bool:
+        """Whether a guarded object's ``__dict__`` entry travels as is; the two
+        callers decide what an entry that does not becomes.
 
         Reaching an object through the guard tree does not mean its whole state
-        is needed, only the attributes a guard actually reads. The rest becomes
-        the _Missing sentinel, which is what keeps an unpicklable bystander (a
-        generator, a live iterator, a C handle) from taking the frame down.
-        What the object itself reads back at load stays: for a module, the
-        containers in _NN_MODULE_STATE_ATTRS. Callables stay too, as they always
-        did for modules (hooks, forward references), so a partial or C callable
-        closing over unpicklable state still fails the dump loudly.
+        is needed, only the attributes a guard actually reads; the rest is what
+        an unpicklable bystander (a generator, a live iterator, a C handle)
+        hides in. What the object itself reads back at load stays: on the module
+        path (``module_state``), the containers in _NN_MODULE_STATE_ATTRS.
+        Callables stay too, as they always did for modules (hooks, forward
+        references), so a partial or C callable closing over unpicklable state
+        still fails the dump loudly.
         """
         if isinstance(attr, (torch.Tensor, torch.nn.Module)):
             return True
-        if isinstance(obj, torch.nn.Module) and name in _NN_MODULE_STATE_ATTRS:
+        if module_state and name in _NN_MODULE_STATE_ATTRS:
             return True
         if id(attr) in self.guard_tree_values or callable(attr):
             return True
@@ -5118,10 +5119,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         because _unpickle_ddp_module rebuilds it through nn.Module.__setstate__).
         """
         for name, attr in obj.__dict__.items():
-            if not self._keeps_attribute(obj, name, attr):
+            if not self._keeps_attribute(name, attr, module_state=True):
                 self.missing_values[id(attr)] = attr
 
-    def _pruned_state(self, obj: Any) -> dict[str, Any]:
+    def _pruned_state(self, fields: dict[str, Any]) -> dict[str, Any]:
         """The state a guarded user object is rebuilt from: its ``__dict__`` with
         every unguarded attribute replaced by the sentinel. Scoped to this one
         receiver, so a value it shares with an object that is pickled whole (one
@@ -5131,9 +5132,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         and length at load."""
         return {
             name: attr
-            if self._keeps_attribute(obj, name, attr)
+            if self._keeps_attribute(name, attr, module_state=False)
             else self._missing("unguarded attribute")
-            for name, attr in (_instance_dict(obj) or {}).items()
+            for name, attr in fields.items()
         }
 
 
