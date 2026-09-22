@@ -2075,6 +2075,16 @@
       ]
     }
   ],
+  "GB1472": [
+    {
+      "Gb_type": "classmethod of non-Python function",
+      "Context": "tp_descr_get {self} on {owner}",
+      "Explanation": "Dynamo can only bind a classmethod wrapping a Python function to its class.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",

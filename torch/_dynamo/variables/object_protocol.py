@@ -2215,10 +2215,12 @@ def _resolve_descriptor_get(
         tg_vt = variables.TupleGetterVariable(type_attr, source=source)
         return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, staticmethod):
-        sm_vt = variables.StaticMethodVariable(type_attr, source=source)
+        sm_vt = variables.StaticMethodVariable.from_descriptor(
+            tx, type_attr, source=source
+        )
         return sm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, classmethod):
-        cm_vt = variables.ClassMethodVariable(type_attr, source=source)
+        cm_vt = variables.ClassMethodVariable.from_descriptor(type_attr, source=source)
         return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.ClassMethodDescriptorType):
         cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)

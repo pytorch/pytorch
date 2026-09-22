@@ -4932,28 +4932,42 @@ class StaticMethodVariable(VariableTracker):
     https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
     """
 
-    _nonvar_fields = {
-        "descriptor",
-        *VariableTracker._nonvar_fields,
+    # sm_memberlist: both members are readonly aliases of the wrapped callable.
+    # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1469-L1473
+    tp_members = {
+        "__func__": Member(lambda s, _: s.descriptor, readonly_setter),
+        "__wrapped__": Member(lambda s, _: s.descriptor, readonly_setter),
     }
 
-    def __init__(
-        self,
-        descriptor: staticmethod,  # type: ignore[type-arg]
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, descriptor: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @classmethod
+    def from_descriptor(
+        cls,
+        tx: "InstructionTranslatorBase",
+        descriptor: staticmethod,  # type: ignore[type-arg]
+        source: "Source | None" = None,
+    ) -> "StaticMethodVariable":
+        func_source = AttrSource(source, "__func__") if source else None
+        return cls(
+            VariableTracker.build(tx, descriptor.__func__, func_source),
+            source=source,
+        )
+
     def __repr__(self) -> str:
-        func_name = getattr(self.descriptor.__func__, "__name__", "?")
-        return f"StaticMethodVariable({func_name})"
+        # A staticmethod built by user code can wrap any callable, so only a
+        # traced function has a name to report.
+        if isinstance(self.descriptor, BaseUserFunctionVariable):
+            return f"StaticMethodVariable({self.descriptor.get_name()})"
+        return f"StaticMethodVariable({self.descriptor})"
 
     def python_type(self) -> type:
         return staticmethod
 
     def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
-        return self.descriptor
+        return staticmethod(self.descriptor.as_python_constant())
 
     def tp_descr_get_impl(
         self,
@@ -4963,8 +4977,18 @@ class StaticMethodVariable(VariableTracker):
     ) -> VariableTracker:
         # sm_descr_get returns sm->sm_callable unconditionally.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
-        func_source = AttrSource(self.source, "__func__") if self.source else None
-        return VariableTracker.build(tx, self.descriptor.__func__, func_source)
+        return self.descriptor
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Rebuild the descriptor around the traced callable rather than
+        # restoring an original object, which may wrap an unrealized closure.
+        # Descriptor-path instances are consumed by tp_descr_get_impl and do not
+        # escape, so this effectively only serves values built by user code.
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "staticmethod")
+        )
+        codegen(self.descriptor)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class ClassMethodVariable(VariableTracker):
@@ -4978,27 +5002,55 @@ class ClassMethodVariable(VariableTracker):
     """
 
     _nonvar_fields = {
-        "descriptor",
+        "from_class_attr",
         *VariableTracker._nonvar_fields,
+    }
+
+    # cm_memberlist: both members are readonly aliases of the wrapped callable.
+    # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1261-L1265
+    tp_members = {
+        "__func__": Member(lambda s, _: s.descriptor, readonly_setter),
+        "__wrapped__": Member(lambda s, _: s.descriptor, readonly_setter),
     }
 
     def __init__(
         self,
-        descriptor: classmethod,  # type: ignore[type-arg]
+        descriptor: VariableTracker,
+        from_class_attr: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+        # True only for a descriptor read off a class, where the bound method is
+        # genuinely addressable as `owner.<func name>`. A `classmethod(...)`
+        # built by user code has no such attribute, so it must stay sourceless.
+        self.from_class_attr = from_class_attr
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: classmethod,  # type: ignore[type-arg]
+        source: "Source | None" = None,
+    ) -> "ClassMethodVariable":
+        func_source = AttrSource(source, "__func__") if source else None
+        return cls(
+            UserFunctionVariable(descriptor.__func__, source=func_source),
+            source=source,
+            from_class_attr=True,
+        )
 
     def __repr__(self) -> str:
-        func_name = getattr(self.descriptor.__func__, "__name__", "?")
-        return f"ClassMethodVariable({func_name})"
+        # A classmethod built by user code can wrap any callable, so only a
+        # traced function has a name to report.
+        if isinstance(self.descriptor, BaseUserFunctionVariable):
+            return f"ClassMethodVariable({self.descriptor.get_name()})"
+        return f"ClassMethodVariable({self.descriptor})"
 
     def python_type(self) -> type:
         return classmethod
 
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
-        return self.descriptor
+        return classmethod(self.descriptor.as_python_constant())
 
     def tp_descr_get_impl(
         self,
@@ -5008,21 +5060,40 @@ class ClassMethodVariable(VariableTracker):
     ) -> VariableTracker:
         # cm_descr_get binds the wrapped function to the class.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
-        func_source = AttrSource(self.source, "__func__") if self.source else None
+        func = self.descriptor
+        if not isinstance(func, UserFunctionVariable):
+            unimplemented(
+                gb_type="classmethod of non-Python function",
+                context=f"tp_descr_get {self} on {owner}",
+                explanation="Dynamo can only bind a classmethod wrapping a "
+                "Python function to its class.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         bound_source = (
-            AttrSource(owner.source, self.descriptor.__func__.__name__)
-            if owner.source
+            AttrSource(owner.source, func.get_name())
+            if self.from_class_attr and owner.source
             else None
         )
-        return UserMethodVariable(
-            UserFunctionVariable(
-                self.descriptor.__func__,
-                source=func_source
-                or (bound_source and AttrSource(bound_source, "__func__")),
-            ),
-            owner,
-            source=bound_source,
+        if func.source is None and bound_source is not None:
+            # The descriptor had no source of its own (C().f, where the class
+            # came from obj.__class__), so take the function source from the
+            # bound attribute. Without this the function would go unguarded.
+            # Swap the source on the existing VT; get_function() would realize a
+            # synthesized function and can graph break.
+            # cast() is only for pyrefly.
+            func = cast(
+                UserFunctionVariable,
+                func.clone(source=AttrSource(bound_source, "__func__")),
+            )
+        return UserMethodVariable(func, owner, source=bound_source)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # See StaticMethodVariable.reconstruct.
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "classmethod")
         )
+        codegen(self.descriptor)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class MemberDescriptorVariable(DescriptorVariable):
