@@ -2101,6 +2101,7 @@ fake_tensor_failures = set()
 symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
+    xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
@@ -2131,7 +2132,6 @@ out_symbolic_tensor_failures = {
     xfail('argmax', ''),
     xfail('argmin', ''),
     xfail('gather', ''),
-    xfail('histogramdd', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
@@ -2238,7 +2238,7 @@ instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for="cpu")
 
 
 class TestGenericProxyTensorDevice(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_amp_cache(self, device):
         layer = torch.nn.Conv2d(3, 3, 3).to(device)
@@ -2276,13 +2276,18 @@ class TestGenericProxyTensorDevice(TestCase):
         )
 
 
-instantiate_device_type_tests(TestGenericProxyTensorDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestGenericProxyTensorDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 class TestSymbolicTracingDevice(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_cpu_scalar_cuda(self, device):
+    def test_cpu_scalar_device(self, device):
         # Extracted from wave2vec2
         def f(a, b):
             return (a * b) @ b
@@ -2302,7 +2307,12 @@ def forward(self, a_1, b_1):
         )
 
 
-instantiate_device_type_tests(TestSymbolicTracingDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestSymbolicTracingDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 class TestUnbackedSymbolicTracingDevice(TestCase):
@@ -2353,7 +2363,7 @@ class TestUnbackedSymbolicTracingDevice(TestCase):
             torch._check(z1 == z2 + z3)
             return y * 2
 
-        # NB: inputs are done as CUDA to ensure they aren't queried to be
+        # NB: inputs are done as CUDA/XPU to ensure they aren't queried to be
         # backed
 
         gm = make_fx(f, tracing_mode="symbolic")(
@@ -2378,7 +2388,12 @@ class TestUnbackedSymbolicTracingDevice(TestCase):
                 torch.tensor([1.0], device=device),
             )
 
-instantiate_device_type_tests(TestUnbackedSymbolicTracingDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestUnbackedSymbolicTracingDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 if __name__ == '__main__':
     run_tests()
