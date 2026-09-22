@@ -1359,6 +1359,27 @@ class _PermissiveGetattr:
         return lambda *args: None
 
 
+class _NoneGetattr:
+    # Resolves any name to None; the C unpickler calls that as __setstate__.
+    def __init__(self):
+        self.a = 1
+
+    def __getattr__(self, name):
+        return None
+
+
+_FINALIZED: list = []
+
+
+class _CountsDeletes:
+    # A finalizer that touches only a global, the shape a probe must not run.
+    def __init__(self):
+        self.a = 1
+
+    def __del__(self):
+        _FINALIZED.append(type(self))
+
+
 class _TupleSub(tuple):
     __slots__ = ()  # var-sized, so refused by __itemsize__, not by the slots scan
 
@@ -1425,6 +1446,11 @@ class _KeyWithBystanders:
 
     def __hash__(self):
         return 0
+
+
+class _Color(enum.Enum):
+    RED = 1
+    BLUE = 2
 
 
 class _NetWithTags(torch.nn.Module):
@@ -2934,8 +2960,11 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # failing the dump.
         copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
         self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
-        self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
-        self.assertTrue(_pickles_by_default(_GenericHolder()))
+        self.assertTrue(_pickles_by_default(_HolderWithGenerator))
+        self.assertTrue(_pickles_by_default(_GenericHolder))
+        before = len(_FINALIZED)
+        self.assertFalse(_pickles_by_default(_CountsDeletes))
+        self.assertEqual(len(_FINALIZED), before)  # the probe ran no finalizer
         for obj in (
             _PipelineWithSetstate(),
             _WithGetstate(),
@@ -2945,6 +2974,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _CopyregRegistered(),
             _NewNeedsArg(1),
             _PermissiveGetattr(),
+            _NoneGetattr(),
             _RaisingGetattr(),
             _SlottedHolder(),
             _PureSlots(),
@@ -2955,7 +2985,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             torch.nn.Linear(1, 1),
             torch.randn(1),
         ):
-            self.assertFalse(_pickles_by_default(obj), type(obj).__name__)
+            self.assertFalse(_pickles_by_default(type(obj)), type(obj).__name__)
 
     def test_is_torch_type_walks_the_mro(self):
         self.assertTrue(_is_torch_type(torch.nn.Linear))
@@ -3010,7 +3040,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _CopyregRegistered(),
             _NewNeedsArg(1),
             _PermissiveGetattr(),
+            _NoneGetattr(),
             _RaisingGetattr(),
+            _CountsDeletes(),
             types.SimpleNamespace(a=1),
             Point(1, 2),
             collections.OrderedDict(a=1),
@@ -3035,7 +3067,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # Every protocol the pickler could write with, DEFAULT_PROTOCOL included.
         for protocol in range(2, pickle.HIGHEST_PROTOCOL + 1):
             for obj in zoo:
-                if _pickles_by_default(obj):
+                if _pickles_by_default(type(obj)):
                     self.assertTrue(
                         dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
                     )
@@ -3052,7 +3084,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                     self.assertEqual(vars(loaded), {"probe": 1})
         # And the predicate is not vacuous: the plain shapes are admitted, and
         # so is WeakValueDictionary, a pure-Python class whose state is its dict.
-        admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
+        admitted = {type(o).__name__ for o in zoo if _pickles_by_default(type(o))}
         self.assertLessEqual(
             {
                 "_HolderWithGenerator",
@@ -4567,6 +4599,47 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
         state = load_guards_state(self._cached_guards_state).output_graph
         self.assertEqual(next(iter(state.local_scope["d"])).sub, sub)
+
+    def test_a_set_contains_comparand_shared_with_a_module_attribute_stays_real(
+        self,
+    ):
+        # SET_CONTAINS bakes a sourceless constant (an enum member built by a
+        # constant-folded call) and asks the set for it by hash and __eq__ at run
+        # time. The member is a process-wide singleton, so an unguarded module
+        # attribute holding it registers the very object as missing; baked as
+        # the sentinel the guard would be False forever (NOT_CONTAINS: True).
+        # The module's TYPE_MATCH is kept so the module travels and prunes.
+        def fn(m, s, x):
+            if _Color(1) in s:
+                x = x + 1
+            return m(x)
+
+        m, s, x = _NetWithTags(_Color.RED), {_Color.RED}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("SET_CONTAINS", "TYPE_MATCH"), fn, m, s, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "s": s, "x": x}, True)
+        self._test_check_fn(ref, loaded, {"m": m, "s": {_Color.BLUE}, "x": x}, False)
+
+    def test_a_dict_keys_comparand_shares_a_key_with_a_module_attribute(self):
+        # EQUALS_MATCH on a dict_keys view compares every key by value, and the
+        # view's reducer pickles each key as its own object, so a key that is
+        # also an unguarded module attribute must be marked through the view. A
+        # torch.Size, not a tuple: pickle writes an exact tuple natively, so only
+        # a subclass ever reaches the missing_values branch.
+        def fn(m, ks, x):
+            for k in ks:
+                x = x + k[0]
+            return m(x)
+
+        dims = torch.Size([1, 2])
+        m, ks, x = _NetWithTags(dims), {dims: 0}.keys(), torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("EQUALS_MATCH", "TYPE_MATCH"), fn, m, ks, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "ks": ks, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(list(state.local_scope["ks"]), [torch.Size([1, 2])])
 
     def test_grad_mode(self):
         def fn(x):
