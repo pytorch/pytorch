@@ -777,9 +777,20 @@ class ConvertFrameAssert:
         try:
             compile_ctx = compile_context(CompileContext(compile_id))
             # When recompile_limit is set, temporarily override the global
-            # config so the existing exceeds_recompile_limit check uses it.
+            # config so the existing exceeds_recompile_limit check uses it. An
+            # explicit package is its own recompile budget, so its limit also
+            # lifts the accumulated safety cap; ordinary torch.compile keeps
+            # the ambient global cap.
+            explicit = self._package is not None and self._package.explicit_capture
             recompile_ctx = (
-                config.patch(recompile_limit=self._recompile_limit)
+                config.patch(
+                    recompile_limit=self._recompile_limit,
+                    accumulated_recompile_limit=(
+                        max(config.accumulated_recompile_limit, self._recompile_limit)
+                        if explicit
+                        else config.accumulated_recompile_limit
+                    ),
+                )
                 if self._recompile_limit is not None
                 else contextlib.nullcontext()
             )

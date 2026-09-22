@@ -1717,6 +1717,37 @@ def add(x, y):
         self.assertEqual(entry.guarded_codes, [])
         self.assertFalse(entry.bypassed)
 
+    @torch._dynamo.config.patch(accumulated_recompile_limit=1)
+    def test_explicit_package_recompile_limit_lifts_the_accumulated_cap(self):
+        # The accumulated cap is a global safety net over torch.compile; a
+        # capture that asked for N variants of a frame must be allowed to
+        # record them, so its recompile_limit raises the cap to N for its own
+        # compiles. Ordinary compiles keep the ambient cap.
+        def fn(x):
+            return x + 1
+
+        variants = (
+            torch.randn(3),
+            torch.randint(0, 5, (3,)),
+            torch.randn(3, dtype=torch.float64),
+        )
+        counter = torch._dynamo.testing.CompileCounter()
+        plain = torch._dynamo.optimize(backend=counter, recompile_limit=2)(fn)
+        for x in variants:
+            plain(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        torch._dynamo.reset()
+        pkg = CompilePackage(fn, explicit_capture=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch._dynamo.optimize(
+            backend=counter, package=pkg, recompile_limit=2
+        )(fn)
+        for x in variants:
+            compiled(x)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(len(pkg.cache_entry().codes[0].guarded_codes), 2)
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
