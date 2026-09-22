@@ -78,7 +78,7 @@ report it produces. It is distinct from
 .. autoclass:: torch.compiler.precompile.Capture
 
 .. autoclass:: torch.compiler.precompile.PrecompiledRunnable
-   :members: unload
+   :members: installed, unload
 
 .. autoclass:: torch.compiler.precompile.PrecompileSummary
    :members: complete, dropped_guard_types, kept_guard_types

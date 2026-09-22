@@ -290,7 +290,6 @@ import pickle
 import stat
 import types
 import uuid
-from collections.abc import Callable  # noqa: TC003
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
@@ -307,7 +306,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from typing_extensions import Self
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
@@ -1831,6 +1830,14 @@ class PrecompiledModule(PrecompiledRunnable):
         # ``fn`` is the whole computation: an nn.Module, or a callable that closes
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
         # step that computes a loss and torch.autograd.grad).
+        if backend not in ("inductor", "eager"):
+            raise ValueError(
+                f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
+            )
+        if tracer not in ("make_fx", "dynamo"):
+            raise ValueError(
+                f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
+            )
         self._fn = fn
         self._backend = backend
         self._tracer = tracer
@@ -2066,7 +2073,6 @@ class PrecompiledModule(PrecompiledRunnable):
                 "format": _CACHE_FORMAT,
                 "version": _CACHE_VERSION,
                 "backend": self._backend,
-                "tracer": self._tracer,
                 "code_hash": code_hash,
                 "artifact": self._artifact_bytes,
             },
@@ -2387,9 +2393,6 @@ def _runnable_from_pair(python_code: str, cache: bytes) -> PrecompiledRunnable:
     # artifact and to read BACKEND for the cache-pairing check below.
     meta = _parse_artifact_metadata(python_code)
     backend = cast(str, meta["BACKEND"])
-    # TRACER is absent on make_fx artifacts predating the tag; the cache envelope
-    # defaults the same way, so an older pair still matches.
-    tracer = cast(str, meta.get("TRACER", "make_fx"))
 
     # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
     # are the inductor save_cache_artifacts bundle, used below to prime the kernel
@@ -2418,12 +2421,6 @@ def _runnable_from_pair(python_code: str, cache: bytes) -> PrecompiledRunnable:
                 raise PrecompileError(
                     f"cache backend {blob.get('backend')!r} does not match the "
                     f"python_code backend {backend!r}; the cache and python_code "
-                    "came from different precompile captures."
-                )
-            if blob.get("tracer", "make_fx") != tracer:
-                raise PrecompileError(
-                    f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
-                    f"the python_code tracer {tracer!r}; the cache and python_code "
                     "came from different precompile captures."
                 )
             # Reject a cache whose code_hash does not match this python_code (a
@@ -2491,10 +2488,10 @@ def load(
     exactly the python_code bytes it was emitted with).
 
     The driver runs from ``python_code`` -- the single source of truth for the whole
-    calling convention. ``load`` reads the cache's ``BACKEND`` (to check the pairing)
-    and, for the inductor backend, primes the inductor kernel caches from its bundle
-    so a warm reload loads precompiled kernels instead of JIT-compiling; then it
-    exec's ``python_code``. With no usable cache it degrades to JIT'ing from
+    calling convention. ``load`` reads the source's ``BACKEND``, checks the cache's
+    ``backend`` tag against it, primes the inductor kernel caches when the cache
+    carries a bundle so a warm reload loads precompiled kernels instead of
+    JIT-compiling, and then exec's ``python_code``. With no usable cache it degrades to JIT'ing from
     ``python_code``. Both files are trusted, EXECUTABLE input: load only artifacts
     you produced or otherwise trust.
 
@@ -2505,8 +2502,8 @@ def load(
     :class:`torch.compiler.precompile.PrecompiledRunnable`.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
-    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
-    ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
+    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend`` or
+    ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
