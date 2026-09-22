@@ -1843,7 +1843,6 @@ class PythonWrapperCodegen(CodeGen):
                 "from torch._inductor.codegen.memory_planning import _align as align",
             ),
             (("device", "empty_strided"), "from torch import device, empty_strided"),
-            # Its only user is the async_compile binding, so it lives and dies with it.
             (
                 ("async_compile",),
                 f"from {async_compile.__name__} import AsyncCompile",
@@ -1906,8 +1905,7 @@ class PythonWrapperCodegen(CodeGen):
     def write_preamble_line(
         self, buf: IndentedBuffer, names: tuple[str, ...], line: str
     ) -> None:
-        """Emit one line that exists only for ``names``: an import or binding of
-        them, or the AsyncCompile wait/del that retires async_compile.
+        """Emit one line that exists only for ``names``: an import or binding of them.
 
         The default emits every line: which of them a given graph will use is not known
         here, since write_header runs before anything has been lowered.
@@ -2132,10 +2130,13 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        self.prefix.writeline("")
-        self.prefix.writeline("")
-        for line in ("async_compile.wait(globals())", "del async_compile"):
-            self.write_preamble_line(self.prefix, ("async_compile",), line)
+        self.prefix.splice(
+            """
+
+            async_compile.wait(globals())
+            del async_compile
+            """
+        )
 
     def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
