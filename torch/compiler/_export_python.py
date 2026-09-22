@@ -21,6 +21,7 @@ import functools
 import inspect
 import logging
 import os
+import threading
 from collections.abc import Callable, Sequence
 from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
@@ -71,6 +72,13 @@ class ExportedPythonArtifact:
         self._decompositions = decompositions
         self._example_inputs = None if example_inputs is None else tuple(example_inputs)
         self._loaded: Callable[..., Any] | None = None
+        # (pid, tid) currently inside _materialize. There is deliberately no
+        # per-artifact lock: capture is already serialized process-wide, so a second
+        # lock would add nothing but a second acquisition order to deadlock against.
+        # This is the re-entrancy guard the (reentrant) capture lock cannot provide.
+        # The pid makes it fork-safe without a registry -- a child never matches a
+        # marker left by a thread it did not inherit.
+        self._materializing: tuple[int, int] | None = None
 
     def _precompile_and_save(self, args: tuple[Any, ...]) -> str:
         example = self._example_inputs
@@ -183,6 +191,46 @@ class ExportedPythonArtifact:
         self._decompositions = None
         return entry
 
+    def _materialize_once(self, args: tuple[Any, ...]) -> Callable[..., Any]:
+        # Materialization runs under the one process-wide capture lock. Capture runs
+        # fn, which may call another decorated function, so any second lock taken
+        # around this would give two threads two orders to acquire them in and deadlock
+        # -- which is why the artifact holds no lock of its own.
+        import torch._precompile as precompile_impl
+
+        ident = (os.getpid(), threading.get_ident())
+        if self._materializing == ident:
+            raise _precompile_error(
+                "torch.compiler.export_python: re-entrant call into "
+                f"{getattr(self._fn, '__name__', 'fn')} while it is being precompiled. "
+                "A decorated function cannot call itself: capture would have to run "
+                "inside its own capture. Move the recursion into an undecorated helper."
+            )
+        with precompile_impl._CAPTURE_LOCK:
+            if self._loaded is None:
+                self._materializing = ident
+                try:
+                    self._loaded = self._serialize_first_launch(self._materialize(args))
+                finally:
+                    self._materializing = None
+            return self._loaded
+
+    def _serialize_first_launch(self, entry: Callable[..., Any]) -> Callable[..., Any]:
+        # The artifact compiles and autotunes its Triton kernels on its first launch,
+        # and inductor's autotuner is not safe to run from several threads at once: each
+        # tuner closes the launchers it did not pick, which a concurrent one may still
+        # be benchmarking or may have picked. So racing first calls take turns under
+        # the capture lock until one launch succeeds, and only then see the bare entry.
+        import torch._precompile as precompile_impl
+
+        def first_launch(*args: Any) -> Any:
+            with precompile_impl._CAPTURE_LOCK:
+                out = entry(*args)
+                self._loaded = entry
+                return out
+
+        return first_launch
+
     def _bind_positional(
         self,
         args: tuple[Any, ...],
@@ -278,7 +326,7 @@ class ExportedPythonArtifact:
         self._check_supported_args(args)
         loaded = self._loaded
         if loaded is None:
-            loaded = self._loaded = self._materialize(args)
+            loaded = self._materialize_once(args)
         return loaded(*args)
 
 
