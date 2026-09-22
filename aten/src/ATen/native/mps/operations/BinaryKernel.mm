@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
@@ -8,13 +9,13 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/complex_native.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/nextafter_native.h>
@@ -179,69 +180,29 @@ static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
-  lib.exec_binary_kernel(iter, "lerp_alpha", weight);
+  // Narrowing the weight to a low-precision dtype would overflow for weights outside its
+  // range and lose accuracy inside it, so hand it over at opmath precision.
+  lib.exec_binary_kernel(iter, "lerp_alpha", weight, at::toOpMathType(iter.common_dtype()));
 }
 
 static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
-  using namespace mps;
-  auto type_str = scalarToMetalTypeString(iter.common_dtype());
-  auto numel = static_cast<uint32_t>(iter.numel());
-  auto ndim = static_cast<uint32_t>(iter.ndim());
+  // `lerp.Tensor` lets only a 0-dim `weight` differ in dtype from `self`/`end`, and
+  // TensorIterator materializes that promotion only when the common device is CPU, leaving
+  // other backends to cast while loading. `exec_ternary_kernel` picks the cast flavor for
+  // anything that disagrees with the common dtype.
+  const auto common_dtype = iter.common_dtype();
 
-  // simple elementwise kernel for dense tensors
-  if (iter.is_contiguous()) {
-    auto pso = lib.getPipelineStateForFunc("lerp_tensor_dense_" + type_str);
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_dispatch1DJob(computeEncoder, pso, numel);
-    });
-    return;
+  // Mirror the CUDA kernel: read a CPU scalar weight on the host, drop it from the iterator
+  // and let the scalar-weight path cast it to the compute dtype. `lerp_alpha` is instantiated
+  // for a single tensor dtype, so this needs the other operands to already agree.
+  if (iter.is_cpu_scalar(3) && iter.dtype(0) == common_dtype && iter.dtype(1) == common_dtype &&
+      iter.dtype(2) == common_dtype) {
+    const auto weight = iter.tensor(3).item();
+    iter.remove_operand(3);
+    return lerp_scalar_mps_kernel(iter, weight);
   }
 
-  // Scalar weight broadcast path
-  if (ndim == 1 && iter.strides(3)[0] == 0) {
-    auto pso = lib.getPipelineStateForFunc("lerp_tensor_scalar_weight_" + type_str);
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_dispatch1DJob(computeEncoder, pso, numel);
-    });
-    return;
-  }
-
-  // 2D/3D: multi-dimensional dispatch, to avoid integer division for coordinates
-  if (ndim >= 2 && ndim <= 3) {
-    auto pso = lib.getPipelineStateForFunc(fmt::format("lerp_tensor_strided_{}d_{}", ndim, type_str));
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_setArgs<4>(computeEncoder, iter.strides(0), iter.strides(1), iter.strides(2), iter.strides(3));
-      auto sizes = iter.shape();
-      auto maxTg = [pso maxTotalThreadsPerThreadgroup];
-      auto tg_x = std::min(static_cast<NSUInteger>(sizes[0]), maxTg);
-      auto tg_y = std::min(static_cast<NSUInteger>(sizes[1]), maxTg / tg_x);
-      auto grid_z = ndim > 2 ? static_cast<NSUInteger>(sizes[2]) : 1;
-      auto tg_z = std::clamp(grid_z, 1UL, maxTg / (tg_x * tg_y));
-      [computeEncoder dispatchThreads:MTLSizeMake(sizes[0], sizes[1], grid_z)
-                threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
-    });
-    return;
-  }
-
-  // General strided fallback
-  auto pso = lib.getPipelineStateForFunc("lerp_tensor_strided_" + type_str);
-  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-    auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-    [computeEncoder setComputePipelineState:pso];
-    bind_iter_tensors(computeEncoder, iter);
-    mtl_setArgs<4>(
-        computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), iter.strides(3), ndim);
-    mtl_dispatch1DJob(computeEncoder, pso, numel);
-  });
+  lib.exec_ternary_kernel(iter, "lerp");
 }
 
 static void mul_mps_kernel(TensorIteratorBase& iter) {
