@@ -4366,6 +4366,20 @@ def _is_torch_type(cls: type) -> bool:
     return any(is_torch_class(c) for c in cls.__mro__)
 
 
+@functools.cache
+def _dtensor_structural_types() -> tuple[type, ...]:
+    """The DTensor structural types the attribute pruner leaves alone (see
+    _keeps_attribute): the Placement hierarchy, user subclasses included, the
+    mesh and its layout, and the spec a DTensor rebuilds itself from."""
+    if not torch.distributed.is_available():
+        return ()
+    from torch.distributed.device_mesh import _MeshLayout, DeviceMesh
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+    from torch.distributed.tensor.placement_types import Placement
+
+    return (Placement, DeviceMesh, _MeshLayout, DTensorSpec, TensorMeta)
+
+
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
 # breaks the module itself: __getattr__ indexes the three dicts for every name
 # outside __dict__, and __setattr__/__delattr__ index all four on any
@@ -5118,6 +5132,16 @@ class GuardsStatePickler(FunctionPicklerBase):
         if module_state and name in _NN_MODULE_STATE_ATTRS:
             return True
         if id(attr) in self.guard_tree_values or callable(attr):
+            return True
+        if isinstance(attr, _dtensor_structural_types()):
+            # A DTensor structural value (a Placement, a DeviceMesh) may be the
+            # very object a DTensorSpec elsewhere in the state rebuilds itself
+            # from: on a module it is registered by id and would become the
+            # sentinel there, and a user object keeps it readable. By class, so
+            # a user Placement subclass counts and a stateful object that merely
+            # lives under torch.distributed.tensor does not; any other
+            # torch-typed bystander (a GradScaler whose __getstate__ asserts)
+            # stays prunable.
             return True
         return _is_shared_constant(attr)
 
