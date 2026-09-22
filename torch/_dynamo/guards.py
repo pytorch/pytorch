@@ -3380,6 +3380,8 @@ class GuardBuilder(GuardBuilderBase):
 
         code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())}")
+        # The keys are snapshotted and compared as a list by value at run time.
+        self._compared_by_value(value)
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_mapping_keys_guard(
             value, code, guard.user_stack
@@ -4418,7 +4420,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             if id(value) in self._verbatim_elements:
                 continue
             # Holds the value, like its sibling maps, so the id stays live: a
-            # __dict__ property may hand the walk a dict that dies with it.
+            # __dict__ property may hand the walk fields that die with its dict.
             self._verbatim_elements[id(value)] = value
             if inspect.ismodule(value) or isinstance(
                 value, (torch.Tensor, torch.nn.Module)
@@ -4431,9 +4433,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # identity). Descending would only switch pruning off for
                 # everything they hold.
                 continue
-            if isinstance(value, dict):
+            if isinstance(value, (dict, types.MappingProxyType)):
                 # Keys too: missing_values prunes hashable objects (a frozen
-                # dataclass), so a key can be one or hold one.
+                # dataclass), so a key can be one or hold one. A mappingproxy
+                # (MAPPING_KEYS_CHECK) is read the same way and its reducer
+                # pickles each key on its own.
                 stack.extend(value)
                 stack.extend(value.values())
             elif isinstance(value, (list, tuple, set, frozenset, dict_keys)):
@@ -4599,11 +4603,11 @@ class GuardsStatePickler(FunctionPicklerBase):
     # call-site default binding next to `f.__defaults__ == (...)`), and only
     # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
     # records those tuples in value_guarded_containers, which the pickler takes
-    # as a required argument. A non-const dict key and a *_CONTAINS comparand
-    # are recorded there too (_compared_by_value): the key managers and the
-    # contains guards bake them and compare by value at run time, and that
-    # comparison reads every field, so the protection extends through the
-    # key's instance dict. Two known limits: a slotted key's slot
+    # as a required argument. A non-const dict key, a *_CONTAINS comparand and
+    # a MAPPING_KEYS_CHECK proxy are recorded there too (_compared_by_value):
+    # the key managers and those guards bake them and compare by value at run
+    # time, and that comparison reads every field, so the protection extends
+    # through the key's instance dict. Two known limits: a slotted key's slot
     # values are not marked, and a tensor or nn.Module field still goes through
     # its own guard_tree_values check (a loaded copy could not compare equal to
     # the run-time object anyway). A dict/tuple SUBCLASS is verbatim whenever
