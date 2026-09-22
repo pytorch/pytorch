@@ -10,6 +10,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import torch
@@ -1104,7 +1105,9 @@ class TestPrecompile(TestCase):
             exec(compile(code, "<dt>", "exec"), ns)
             self.assertEqual(ns["forward"](m, x).to_local(), ref.to_local())
 
-            # A subclass input's outer dtype is checked like a dense one (invariant 6).
+            # A subclass input's outer dtype and device are recorded and checked like a
+            # dense one's (invariant 6).
+            self.assertIn("USER_INPUT_DEVICES = ['cpu']", code)
             x64 = distribute_tensor(torch.randn(5, 4).double(), mesh, [Replicate()])
             with self.assertRaisesRegex(PrecompileError, "runtime input has dtype"):
                 f_c(m, x64)
@@ -3166,21 +3169,18 @@ class TestPrecompile(TestCase):
                 with state_lock:
                     active -= 1
 
-        barrier = threading.Barrier(4)
-        results: list = [None] * 4
-
-        def worker(i):
-            barrier.wait()
-            results[i] = torch.compiler.precompile(
+        def worker():
+            return torch.compiler.precompile(
                 lambda a: a + 1, torch.ones(2), backend="eager"
             )
 
-        with mock.patch.object(precompile_impl, "_capture", spy):
-            threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
+        with (
+            mock.patch.object(precompile_impl, "_capture", spy),
+            ThreadPoolExecutor(4) as pool,
+        ):
+            futures = [pool.submit(worker) for _ in range(4)]
+            # result() re-raises a worker's exception with its traceback
+            results = [future.result() for future in futures]
 
         self.assertEqual(max_active, 1)
         for code, _cache in results:
@@ -3202,18 +3202,25 @@ class TestPrecompile(TestCase):
         # Run on a thread so a regressed (non-reentrant) lock fails here instead of
         # hanging the shard.
         results = []
-        thread = threading.Thread(
-            target=lambda: results.append(
-                torch.compiler.precompile(outer, torch.ones(2), backend="eager")
-            ),
-            daemon=True,
-        )
+        errors = []
+
+        def target():
+            try:
+                results.append(
+                    torch.compiler.precompile(outer, torch.ones(2), backend="eager")
+                )
+            except Exception as e:
+                errors.append(e)
+
+        thread = threading.Thread(target=target, daemon=True)
         thread.start()
         thread.join(120)
         if thread.is_alive():
             # The wedged thread holds the lock forever; free it for the later tests.
             torch._precompile._CAPTURE_LOCK = threading.RLock()
             self.fail("nested precompile deadlocked")
+        if errors:
+            raise errors[0]
         code, _cache = results[0]
         self.assertIn("def forward", code)
 
