@@ -1159,6 +1159,8 @@ def _all_in_parens(string: str) -> bool:
 
 # pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
+    r"""Default operation implementations shared by code generation backends."""
+
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -1297,6 +1299,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         values: tuple[OpVarT, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
     ) -> tuple[OpVarT, ...]:
         raise NotImplementedError(
             f"{type(self).__name__}: sort should be handled by CSEProxy"
@@ -2527,6 +2530,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
     ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
@@ -3192,8 +3196,9 @@ class CSEProxy(DefaultHandler):
         values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
     ) -> tuple[CSEVariable, ...]:
-        return self.kernel.sort(dtypes, values, stable, descending)
+        return self.kernel.sort(dtypes, values, stable, descending, top_k=top_k)
 
     def bucketize(
         self,
