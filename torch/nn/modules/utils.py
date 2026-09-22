@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+from collections.abc import Sequence
 from itertools import repeat
 from typing import Any
 
@@ -32,7 +33,9 @@ def _reverse_repeat_tuple(t, n):
     return tuple(x for x in reversed(t) for _ in range(n))
 
 
-def _list_with_default(out_size: list[int], defaults: list[int]) -> list[int]:
+def _list_with_default(
+    out_size: int | Sequence[int | None], defaults: Sequence[int]
+) -> int | list[int]:
     import torch
 
     if isinstance(out_size, (int, torch.SymInt)):
