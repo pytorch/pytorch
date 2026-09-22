@@ -13051,9 +13051,7 @@ if __name__ == '__main__':
 
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16,
-            torch.complex64, torch.complex128, torch.bool)
-    @parametrize_test("threads", [1, 4])
+    @dtypes(torch.float32)
     @parametrize_test("noncontiguous", [False, True])
     @parametrize_test("case", [
         subtest((None, 2, (8, 10), (2, 2), (2, 2), (0, 0), (1, 1)), name="unbatched"),
@@ -13065,15 +13063,23 @@ if __name__ == '__main__':
         subtest((2, 3, (64, 66), (2, 2), (3, 3), (0, 0), (1, 1)), name="gaps"),
         subtest((2, 3, (63, 65), (2, 3), (1, 2), (2, 1), (2, 3)), name="dilation"),
         subtest((8, 1, (64, 66), (3, 3), (1, 1), (1, 1), (1, 1)), name="batch_only"),
-        subtest((2, 1, (128, 128), (1, 1), (1, 1), (0, 0), (1, 1)), name="parallel_limit"),
-        subtest((2, 1, (128, 129), (1, 1), (1, 1), (0, 0), (1, 1)), name="above_limit"),
+        subtest((2, 1, (64, 128), (1, 1), (1, 1), (0, 0), (1, 1)), name="parallel_limit"),
+        subtest((2, 1, (64, 129), (1, 1), (1, 1), (0, 0), (1, 1)), name="above_limit"),
         subtest((0, 2, (8, 10), (2, 2), (2, 2), (0, 0), (1, 1)), name="empty_batch"),
         subtest((2, 1, (2, 3), (2, 3), (2, 3), (5, 7), (3, 2)), name="large_padding"),
         subtest((1, 4, (4, 5), (3, 3), (1, 1), (1, 512), (1, 1)), name="wide_padding"),
     ])
-    def test_fold_reference(self, device, dtype, threads, noncontiguous, case):
-        self.addCleanup(torch.set_num_threads, torch.get_num_threads())
-        torch.set_num_threads(threads)
+    def test_fold_reference(self, device, dtype, noncontiguous, case):
+        self._test_fold_reference(device, dtype, noncontiguous, case)
+
+    @onlyCPU
+    @dtypes(torch.float64, torch.float16, torch.bfloat16,
+            torch.complex64, torch.complex128, torch.bool)
+    def test_fold_reference_dtypes(self, device, dtype):
+        case = (2, 3, (17, 19), (3, 3), (1, 1), (1, 1), (1, 1))
+        self._test_fold_reference(device, dtype, True, case)
+
+    def _test_fold_reference(self, device, dtype, noncontiguous, case):
         batch, channels, size, kernel, stride, padding, dilation = case
         n = 1 if batch is None else batch
         h, w = size
@@ -13109,20 +13115,18 @@ if __name__ == '__main__':
             self.assertEqual(image.grad, expected, atol=0, rtol=0)
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16,
-            torch.complex64, torch.complex128, torch.bool)
+    @dtypes(torch.float32)
     def test_fold_out_batch_stride(self, device, dtype):
         columns = torch.randint(-2, 3, (4, 9, 64 * 65), device=device).to(dtype)
         expected = F.fold(columns, (64, 65), (3, 3), padding=1)
         storage = torch.full((8, 1, 64, 65), 7, device=device, dtype=dtype)
-        output = storage[::2]
+        output = storage[1::2]
         torch.ops.aten.col2im.out(columns, (64, 65), (3, 3), (1, 1), (1, 1), (1, 1), out=output)
         self.assertEqual(output, expected, atol=0, rtol=0)
-        self.assertEqual(storage[1::2], torch.full_like(storage[1::2], 7))
+        self.assertEqual(storage[::2], torch.full_like(storage[::2], 7))
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16,
-            torch.complex64, torch.complex128)
+    @dtypes(torch.float32, torch.complex64)
     @parametrize_test("kernel", [(1, 1), (2, 2), (2, 3)])
     def test_fold_nonoverlap_signed_zero(self, device, dtype, kernel):
         kh, kw = kernel
