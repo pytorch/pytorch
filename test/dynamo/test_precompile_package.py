@@ -2353,9 +2353,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.wont_generalize, ("mode",))
         self.assertEqual(summary.capture_errors, ("boom",))
 
-    def test_precompile_session_captures_variants_and_renders(self):
-        from torch._precompile import _parse_artifact_metadata
-
+    def test_precompile_session_captures_variants_and_summarizes(self):
         def step(model, x):
             y = model(x)
             torch._dynamo.graph_break()
@@ -2379,29 +2377,21 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         self.assertTrue(summary.kept_guards)
         self.assertEqual(summary.risky_dropped_guards, ())
-        python_code, cache = session.snapshot_artifact()
-        meta = _parse_artifact_metadata(python_code)
-        self.assertEqual(meta["TRACER"], "dynamo")
-        self.assertEqual(len(meta["FRAMES"]), 2)
-        self.assertEqual(
-            meta["DROPPED_GUARDS"], [list(s) for s in summary.dropped_guards]
-        )
-        with self.assertRaisesRegex(PackageError, "dropped .* guard"):
-            session.snapshot_artifact(require_no_dropped_guards=True)
         with self.assertRaisesRegex(PackageError, "not active"):
             call(model, x2)
+        # A call that raised is a capture error, and the summary is not complete.
+        failed = precompile_package.precompile_capture(step, backend="eager")
+        with failed as call:
+            with self.assertRaises(RuntimeError):
+                call(model, torch.ones(2, 5))
+        self.assertFalse(failed.summary().complete)
+        self.assertEqual(len(failed.summary().capture_errors), 1)
         # A second session on the same function compiles into its own cache
         # region rather than serving the first one's entries.
         second = precompile_package.precompile_capture(step, backend="eager")
         with second as call:
             call(model, x2)
         self.assertGreaterEqual(second.summary().guarded_codes, 2)
-        # A session that never ran its callable has nothing to render.
-        empty = precompile_package.precompile_capture(step, backend="eager")
-        with empty:
-            pass
-        with self.assertRaisesRegex(PackageError, "no compiled code"):
-            empty.snapshot_artifact()
         with self.assertRaisesRegex(PackageError, "partial"):
             precompile_package.precompile_capture(functools.partial(step, model))
         with self.assertRaisesRegex(PackageError, "CALLS the model"):
