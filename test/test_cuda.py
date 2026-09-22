@@ -1941,6 +1941,29 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         ):
             event1.elapsed_time(event2)
 
+    @skipIfRocm(msg="Does not actually block the host thread on ROCm.")
+    def test_events_blocking_synchronize(self):
+        # blocking=False busy-spins in synchronize() (CPU time ~= wall time);
+        # blocking=True (cudaEventBlockingSync) sleeps instead (CPU time ~= 0).
+        torch.cuda.synchronize()
+        for event_cls in [torch.cuda.Event, torch.Event]:
+            for blocking in [True, False]:
+                event = event_cls(blocking=blocking)
+                torch.cuda._sleep(int(500 * get_cycles_per_ms()))
+                event.record()
+
+                cpu_start = time.thread_time()
+                wall_start = time.perf_counter()
+                event.synchronize()
+                cpu_elapsed = time.thread_time() - cpu_start
+                wall_elapsed = time.perf_counter() - wall_start
+
+                ratio = cpu_elapsed / wall_elapsed
+                if blocking:
+                    self.assertLess(ratio, 0.1)
+                else:
+                    self.assertGreater(ratio, 0.5)
+
     def test_generic_stream_event(self):
         stream = torch.Stream("cuda")
         self.assertEqual(stream.device_index, torch.cuda.current_device())
