@@ -2935,6 +2935,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.sub, {sub: 1})
         self.assertEqual(next(iter(out.sub)).tags, ["t"])
 
+    def test_a_mapping_proxy_comparand_keeps_its_keys(self):
+        # MAPPING_KEYS_CHECK snapshots a mappingproxy's keys and compares the
+        # list by value at run time; the proxy's reducer pickles each key on its
+        # own, so the walk descends a proxy like the dict it wraps.
+        sub = _SubCfg(2.0, ["t"])
+        mp = types.MappingProxyType({sub: 1})
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {id(sub): sub}, {id(mp): mp}, buf).dump({"mp": mp})
+        out = load_guards_state(buf.getvalue())["mp"]
+        self.assertEqual(list(out), [sub])
+        self.assertEqual(next(iter(out)).tags, ["t"])
+
     def test_a_container_subclass_key_marks_its_fields_too(self):
         # The walk descends a container's elements AND its instance dict, so a
         # tuple subclass key with instance state keeps a field registered as
