@@ -106,6 +106,16 @@ void createCublasHandle(cublasHandle_t *handle) {
   TORCH_CUDABLAS_CHECK(cublasCreate(handle));
 }
 
+#ifdef USE_ROCM
+// rocblas_set_workspace frees the arena a handle owns from creation, and that
+// free is illegal under stream capture. ATen binds a workspace on every call,
+// so release the arena while the handle is created.
+void createInternalCublasHandle(cublasHandle_t *handle) {
+  createCublasHandle(handle);
+  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(*handle, nullptr, 0));
+}
+#endif
+
 void destroyCublasHandle(cublasHandle_t handle) {
 // this is because of something dumb in the ordering of
 // destruction. Sometimes atexit, the cuda context (or something)
@@ -119,7 +129,15 @@ void destroyCublasHandle(cublasHandle_t handle) {
 #endif
 }
 
+#ifdef USE_ROCM
+// ATen binds a per-call workspace on its handle, and rocBLAS cannot hand a
+// handle back its managed arena once bound, so public callers get a separate
+// handle whose arena is never touched.
+using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createInternalCublasHandle, destroyCublasHandle>;
+using CuBlasPublicPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
+#else
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
+#endif
 
 enum class WorkspaceMode { Cached, Explicit, Default };
 
@@ -457,15 +475,9 @@ static void setupCUDABlasHandle(
           cublasSetWorkspace(handle, workspace, workspace_size));
       break;
     case WorkspaceMode::Default:
-#ifdef USE_ROCM
-      // cublasSetStream maps to rocblas_set_stream, which does not touch the
-      // workspace binding, so the handle must be unbound explicitly. This also
-      // frees the arena the handle owns from creation; that free is illegal
-      // under stream capture, so spend it here rather than on a later bind.
-      TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, nullptr, 0));
-#else
-      // cublasSetStream above resets the handle to cuBLAS's default workspace.
-#endif
+      // cuBLAS: cublasSetStream above resets the handle to its default
+      // workspace. rocBLAS: only public handles take this path, and they keep
+      // the arena rocBLAS allocated at creation because ATen never binds them.
       break;
   }
 
@@ -490,6 +502,25 @@ static void setupCUDABlasHandle(
 #endif
 }
 
+template <typename PoolType>
+static cublasHandle_t reserveCUDABlasHandle(c10::DeviceIndex device) {
+  // Thread local PoolWindows are lazily-initialized
+  // to avoid initialization issues that caused hangs on Windows.
+  // See: https://github.com/pytorch/pytorch/pull/22405
+  // This thread local unique_ptrs will be destroyed when the thread terminates,
+  // releasing its reserved handles back to the pool.
+
+  // Use a leaky singleton for the pool following standard practice around
+  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
+  static auto pool = std::shared_ptr<PoolType>(
+      new PoolType(), [](PoolType* p) {
+        // Leak the memory.
+      });
+  thread_local std::unique_ptr<typename PoolType::PoolWindow> myPoolWindow(
+      pool->newPoolWindow());
+  return myPoolWindow->reserve(device);
+}
+
 static cublasHandle_t getCurrentCUDABlasHandleImpl(
     void* workspace,
     size_t workspace_size,
@@ -508,21 +539,7 @@ static cublasHandle_t getCurrentCUDABlasHandleImpl(
   }
 #endif
 
-  // Thread local PoolWindows are lazily-initialized
-  // to avoid initialization issues that caused hangs on Windows.
-  // See: https://github.com/pytorch/pytorch/pull/22405
-  // This thread local unique_ptrs will be destroyed when the thread terminates,
-  // releasing its reserved handles back to the pool.
-
-  // Use a leaky singleton for the pool following standard practice around
-  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
-  static auto pool = std::shared_ptr<CuBlasPoolType>(
-      new CuBlasPoolType(), [](CuBlasPoolType* p) {
-        // Leak the memory.
-      });
-  thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
-      pool->newPoolWindow());
-  cublasHandle_t handle = myPoolWindow->reserve(device);
+  cublasHandle_t handle = reserveCUDABlasHandle<CuBlasPoolType>(device);
 
   if (!setup) {
     return handle;
@@ -538,10 +555,30 @@ static cublasHandle_t getCurrentCUDABlasHandleImpl(
 }
 
 cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
-  WorkspaceMode workspace_mode = isCUDABlasWorkspaceCachingEnabled()
-      ? WorkspaceMode::Cached
-      : WorkspaceMode::Default;
-  return getCurrentCUDABlasHandleImpl(nullptr, 0, workspace_mode, setup);
+  if (isCUDABlasWorkspaceCachingEnabled()) {
+    return getCurrentCUDABlasHandleImpl(
+        nullptr, 0, WorkspaceMode::Cached, setup);
+  }
+#ifdef USE_ROCM
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  // Callers request the public handle to keep handle creation out of stream
+  // capture, so create this thread's internal handle too.
+  (void)reserveCUDABlasHandle<CuBlasPoolType>(device);
+  cublasHandle_t handle = reserveCUDABlasHandle<CuBlasPublicPoolType>(device);
+  if (setup) {
+    setupCUDABlasHandle(
+        handle,
+        c10::cuda::getCurrentCUDAStream(),
+        nullptr,
+        0,
+        WorkspaceMode::Default);
+  }
+  return handle;
+#else
+  return getCurrentCUDABlasHandleImpl(
+      nullptr, 0, WorkspaceMode::Default, setup);
+#endif
 }
 
 CUDABlasHandleWithWorkspace::CUDABlasHandleWithWorkspace(
@@ -575,8 +612,8 @@ CUDABlasHandleWithWorkspace::~CUDABlasHandleWithWorkspace() {
 #endif
   if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
     // The handle may still refer to this allocation. Retain it rather than
-    // leaving a dangling workspace pointer in a handle returned by the public
-    // API. Destructors cannot report this failure by throwing.
+    // leaving a dangling workspace pointer in a pooled handle. Destructors
+    // cannot report this failure by throwing.
     (void)workspace_.release_context();
     TORCH_WARN_ONCE(
         "Failed to restore the cuBLAS default workspace: ",

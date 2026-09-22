@@ -89,12 +89,19 @@ bool rocblasOwnsWorkspace(cublasHandle_t handle) {
       reinterpret_cast<rocblas_handle>(handle));
 }
 
+size_t rocblasWorkspaceSize(cublasHandle_t handle) {
+  size_t size = 0;
+  rocblas_get_device_memory_size(
+      reinterpret_cast<rocblas_handle>(handle), &size);
+  return size;
+}
+
 } // namespace
 
-// Unlike cuBLAS, rocblas_set_stream does not reset the workspace binding, so
-// the eager scope must unbind explicitly or it leaves the handle pointing at
-// memory that has gone back to the caching allocator.
-TEST(CUDABlasHandlePoolTest, EagerWorkspaceRestoresManagedArena) {
+// ATen binds its eager workspaces to an internal handle, so the public handle
+// keeps the arena rocBLAS allocated at creation, as a cuBLAS handle keeps its
+// default workspace.
+TEST(CUDABlasHandlePoolTest, EagerWorkspaceLeavesPublicHandleArena) {
   if (!at::cuda::is_available()) {
     return;
   }
@@ -103,15 +110,27 @@ TEST(CUDABlasHandlePoolTest, EagerWorkspaceRestoresManagedArena) {
   }
 
   at::cuda::CUDAGuard device_guard(0);
-  const auto handle = at::cuda::getCurrentCUDABlasHandle();
-  ASSERT_TRUE(rocblasOwnsWorkspace(handle));
+  const auto public_handle = at::cuda::getCurrentCUDABlasHandle();
+  ASSERT_TRUE(rocblasOwnsWorkspace(public_handle));
+  const size_t arena_size = rocblasWorkspaceSize(public_handle);
+  ASSERT_GT(arena_size, 0);
 
+  cublasHandle_t internal_handle = nullptr;
   {
     auto scoped = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
-    EXPECT_FALSE(rocblasOwnsWorkspace(scoped));
+    internal_handle = scoped;
+    EXPECT_NE(internal_handle, public_handle);
+    EXPECT_FALSE(rocblasOwnsWorkspace(internal_handle));
   }
 
-  EXPECT_TRUE(rocblasOwnsWorkspace(handle));
+  // Unlike cuBLAS, rocblas_set_stream does not reset the workspace binding, so
+  // the eager scope must unbind explicitly or it leaves the handle pointing at
+  // memory that has gone back to the caching allocator.
+  EXPECT_TRUE(rocblasOwnsWorkspace(internal_handle));
+  EXPECT_EQ(rocblasWorkspaceSize(internal_handle), 0);
+  EXPECT_EQ(at::cuda::getCurrentCUDABlasHandle(), public_handle);
+  EXPECT_TRUE(rocblasOwnsWorkspace(public_handle));
+  EXPECT_EQ(rocblasWorkspaceSize(public_handle), arena_size);
 }
 
 TEST(CUDABlasHandlePoolTest, CachedWorkspaceLeavesHandleUserOwned) {
@@ -129,10 +148,10 @@ TEST(CUDABlasHandlePoolTest, CachedWorkspaceLeavesHandleUserOwned) {
 
 // rocblas_set_workspace frees whatever the handle currently manages, and a
 // handle owns an arena from creation, so the first bind performs a free. A free
-// is illegal under stream capture, which is why the public handle drains that
-// bind up front. Handles are thread local, so the capture must run on a thread
-// that has not issued a gemm yet or the hazard is already spent and the test is
-// vacuous.
+// is illegal under stream capture, which is why internal handles drop that
+// arena when they are created. Handles are thread local, so the capture must
+// run on a thread that has not issued a gemm yet or the hazard is already spent
+// and the test is vacuous.
 TEST(CUDABlasHandlePoolTest, EagerWorkspaceBindIsCaptureSafe) {
   if (!at::cuda::is_available()) {
     return;
@@ -163,7 +182,8 @@ TEST(CUDABlasHandlePoolTest, EagerWorkspaceBindIsCaptureSafe) {
       at::cuda::CUDAGuard device_guard(0);
       auto stream = c10::cuda::getStreamFromPool();
       c10::cuda::CUDAStreamGuard stream_guard(stream);
-      // Spends this thread's capture-hostile first bind before capture starts.
+      // Creates this thread's handles before capture starts; creating a
+      // handle is illegal under capture.
       (void)at::cuda::getCurrentCUDABlasHandle();
 
       at::cuda::CUDAGraph graph;
