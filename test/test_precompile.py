@@ -54,14 +54,15 @@ _pytree.register_pytree_node(
 
 
 def _precompile_pair(fn, *args, **kwargs):
-    """The callable API, behind one indirection: the module switch above this commit
-    retires ``torch.compiler.precompile(fn, *args)`` and re-points these two helpers
-    at the make_fx internals it drove, so every test below keeps covering them."""
+    """One indirection point over the callable entry point: every test below drives
+    the make_fx capture through this helper rather than spelling the callable, so a
+    change of entry point re-points the whole suite here."""
     return torch.compiler.precompile(fn, *args, **kwargs)
 
 
 def _load_pair(python_code, cache):
-    """The callable API's ``load``, behind the same indirection as ``_precompile_pair``."""
+    """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair through
+    the callable API's ``load``; the second indirection point, for the same reason."""
     return torch.compiler.precompile.load(python_code, cache)
 
 
@@ -1961,10 +1962,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(tuple(row.shape), (1, 4))
         self.assertNotEqual(row.stride(), xex.stride())
         self.assertEqual(_load_pair(code, cache)(m, row), m(row))
-        self.assertEqual(
-            _load_pair(code, _strip_artifact(cache))(m, row),
-            m(row),
-        )
+        self.assertEqual(_load_pair(code, _strip_artifact(cache))(m, row), m(row))
 
     def test_empty_input_shape_is_still_checked(self):
         # The numel==0 exemption must relax ONLY the (meaningless) stride check, not the
@@ -2627,10 +2625,7 @@ class TestPrecompile(TestCase):
 
         def loaders():
             yield "cached", _load_pair(code, cache)
-            yield (
-                "inlined",
-                _load_pair(code, _strip_artifact(cache)),
-            )
+            yield "inlined", _load_pair(code, _strip_artifact(cache))
 
         for label, f_c in loaders():
             with self.subTest(path=label):
