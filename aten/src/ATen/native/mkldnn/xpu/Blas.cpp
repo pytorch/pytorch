@@ -494,7 +494,7 @@ Tensor _weight_int4pack_mm_xpu(
     const Tensor& B,
     int64_t qGroupSize,
     const Tensor& qScale,
-    const std::optional<Tensor>& qZeros) {
+    const Tensor& qZeros) {
   auto M = A.size(0); // M
   auto N = B.size(0); // N1=LCM(N, K)
   TORCH_CHECK(
@@ -512,12 +512,10 @@ Tensor _weight_int4pack_mm_xpu(
       A.dtype(),
       ") or be float32, got ",
       qScale.dtype());
-  if (qZeros.has_value()) {
-    TORCH_CHECK(
-        qZeros->dtype() == kChar,
-        __func__,
-        " : expect qZeros to be int8 tensor currently.");
-  }
+  TORCH_CHECK(
+      qZeros.dtype() == kChar,
+      __func__,
+      " : expect qZeros to be int8 tensor currently.");
   TORCH_CHECK(B.dim() == 2, __func__, " : expect B to 2d tensor.");
 
   TORCH_CHECK(
@@ -532,19 +530,17 @@ Tensor _weight_int4pack_mm_xpu(
       ": expect qScale to be 2d tensor with sizes [:, ",
       N,
       "]");
-  if (qZeros.has_value()) {
-    TORCH_CHECK(
-        qZeros->dim() == 2 && qZeros->size(1) == N,
-        __func__,
-        ": expect qZeros to be 2d tensor with sizes [:, ",
-        N,
-        "]");
-  }
+  TORCH_CHECK(
+      qZeros.dim() == 2 && qZeros.size(1) == N,
+      __func__,
+      ": expect qZeros to be 2d tensor with sizes [:, ",
+      N,
+      "]");
 
   auto C = at::empty({M, N}, A.options());
 
   // qscale:[K/qGroupSize, N]
-  // qzp:[K/qGroupSize, N] (optional, nullptr for symmetric quantization)
+  // qzp:[K/qGroupSize, N]
   at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
 
   return C;

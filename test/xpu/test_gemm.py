@@ -1422,10 +1422,7 @@ class TestBasicGEMM(TestCase):
     @parametrize("q_group", [32, 64, 128])
     @parametrize("act_dtype", [torch.bfloat16, torch.float16])
     @parametrize("scale_dtype_fp32", [True, False])
-    @parametrize("symmetric", [True, False])
-    def test__int4_mm(
-        self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32, symmetric
-    ):
+    def test__int4_mm(self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32):
         inner_k_tiles = 2
         torch.manual_seed(1)
         a_fp32 = torch.rand((m, k), dtype=torch.float32, device=device)
@@ -1449,10 +1446,9 @@ class TestBasicGEMM(TestCase):
         b = b_fp32.to(dtype=act_dtype)
         scale_dtype = torch.float32 if scale_dtype_fp32 else act_dtype
         scales = b_scales.to(dtype=scale_dtype)
-        qzeros = None if symmetric else zeros_int8
         ref = torch.mm(a, b)
 
-        res = weight_int4pack_mm(a, b_int4pack, scales, qzeros)
+        res = weight_int4pack_mm(a, b_int4pack, scales, zeros_int8)
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
