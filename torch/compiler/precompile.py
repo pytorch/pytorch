@@ -6,8 +6,9 @@ reload it in a fresh process. This module exports the types a capture takes and
 returns: the ``MakeFxTracer`` configuration, the ``Capture`` handle, the
 ``PrecompiledRunnable`` a load returns, and the ``PrecompileSummary`` report; the
 entry points that produce and consume them follow in later commits. See Note
-[precompile programming model] in ``torch/_precompile.py`` for the contract. Signatures, error types and the
-artifact format may change between releases without a deprecation cycle.
+[precompile programming model] in ``torch/_precompile.py`` for the contract.
+Signatures, error types and the artifact format may change between releases
+without a deprecation cycle.
 
 Distinct from ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
 guard-serialization caching mode), despite the shared word.
