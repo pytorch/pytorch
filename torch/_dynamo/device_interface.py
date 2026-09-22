@@ -264,7 +264,7 @@ class DeviceInterface:
         return False
 
     @staticmethod
-    def is_fp32_softmax_attention_fusion_safe(device: torch.device) -> bool:
+    def is_fp32_softmax_attention_fusion_safe() -> bool:
         return True
 
     @staticmethod
@@ -420,8 +420,8 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
 
     @staticmethod
-    def is_fp32_softmax_attention_fusion_safe(device: torch.device) -> bool:
-        return "cuda" not in str(device)
+    def is_fp32_softmax_attention_fusion_safe() -> bool:
+        return False
 
     @staticmethod
     def keep_attention_on_math_path() -> bool:
