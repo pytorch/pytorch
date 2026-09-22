@@ -1417,6 +1417,37 @@ inline torch::stable::Tensor& mm_out(
   return out;
 }
 
+/// Stable version of the mm.dtype_out op.
+///
+/// Computes the matrix product of self and mat2 in out_dtype. This is a
+/// different overload than mm_out without the out_dtype argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 2-D input tensor.
+/// @param mat2 The second 2-D input tensor.
+/// @param out_dtype The dtype of the result.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& mm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2,
+    torch::headeronly::ScalarType out_dtype) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out_dtype),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::mm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
 /// Stable version of the bmm.out op.
 ///
 /// Computes the batch matrix product of the 3-D tensors self and mat2,
@@ -1440,6 +1471,37 @@ inline torch::stable::Tensor& bmm_out(
       torch::stable::detail::from(out)};
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::bmm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the bmm.dtype_out op.
+///
+/// Computes the batch matrix product of self and mat2 in out_dtype. This is a
+/// different overload than bmm_out without the out_dtype argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 3-D input tensor of shape (b, n, m).
+/// @param mat2 The second 3-D input tensor of shape (b, m, p).
+/// @param out_dtype The dtype of the result.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& bmm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2,
+    torch::headeronly::ScalarType out_dtype) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out_dtype),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bmm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
   // Clean up the handle in stack[0], discard the temporary
   (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   return out;
