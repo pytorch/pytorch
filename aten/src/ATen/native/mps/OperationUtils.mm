@@ -776,6 +776,7 @@ MetalShaderLibrary::~MetalShaderLibrary() {
 }
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
+  std::lock_guard guard(cache_mutex);
   if (C10_UNLIKELY(!library)) {
     TORCH_INTERNAL_ASSERT(nparams == 0);
     library = compileLibrary(shaderSource);
@@ -785,6 +786,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary() {
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::string>& params) {
   TORCH_INTERNAL_ASSERT(nparams == params.size());
+  std::lock_guard guard(cache_mutex);
   std::string key;
   for (const auto& p : params) {
     key += ':';
@@ -856,6 +858,7 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
     id<MTLLibrary> lib,
     const std::string& fname) {
   auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
+  std::lock_guard guard(cache_mutex);
   auto found_cpl = cplMap.find(key);
   if (found_cpl != cplMap.end()) {
     return found_cpl->second;
@@ -871,6 +874,7 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 }
 
 bool MetalShaderLibrary::hasFunction(const std::string& fname) {
+  std::lock_guard guard(cache_mutex);
   // Lazily build a set of all kernel names exposed by the library. The library is immutable post-load, so the set is
   // computed once per library instance. Used by exec_unary_kernel to decide whether to take the direct per-(in,out)
   // kernel or fall back to the `_dense_cast_` cast variant.
@@ -883,6 +887,7 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
+  std::lock_guard guard(cache_mutex);
   if (C10_UNLIKELY(!library && nparams > 0)) {
     throw std::runtime_error("Library must be initialized first");
   }
@@ -903,6 +908,7 @@ std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const
 }
 
 MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::string& name) {
+  std::lock_guard guard(cache_mutex);
   // Check if kernel is already cached
   auto it = kernelCache.find(name);
   if (it != kernelCache.end()) {
@@ -921,6 +927,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
 
  protected:
   id<MTLLibrary> getLibrary() override {
+    std::lock_guard guard(cache_mutex);
     if (C10_UNLIKELY(!library)) {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
