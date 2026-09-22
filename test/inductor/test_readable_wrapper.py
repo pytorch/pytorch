@@ -18,6 +18,17 @@ def _code_for(fn, *args, **config_kwargs):
     return result, "\n".join(codes)
 
 
+def _softmax(x):
+    return torch.softmax(x * 2, dim=-1)
+
+
+def _cond_softmax(x):
+    # Kernels in both the root and the branch subgraphs, whose text the root splices in.
+    return torch.cond(
+        x.sum() > 0, lambda t: torch.softmax(t * 2, dim=-1), lambda t: t.cos(), (x,)
+    )
+
+
 class TestReadableWrapperCodegen(TestCase):
     """The readable wrapper emits kernels as code rather than as source strings."""
 
@@ -41,31 +52,6 @@ class TestReadableWrapperCodegen(TestCase):
         # The launch site is unchanged, which is what makes the hoist a pure
         # reformatting: the name still binds a CachingAutotuner.
         self.assertIn(".run(", code)
-
-    @requires_cuda_and_triton
-    def test_async_compile_is_dropped_when_no_backend_needs_it(self):
-        def fn(x):
-            return (x * 2).relu()
-
-        x = torch.randn(256, device="cuda")
-        _, code = _code_for(fn, x, readable_wrapper=True)
-        self.assertNotIn("AsyncCompile()", code)
-        self.assertNotIn("async_compile.wait", code)
-        self.assertNotIn("del async_compile", code)
-
-    def test_async_compile_survives_when_a_backend_needs_it(self):
-        # C++ kernels cannot be hoisted -- the text is C++ and producing the value
-        # needs a compiler invocation -- so the lifecycle has to stay for them. The
-        # decision is per-graph, not per-mode.
-        def fn(x):
-            return (x + 1).relu().sum(0)
-
-        x = torch.randn(1024)
-        _, code = _code_for(fn, x, readable_wrapper=True)
-        if "async_compile.cpp" not in code:
-            self.skipTest("graph did not lower to a C++ kernel")
-        self.assertIn("AsyncCompile()", code)
-        self.assertIn("async_compile.wait", code)
 
     @requires_cuda_and_triton
     def test_every_kernel_is_defined_exactly_once(self):
@@ -142,11 +128,56 @@ class TestReadableWrapperCodegen(TestCase):
             return (x + 1).relu().sum(0)
 
         x = torch.randn(1024)
+        _, code = _code_for(fn, x, readable_wrapper=True, cpu_backend="cpp")
+        self.assertIn("empty_strided_cpu", code)
+        self.assertNotIn("empty_strided_cuda", code)
+        self.assertNotIn("empty_strided_xpu", code)
+
+    @requires_cuda_and_triton
+    def test_async_compile_is_dropped_when_no_backend_needs_it(self):
+        def fn(x):
+            return (x * 2).relu()
+
+        x = torch.randn(256, device="cuda")
         _, code = _code_for(fn, x, readable_wrapper=True)
-        preamble = code.split("async_compile.cpp")[0]
-        self.assertIn("empty_strided_cpu", preamble)
-        self.assertNotIn("empty_strided_cuda", preamble)
-        self.assertNotIn("empty_strided_xpu", preamble)
+        self.assertNotIn("AsyncCompile", code)
+        self.assertNotIn("async_compile", code)
+
+    def test_async_compile_survives_when_a_backend_needs_it(self):
+        # C++ kernels cannot be hoisted -- the text is C++ and producing the value
+        # needs a compiler invocation -- so the lifecycle has to stay for them. The
+        # decision is per-graph, not per-mode.
+        def fn(x):
+            return (x + 1).relu().sum(0)
+
+        x = torch.randn(1024)
+        _, code = _code_for(fn, x, readable_wrapper=True, cpu_backend="cpp")
+        self.assertIn("async_compile.cpp_pybinding(", code)
+        for line in (
+            "from torch._inductor.async_compile import AsyncCompile",
+            "async_compile = AsyncCompile()",
+            "async_compile.wait(globals())",
+            "del async_compile",
+        ):
+            self.assertEqual(code.count(line), 1, line)
+
+    def test_cpp_kernels_in_root_and_subgraphs_run_standalone(self):
+        # A subgraph's C++ kernel binds through the root's async_compile, and only the
+        # root waits on it, so the lifecycle is decided once for the whole module.
+        def fn(x):
+            y = (x + 1).relu()
+            pred = y.sum() > 0
+            return torch.cond(pred, lambda t: (t * 2).sin(), lambda t: t.cos(), (y,))
+
+        x = torch.randn(64, 128)
+        expected, code = _code_for(fn, x, readable_wrapper=True, cpu_backend="cpp")
+        # one kernel in the root and one per branch
+        self.assertGreaterEqual(code.count("= async_compile.cpp_pybinding("), 3)
+        self.assertEqual(code.count("async_compile.wait(globals())"), 1)
+        ns: dict[str, object] = {"__name__": "_readable_artifact"}
+        exec(compile(code, "<readable_artifact>", "exec"), ns)
+        got = ns["call"]([x])  # type: ignore[operator]
+        self.assertEqual(got[0], expected)
 
     @requires_cuda_and_triton
     def test_a_binding_is_not_kept_alive_by_its_own_definition(self):
@@ -176,14 +207,13 @@ class TestReadableWrapperCodegen(TestCase):
         # A kernel module supplies its own imports (`math as tl_math`) and carries
         # `'device': 0` in its metadata. Neither is a use of the wrapper's binding, and
         # once kernels are hoisted they sit in the same text as the wrapper's own code.
-        def fn(x):
-            return torch.softmax(x * 2, dim=-1)
-
         x = torch.randn(64, 128, device="cuda")
-        _, code = _code_for(fn, x, readable_wrapper=True)
-        self.assertIn("math as tl_math", code)
-        self.assertNotIn("\nimport math\n", code)
-        self.assertNotIn("from torch import device, empty_strided", code)
+        for fn in (_softmax, _cond_softmax):
+            with self.subTest(fn.__name__):
+                _, code = _code_for(fn, x, readable_wrapper=True)
+                self.assertIn("math as tl_math", code)
+                self.assertNotIn("\nimport math\n", code)
+                self.assertNotIn("from torch import device, empty_strided", code)
 
     @requires_cuda_and_triton
     def test_no_stale_pointer_to_a_cache_file(self):
@@ -204,18 +234,18 @@ class TestReadableWrapperCodegen(TestCase):
     def test_triton_is_not_imported_twice(self):
         # A hoisted kernel carries its own triton imports, so the wrapper's copy is dead
         # weight -- and `start_graph`/`end_graph` are only used under profile_bandwidth.
-        def fn(x):
-            return torch.softmax(x * 2, dim=-1)
-
         x = torch.randn(64, 128, device="cuda")
-        _, code = _code_for(fn, x, readable_wrapper=True)
-        preamble = code.split("Original ATen:")[0]
-        self.assertNotIn("import triton", preamble)
-        self.assertNotIn("start_graph", preamble)
-        # the kernel still supplies what it needs
-        self.assertIn("import triton", code)
-        for line in ("import triton\n", "import triton.language as tl\n"):
-            self.assertEqual(code.count(line), 1, f"{line!r} appears more than once")
+        for fn in (_softmax, _cond_softmax):
+            with self.subTest(fn.__name__):
+                _, code = _code_for(fn, x, readable_wrapper=True)
+                preamble = code.split("Original ATen:")[0]
+                self.assertNotIn("import triton", preamble)
+                self.assertNotIn("start_graph", preamble)
+                # each kernel still supplies what it needs, and nothing else does
+                kernels = len(re.findall(r"^def triton_\w+\(", code, re.MULTILINE))
+                self.assertGreater(kernels, 0)
+                for line in ("import triton\n", "import triton.language as tl\n"):
+                    self.assertEqual(code.count(line), kernels, line)
 
     @requires_cuda_and_triton
     def test_default_wrapper_still_uses_async_compile(self):
@@ -248,6 +278,17 @@ class TestReadableWrapperCodegen(TestCase):
         x = torch.randn(256, device="cuda")
         with self.assertRaisesRegex(Exception, "benchmark_kernel"):
             _code_for(fn, x, readable_wrapper=True, benchmark_kernel=True)
+
+    def test_profile_bandwidth_output_is_refused(self):
+        # profile_bandwidth_output runs the benchmark harness, which this mode drops.
+        def fn(x):
+            return (x * 2).relu()
+
+        x = torch.randn(256)
+        with self.assertRaisesRegex(Exception, "profile_bandwidth_output"):
+            _code_for(
+                fn, x, readable_wrapper=True, profile_bandwidth_output="unused.txt"
+            )
 
 
 if __name__ == "__main__":
