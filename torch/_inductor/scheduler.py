@@ -5779,39 +5779,37 @@ class Scheduler:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _count_subgraph_kernel_nodes(self, subgraph: ir.Subgraph | None) -> int:
+        """Count the kernels an invoke_subgraph body is expected to emit.
+
+        Counted from the lowered operations rather than from a Scheduler built for
+        the occasion. Scheduler.__init__ finalizes MultiTemplateBuffers, which
+        rewrites the body's operation list in place, so the Scheduler codegen
+        builds later would start from already-finalized templates and lose the
+        epilogue fusions it would otherwise make.
+
+        The count is therefore pre-fusion and reads high for a body whose buffers
+        later fuse (two fusable pointwise buffers count as two, not one), so the
+        threshold errs toward capturing. Fusion decisions are not available
+        without a Scheduler, and this is a coarse size heuristic.
+        """
         if subgraph is None or subgraph.graph is None:
             return 0
 
-        graph = subgraph.graph
-        # Nested bodies are counted under this region's patches too, the way
-        # codegen will see them.
+        count = 0
+        # Nested bodies are counted under this region's patches, as codegen sees them.
         with config.patch(subgraph.inductor_config_patches or {}):
-            if graph.scheduler is None:
-                # Temporary codegen state just for counting; codegen() rebuilds it.
-                with config.patch("graph_partition", False), V.set_graph_handler(graph):
-                    graph.init_wrapper_code()
-                    graph._update_scheduler()
-
-            count = 0
-            for node in graph.scheduler.nodes:
-                direct_kernel = False
-                nested_subgraphs: list[ir.Subgraph] = []
-                for scheduled_node in node.get_nodes():
-                    op = scheduled_node.node
-                    if not isinstance(op, ir.IRNode):
-                        continue
-                    op_subgraphs = op.get_subgraphs()
-                    if op_subgraphs:
-                        nested_subgraphs.extend(op_subgraphs)
-                    elif not isinstance(op, ir.MultiOutput):
-                        direct_kernel = True
-                if direct_kernel and not isinstance(node, NopKernelSchedulerNode):
+            for op in subgraph.graph.operations:
+                if not isinstance(op, ir.IRNode):
+                    continue
+                nested_subgraphs = op.get_subgraphs()
+                if nested_subgraphs:
+                    count += sum(
+                        self._count_subgraph_kernel_nodes(nested)
+                        for nested in nested_subgraphs
+                    )
+                elif not isinstance(op, ir.MultiOutput) and not op.is_no_op():
                     count += 1
-                count += sum(
-                    self._count_subgraph_kernel_nodes(nested)
-                    for nested in nested_subgraphs
-                )
-            return count
+        return count
 
     def _count_partition_kernel_nodes(self, nodes: Sequence[BaseSchedulerNode]) -> int:
         count = 0
@@ -11310,7 +11308,8 @@ class Scheduler:
             if graph.disable_cudagraphs_reason is not None:
                 return f"invoke_subgraph body {graph.disable_cudagraphs_reason}"
             # A body is never partitioned, so judge it by whole-graph rules. The
-            # mapping is copied because the check pops the entries it tolerates.
+            # mapping is copied because the check pops the entries it tolerates,
+            # meta among them -- a meta tensor implies no compute to capture.
             if reason := check_multiple_devices_or_any_cpu_nodes(
                 dict(graph.device_node_mapping), use_cudagraph_partition=False
             ):
