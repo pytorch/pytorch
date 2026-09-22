@@ -576,7 +576,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                         stage_index=0,  # stage 0 (the only stage)
                         computation_type=comp_type,
                         microbatch_index=microbatch_index
-                        if comp_type == _ComputationType.FORWARD
+                        if comp_type
+                        in (_ComputationType.FORWARD, _ComputationType.FULL_BACKWARD)
                         else None,
                     )
                     for comp_type in computation_types
@@ -584,11 +585,12 @@ class ComposabilityTest(MultiProcContinuousTest):
             }
             return schedule
 
-        unshard_schedule = create_schedule(
+        finalize_schedule = create_schedule(
             [
                 _ComputationType.UNSHARD,
                 _ComputationType.FORWARD,
-                _ComputationType.REDUCE_GRAD,  # Contains final fsdp post_backward
+                _ComputationType.FULL_BACKWARD,
+                _ComputationType.REDUCE_GRAD,
             ],
             microbatch_index=0,
         )
@@ -612,16 +614,20 @@ class ComposabilityTest(MultiProcContinuousTest):
         # Verify parameters are now sharded again
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
-        # Test 2: Run UNSHARD only schedule
-        runtime.pipeline_order_with_comms = unshard_schedule
-        runtime.step(dummy_input)
+        # Test 2: Run a backward schedule with explicit FSDP finalization
+        runtime = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=loss_fn, scale_grads=False
+        )
+        runtime.pipeline_order_with_comms = finalize_schedule
+        target = torch.randn_like(dummy_input)
+        runtime.step(dummy_input, target=target)
 
         # Verify parameters are still sharded
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
         self.assertNotIn(0, runtime.unsharded_stages)
 
         # The bookkeeping must allow the next step to unshard again.
-        runtime.step(dummy_input)
+        runtime.step(dummy_input, target=target)
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
 
