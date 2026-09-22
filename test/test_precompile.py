@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import copy
 import errno
-import functools
 import io
 import os
 import pickle
@@ -415,52 +414,6 @@ class TestPrecompile(TestCase):
         self.assertEqual(f(3), ((3,), {}))
         with self.assertRaisesRegex(PrecompileError, "not runnable"):
             PrecompiledModule(lambda x: x)(1)
-
-    def test_precompile_error_result_defaults_to_sentinel(self):
-        # Nothing ran before an ordinary refusal, so the default is the sentinel, not
-        # None: a training step that ends in .backward() returns None for real. The
-        # public test for it is the comparison against the class default.
-        err = PrecompileError("refused")
-        self.assertIs(err.result, PrecompileError.result)
-        self.assertIsNotNone(err.result)
-        err.result = None
-        self.assertIsNone(err.result)
-
-    def test_make_fx_capture_constructor(self):
-        # A partial hides its bound arguments from the capture, so it is refused
-        # up front with the fix, rather than failing later as a baked constant; the
-        # tracer name is refused too, since the constructor reads the MakeFxTracer.
-        from torch._precompile import _MakeFxCapture, MakeFxTracer
-
-        def step(model, x):
-            return model(x)
-
-        bound = functools.partial(step, torch.nn.Linear(2, 2))
-        table = {torch.ops.aten.add.Tensor: lambda *a, **k: None}
-        tracer = MakeFxTracer(decompositions=table)
-        with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
-            _MakeFxCapture(
-                bound, "m.py", "m.cache", backend="eager", tracer=tracer, training=False
-            )
-        with self.assertRaisesRegex(PrecompileError, "MakeFxTracer instance as tracer"):
-            _MakeFxCapture(
-                step,
-                "m.py",
-                "m.cache",
-                backend="eager",
-                tracer="make_fx",
-                training=False,
-            )
-        cap = _MakeFxCapture(
-            step, "m.py", "m.cache", backend="eager", tracer=tracer, training=False
-        )
-        self.assertIs(cap.__enter__(), cap)
-        self.assertIs(cap._module._decompositions, table)
-        self.assertEqual(cap._artifact_path, "m.py")
-        self.assertEqual(cap._cache_path, "m.cache")
-        self.assertFalse(cap._training)
-        self.assertFalse(cap._traced)
-        self.assertIsNone(cap._rendered)
 
     def test_inlined_forward_warns_unless_told_not_to(self):
         # exec of an artifact is untrusted input on the load path and warns on

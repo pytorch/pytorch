@@ -1497,7 +1497,10 @@ class TestCustomOpAutoTune(TestCase):
         )
 
     @skipIfXpu
-    def test_cudagraph_memory_cleanup_benchmarker(self):
+    @parametrize("autotune_cudagraph_benchmarking_iters", (1, 10))
+    def test_cudagraph_memory_cleanup_benchmarker(
+        self, autotune_cudagraph_benchmarking_iters
+    ):
         """Test that CUDA graph benchmarking cleans up memory without leaking."""
         if self.device != "cuda":
             self.skipTest("CUDA graph test requires CUDA device")
@@ -1516,17 +1519,20 @@ class TestCustomOpAutoTune(TestCase):
         def mm_callable():
             return torch.mm(a, b)
 
-        # This should capture into CUDA graph, benchmark, and clean up properly
-        _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
-        torch.cuda.synchronize()
-
-        memory_after_first = torch.cuda.memory_allocated()
-
-        # Run benchmarking again - memory should not grow
-        for _ in range(3):
+        with config.patch(
+            autotune_cudagraph_benchmarking_iters=autotune_cudagraph_benchmarking_iters
+        ):
+            # This should capture into CUDA graph, benchmark, and clean up properly
             _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
+            torch.cuda.synchronize()
 
-        memory_after_many = torch.cuda.memory_allocated()
+            memory_after_first = torch.cuda.memory_allocated()
+
+            # Run benchmarking again - memory should not grow
+            for _ in range(3):
+                _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
+
+            memory_after_many = torch.cuda.memory_allocated()
 
         # Memory should not grow significantly across multiple benchmark runs
         self.assertEqual(
