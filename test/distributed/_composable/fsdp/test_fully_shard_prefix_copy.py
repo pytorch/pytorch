@@ -16,7 +16,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
 from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo
 from torch.distributed.fsdp._fully_shard._fsdp_param import (
     _get_all_gather_num_prefixes,
-    ExtensionsData,
     FSDPParam,
     ShardedState,
 )
@@ -50,80 +49,20 @@ class _OpCounter(TorchDispatchMode):
 @unittest.skipIf(IS_WINDOWS, "FSDP2 is not supported on Windows")
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
-    @parametrize("positional", [False, True])
-    def test_extensions_data_constructor_and_clear(self, device, positional):
-        metadata = {"name": "legacy"}
-        sizes = [torch.Size((2, 3))]
-        data = (
-            ExtensionsData(metadata, sizes)
-            if positional
-            else ExtensionsData(
-                all_gather_metadata=metadata, all_gather_input_sizes=sizes
-            )
-        )
-        self.assertIs(data.all_gather_metadata, metadata)
-        self.assertIs(data.all_gather_input_sizes, sizes)
-        self.assertIsNone(data._all_gather_num_prefixes)
-        data._all_gather_num_prefixes = ()
-        data.clear()
-        self.assertIsNone(data.all_gather_metadata)
-        self.assertEqual(data.all_gather_input_sizes, ())
-        self.assertIsNone(data._all_gather_num_prefixes)
-
-    def _make_legacy_extension_param(self, world_size, shard_dim, padded_size, sizes):
+    def _make_extension_param(self, world_size, shard_dim, padded_size, inputs):
         param = FSDPParam.__new__(FSDPParam)
         param.mesh_info = Mock(spec=FSDPMeshInfo, shard_mesh_size=world_size)
         param.fsdp_placement = Shard(shard_dim)
         param.padded_sharded_param_size = torch.Size(padded_size)
         param.sharded_state = ShardedState.SHARDED
-        param.sharded_param = Mock(_local_tensor=Mock(spec=["fsdp_pre_all_gather"]))
-        param._extensions_data = ExtensionsData(all_gather_input_sizes=sizes)
-        param._all_gather_num_prefixes = None
+        param.offload_to_cpu = False
+        param._shard_mesh = Mock()
+        local_tensor = Mock(spec=["fsdp_pre_all_gather", "fsdp_post_all_gather"])
+        local_tensor.fsdp_pre_all_gather = lambda mesh: (inputs, None)
+        param.sharded_param = Mock(_local_tensor=local_tensor)
+        param._init_extensions()
         param.all_gather_outputs = []
         return param
-
-    def test_extensions_data_prepared_empty_prefixes(self, device):
-        param = self._make_legacy_extension_param(2, 1, (2, 3), [torch.Size((2, 3))])
-        output = torch.empty(12, device=device)
-        param.all_gather_outputs = [output]
-        self.assertEqual(param._unflatten_all_gather_outputs()[0].size(), (4, 3))
-        param._extensions_data._all_gather_num_prefixes = ()
-        self.assertEqual(param.all_gather_num_prefixes, ())
-        param._extensions_data.all_gather_input_sizes = ()
-        self.assertEqual(param._unflatten_all_gather_outputs(), ())
-        param._extensions_data.clear()
-        param.all_gather_outputs = []
-        self.assertEqual(param.all_gather_num_prefixes, ())
-        self.assertEqual(param._unflatten_all_gather_outputs(), ())
-
-    def test_legacy_all_gather_input_sizes_refresh(self, device):
-        world_size = 2
-        param = self._make_legacy_extension_param(world_size, 1, (2, 2, 3), [])
-        for size, empty_size, output_size, empty_output_size in (
-            ((2, 2, 3), (0, 3), (4, 2, 3), (0, 3)),
-            ((3, 4), (3, 0), (6, 4), (6, 0)),
-            ((12,), (0,), (24,), (0,)),
-        ):
-            expected = make_tensor((2, 4, 3), device=device, dtype=torch.float32)
-            shards = [shard.contiguous() for shard in expected.chunk(world_size, 1)]
-            param._extensions_data.all_gather_input_sizes = [
-                torch.Size(size),
-                torch.Size(empty_size),
-            ]
-            result = AllGatherResult(
-                torch.cat([shard.flatten() for shard in shards]),
-                None,
-                None,
-                [[expected.dtype, expected.dtype]],
-                [[shards[0].numel(), 0]],
-                [shards[0].numel(), 0],
-            )
-            with torch.no_grad():
-                _default_all_gather_output_fn([param], result, world_size)
-            output, empty_output = param._unflatten_all_gather_outputs()
-            self.assertEqual(output.size(), output_size)
-            self.assertEqual(empty_output.size(), empty_output_size)
-            self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
 
     def test_all_gather_input_padding(self, device):
         tensor = torch.empty(2, 3, device=device)
@@ -139,10 +78,9 @@ class TestPrefixCopy(TestCase):
     @parametrize("world_size", [1, 2])
     def test_legacy_all_gather_input_size(self, device, world_size):
         tensor = torch.empty(2, 3, device=device)
-        param = self._make_legacy_extension_param(
-            world_size, 1, (4, 3), [tensor.size()]
-        )
+        param = self._make_extension_param(world_size, 1, (4, 3), (tensor,))
         if world_size == 1:
+            _ = param.all_gather_inputs
             self.assertEqual(param.all_gather_num_prefixes, (1,))
             param.all_gather_outputs = [tensor]
             self.assertEqual(param._unflatten_all_gather_outputs()[0].size(), (2, 3))
@@ -150,17 +88,18 @@ class TestPrefixCopy(TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "Shard.*all-gather output must have.*elements"
             ):
-                _ = param.all_gather_num_prefixes
+                _ = param.all_gather_inputs
 
     @parametrize("input_size", [None, (0, 3), (3, 0)])
     def test_empty_all_gather_inputs(self, device, input_size):
-        sizes = [] if input_size is None else [torch.Size(input_size)]
-        param = self._make_legacy_extension_param(2, 1, (4, 3), sizes)
+        inputs = () if input_size is None else (torch.empty(input_size, device=device),)
+        param = self._make_extension_param(2, 1, (4, 3), inputs)
+        _ = param.all_gather_inputs
         if input_size is None:
             self.assertEqual(param.all_gather_num_prefixes, ())
             self.assertEqual(param._unflatten_all_gather_outputs(), ())
         else:
-            param.all_gather_outputs = [torch.empty(input_size, device=device)]
+            param.all_gather_outputs = list(inputs)
             self.assertEqual(param.all_gather_num_prefixes, (1,))
             self.assertEqual(
                 param._unflatten_all_gather_outputs()[0].size(),
@@ -172,9 +111,10 @@ class TestPrefixCopy(TestCase):
         expected = make_tensor((2, 4, 3), device=device, dtype=torch.float32)
         shards = [shard.contiguous() for shard in expected.chunk(world_size, dim=1)]
         empty = torch.empty(0, 3, device=device)
-        param = self._make_legacy_extension_param(
-            world_size, 1, shards[0].size(), [shards[0].size(), empty.size()]
+        param = self._make_extension_param(
+            world_size, 1, shards[0].size(), (shards[0], empty)
         )
+        _ = param.all_gather_inputs
         self.assertEqual(param.all_gather_num_prefixes, (2, 1))
         result = AllGatherResult(
             torch.cat([shard.flatten() for shard in shards]),
@@ -378,8 +318,8 @@ class TestPrefixCopy(TestCase):
         padded_size = list(shards[0].size())
         if payload_matches_param:
             padded_size[shard_dim] *= expected.element_size()
-        param = self._make_legacy_extension_param(
-            world_size, shard_dim, padded_size, [inputs[0].size()]
+        param = self._make_extension_param(
+            world_size, shard_dim, padded_size, (inputs[0],)
         )
         if cached_output:
             param.init_all_gather_outputs(
@@ -399,8 +339,9 @@ class TestPrefixCopy(TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "Shard.*all-gather output must have.*elements"
             ):
-                _ = param.all_gather_num_prefixes
+                _ = param.all_gather_inputs
             return
+        _ = param.all_gather_inputs
         self.assertEqual(param._unflatten_all_gather_outputs()[0].size(), output.size())
         with torch.no_grad(), _OpCounter() as counter:
             _default_all_gather_output_fn([param], result, world_size)

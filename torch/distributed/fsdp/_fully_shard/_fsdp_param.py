@@ -174,14 +174,10 @@ class ExtensionsData:
     all_gather_metadata: Any | None = None
     # Save the all-gather input sizes to unflatten the all-gather outputs to ND
     all_gather_input_sizes: Sequence[torch.Size] = ()  # ND
-    _all_gather_num_prefixes: tuple[int, ...] | None = field(
-        default=None, init=False, repr=False
-    )
 
     def clear(self):
         self.all_gather_metadata = None
         self.all_gather_input_sizes = ()
-        self._all_gather_num_prefixes = None
 
 
 class FSDPParam:
@@ -210,7 +206,7 @@ class FSDPParam:
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
-    _all_gather_num_prefixes: tuple[int, ...] | None
+    _all_gather_num_prefixes: tuple[int, ...]
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
@@ -845,7 +841,7 @@ class FSDPParam:
             )
         if has_fsdp_pre_all_gather:
             self._extensions_data = ExtensionsData()
-            self._all_gather_num_prefixes = None
+            self._all_gather_num_prefixes = ()
         else:
             self._all_gather_num_prefixes = (
                 math.prod(self.padded_sharded_param_size[: self.fsdp_placement.dim])
@@ -981,24 +977,7 @@ class FSDPParam:
     def all_gather_num_prefixes(self) -> tuple[int, ...]:
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             return (1,)
-        if self._all_gather_num_prefixes is not None:
-            return self._all_gather_num_prefixes
-        extensions_data = self._extensions_data
-        if extensions_data._all_gather_num_prefixes is not None:
-            return extensions_data._all_gather_num_prefixes
-        world_size = (
-            self.mesh_info.shard_mesh_size
-            if isinstance(self.mesh_info, FSDPMeshInfo)
-            else 1
-        )
-        # Legacy overrides may only populate input sizes; recompute after each write.
-        return _get_all_gather_num_prefixes(
-            extensions_data.all_gather_input_sizes,
-            world_size=world_size,
-            shard_dim=self.fsdp_placement.dim,
-            padded_sharded_size=self.padded_sharded_param_size,
-            all_gather_outputs=self.all_gather_outputs,
-        )
+        return self._all_gather_num_prefixes
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
@@ -1194,19 +1173,17 @@ class FSDPParam:
                     if isinstance(self.mesh_info, FSDPMeshInfo)
                     else 1
                 )
-                self._extensions_data._all_gather_num_prefixes = (
-                    _get_all_gather_num_prefixes(
-                        self._extensions_data.all_gather_input_sizes,
-                        world_size=world_size,
-                        shard_dim=self.fsdp_placement.dim,
-                        padded_sharded_size=self.padded_sharded_param_size,
-                        require_padding=(
-                            num_fn_params == 5
-                            and sharded_local_tensor.size()
-                            != self.padded_sharded_param_size
-                        ),
-                        all_gather_outputs=self.all_gather_outputs,
-                    )
+                self._all_gather_num_prefixes = _get_all_gather_num_prefixes(
+                    self._extensions_data.all_gather_input_sizes,
+                    world_size=world_size,
+                    shard_dim=self.fsdp_placement.dim,
+                    padded_sharded_size=self.padded_sharded_param_size,
+                    require_padding=(
+                        num_fn_params == 5
+                        and sharded_local_tensor.size()
+                        != self.padded_sharded_param_size
+                    ),
+                    all_gather_outputs=self.all_gather_outputs,
                 )
                 return [t.view(-1) for t in all_gather_inputs]
             sharded_param_data = self._sharded_param_data
