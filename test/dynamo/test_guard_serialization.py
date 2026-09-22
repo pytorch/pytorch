@@ -3244,6 +3244,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(list(out), [sub])
         self.assertEqual(next(iter(out)).tags, ["t"])
 
+    def test_a_deque_field_of_a_by_value_key_marks_its_items(self):
+        # A deque matches no builtin container check and has no instance dict,
+        # yet its reducer pickles each item on its own; and pytree flattens
+        # through a deque, so an unguarded local one registers its ITEMS.
+        sub = _SubCfg(2.0, ["t"])
+        key = _KeyWithSub("a", collections.deque([sub]))
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {id(sub): sub}, {id(key): key}, buf).dump({"k": key})
+        out = load_guards_state(buf.getvalue())["k"]
+        self.assertEqual(list(out.sub), [sub])
+        self.assertEqual(out.sub[0].tags, ["t"])
+
     def test_a_container_subclass_key_marks_its_fields_too(self):
         # The walk descends a container's elements AND its instance dict, so a
         # tuple subclass key with instance state keeps a field registered as
