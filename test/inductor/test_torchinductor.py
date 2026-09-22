@@ -6899,6 +6899,27 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(2, 4, 4, 4),),
         )
 
+    @skip_if_mps
+    @parametrize("output_size", [(1, 1), (2, 2)])
+    def test_adaptive_max_pool2d_int64(self, output_size):
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, output_size)
+
+        x = torch.randint(0, 10, (1, 1, 4, 4), dtype=torch.int64, device=self.device)
+        compiled = torch.compile(fn, fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+            compiled(x)
+
+    @parametrize("output_size", [(1, 1, 1), (2, 2, 2)])
+    def test_adaptive_max_pool3d_int64(self, output_size):
+        def fn(x):
+            return aten.adaptive_max_pool3d(x, output_size)
+
+        x = torch.randint(0, 10, (1, 1, 4, 4, 4), dtype=torch.int64, device=self.device)
+        compiled = torch.compile(fn, fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+            compiled(x)
+
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d1(self):
         def fn(x, samples):

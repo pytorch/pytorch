@@ -3127,6 +3127,14 @@ def max_pool3d_with_indices(
     )
 
 
+_ADAPTIVE_MAX_POOL_DTYPES = (torch.double, torch.float, torch.half, torch.bfloat16)
+
+_ADAPTIVE_MAX_POOL_EAGER_DTYPES = {
+    "cpu": _ADAPTIVE_MAX_POOL_DTYPES,
+    "cuda": _ADAPTIVE_MAX_POOL_DTYPES,
+}
+
+
 @register_decomposition(aten.adaptive_max_pool2d)
 @out_wrapper("out", "indices")
 def adaptive_max_pool2d(
@@ -3138,6 +3146,13 @@ def adaptive_max_pool2d(
         ndim in (3, 4),
         lambda: f"adaptive_max_pool2d(): Expected 3D or 4D tensor, but got {ndim}D",
     )
+    if input.dtype not in _ADAPTIVE_MAX_POOL_DTYPES:
+        eager_dtypes = _ADAPTIVE_MAX_POOL_EAGER_DTYPES.get(input.device.type)
+        torch._check_not_implemented(
+            eager_dtypes is None or input.dtype in eager_dtypes,
+            lambda: f"\"adaptive_max_pool2d\" not implemented for '{input.dtype}'",
+        )
+        return NotImplemented
     for i in range(1, ndim):
         torch._check(
             input.size(i) > 0,
@@ -3187,6 +3202,13 @@ def adaptive_max_pool3d(
         ndim in (4, 5),
         lambda: f"adaptive_max_pool3d(): Expected 4D or 5D tensor, but got {ndim}D",
     )
+    if input.dtype not in _ADAPTIVE_MAX_POOL_DTYPES:
+        eager_dtypes = _ADAPTIVE_MAX_POOL_EAGER_DTYPES.get(input.device.type)
+        torch._check_not_implemented(
+            eager_dtypes is None or input.dtype in eager_dtypes,
+            lambda: f"\"adaptive_max_pool3d\" not implemented for '{input.dtype}'",
+        )
+        return NotImplemented
     for i in range(1, ndim):
         torch._check(
             input.size(i) > 0,
