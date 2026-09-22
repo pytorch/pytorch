@@ -147,36 +147,35 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
       bool /*has_symbolic_sizes*/,
-      bool* has_python_cia) const override {
-    *has_python_cia = false;
-    return false;
+      bool* /*has_python_cia*/) const override {
+    PANIC(fake_try_decomp);
   }
   bool fake_try_custom_op_impl(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/) const override {
-    return false;
+    PANIC(fake_try_custom_op_impl);
   }
   bool fake_try_op_impl(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
       c10::Device /*common_device*/) const override {
-    return false;
+    PANIC(fake_try_op_impl);
   }
   bool fake_try_fast_op_impls(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
       c10::Device /*common_device*/) const override {
-    return false;
+    PANIC(fake_try_fast_op_impls);
   }
   bool fake_try_prim_meta(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/) const override {
-    return false;
+    PANIC(fake_try_prim_meta);
   }
   bool fake_infer_from_real_tensors(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/) const override {
-    return false;
+    PANIC(fake_infer_from_real_tensors);
   }
   c10::intrusive_ptr<TensorImpl> to_meta_tensor(
       const c10::intrusive_ptr<TensorImpl>& /*real*/) const override {
