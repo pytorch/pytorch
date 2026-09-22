@@ -12,6 +12,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
+#include <bit>
 #include <functional>
 #include <limits>
 #include <type_traits>
@@ -625,14 +626,12 @@ struct TORCH_API IValue final {
   IValue(const c10::SymBool& i) {
     if (auto mi = i.maybe_as_bool()) {
       tag = Tag::Bool;
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-      payload.u.as_int = *mi;
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-      /* due to byteorder if value assigned as_int, as_bool actually is not set correctly */
-      payload.u.as_bool = *mi;
-#else
-#error Unexpected or undefined __BYTE_ORDER__
-#endif
+      if constexpr (std::endian::native == std::endian::little) {
+        payload.u.as_int = *mi;
+      } else {
+        // Writing as_int on a big-endian host leaves as_bool unset.
+        payload.u.as_bool = *mi;
+      }
     } else {
       tag = Tag::SymBool;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
