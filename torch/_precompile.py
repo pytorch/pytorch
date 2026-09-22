@@ -131,10 +131,13 @@ it.
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
-#    on input layout. Each dense user-input leaf's dtype and device are recorded at
-#    capture and checked at runtime (both backends): a dtype- or device-mismatched input
-#    is rejected with a PrecompileError rather than crashing deep in a kernel or reading
-#    a wrong value. The graph is specialized to the example input shapes (invariant 3);
+#    on input layout. Every tensor user-input leaf's dtype and device, tensor subclasses
+#    (e.g. DTensor) included, are recorded at capture and checked at runtime (both
+#    backends): a dtype- or device-mismatched input is rejected with a PrecompileError
+#    rather than crashing deep in a kernel or reading a wrong value. The recorded device
+#    includes its index, so a capture whose only tensor inputs are subclass leaves (e.g.
+#    a DTensor shard on cuda:0) is tied to that device index, as parameters already
+#    are. The graph is specialized to the example input shapes (invariant 3);
 #    tensor-subclass outputs in particular are rebuilt with constant outer sizes/strides,
 #    so a different runtime shape is undefined. The inductor backend ADDITIONALLY bakes
 #    each read input's stride / memory format (it emits assert_size_stride) -- and this
@@ -533,11 +536,11 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
     Tensor subclasses (e.g. DTensor) go through AOTAutograd's flatten path, so their
     outer shape is not the dense shape the inductor artifact bakes; record ``None`` and
-    skip them in the SHAPE check only -- dtype and device are still recorded and still
-    checked. Note this leaves a subclass's INNER shapes unguarded: an artifact captured
-    from one sharding silently runs a differently-sharded input against capture's baked
-    local shapes, and an empty inner leaf is worse than a wrong number. Recording the
-    dense-leaf shapes is the real fix and is not done here.
+    skip them in the shape check only; dtype and device are still recorded and checked.
+    A subclass's inner shapes are not recorded either: the default backend's baked
+    assert_size_stride rejects a differently-sharded input on every inner leaf the graph
+    reads, but with backend="eager", or for an inner leaf the graph never reads, it runs
+    against capture's local shapes unchecked.
     """
     if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
         return tuple(t.shape)
@@ -551,9 +554,8 @@ def _dense_dtype(t: object) -> str | None:
     metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime. The
     graph is specialized to the example dtype (invariant 6).
 
-    Unlike _dense_shape this DOES apply to a wrapper subclass: its outer dtype is the
-    one AOTAutograd specializes on, and skipping it let a float64 subclass reach a graph
-    built for float32 and come back as reinterpreted bytes with no error at all.
+    Unlike _dense_shape this applies to a wrapper subclass too: its outer dtype is the
+    one AOTAutograd specializes on, so a mismatched subclass dtype must be rejected.
     """
     if isinstance(t, torch.Tensor):
         return str(t.dtype)
@@ -567,9 +569,8 @@ def _dense_device(t: object) -> str | None:
     compares cleanly at runtime. The graph is specialized to the example device
     (invariant 6).
 
-    Applies to a wrapper subclass for the same reason as _dense_dtype, and here the
-    stakes are memory safety rather than a wrong number: skipping it handed a CUDA
-    subclass to a graph built for CPU.
+    Applies to a wrapper subclass too, as _dense_dtype does: a graph built for one
+    device must not be handed a subclass on another.
     """
     if isinstance(t, torch.Tensor):
         return str(t.device)
@@ -987,7 +988,7 @@ def _capture(
     # reject a shape (invariant 3) or dtype/device (invariant 6) mismatch up front; see
     # the inlined driver checks (torch._precompile_driver). Stride is NOT recorded --
     # memory-format mismatches are enforced by inductor's own (pinned-on)
-    # assert_size_stride. Subclasses -> None.
+    # assert_size_stride. Subclass shapes -> None.
     # Widened element type (a marked-dynamic dim becomes None within the tuple in the
     # unbacked path below); _dense_shape's static tuples conform to it.
     user_input_shapes: list[tuple[int | None, ...] | None] = [
@@ -1108,17 +1109,10 @@ def _capture(
         captured_grad_param_indices = grad_param_indices
         return [*result_flat, *grad_flat]
 
-    # Trace with grad enabled, so a backward inside ``fn`` is built as graph ops. This
-    # DOES specialize a ``fn`` that reads torch.is_grad_enabled() and branches: it always
-    # captures the grad-enabled branch, which is documented alongside the other Python
-    # specializations. Tracing under the caller's ambient mode instead was tried and is
-    # worse: it makes the baked branch depend on ambient state that no stamp records, so
-    # a no_grad capture silently returns the wrong branch in every later process, and
-    # stamping it is not an option either -- capture-with-grad-on then call-under-no_grad
-    # is the ordinary inference pattern and a strict check would refuse it. A constant
-    # that is documented beats an ambient input that cannot be checked.
-    # Restore .grad in finally so a make_fx failure (e.g. fn raising after running a
-    # backward) does not leave the user's example model with clobbered .grad fields.
+    # Trace with grad enabled so any backward in ``fn`` is built as graph ops; the
+    # forward graph is the same as under no_grad. Restore in finally so a make_fx
+    # failure (e.g. fn raising after running a backward) does not leave the user's
+    # example model with clobbered .grad fields.
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
     tracing_mode = "symbolic" if fake_mode is not None else "real"
@@ -1330,8 +1324,9 @@ def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -
     # driver validates against it when present, else skips the structure check).
     buf.writeline(f"IN_SPEC = {in_spec_str!r}")
     buf.writeline(f"OUT_SPEC = {out_spec_str!r}")
-    # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
-    # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
+    # Per user-input-leaf example shape / dtype / device (None for a non-tensor leaf,
+    # and shape None for a subclass leaf); the drivers reject a runtime mismatch
+    # (invariants 3 and 6).
     # Memory-format mismatches are caught by the inductor artifact's own
     # assert_size_stride (pinned on at capture).
     buf.writeline(f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}")
