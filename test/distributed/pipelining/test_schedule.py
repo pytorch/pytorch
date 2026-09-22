@@ -26,6 +26,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._p2p import (
     _build_p2p_edge_groups,
     _directed_edge_split_rounds,
+    _physical_edge_matchings,
     _PP_EDGE_GROUP_CACHE,
     _stage_rank_assignment,
 )
@@ -204,6 +205,13 @@ class P2PEdgeGroupTest(TestCase):
         )
 
         self.assertEqual(
+            _physical_edge_matchings(assignment),
+            (
+                ((0, 1), (2, 3)),
+                ((0, 3), (1, 2)),
+            ),
+        )
+        self.assertEqual(
             _directed_edge_split_rounds(assignment),
             (
                 ((0, 1), (2, 3)),
@@ -213,6 +221,17 @@ class P2PEdgeGroupTest(TestCase):
             ),
         )
 
+    def test_repeated_two_rank_assignment_uses_one_physical_pair(self):
+        assignment = _stage_rank_assignment(
+            {stage: stage % 2 for stage in range(8)}, group_size=2
+        )
+
+        self.assertEqual(_physical_edge_matchings(assignment), (((0, 1),),))
+        self.assertEqual(
+            _directed_edge_split_rounds(assignment),
+            (((0, 1),), ((1, 0),)),
+        )
+
     def test_v_assignment_excludes_same_rank_turn_and_wraparound(self):
         assignment = _stage_rank_assignment(
             dict(enumerate((0, 1, 2, 3, 3, 2, 1, 0))),
@@ -220,6 +239,10 @@ class P2PEdgeGroupTest(TestCase):
         )
 
         rounds = _directed_edge_split_rounds(assignment)
+        self.assertEqual(
+            _physical_edge_matchings(assignment),
+            (((0, 1), (2, 3)), ((1, 2),)),
+        )
         edges = {edge for round_edges in rounds for edge in round_edges}
         self.assertEqual(
             edges,

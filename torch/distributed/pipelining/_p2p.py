@@ -14,6 +14,8 @@ from torch._logging import warning_once
 logger = logging.getLogger(__name__)
 
 _StageRankAssignment = tuple[int, ...]
+_PhysicalRankEdge = tuple[int, int]
+_PhysicalEdgeMatching = tuple[_PhysicalRankEdge, ...]
 _DirectedRankEdge = tuple[int, int]
 _P2PSplitRound = tuple[_DirectedRankEdge, ...]
 _DirectedP2PGroupMap = dict[_DirectedRankEdge, dist.ProcessGroup]
@@ -61,28 +63,21 @@ def _stage_rank_assignment(
     return assignment
 
 
-def _directed_edge_split_rounds(
+def _physical_edge_matchings(
     stage_rank_assignment: _StageRankAssignment,
-) -> tuple[_P2PSplitRound, ...]:
-    """Partition adjacent physical-rank edges into collective split rounds.
+) -> tuple[_PhysicalEdgeMatching, ...]:
+    """Partition unique adjacent physical-rank pairs into disjoint rounds.
 
-    Logical adjacencies mapped to the same physical-rank pair share a child
-    communicator. Same-rank adjacencies require no communication. Every
-    remaining rank pair appears in two directed rounds. Each returned round is
-    passed directly as one ``split_ranks`` argument to
-    :func:`torch.distributed.split_group`.
-    Because a parent rank may occur in at most one subgroup per split call, the
-    helper packs only disjoint edges into a round. Its deterministic greedy
-    matching combines independent edges and thereby reduces collective setup
-    calls without changing which directed communicators are created.
+    Repeated logical-stage adjacencies mapped to the same physical ranks share
+    one pair. Same-rank adjacencies require no communication. Because a rank
+    may participate in at most one pair per setup round, the deterministic
+    greedy matching combines only disjoint pairs.
 
-    For example, the PP4/VPP2 assignment ``(0, 1, 2, 3, 0, 1, 2, 3)`` needs
-    eight directed communicators. They fit in four split calls::
+    For example, PP4/VPP2 assignment ``(0, 1, 2, 3, 0, 1, 2, 3)`` has four
+    physical pairs in two matchings::
 
         ((0, 1), (2, 3))
-        ((1, 0), (3, 2))
         ((0, 3), (1, 2))
-        ((3, 0), (2, 1))
 
     Only successive logical stages in ``stage_rank_assignment`` contribute
     edges. Long-range skip connections are not supported; a future arbitrary
@@ -94,8 +89,8 @@ def _directed_edge_split_rounds(
             stage, indexed by logical stage.
 
     Returns:
-        Ordered split rounds containing directed ``(source_rank,
-        destination_rank)`` edges.
+        Ordered rounds containing canonical ``(lower_rank, higher_rank)``
+        pairs.
     """
     remaining_edges = sorted(
         {
@@ -104,11 +99,11 @@ def _directed_edge_split_rounds(
             if source != destination
         }
     )
-    edge_matchings: list[tuple[_DirectedRankEdge, ...]] = []
+    edge_matchings: list[_PhysicalEdgeMatching] = []
     while remaining_edges:
         used_ranks: set[int] = set()
-        matching: list[_DirectedRankEdge] = []
-        deferred: list[_DirectedRankEdge] = []
+        matching: list[_PhysicalRankEdge] = []
+        deferred: list[_PhysicalRankEdge] = []
         for edge in remaining_edges:
             if edge[0] in used_ranks or edge[1] in used_ranks:
                 deferred.append(edge)
@@ -118,8 +113,28 @@ def _directed_edge_split_rounds(
         edge_matchings.append(tuple(matching))
         remaining_edges = deferred
 
+    return tuple(edge_matchings)
+
+
+def _directed_edge_split_rounds(
+    stage_rank_assignment: _StageRankAssignment,
+) -> tuple[_P2PSplitRound, ...]:
+    """Expand physical-rank matchings into directed split rounds.
+
+    Each physical pair receives distinct forward and reverse child groups.
+    The returned rounds may therefore be passed directly as ``split_ranks`` to
+    :func:`torch.distributed.split_group`.
+
+    Args:
+        stage_rank_assignment: Physical pipeline-group rank for every logical
+            stage, indexed by logical stage.
+
+    Returns:
+        Ordered split rounds containing directed ``(source_rank,
+        destination_rank)`` edges.
+    """
     split_rounds: list[_P2PSplitRound] = []
-    for matching_edges in edge_matchings:
+    for matching_edges in _physical_edge_matchings(stage_rank_assignment):
         split_rounds.append(matching_edges)
         split_rounds.append(
             tuple((destination, source) for source, destination in matching_edges)
