@@ -1,5 +1,6 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/native/Resize.h>
+#include <ATen/ops/_chunk_cat.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -8,6 +9,7 @@
 #include <torch/csrc/distributed/fsdp/CollectiveCopyCUDA.hpp>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <algorithm>
 #include <cmath>
 
 namespace c10d::fsdp {
@@ -115,6 +117,12 @@ at::Tensor& reduce_scatter_copy_in_cuda(
     int64_t num_chunks) {
   check_reduce_scatter_copy_in_inputs(
       out, tensors, num_leading_dims, num_chunks);
+  if (std::all_of(
+          num_leading_dims.begin(), num_leading_dims.end(), [](int64_t dim) {
+            return dim == 0;
+          })) {
+    return at::_chunk_cat_out(out, tensors, 0, num_chunks);
+  }
   const c10::cuda::CUDAGuard device_guard(out.device());
   const auto src_dtype = tensors[0].scalar_type();
   bool fast_path = src_dtype == out.scalar_type() ||
