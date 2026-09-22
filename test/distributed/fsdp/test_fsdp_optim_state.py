@@ -1954,8 +1954,8 @@ class TestFSDPOptimState(FSDPTestContinuous):
             dist.destroy_process_group(new_group)
 
     @skip_if_lt_x_gpu(2)
-    def test_interface_arguments(self):
-        device_type = self.device_type
+    def test_interface_arguments(self, device):
+        device_type = torch.device(device).type
         model = FSDP(TestDummyModel().to(device_type))
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
@@ -2024,8 +2024,8 @@ class TestFSDPOptimState(FSDPTestContinuous):
                         self.assertFalse(isinstance(s, ShardedTensor))
 
     @skip_if_lt_x_gpu(2)
-    def test_state_dict_with_none_tensor_state(self):
-        device_type = self.device_type
+    def test_state_dict_with_none_tensor_state(self, device):
+        device_type = torch.device(device).type
 
         def _run_test(use_orig_params, optimizer_has_tensor_state):
             model = FSDP(
@@ -2063,8 +2063,8 @@ class TestFSDPOptimState(FSDPTestContinuous):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_with_no_shard(self):
-        device_type = self.device_type
+    def test_with_no_shard(self, device):
+        device_type = torch.device(device).type
 
         def _run_test(use_orig_params: bool) -> None:
             model = FSDP(
@@ -2094,8 +2094,8 @@ class TestFSDPOptimState(FSDPTestContinuous):
         self.run_subtests({"use_orig_params": [False, True]}, _run_test)
 
     @skip_if_lt_x_gpu(2)
-    def test_no_grad(self):
-        device_type = self.device_type
+    def test_no_grad(self, device):
+        device_type = torch.device(device).type
         model = TestDummyModel(no_grad=True).to(device_type)
         fsdp_model = FSDP(deepcopy(model), use_orig_params=True)
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
