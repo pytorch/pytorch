@@ -12,8 +12,10 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton
 
 
@@ -25,7 +27,7 @@ i64 = torch.int64
 i32 = torch.int32
 
 
-class TestCompilerBisectorGeneric(TestCase):
+class TestCompilerBisector(TestCase):
     hw_classification = HardwareClassification.GENERIC
     bisector_ns = "_test_bisector"
 
@@ -128,8 +130,9 @@ class TestCompilerBisectorGeneric(TestCase):
         self.assertEqual(out.subsystem, None)
 
 
-@unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-class TestCompilerBisector(TestCase):
+class TestCompilerBisectorDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     bisector_ns = "_test_bisector"
 
     def tearDown(self):
@@ -142,7 +145,7 @@ class TestCompilerBisector(TestCase):
         return getattr(getattr(torch.ops, self.bisector_ns), name).default
 
     @unittest.skipIf(not has_triton(), "requires Triton")
-    def test_bad_decomp(self):
+    def test_bad_decomp(self, device):
         import_module("torch._inductor.compile_fx")
 
         def bad_exp_decomp(self, rate=1, generator=None):
@@ -185,7 +188,7 @@ class TestCompilerBisector(TestCase):
             torch._dynamo.reset()
             with patch_exp_decomp():
                 vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(4, 400, 256, device=GPU_TYPE)
+                x = torch.randn(4, 400, 256, device=device)
                 with torch._dynamo.utils.preserve_rng_state():
                     vq(x)
                 out_compiled = vq_compiled(x)
@@ -199,7 +202,7 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("aten.exponential" in out.debug_info)
 
     @unittest.skipIf(not has_triton(), "requires Triton")
-    def test_joint_graph(self):
+    def test_joint_graph(self, device):
         from torch._inductor import config
 
         class CustomPostPass(CustomGraphPass):
@@ -222,7 +225,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            inp = torch.rand([10], device=GPU_TYPE)
+            inp = torch.rand([10], device=device)
 
             out = foo(inp)
             out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
@@ -237,9 +240,9 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
     @unittest.skipIf(not has_triton(), "requires Triton")
-    def test_rng(self):
+    def test_rng(self, device):
         def foo():
-            return torch.rand([10], device=GPU_TYPE) + 1
+            return torch.rand([10], device=device) + 1
 
         def test_fn():
             torch._dynamo.reset()
@@ -257,7 +260,7 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("inductor_fallback_random" in out.debug_info)
 
     @unittest.skipIf(not has_triton(), "requires Triton")
-    def test_emulate_precision_casts(self):
+    def test_emulate_precision_casts(self, device):
         def test_fn():
             torch._dynamo.reset()
 
@@ -269,7 +272,7 @@ class TestCompilerBisector(TestCase):
 
             dtype = torch.bfloat16
             torch.manual_seed(0)
-            inp = torch.randn(16, 16, 768, dtype=dtype, device=GPU_TYPE)
+            inp = torch.randn(16, 16, 768, dtype=dtype, device=device)
             eager_scale = calculate_scale(inp)
             compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
 
@@ -280,7 +283,7 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
 
     @unittest.skipIf(not has_triton(), "requires Triton")
-    def test_bad_lowering(self):
+    def test_bad_lowering(self, device):
         def test_fn():
             torch._dynamo.reset()
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
@@ -288,7 +291,7 @@ class TestCompilerBisector(TestCase):
                 def my_func(x):
                     return ((x * -1) - 0.01).relu()
 
-                inp = torch.rand([100], device=GPU_TYPE)
+                inp = torch.rand([100], device=device)
 
                 return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
 
@@ -305,7 +308,7 @@ class TestCompilerBisector(TestCase):
             "test_configs.bisect_keep_custom_backend_for_inductor": True,
         }
     )
-    def test_bisect_pre_grad_graph(self):
+    def test_bisect_pre_grad_graph(self, device):
         def f(x):
             for _ in range(5):
                 x = x + 1
@@ -342,7 +345,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            x = torch.randn(1024, device=GPU_TYPE)
+            x = torch.randn(1024, device=device)
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
                 opt_f = torch.compile(f, backend=MyBackend())
                 return torch.allclose(opt_f(x), f(x))
@@ -355,7 +358,7 @@ class TestCompilerBisector(TestCase):
     # XPU doesn't support cudagrah
     @requires_cuda
     @unittest.skipIf(not has_triton(), "requires Triton")
-    def test_cudagraph_bisect_max(self):
+    def test_cudagraph_bisect_max(self, device):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
         import os
         from unittest.mock import patch
@@ -384,7 +387,7 @@ class TestCompilerBisector(TestCase):
             try:
                 foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
                 bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(10, device=GPU_TYPE)
+                x = torch.randn(10, device=device)
                 foo_c(x)
                 bar_c(x)
 
@@ -395,7 +398,7 @@ class TestCompilerBisector(TestCase):
                 get_env_val.cache_clear()
 
     @unittest.skipIf(not has_triton(), "requires Triton")
-    def test_bisect_run_debuginfo(self):
+    def test_bisect_run_debuginfo(self, device):
         import os
         import subprocess
         from pathlib import Path
@@ -426,6 +429,11 @@ class TestCompilerBisector(TestCase):
             "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
         )
         self.assertIn(expected_result, output.stdout)
+
+
+instantiate_device_type_tests(
+    TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
