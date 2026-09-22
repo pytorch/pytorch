@@ -73,7 +73,7 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
@@ -551,16 +551,15 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[VariableTracker] | list[str] | None = None,
+    args: Sequence[object] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
     from .variables.builder import SourcelessBuilder
 
     if args:
-        args_ = [
-            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
-            for arg in args
-        ]
+        # Callers may forward args from real exceptions, which can contain
+        # plain Python values rather than VariableTrackers.
+        args_ = [SourcelessBuilder.create(tx, arg) for arg in args]
     else:
         args_: list[VariableTracker] = []
 
