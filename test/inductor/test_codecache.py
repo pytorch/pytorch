@@ -2,7 +2,6 @@
 import base64
 import copy
 import functools
-import gc
 import hashlib
 import json
 import logging
@@ -16,7 +15,6 @@ import textwrap
 import types
 import unittest
 import warnings
-import weakref
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -65,7 +63,11 @@ from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.output_code import CompiledFxGraphConstants
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.triton_bundler import TritonBundler
+from torch._inductor.triton_bundler import (
+    TritonBundler,
+    TritonKernelArtifact,
+    TritonKernelArtifacts,
+)
 from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
@@ -752,6 +754,31 @@ class TestFxGraphCache(TestCase):
         for compile_result in cached_autotuner.compile_results:
             compile_result.kernel.cubin_raw = None
 
+    @staticmethod
+    def add_conflicting_bundled_binary(bundle, *, device, payload):
+        """Add a conflicting binary with an existing bundle identity."""
+        binary_exts = tuple(GPU_KERNEL_BIN_EXTS.values())
+        match = next(
+            (
+                (artifacts, artifact)
+                for artifacts in bundle.kernel_artifacts
+                for artifact in artifacts.artifacts
+                if artifact.filename.endswith(binary_exts)
+            ),
+            None,
+        )
+        if match is None:
+            raise AssertionError("bundle has no GPU binary")
+        artifacts, artifact = match
+        bundle.kernel_artifacts.append(
+            TritonKernelArtifacts(
+                artifacts.kernel_hash,
+                device,
+                [TritonKernelArtifact(artifact.filename, payload)],
+            )
+        )
+        return artifacts, artifact
+
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
             f"""
@@ -1037,10 +1064,14 @@ class TestFxGraphCache(TestCase):
 
         self.reset()
         triton_dir = os.path.join(cache_dir(), "triton")
-        shutil.rmtree(triton_dir)
-        TritonBundler.read_and_emit(bundle)
         self.assertTrue(os.path.isdir(triton_dir))
         self.clear_retained_static_binaries(bundle, static_autotuner.kernel)
+        metadata = TritonBundler.read_and_emit(bundle)
+        self.assertIsNotNone(metadata)
+        self.assertNotIn(
+            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
+        )
+        self.assertTrue(os.path.isdir(triton_dir))
         shutil.rmtree(triton_dir)
 
         graph.after_deserialization(CompiledFxGraphConstants())
@@ -1060,6 +1091,63 @@ class TestFxGraphCache(TestCase):
         )
         actual = graph.current_callable([x.clone()])
         self.assertEqual(actual[0], expected)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @parametrize("conflicting_device", ("same", "other"))
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_ambiguous_device_agnostic_bundle_falls_back_to_jit(
+        self, conflicting_device
+    ):
+        def fn(x):
+            return x.sin()
+
+        with torch.cuda.device(0):
+            x = torch.randn(32, device="cuda")
+            expected = fn(x)
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        original_artifacts = next(
+            artifacts
+            for artifacts in bundle.kernel_artifacts
+            if any(
+                artifact.filename.endswith(tuple(GPU_KERNEL_BIN_EXTS.values()))
+                for artifact in artifacts.artifacts
+            )
+        )
+        duplicate_device = (
+            original_artifacts.device if conflicting_device == "same" else 1
+        )
+        self.add_conflicting_bundled_binary(
+            bundle,
+            device=duplicate_device,
+            payload=b"conflicting bundled binary",
+        )
+
+        self.reset()
+        metadata = TritonBundler.read_and_emit(bundle)
+        self.assertIsNotNone(metadata)
+        self.assertNotIn(
+            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
+        )
+        shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
@@ -1091,7 +1179,7 @@ class TestFxGraphCache(TestCase):
         loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
             static_autotuner.kernel_name
         ]
-        coordinator = loaded_autotuner.run.__self__
+        self.assertIs(loaded_autotuner.run.__self__, loaded_autotuner)
         static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
         cubin_path = static_kernel._agnostic_cubin_path()
         self.assertIsNotNone(static_kernel.cubin_raw)
@@ -1116,7 +1204,7 @@ class TestFxGraphCache(TestCase):
                     del os.environ["TRITON_LIBDEVICE_PATH"]
                 else:
                     os.environ["TRITON_LIBDEVICE_PATH"] = old_libdevice_path
-        self.assertIs(loaded_autotuner.run.__self__, coordinator)
+        self.assertIs(loaded_autotuner.run.__self__, loaded_autotuner)
         with open(cubin_path, "rb") as file:
             self.assertEqual(file.read(), static_kernel.cubin_raw)
 
@@ -1146,9 +1234,7 @@ class TestFxGraphCache(TestCase):
         self.assertIs(cached_autotuner.run.__self__, cached_autotuner)
         self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
 
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
-    @torch.compiler.config.patch(compile_on_one_rank=True)
     @config.patch(
         {
             "bundle_triton_into_fx_graph_cache": True,
@@ -1159,395 +1245,44 @@ class TestFxGraphCache(TestCase):
             "use_static_triton_launcher": True,
         }
     )
-    def test_device_agnostic_fallback_coordinator_does_not_retain_autotuner(self):
+    def test_single_device_corrupt_bundled_cubin_recovers(self):
         def fn(x):
             return x.sin()
 
-        with torch.cuda.device(0):
-            x = torch.randn(32, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
-
+        x = torch.randn(32, device="cuda")
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
         graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
-        self.reset()
-        TritonBundler.read_and_emit(bundle)
-        graph.after_deserialization(CompiledFxGraphConstants())
-        module_globals = graph.current_callable.__globals__  # type: ignore[union-attr]
-        cached_autotuner = module_globals[static_autotuner.kernel_name]
-        self.assertIsNot(cached_autotuner.run.__self__, cached_autotuner)
-        cached_autotuner_ref = weakref.ref(cached_autotuner)
 
-        gc_was_enabled = gc.isenabled()
-        gc.disable()
-        try:
-            self.assertIs(
-                module_globals.pop(static_autotuner.kernel_name), cached_autotuner
-            )
-            PyCodeCache.cache_clear()
-            del cached_autotuner
-            del static_autotuner
-            del bundle
-            del graph
-            self.assertIsNone(cached_autotuner_ref())
-        finally:
-            if gc_was_enabled:
-                gc.enable()
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @requires_cuda_and_triton
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "autotune_local_cache": False,
-            "autotune_remote_cache": False,
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
-    def test_missing_bundled_cubin_during_autotune_falls_back_to_jit(self):
-        def fn(x):
-            return x.sin()
-
-        with torch.cuda.device(0):
-            x0 = torch.randn(32, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
-        cached_autotuner = static_autotuner.kernel
-        cached_autotuner.compile_results.append(
-            copy.deepcopy(cached_autotuner.compile_results[0])
+        compile_result = static_autotuner.kernel.compile_results[0]
+        device = compile_result.compile_meta["device"]
+        original_artifacts, original_binary = self.add_conflicting_bundled_binary(
+            bundle,
+            device=1 - device,
+            payload=b"binary for the wrong device",
         )
+        self.assertEqual(original_artifacts.device, device)
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
-        self.clear_retained_static_binaries(bundle, cached_autotuner)
-        graph.after_deserialization(CompiledFxGraphConstants())
-        coordinator = cached_autotuner.run.__self__
-        self.assertEqual(len(cached_autotuner.launchers), 2)
-
-        shutil.rmtree(os.path.join(cache_dir(), "triton"))
-        with torch.cuda.device(1):
-            x1 = torch.randn(32, device="cuda")
-            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNot(cached_autotuner.run.__self__, coordinator)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @requires_cuda_and_triton
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "profile_bandwidth": True,
-            "profile_bandwidth_regex": "",
-            "use_static_triton_launcher": True,
-        }
-    )
-    def test_missing_bundled_cubin_in_debug_autotuner_falls_back_to_jit(self):
-        def fn(x):
-            return x.sin()
-
-        with torch.cuda.device(0):
-            x0 = torch.randn(32, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
-
-        self.reset()
-        TritonBundler.read_and_emit(bundle)
-        graph.after_deserialization(CompiledFxGraphConstants())
         cached_autotuner = static_autotuner.kernel
-        self.clear_retained_static_binaries(bundle, cached_autotuner)
-        coordinator = cached_autotuner.run.__self__
+        static_kernel = compile_result.kernel
+        cubin_path = static_kernel.cubin_path
+        expected_cubin = static_kernel.cubin_raw
+        self.assertIsNotNone(cubin_path)
+        self.assertIsNotNone(expected_cubin)
+        self.assertEqual(expected_cubin, original_binary.payload)
+        with open(cubin_path, "wb") as file:
+            file.write(b"truncated")
 
-        shutil.rmtree(os.path.join(cache_dir(), "triton"))
-        with torch.cuda.device(1):
-            x1 = torch.randn(32, device="cuda")
-            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNot(cached_autotuner.run.__self__, coordinator)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @requires_cuda_and_triton
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
-    def test_failed_jit_fallback_compilation_retries(self):
-        def fn(x):
-            return x.sin()
-
-        with torch.cuda.device(0):
-            x0 = torch.randn(32, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
-
-        self.reset()
-        TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
-        cached_autotuner = static_autotuner.kernel
-        self.clear_retained_static_binaries(bundle, cached_autotuner)
-        coordinator = cached_autotuner.run.__self__
-        shutil.rmtree(os.path.join(cache_dir(), "triton"))
-        old_libdevice_path = os.environ.get("TRITON_LIBDEVICE_PATH")
-        missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
-        self.assertFalse(os.path.exists(missing_libdevice_path))
-        with torch.cuda.device(1):
-            x1 = torch.randn(32, device="cuda")
-            # Exercise a real Triton compiler failure after the static launch
-            # has released its artifacts, then restore the toolchain and retry.
-            os.environ["TRITON_LIBDEVICE_PATH"] = missing_libdevice_path
-            try:
-                with self.assertRaises(FileNotFoundError):
-                    graph.current_callable([x1.clone()])
-            finally:
-                if old_libdevice_path is None:
-                    del os.environ["TRITON_LIBDEVICE_PATH"]
-                else:
-                    os.environ["TRITON_LIBDEVICE_PATH"] = old_libdevice_path
-            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNot(cached_autotuner.run.__self__, coordinator)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @requires_cuda_and_triton
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
-    @config.patch({"autotune_local_cache": False, "autotune_remote_cache": False})
-    def test_concurrent_missing_bundled_cubin_fallback(self):
-        import sys
-        import threading
-        from concurrent.futures import ThreadPoolExecutor
-
-        from torch._dynamo.convert_frame import compile_lock
-
-        def fn(x):
-            return x.sin()
-
-        with torch.cuda.device(0):
-            x0 = torch.randn(65536, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
-        second_graph = pickle.loads(pickle.dumps(graph))
-        second_static_autotuner = second_graph._triton_bundle.static_autotuners[0]
-
-        self.reset()
-        TritonBundler.read_and_emit(bundle)
-        graph.after_deserialization(CompiledFxGraphConstants())
-        # Load the second serialized graph into a distinct generated module so
-        # it owns an independent static autotuner and fallback coordinator.
-        PyCodeCache.cache_clear()
-        TritonBundler.read_and_emit(second_graph._triton_bundle)
-        second_graph.after_deserialization(CompiledFxGraphConstants())
-        cached_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
             static_autotuner.kernel_name
         ]
-        second_cached_autotuner = second_graph.current_callable.__globals__[  # type: ignore[union-attr]
-            second_static_autotuner.kernel_name
-        ]
-        self.clear_retained_static_binaries(bundle, cached_autotuner)
-        self.clear_retained_static_binaries(
-            second_graph._triton_bundle, second_cached_autotuner
-        )
-        coordinator = cached_autotuner.run.__self__
-        second_coordinator = second_cached_autotuner.run.__self__
-        self.assertIsNot(coordinator, cached_autotuner)
-        self.assertIsNot(second_coordinator, second_cached_autotuner)
-        self.assertIsNot(coordinator, second_coordinator)
-        static_kernel = cached_autotuner.launchers[0].__globals__["runner"].__self__
-        cubin_path = static_kernel._agnostic_cubin_path()
-        second_static_kernel = (
-            second_cached_autotuner.launchers[0].__globals__["runner"].__self__
-        )
-        self.assertEqual(cubin_path, second_static_kernel._agnostic_cubin_path())
-
-        run_code = type(cached_autotuner).run.__code__
-        fallback_code = type(coordinator)._run_fallback.__code__
-        compile_kernel_from_src = coordinator._compile_kernel_from_src
-        if compile_kernel_from_src is None:
-            raise AssertionError("source compilation callback is not set")
-        compile_code = compile_kernel_from_src.__code__
-        active_paused = threading.Event()
-        release_active = threading.Event()
-        candidate_run_paused = threading.Event()
-        release_candidate_run = threading.Event()
-        trace_condition = threading.Condition()
-        fallback_entries = 0
-        compile_calls = 0
-        compiled_launcher_counts = []
-        compiled_autotuners = []
-        candidate_run_entries = 0
-        candidate_runs = 0
-        max_candidate_runs = 0
-        compile_lock_owned = False
-
-        def run_on_device(graph_to_run, x, device, pause_static=False):
-            def trace(frame, event, arg):
-                nonlocal candidate_run_entries, compile_calls
-                nonlocal candidate_runs, compile_lock_owned, fallback_entries
-                nonlocal max_candidate_runs
-                if frame.f_code is compile_code:
-                    with trace_condition:
-                        if event == "call":
-                            compile_calls += 1
-                        elif event == "line" and compile_lock._is_owned():
-                            compile_lock_owned = True
-                        elif event == "return":
-                            compiled_launcher_counts.append(len(arg.launchers))
-                            compiled_autotuners.append(arg)
-                        trace_condition.notify_all()
-                    return trace
-                if (
-                    pause_static
-                    and event == "call"
-                    and frame.f_code is run_code
-                    and frame.f_locals.get("self") is cached_autotuner
-                ):
-                    active_paused.set()
-                    if not release_active.wait(timeout=30):
-                        raise AssertionError("timed out waiting to release active run")
-                elif frame.f_code is run_code and frame.f_locals.get("self") not in (
-                    cached_autotuner,
-                    second_cached_autotuner,
-                ):
-                    with trace_condition:
-                        if event == "call":
-                            candidate_run_entries += 1
-                            candidate_runs += 1
-                            max_candidate_runs = max(max_candidate_runs, candidate_runs)
-                            first_candidate_run = candidate_run_entries == 1
-                            self.assertTrue(compile_lock._is_owned())
-                        elif event == "return":
-                            candidate_runs -= 1
-                            first_candidate_run = False
-                        else:
-                            return trace
-                        trace_condition.notify_all()
-                    if first_candidate_run:
-                        candidate_run_paused.set()
-                        if not release_candidate_run.wait(timeout=30):
-                            raise AssertionError(
-                                "timed out waiting to release fallback run"
-                            )
-                elif event == "call" and frame.f_code is fallback_code:
-                    with trace_condition:
-                        fallback_entries += 1
-                        trace_condition.notify_all()
-                return trace
-
-            sys.settrace(trace)
-            try:
-                with torch.cuda.device(device):
-                    return graph_to_run.current_callable([x])[0]
-            finally:
-                sys.settrace(None)
-
-        with torch.cuda.device(1):
-            x1 = torch.randn(65536, device="cuda")
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            first = pool.submit(run_on_device, graph, x0.clone(), 0, True)
-            self.assertTrue(active_paused.wait(timeout=30))
-            os.remove(cubin_path)
-            PyCodeCache.cache_clear()
-            second = pool.submit(run_on_device, graph, x1.clone(), 1)
-            third = pool.submit(run_on_device, second_graph, x1.clone(), 1)
-            try:
-                with trace_condition:
-                    self.assertTrue(
-                        trace_condition.wait_for(
-                            lambda: fallback_entries == 2,
-                            timeout=30,
-                        )
-                    )
-                with coordinator._condition:
-                    self.assertTrue(
-                        coordinator._condition.wait_for(
-                            lambda: coordinator._pending and coordinator._compiling,
-                            timeout=30,
-                        )
-                    )
-                    self.assertEqual(coordinator._active_runs, 1)
-                    self.assertTrue(cached_autotuner.launchers)
-            finally:
-                release_active.set()
-
-            try:
-                self.assertTrue(candidate_run_paused.wait(timeout=30))
-                with trace_condition:
-                    self.assertTrue(
-                        trace_condition.wait_for(
-                            lambda: compiled_launcher_counts
-                            and compiled_launcher_counts[0] > 1
-                            and compile_lock_owned,
-                            timeout=30,
-                        )
-                    )
-                    self.assertEqual(candidate_run_entries, 1)
-                    self.assertEqual(max_candidate_runs, 1)
-                with coordinator._condition:
-                    self.assertIsNone(coordinator._fallback)
-                    self.assertTrue(coordinator._compiling)
-                with second_coordinator._condition:
-                    self.assertIsNone(second_coordinator._fallback)
-                    self.assertTrue(second_coordinator._compiling)
-                self.assertFalse(second.done())
-                self.assertFalse(third.done())
-            finally:
-                release_candidate_run.set()
-
-            self.assertEqual(first.result(timeout=30), fn(x0))
-            self.assertEqual(second.result(timeout=30), fn(x1))
-            self.assertEqual(third.result(timeout=30), fn(x1))
-            with trace_condition:
-                self.assertTrue(
-                    trace_condition.wait_for(
-                        lambda: compile_calls == 2 and candidate_run_entries == 2,
-                        timeout=30,
-                    )
-                )
-        self.assertIs(coordinator._fallback, second_coordinator._fallback)
-        self.assertEqual(fallback_entries, 2)
-        self.assertEqual(compile_calls, 2)
-        self.assertGreater(compiled_launcher_counts[0], 1)
-        self.assertIs(compiled_autotuners[0], compiled_autotuners[1])
-        self.assertEqual(candidate_run_entries, 2)
-        self.assertEqual(candidate_runs, 0)
-        self.assertEqual(max_candidate_runs, 1)
-        self.assertTrue(compile_lock_owned)
-        self.assertEqual(len(coordinator._fallback.launchers), 1)
-        for cached, fallback_coordinator in (
-            (cached_autotuner, coordinator),
-            (second_cached_autotuner, second_coordinator),
-        ):
-            self.assertIs(cached.run.__self__, coordinator._fallback)
-            self.assertEqual(fallback_coordinator._active_runs, 0)
-            self.assertFalse(fallback_coordinator._pending)
-            self.assertFalse(fallback_coordinator._compiling)
-            self.assertIsNone(fallback_coordinator._compile_kernel_from_src)
-            self.assertFalse(cached.launchers)
-            self.assertFalse(cached.compile_results)
+        self.assertIs(loaded_autotuner, cached_autotuner)
+        self.assertIs(loaded_autotuner.run.__self__, loaded_autotuner)
+        self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
+        with open(cubin_path, "rb") as file:
+            self.assertEqual(file.read(), expected_cubin)
 
     @requires_cuda_and_triton
     @config.patch(

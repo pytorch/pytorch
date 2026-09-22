@@ -487,17 +487,12 @@ class AsyncCompile:
         is_backward = getattr(V.graph, "is_backward", False)
 
         def compile_kernel_in_parent() -> CachingAutotuner:
-            from torch._dynamo.convert_frame import compile_lock
-
-            with (
-                compile_lock,
-                dynamo_timed(
-                    "async_compile.precompile",
-                    log_pt2_compile_event=True,
-                    dynamo_compile_column_us="triton_compile_time_us",
-                    log_waitcounter=True,
-                    waitcounter_name_override="compile_triton",
-                ),
+            with dynamo_timed(
+                "async_compile.precompile",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="triton_compile_time_us",
+                log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
                 fail = None
                 try:

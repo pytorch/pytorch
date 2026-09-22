@@ -5696,10 +5696,6 @@ class StaticAutotunerFuture(CodeCacheFuture):
                     reload_kernel=self.reload_kernel_from_src,
                     static_triton_bundle_key=None,  # no need to save again
                 )
-                if self.static_autotuner.has_device_agnostic_static_launchers():
-                    self.static_autotuner.install_jit_fallback(
-                        self.compile_kernel_from_src
-                    )
                 return self.static_autotuner
             except MissingTritonKernelError:
                 log.warning(

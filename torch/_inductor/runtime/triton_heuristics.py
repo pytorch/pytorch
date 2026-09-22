@@ -19,7 +19,6 @@ import re
 import sys
 import threading
 import time
-import weakref
 from collections import namedtuple
 from typing import (
     Any,
@@ -84,7 +83,6 @@ from .runtime_utils import (
     validate_triton_config,
 )
 from .static_triton_launcher import (
-    MissingTritonKernelError,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
@@ -549,127 +547,6 @@ def _resolve_load_device(device: int | None, device_type: str) -> int | None:
     from torch._dynamo.device_interface import get_interface_for_device
 
     return get_interface_for_device(device_type.replace("hip", "cuda")).current_device()
-
-
-class _JITFallbackCoordinator:
-    """Coordinate runtime source fallback for one cached static autotuner."""
-
-    def __init__(
-        self,
-        autotuner: CachingAutotuner,
-        compile_kernel_from_src: Callable[[], CachingAutotuner],
-    ) -> None:
-        self._autotuner_ref = weakref.ref(autotuner)
-        self._run_static = type(autotuner).run
-        self._compile_kernel_from_src = compile_kernel_from_src
-        self._condition = threading.Condition()
-        self._active_runs = 0
-        self._pending = False
-        self._compiling = False
-        self._fallback: CachingAutotuner | None = None
-
-    def _run_fallback(self, *args, stream, benchmark_run, **kwargs):
-        autotuner = self._autotuner_ref()
-        if autotuner is None:
-            raise RuntimeError("static autotuner was released during JIT fallback")
-        owns_compilation = False
-        try:
-            while True:
-                with self._condition:
-                    if self._fallback is not None:
-                        fallback = self._fallback
-                        break
-                    if not self._compiling:
-                        if self._compile_kernel_from_src is None:
-                            raise AssertionError("JIT fallback callback is not set")
-                        compile_kernel_from_src = self._compile_kernel_from_src
-                        self._pending = True
-                        self._compiling = True
-                        owns_compilation = True
-                        while self._active_runs:
-                            self._condition.wait()
-                        fallback = None
-                        break
-                    self._condition.wait()
-
-            if fallback is not None:
-                return fallback.run(
-                    *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-                )
-
-            log.warning(
-                "Bundled Triton kernel disappeared after loading; "
-                "falling back to JIT compilation"
-            )
-            from torch._dynamo.convert_frame import compile_lock
-
-            with compile_lock:
-                autotuner.release_benchmark_artifacts()
-                fallback = compile_kernel_from_src()
-                result = fallback.run(
-                    *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-                )
-        except BaseException:
-            if owns_compilation:
-                with self._condition:
-                    self._compiling = False
-                    self._condition.notify_all()
-            raise
-
-        with self._condition:
-            self._fallback = fallback
-            self._compile_kernel_from_src = None
-            self._pending = False
-            self._compiling = False
-            autotuner.run = fallback.run  # type: ignore[method-assign]
-            self._condition.notify_all()
-        return result
-
-    def run(self, *args, stream, benchmark_run=False, **kwargs):
-        autotuner = self._autotuner_ref()
-        if autotuner is None:
-            raise RuntimeError("static autotuner was released before launch")
-        with self._condition:
-            if self._fallback is not None:
-                fallback = self._fallback
-                run_static = False
-            elif self._pending:
-                fallback = None
-                run_static = False
-            else:
-                fallback = None
-                run_static = True
-                self._active_runs += 1
-
-        if fallback is not None:
-            return fallback.run(
-                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-            )
-        if not run_static:
-            return self._run_fallback(
-                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-            )
-
-        try:
-            return self._run_static(
-                autotuner,
-                *args,
-                stream=stream,
-                benchmark_run=benchmark_run,
-                **kwargs,
-            )
-        except MissingTritonKernelError:
-            autotuner._post_launch()
-            with self._condition:
-                self._pending = True
-        finally:
-            with self._condition:
-                self._active_runs -= 1
-                self._condition.notify_all()
-
-        return self._run_fallback(
-            *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-        )
 
 
 class CachingAutotuner(KernelInterface):
@@ -1345,19 +1222,6 @@ class CachingAutotuner(KernelInterface):
         from torch._dynamo.device_interface import get_interface_for_device
 
         return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
-
-    def has_device_agnostic_static_launchers(self) -> bool:
-        return any(
-            isinstance(result, StaticTritonCompileResult)
-            and result.compile_meta.get("device") is None
-            for result in self.compile_results
-        )
-
-    def install_jit_fallback(
-        self, compile_kernel_from_src: Callable[[], CachingAutotuner]
-    ) -> None:
-        coordinator = _JITFallbackCoordinator(self, compile_kernel_from_src)
-        self.run = coordinator.run  # type: ignore[method-assign]
 
     def _create_compile_meta(self, cfg: Config) -> dict[str, Any]:
         """
@@ -2589,8 +2453,14 @@ class CachingAutotuner(KernelInterface):
             self._debug_call = None
             debug_call.finalize(self.get_device_interface())
 
-    def run(self, *args, stream, benchmark_run=False, **kwargs):
-        """Launch the Triton kernel call and return its result."""
+    def run(
+        self,
+        *args,
+        stream,
+        benchmark_run=False,
+        **kwargs,
+    ):  # type:ignore[override]
+        """Launch triton kernel call and return result."""
         # --- FAST PATH ---
         # After the first successful launch in steady state, cache the launcher
         # and skip all preamble on subsequent calls (~2µs savings).
@@ -3155,6 +3025,15 @@ class StaticTritonCompileResult(CompileResult[_T]):
     which vastly simplifies the setup and metadata needed to be kept.
     """
 
+    def bundled_artifact_identity(self) -> tuple[int | None, str, str]:
+        device_type = self.compile_meta.get("device_type", "cuda")
+        binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
+        return (
+            self.compile_meta.get("device"),
+            triton_hash_to_path_key(self.kernel.hash),
+            f"{self.kernel.name}{binary_ext}",
+        )
+
     @staticmethod
     def can_statically_launch(
         kernel: CompiledKernel,
@@ -3241,13 +3120,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
         device_type = (
             "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
         )
-        binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
+        _, kernel_hash, binary_filename = self.bundled_artifact_identity()
         cubin_location = os.path.join(
             triton_cache_dir(
                 _resolve_load_device(self.compile_meta.get("device"), device_type)
             ),
-            triton_hash_to_path_key(self.kernel.hash),
-            f"{self.kernel.name}{binary_ext}",
+            kernel_hash,
+            binary_filename,
         )
         self.kernel.reload_cubin_from_raw(cubin_location)
 
@@ -3666,7 +3545,7 @@ class DebugAutotuner(CachingAutotuner):
         super().__init__(*args, **kwargs)
         self.cached = None
 
-    def run(self, *args, stream, benchmark_run=False, **kwargs):
+    def run(self, *args, stream, **kwargs):
         if not self.with_bandwidth_info:
             super().run(*args, stream=stream, **kwargs, benchmark_run=True)
             return
