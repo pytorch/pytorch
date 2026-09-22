@@ -4378,7 +4378,7 @@ def forward(self, x):
         gm_edit.recompile()
 
         expected = [
-            """x = torch.sin(l_x_)""",
+            """sin = torch.sin(l_x_)""",
             """cos = torch.cos(l_nested_frame_values_0_1_)""",
         ]
 
@@ -4607,7 +4607,7 @@ torch.testing.assert_close(out_export, out_orig)
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"strict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
+            msg=lambda msg: f"{msg}\nstrict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
         )
 
 
@@ -4681,7 +4681,9 @@ class ExportTestsDevice(torch._dynamo.test_case.TestCase):
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
-instantiate_device_type_tests(ExportTestsDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    ExportTestsDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
