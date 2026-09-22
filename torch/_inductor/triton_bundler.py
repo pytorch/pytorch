@@ -550,50 +550,57 @@ class TritonBundler:
                     continue
                 basedir = triton_cache_dir(artifacts.device)
                 directory = os.path.join(basedir, artifacts.kernel_hash)
+                tmp_dir = None
+                try:
+                    if os.path.exists(directory) and os.listdir(directory):
+                        # If directory already exists, leave local disk to take
+                        # care of caching.
+                        log.debug(
+                            "Bailing out TritonBundler.read_and_emit, %s is non empty",
+                            directory,
+                        )
+                        continue
 
-                if os.path.exists(directory) and len(os.listdir(directory)) != 0:
-                    # If directory already exists, we bail out and leave
-                    # local disk to take care of caching
-                    log.debug(
-                        "Bailing out TritonBundler.read_and_emit, %s is non empty",
-                        directory,
+                    Path(basedir).mkdir(parents=True, exist_ok=True)
+                    tmp_dir = os.path.join(basedir, f"tmp.{uuid.uuid4()}")
+                    os.makedirs(tmp_dir)
+                    emitted_kernel_names = []
+                    for artifact in artifacts.artifacts:
+                        filepath = os.path.join(tmp_dir, artifact.filename)
+                        with open(filepath, "wb") as file:
+                            payload = artifact.payload
+                            if artifact.filename.endswith(".json"):
+                                payload = payload.replace(
+                                    TritonBundler._REPLACE_BYTES,
+                                    str.encode(directory),
+                                )
+                            file.write(payload)
+                        extension = os.path.splitext(artifact.filename)[1]
+                        if extension in GPU_KERNEL_BIN_EXTS.values():
+                            # Append the binary name without its extension.
+                            emitted_kernel_names.append(Path(artifact.filename).stem)
+
+                    if _IS_WINDOWS:
+                        with FileLock(directory + ".lock"):
+                            if os.path.exists(directory):
+                                shutil.rmtree(directory)
+                            os.replace(tmp_dir, directory)
+                    else:
+                        # Atomic on POSIX systems
+                        os.replace(tmp_dir, directory)
+                    tmp_dir = None
+                    kernel_names.extend(emitted_kernel_names)
+                    counters["inductor"]["triton_bundler_read_and_emit_kernel"] += len(
+                        artifacts.artifacts
                     )
-                    continue
-
-                Path(basedir).mkdir(parents=True, exist_ok=True)
-
-                # Random ID to avoid any collisions
-                rnd_id = str(uuid.uuid4())
-                tmp_dir = os.path.join(basedir, f"tmp.{rnd_id}")
-                os.makedirs(tmp_dir)
-
-                for artifact in artifacts.artifacts:
-                    filepath = os.path.join(tmp_dir, artifact.filename)
-                    with open(filepath, "wb") as file:
-                        payload = artifact.payload
-                        if artifact.filename.endswith(".json"):
-                            payload = payload.replace(
-                                TritonBundler._REPLACE_BYTES, str.encode(directory)
-                            )
-                        file.write(payload)
-                    counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
-                    extension = os.path.splitext(artifact.filename)[1]
-                    if extension in GPU_KERNEL_BIN_EXTS.values():
-                        # Each kernel has bunch of files like .cubin(for cuda), zebin(for xpu), .json, .ttir
-                        # Just append one of them without the extension
-                        kernel_names.append(Path(artifact.filename).stem)
-
-                if _IS_WINDOWS:
-                    with FileLock(directory + ".lock"):
-                        if os.path.exists(directory):
-                            shutil.rmtree(directory)
-                        os.replace(tmp_dir, directory)
-                else:
-                    # Atomic on POSIX systems
-                    try:
-                        os.replace(tmp_dir, directory)
-                    except OSError:
-                        log.warning("Directory %s is not empty - skipping!", tmp_dir)
+                except OSError:
+                    log.warning(
+                        "Unable to emit bundled Triton cache group %s",
+                        artifacts.kernel_hash,
+                        exc_info=True,
+                    )
+                    if tmp_dir is not None:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
 
             if config.use_static_triton_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
