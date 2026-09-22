@@ -402,9 +402,11 @@ def is_b2b_gemm_good_on(
     # The load ratio is only a profitability heuristic, so do not guard on the
     # representative values of backed symbolic dimensions.
     M, N, B_N, B_O, O, P = map(optimization_hint, (M, N, B_N, B_O, O, P))
-    # The templates use B's strides but derive its extents from A and C. Keep
-    # this check so a future epilogue with external inputs cannot turn an extent
-    # mismatch into an out-of-bounds B load.
+    # `all_reach_via_pointwise_with_no_other_inputs` (enforced during matching)
+    # forbids external operands in the epilogue, so B's extents are fully
+    # determined by A and C. The templates read only B's strides and derive its
+    # extents from A and C; keep this check so any future relaxation of that
+    # constraint cannot turn an extent mismatch into an out-of-bounds B load.
     if N != B_N or B_O != O:
         return False
     ratios = []
@@ -577,9 +579,7 @@ def tuned_b2b_gemm(
         A.get_dtype(),
         [A.shape[0], C.shape[1]],  # type: ignore[index]
     )
-    placeholders = [
-        create_placeholder("inner_mm", A.get_dtype(), A.get_device_or_error())
-    ]
+    placeholders = [create_placeholder("inner_mm", A.get_dtype(), layout.device)]
     subgraph_buffer = build_subgraph_buffer(
         placeholders,  # type: ignore[arg-type, list-item]
         subgraph,
