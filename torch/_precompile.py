@@ -3,8 +3,9 @@
 
 ``torch/compiler/precompile.py`` re-exports the public types defined here --
 ``Capture``, ``MakeFxTracer``, ``PrecompiledRunnable`` -- beside
-``PrecompileSummary``; the caller-driven entry points that produce and consume
-them (``capture`` and ``load``) are added by the commits that follow this one.
+``PrecompileSummary``, and ``load``, defined here, which reconstructs a runnable
+from the pair a capture wrote; the ``capture`` entry point that produces the pair
+is added by the commit that follows this one.
 ``PrecompiledModule`` drives a NON-STRICT make_fx trace of one execution of ``fn``
 and renders it as a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``: with ``backend="inductor"`` (the default) the
