@@ -1893,16 +1893,16 @@ class TestPrecompile(TestCase):
             self.assertEqual(p.grad, rp.grad, n)
 
     def test_nontensor_output_inductor_clean_error(self):
-        # A non-tensor python value (float, complex, str, ...) in fn's output trips the
-        # inductor backend's codegen assert; surface a clear PrecompileError (not a raw
-        # InductorError) pointing to backend="eager". int / None outputs lower fine, and
-        # eager handles the non-tensor value.
+        # A non-tensor python value (complex, str, ...) in fn's output trips the inductor
+        # backend's codegen assert; surface a clear PrecompileError (not a raw
+        # InductorError) pointing to backend="eager". int / float / None outputs lower
+        # fine, and eager handles the non-tensor value.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(2, 4)
-        for bad in (3.14, 2 + 3j, "hi"):
+        for bad in (2 + 3j, "hi"):
             with self.assertRaisesRegex(PrecompileError, "non-tensor Python value"):
                 torch.compiler.precompile(lambda model, t, b=bad: (model(t), b), m, x)
-        for extra in (7, None):
+        for extra in (7, 3.14, None):
             code, cache = torch.compiler.precompile(
                 lambda model, t, e=extra: (model(t), e), m, x
             )
@@ -1910,9 +1910,9 @@ class TestPrecompile(TestCase):
                 torch.compiler.precompile.load(code, cache)(m, x)[1], extra
             )
         ecode, ecache = torch.compiler.precompile(
-            lambda model, t: (model(t), 3.14), m, x, backend="eager"
+            lambda model, t: (model(t), 2 + 3j), m, x, backend="eager"
         )
-        self.assertEqual(torch.compiler.precompile.load(ecode, ecache)(m, x)[1], 3.14)
+        self.assertEqual(torch.compiler.precompile.load(ecode, ecache)(m, x)[1], 2 + 3j)
 
     def test_input_layout_mismatch_inductor_clean_error(self):
         # The inductor backend bakes each input's stride / memory format (invariant 6);
