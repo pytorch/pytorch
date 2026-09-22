@@ -1071,8 +1071,8 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
         explicit_capture = kwargs.pop("_explicit_capture", False)
         serialization_filter = kwargs.pop("_serialization_guard_filter_fn", None)
-        post_trace = kwargs.pop("_post_trace", None)
         runtime_filter = kwargs.pop("_guard_filter_fn", None)
+        post_trace = kwargs.pop("_post_trace", None)
         # kwargs might contain a callable that generates kwargs
         torch._dynamo.reset()
         kwarg_gen_fn = kwargs.get("_gen_fn")
@@ -3724,13 +3724,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     @torch._dynamo.config.patch(use_lamba_guard_for_object_aliasing=True)
     def test_duplicate_input_survives_separate_save_build(self):
-        # An explicit capture builds the serialized guards on a SECOND builder
-        # and prunes values the guard tree does not reach. Under the lambda
-        # aliasing guard, DUPLICATE_INPUT names its second input through
-        # additional_used_local_vars without registering it, and an aotautograd
-        # DuplicateInputs registers its tensors inside compile_check_fn, on the
-        # RUNTIME builder. The saved copy must inherit those values after
-        # compile_check_fn, or the duplicated tensor is pickled as _Missing.
+        # An aotautograd DuplicateInputs is installed by compile_check_fn on the
+        # runtime build and rebuilt unconditionally at load; no filter sees it.
+        # With every TENSOR_MATCH dropped from the saved copy (and, under the
+        # lambda aliasing guard, DUPLICATE_INPUT naming its second input without
+        # registering it), only the hand-off of the aotautograd sources keeps
+        # the aliased tensors out of the pruner.
         def fn(x, x_):
             return x + x_
 
@@ -3739,12 +3738,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 DuplicateInputs(LocalSource("x"), LocalSource("x_"))
             )
 
+        def drop_tensor_match(entries):
+            self.assertTrue(any(e.guard_type == "TENSOR_MATCH" for e in entries))
+            return [e.guard_type != "TENSOR_MATCH" for e in entries]
+
         x = torch.randn(3, 2)
         ref, loaded = self._test_serialization(
-            "DUPLICATE_INPUT", fn, x, x, _explicit_capture=True, _post_trace=inject
+            "TENSOR_MATCH",
+            fn,
+            x,
+            x,
+            _explicit_capture=True,
+            _serialization_guard_filter_fn=drop_tensor_match,
+            _post_trace=inject,
         )
-        state = load_guards_state(self._cached_guards_state)
-        self.assertIsInstance(state.output_graph.local_scope["x_"], torch.Tensor)
+        scope = load_guards_state(self._cached_guards_state).output_graph.local_scope
+        self.assertIsInstance(scope["x_"], torch.Tensor)
         self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
         self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
@@ -3756,6 +3765,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return x + 1
 
         def drop_tensor_match(entries):
+            self.assertTrue(any(e.guard_type == "TENSOR_MATCH" for e in entries))
             return [e.guard_type != "TENSOR_MATCH" for e in entries]
 
         ref, loaded = self._test_serialization(
@@ -3779,6 +3789,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return d["a"] + id(d["b"])
 
         def drop_guards_on_b(entries):
+            self.assertTrue(any(e.name == "d['b']" for e in entries))
             return [e.name != "d['b']" for e in entries]
 
         d = {"a": torch.randn(3), "b": threading.Lock()}
@@ -3802,6 +3813,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return x + id(x)
 
         def drop_id_match(entries):
+            self.assertTrue(any(e.guard_type == "ID_MATCH" for e in entries))
             return [e.guard_type != "ID_MATCH" for e in entries]
 
         x = torch.randn(3)
