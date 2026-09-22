@@ -406,6 +406,62 @@ For example, `ScheduleGPipe` and `Schedule1F1B` are subclasses of `PipelineSched
 Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, and `ScheduleZBVZeroBubble`
 are subclasses of `PipelineScheduleMulti`.
 
+### Accessing Stage Forward Information
+
+A runtime surrounding a pipeline stage may need to select resources by the
+global logical stage and current microbatch. Physical pipeline rank is not a
+substitute for logical stage identity because one rank may own several stages
+in an interleaved schedule.
+
+Register a context factory on the stage without changing the wrapped module's
+forward signature:
+
+```python
+from contextlib import contextmanager
+
+from torch.distributed.pipelining import PipelineStageInfo
+
+
+@contextmanager
+def stage_forward_context(info: PipelineStageInfo):
+    planner.enter(
+        stage_index=info.stage_index,
+        microbatch_index=info.microbatch_index,
+        is_metadata_inference=info.is_metadata_inference,
+    )
+    try:
+        yield
+    finally:
+        planner.exit()
+
+
+handle = stage.register_forward_context(stage_forward_context)
+```
+
+The factory is called around each built-in stage forward. Dynamic metadata
+inference uses microbatch zero and sets `is_metadata_inference=True`, allowing a
+consumer to distinguish the representative probe from real microbatch-zero
+execution. Static metadata setup does not execute the module and therefore does
+not enter the context.
+
+Only one context can be registered on a stage at a time. Remove its handle
+before registering another context. Register before the first schedule step if
+the consumer must observe dynamic metadata inference.
+
+The context executes outside a compiled or exported stage module, so it does
+not add graph inputs or change the module signature. CUDA graph capture runs
+the Python context while recording the stage computation, but replay does not
+re-enter Python; consumers must bind replay-stable state during capture. A
+custom schedule action receives this context only when it delegates execution
+to `stage.forward_one_chunk()`.
+
+```{eval-rst}
+.. autoclass:: torch.distributed.pipelining.PipelineStageInfo
+  :members:
+
+.. automethod:: torch.distributed.pipelining.PipelineStage.register_forward_context
+```
+
 ## Logging
 
 You can turn on additional logging using the `TORCH_LOGS` environment variable from [torch.\_logging](https://pytorch.org/docs/main/logging.html#module-torch._logging):

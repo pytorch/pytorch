@@ -3,6 +3,7 @@
 import copy
 import logging
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from model_registry import (
@@ -27,6 +28,7 @@ from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
     pipeline,
     PipelineStage,
+    PipelineStageInfo,
     Schedule1F1B,
     ScheduleDualPipeV,
     ScheduleGPipe,
@@ -373,6 +375,76 @@ class ScheduleTest(MultiProcContinuousTest):
             for _ in range(num_iters):
                 x_clone = mod_ref(x_clone)
             torch.testing.assert_close(x_clone, out)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_interleaved_schedule_forward_context(self):
+        stages_per_rank = 2
+        num_stages = stages_per_rank * self.world_size
+        num_microbatches = 2 * self.world_size
+        mod, _, x, target, loss_fn = setup_models_and_data(
+            self.config, n_layers=num_stages
+        )
+        stage_indices = [
+            self.rank + local_index * self.world_size
+            for local_index in range(stages_per_rank)
+        ]
+        sample = x.chunk(num_microbatches)[0].detach().requires_grad_(True)
+        stages = []
+        observed: dict[int, list[PipelineStageInfo]] = {
+            stage_index: [] for stage_index in stage_indices
+        }
+
+        for stage_index in stage_indices:
+            stage_module = mod.get_submodule(f"layers.{stage_index}")
+            output = stage_module(sample)
+            stage = PipelineStage(
+                stage_module,
+                stage_index,
+                num_stages,
+                self.device,
+                input_args=sample,
+                output_args=output,
+            )
+
+            @contextmanager
+            def forward_context(info, *, index=stage_index):
+                observed[index].append(info)
+                yield
+
+            stage.register_forward_context(forward_context)
+            stages.append(stage)
+
+        schedule = ScheduleInterleaved1F1B(
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+        step_with_optional_pre_split(
+            schedule,
+            num_microbatches,
+            args=(x,) if any(stage.is_first for stage in stages) else (),
+            target=target if any(stage.is_last for stage in stages) else None,
+        )
+
+        for stage_index in stage_indices:
+            self.assertEqual(
+                sorted(
+                    observed[stage_index],
+                    key=lambda info: (info.stage_index, info.microbatch_index),
+                ),
+                [
+                    PipelineStageInfo(
+                        stage_index=stage_index,
+                        microbatch_index=microbatch_index,
+                    )
+                    for microbatch_index in range(num_microbatches)
+                ],
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
