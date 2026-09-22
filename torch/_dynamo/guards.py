@@ -5055,6 +5055,12 @@ class CheckFunctionManager:
         save_guards: bool = False,
         strict_error: bool = False,
         guard_build_local_state: Any | None = None,
+        *,
+        serialization_guard_filter_fn: Callable[
+            [Sequence[GuardFilterEntry]], Sequence[bool]
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -5086,7 +5092,10 @@ class CheckFunctionManager:
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
         # TODO Be more explicit about the behavior for the users.
-        if torch._dynamo.config.caching_precompile:
+        # An explicit capture supplies a separate serialization filter. Ambient
+        # caching-precompile mode must not rewrite that package's live guards,
+        # whether or not this compile saves them.
+        if torch._dynamo.config.caching_precompile and not explicit_capture:
             _guard_filter_fn = guard_filter_fn or (lambda gs: [True for g in gs])
 
             def guard_filter_fn(guards: Sequence[GuardFilterEntry]) -> Sequence[bool]:
@@ -5115,50 +5124,99 @@ class CheckFunctionManager:
                         ret.append(True)
                 return ret
 
-        sorted_guards = sorted(guards or (), key=Guard.sort_key)
+        all_guards = sorted(guards or (), key=Guard.sort_key)
 
         # Disable __torch_function__ dispatch during guard construction so
         # modes with mutable state aren't triggered.  We exit the context
         # before the guard sanity check so GlobalStateGuard.check() sees
         # the true runtime state.
         with torch._C.DisableTorchFunction():
-            if guard_filter_fn:
-                # If we're filtering guards, we need to build it an extra time first
-                # because filtering depends on the builder/guard_manager results
-                builder, guard_manager = self.build_guards(
-                    sorted_guards,
+            filter_entries: list[GuardFilterEntry] | None = None
+
+            def build_filter_entries() -> None:
+                # Filtering depends on the builder's results, so the entries
+                # come from an extra, unsaved build over every guard. Built at
+                # most once: each build_guards call resets and repopulates
+                # code_list and guard_types on the guards it is given, so one
+                # snapshot serves every filter applied to these guards.
+                nonlocal filter_entries
+                if filter_entries is not None:
+                    return
+                inspection_builder, _ = self.build_guards(
+                    all_guards,
                     existing_diff_guard_sources,
                     f_code,
                     output_graph,
                     False,
                 )
+                filter_entries = [
+                    make_guard_filter_entry(guard, inspection_builder)
+                    for guard in all_guards
+                ]
 
-                filter_results = guard_filter_fn(
-                    [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
-                )
-                if len(filter_results) != len(sorted_guards):
+            def apply_filter(
+                filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
+            ) -> list[Guard]:
+                build_filter_entries()
+                if filter_entries is None:
+                    raise AssertionError("filter_entries must be built")
+                filter_results = filter_fn(filter_entries)
+                if len(filter_results) != len(all_guards):
                     raise AssertionError(
                         f"filter_results length ({len(filter_results)}) != "
-                        f"sorted_guards length ({len(sorted_guards)})"
+                        f"sorted_guards length ({len(all_guards)})"
                     )
                 if not all(type(x) is bool for x in filter_results):
                     raise AssertionError("All filter_results entries must be bool")
-                sorted_guards = [
-                    guard for i, guard in enumerate(sorted_guards) if filter_results[i]
+                return [
+                    guard for guard, keep in zip(all_guards, filter_results) if keep
                 ]
 
-            # Redo the guards because filtering relies on the results from the last guard builder.
+            # Runtime and serialized guards are intentionally separate. A package
+            # may need to omit a non-portable identity guard, but dropping it from
+            # the live cache would let later capture examples reuse the wrong graph
+            # instead of triggering the variant that the package needs to record.
+            serialization_filter = (
+                serialization_guard_filter_fn if save_guards else None
+            )
+            # The saved copy is built separately whenever it may differ from
+            # the live guards: an explicit capture never saves from the runtime
+            # build (a save build weakens guards the artifact cannot carry, and
+            # the live cache must stay strict), and a serialization filter
+            # applies to the saved copy only. It is the whole specification of
+            # that copy: it is applied to every guard, not composed with the
+            # runtime filter.
+            separate_save_build = save_guards and (
+                explicit_capture or serialization_filter is not None
+            )
+            runtime_guards = (
+                apply_filter(guard_filter_fn) if guard_filter_fn else all_guards
+            )
             builder, guard_manager = self.build_guards(
-                sorted_guards,
+                runtime_guards,
                 existing_diff_guard_sources,
                 f_code,
                 output_graph,
-                save_guards,
+                save_guards and not separate_save_build,
                 guard_filter_fn=guard_filter_fn,
             )
 
+            serialized_guards = runtime_guards
+            serialization_builder = builder
+            save_guard_manager = guard_manager
+            if separate_save_build:
+                if serialization_filter is not None:
+                    serialized_guards = apply_filter(serialization_filter)
+                serialization_builder, save_guard_manager = self.build_guards(
+                    serialized_guards,
+                    existing_diff_guard_sources,
+                    f_code,
+                    output_graph,
+                    True,
+                    guard_filter_fn=serialization_filter,
+                )
             self.guard_manager = guard_manager
-            self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
+            self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -5198,6 +5256,18 @@ class CheckFunctionManager:
                     "Guard failed on the same frame it was created. This is a bug - please create an issue."
                     f"Guard fail reason: {reasons}"
                 )
+            # The saved copy may hold leaf and accessor guards the live manager
+            # does not, so those get the same-frame check of their own. It never
+            # ran compile_check_fn, so the guards installed there (aliasing,
+            # DuplicateInputs, StorageOverlap) are not part of it; load rebuilds
+            # them through a fresh CheckFunctionManager.
+            if save_guard_manager is not guard_manager:
+                info = save_guard_manager.check_verbose(output_graph.local_scope)
+                if not info.result:
+                    raise AssertionError(
+                        "Serialized guard failed on the same frame it was created. This is a bug - please create an issue."
+                        f"Guard fail reason: {info.verbose_code_parts}"
+                    )
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
@@ -5235,7 +5305,7 @@ class CheckFunctionManager:
                 )
             try:
                 self.guards_state = self.serialize_guards(
-                    builder, sorted_guards, self.output_graph
+                    serialization_builder, serialized_guards, self.output_graph
                 )
             except exc.PackageError as e:
                 if torch._dynamo.config.strict_precompile or strict_error:
