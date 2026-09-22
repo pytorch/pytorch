@@ -1951,10 +1951,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(tuple(row.shape), (1, 4))
         self.assertNotEqual(row.stride(), xex.stride())
         self.assertEqual(_load_pair(code, cache)(m, row), m(row))
-        self.assertEqual(
-            _load_pair(code, _strip_artifact(cache))(m, row),
-            m(row),
-        )
+        self.assertEqual(_load_pair(code, _strip_artifact(cache))(m, row), m(row))
 
     def test_empty_input_shape_is_still_checked(self):
         # The numel==0 exemption must relax ONLY the (meaningless) stride check, not the
@@ -2598,10 +2595,7 @@ class TestPrecompile(TestCase):
 
         def loaders():
             yield "cached", _load_pair(code, cache)
-            yield (
-                "inlined",
-                _load_pair(code, _strip_artifact(cache)),
-            )
+            yield "inlined", _load_pair(code, _strip_artifact(cache))
 
         for label, f_c in loaders():
             with self.subTest(path=label):
