@@ -161,13 +161,15 @@ class C10dBackendTest:
         )
 
 
-def instantiate_backend_tests(namespace, suite_name, base_class, backends):
+def instantiate_backend_tests(
+    namespace, suite_name, base_class, backends, *, harness=MultiProcessTestCase
+):
     for backend in backends:
         backend_name = backend.name.replace("-", " ").title().replace(" ", "")
         class_name = f"{backend_name}{suite_name}Test"
         test_class = type(
             class_name,
-            (base_class, MultiProcessTestCase),
+            (base_class, harness),
             {
                 "__module__": namespace["__name__"],
                 "backend_name": backend.name,
