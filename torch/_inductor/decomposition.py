@@ -29,6 +29,7 @@ from torch._dynamo.utils import counters
 from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
+from torch._library.dispatchless import _flat_call, flat_dispatchless_call
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -160,6 +161,9 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+register_decomposition(flat_dispatchless_call)(_flat_call)
 
 
 @register_decomposition([aten.special_log_ndtr])
