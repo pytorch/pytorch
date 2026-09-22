@@ -27,9 +27,10 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     MI200_ARCH,
+    MI300_ARCH,
+    MI350_ARCH,
     NAVI_ARCH,
     parametrize,
-    skipIfRocm,
     skipIfRocmArch,
     subtest,
 )
@@ -1050,7 +1051,7 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/158328")
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH + MI350_ARCH)
     @parametrize("reduction_op", [torch.sum, torch.argmax])
     def test_2d_reductions_mixed_indexing(
         self,
