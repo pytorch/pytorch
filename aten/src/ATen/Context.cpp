@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <string>
 #include <string_view>
@@ -34,6 +35,21 @@ C10_DIAGNOSTIC_POP()
 #include <cpuinfo.h>
 #endif
 namespace at {
+
+namespace {
+
+std::atomic<bool> xnnpack_backend_available{false};
+
+} // namespace
+
+namespace native::xnnpack::internal {
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+TORCH_API void register_backend() {
+  xnnpack_backend_available.store(true, std::memory_order_relaxed);
+}
+
+} // namespace native::xnnpack::internal
 
 /*
   These const variables defined the fp32 precisions for different backend
@@ -888,11 +904,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 }
 
 bool Context::isXNNPACKAvailable() {
-#ifdef USE_XNNPACK
-  return true;
-#else
-  return false;
-#endif
+  return xnnpack_backend_available.load(std::memory_order_acquire);
 }
 
 void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {
@@ -1019,6 +1031,24 @@ void Context::unsetDefaultMobileCPUAllocator() {
 
 bool Context::allowFP16ReductionCPU() const {
   return allow_fp16_reduction_cpu;
+}
+
+// Plain bools, like the other user-facing toggles on Context (enabled_cudnn,
+// _deterministic_algorithms, ...): set rarely, read per op call, publishing no data.
+bool Context::allowNativeAot() const {
+  return allow_native_aot;
+}
+
+void Context::setAllowNativeAot(bool b) {
+  allow_native_aot = b;
+}
+
+bool Context::maskUnconditionalNativeAot() const {
+  return mask_unconditional_native_aot;
+}
+
+void Context::setMaskUnconditionalNativeAot(bool b) {
+  mask_unconditional_native_aot = b;
 }
 
 void Context::setAllowFP16ReductionCPU(bool b) {

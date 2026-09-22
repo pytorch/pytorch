@@ -29,7 +29,9 @@ from torch.distributed.tensor import DeviceMesh, distribute_tensor
 from torch.testing._internal.common_distributed import HAS_ACCELERATOR, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    NUM_DEVICES,
     with_comms,
 )
 
@@ -945,14 +947,16 @@ class TestDTensorStateDictStager(DTensorTestBase):
             )
 
 
-class TestReplicationStager(DTensorTestBase):
+@unittest.skipIf(torch.accelerator.device_count() < 4, "Requires at least 4 devices")
+class TestReplicationStager(DTensorContinuousTestBase):
     """
     Test suite for _ReplicationStager functionality.
     Tests replication of state_dict across training ranks using CPU tensors only.
     """
+    world_size = NUM_DEVICES
 
-    @property
-    def backend(self) -> str:
+    @classmethod
+    def backend_str(cls) -> str:
         if self.device_type == "cpu":
             return "gloo"
         curr_backend = dist.get_default_backend_for_device(self.device_type)
@@ -1275,8 +1279,9 @@ class TestReplicationStager(DTensorTestBase):
         state_dict = self._create_simple_state_dict(current_rank)
 
         # Initialize replication stager
+        pg = dist.new_group(backend=dist.Backend.GLOO)
         stager = _ReplicationStager(
-            pg=dist.new_group(backend=dist.Backend.GLOO),
+            pg=pg,
             timeout=timedelta(seconds=30),
             device=torch.device("cpu"),
         )
@@ -1294,6 +1299,7 @@ class TestReplicationStager(DTensorTestBase):
 
         # Clean up
         stager.close()
+        dist.destroy_process_group(pg)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
