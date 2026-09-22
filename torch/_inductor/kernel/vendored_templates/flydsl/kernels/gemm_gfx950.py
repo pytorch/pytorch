@@ -132,6 +132,7 @@ def make_gemm_gfx950_param(
         raise ValueError("group_m must be non-negative")
 
     if is_mxfp:
+        # mma_k=32 is the shared dense default; MXFP canonicalizes it to 128.
         if (mma_m, mma_n) != (16, 16) or mma_k not in (32, 128):
             raise ValueError("the gfx950 MXFP kernel requires mma=16x16x128")
         mma_k = 128

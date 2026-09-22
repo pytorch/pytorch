@@ -1254,6 +1254,8 @@ class TestFlyDSLMXFPMetadata(TestCase):
 
     @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
     def test_contract(self, mxfp_format):
+        from torch._inductor.sizevars import SizeVarAllocator
+
         args = self._args(mxfp_format)
         fp32_bias = Buffer(
             name="fp32_bias",
@@ -1267,7 +1269,10 @@ class TestFlyDSLMXFPMetadata(TestCase):
             name="cpu_bias",
             layout=FixedLayout(torch.device("cpu"), torch.bfloat16, [96], [1]),
         )
-        with mock.patch.object(torch.version, "hip", "test"):
+        with (
+            mock.patch.object(torch.version, "hip", "test"),
+            V.set_graph_handler(SimpleNamespace(sizevars=SizeVarAllocator())),
+        ):
             for overrides, expected in (
                 ({}, mxfp_format),
                 ({"contraction_dim": None}, mxfp_format),

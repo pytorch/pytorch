@@ -76,14 +76,17 @@ _BASELINE_CONFIG: dict[MXFPFormat, FlyDSLGemmConfig] = {
 }
 
 
-def _make_gemm_param(gemm_config: dict[str, int | bool], *, dtype_id: int = 2):
+def _make_gemm_param(
+    gemm_config: dict[str, int | bool], *, dtype_id: int | None = None
+):
     # Keep FlyDSL optional when this heuristics module is imported.
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+        GEMM_DTYPE_BF16,
         make_gemm_gfx950_param,
     )
 
     return make_gemm_gfx950_param(
-        dtype_id=dtype_id,
+        dtype_id=GEMM_DTYPE_BF16 if dtype_id is None else dtype_id,
         tile_m=int(gemm_config["TILE_M"]),
         tile_n=int(gemm_config["TILE_N"]),
         tile_k=int(gemm_config["TILE_K"]),
