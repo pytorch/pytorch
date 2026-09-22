@@ -94,7 +94,8 @@ def vt_identity_compare(
     # instances are mutable objects built during tracing, so two distinct VTs
     # (already known not to be `left is right`) are distinct Python objects.
     # A bound method is materialized afresh by every attribute access, so it
-    # behaves the same way: `obj.m is obj.m` is False in CPython.
+    # behaves the same way: `obj.m is obj.m` is False in CPython. So is a device
+    # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable
     from .functions import UserMethodVariable
     from .lists import ListVariable
@@ -105,6 +106,7 @@ def vt_identity_compare(
         OrderedSetVariable,
         SetVariable,
     )
+    from .tensor import CurrentDeviceVariable
 
     if isinstance(
         left,
@@ -118,6 +120,7 @@ def vt_identity_compare(
             TracebackVariable,
             ExceptionVariable,
             UserMethodVariable,
+            CurrentDeviceVariable,
         ),
     ):
         return ConstantVariable.create(False)
