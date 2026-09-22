@@ -12,7 +12,7 @@ def wrap_flydsl(
     /,
     *,
     mutates_args: str | Iterable[str],
-) -> Any:
+) -> Callable[..., None]:
     """Wrap a FlyDSL ``@jit`` launcher for dispatcher-based tracing.
 
     The launcher must write results into explicit tensor arguments and return
