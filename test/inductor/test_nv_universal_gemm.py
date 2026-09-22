@@ -1768,11 +1768,29 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
 
-    def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
+    def _create_mock_kernel(
+        self,
+        tile_m,
+        tile_n,
+        tile_k,
+        cluster_m,
+        cluster_n,
+        *,
+        design_use_2cta=False,
+        impl_use_2cta=False,
+    ):
         """Create a mock kernel with the given tile/cluster configuration."""
         kernel = MagicMock()
+        if design_use_2cta is None:
+            kernel.metadata.design = MagicMock(spec=["tile_shape", "cluster_shape"])
         kernel.metadata.design.tile_shape = (tile_m, tile_n, tile_k)
         kernel.metadata.design.cluster_shape = (cluster_m, cluster_n)
+        if design_use_2cta is not None:
+            kernel.metadata.design.use_2cta_mma = design_use_2cta
+        if impl_use_2cta is None:
+            kernel.impl = MagicMock(spec=[])
+        else:
+            kernel.impl.use_2cta_instrs = impl_use_2cta
         return kernel
 
     def _create_mock_inputs(self, m=512, n=512, k=512, dtype=torch.float16):
@@ -1815,6 +1833,76 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
         self.assertEqual(len(result), 2)
         self.assertEqual(result, kernels[:2])
+
+    @parametrize(
+        "tile_m,design_use_2cta,impl_use_2cta",
+        (
+            (256, True, True),  # Dense 2-CTA kernel.
+            (128, True, False),  # Block-scaled 1-CTA kernel.
+            (256, True, None),  # Fall back to design metadata.
+            (128, None, None),  # Legacy metadata defaults to 1-CTA.
+        ),
+    )
+    def test_filter_kernels_matches_per_cta_tile_m(
+        self, tile_m, design_use_2cta, impl_use_2cta
+    ):
+        heuristics = NVUniversalGemmHeuristics()
+        other = self._create_mock_kernel(64, 128, 64, 2, 1)
+        target = self._create_mock_kernel(
+            tile_m,
+            128,
+            64,
+            2,
+            1,
+            design_use_2cta=design_use_2cta,
+            impl_use_2cta=impl_use_2cta,
+        )
+        config = HeuristicConfig(128, 128, 64, 2, 1, 4, 1, 64, 64, 32, 0.001)
+        inputs = self._create_mock_inputs()
+
+        with (
+            patch.object(heuristics, "should_run", return_value=True),
+            patch.object(heuristics, "_get_heuristic_configs", return_value=[config]),
+        ):
+            result = heuristics.filter_kernels([other, target], inputs, 1)
+
+        self.assertEqual(len(result), 1)
+        self.assertIs(result[0], target)
+
+    def test_supplement_configs_preserve_raw_2cta_tile_m(self):
+        heuristics = NVUniversalGemmHeuristics()
+        selected = self._create_mock_kernel(128, 192, 64, 4, 1)
+        supplement = self._create_mock_kernel(
+            256,
+            192,
+            64,
+            4,
+            1,
+            design_use_2cta=True,
+            impl_use_2cta=True,
+        )
+        heuristic_config = HeuristicConfig(128, 192, 64, 4, 1, 4, 1, 64, 64, 32, 0.001)
+        inputs = self._create_mock_inputs()
+        config_to_kernels = heuristics._extract_config_to_kernels(
+            [selected, supplement]
+        )
+        self.assertEqual(list(config_to_kernels), [(128, 192, 4, 1)])
+        self.assertEqual(len(config_to_kernels[(128, 192, 4, 1)]), 2)
+
+        with (
+            config.patch({"nvgemm_supplement_configs": True}),
+            patch.object(heuristics, "should_run", return_value=True),
+            patch.object(
+                heuristics,
+                "_get_heuristic_configs",
+                return_value=[heuristic_config],
+            ),
+        ):
+            result = heuristics.filter_kernels([selected, supplement], inputs, 1)
+
+        self.assertEqual(len(result), 2)
+        self.assertIs(result[0], selected)
+        self.assertIs(result[1], supplement)
 
     def test_filter_kernels_sorts_by_runtime(self):
         """Test that filter_kernels returns kernels sorted by estimated runtime and respects count."""
