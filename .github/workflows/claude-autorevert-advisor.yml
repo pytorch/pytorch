@@ -73,10 +73,20 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
           aws-region: us-east-1
 
+      - name: Install Claude Code 2.1.280
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            https://downloads.claude.ai/claude-code-releases/2.1.280/linux-x64/claude \
+            --output "$RUNNER_TEMP/claude-code-2.1.280"
+          echo "1e08503dbdf3c2cb0d706d32f3408277388d1c76ef108673e8fe42c1b322925b  $RUNNER_TEMP/claude-code-2.1.280" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/claude-code-2.1.280"
+          "$RUNNER_TEMP/claude-code-2.1.280" --version
+
       - name: Run AI Advisor
         id: claude
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
+          path_to_claude_code_executable: ${{ runner.temp }}/claude-code-2.1.280
           # Providing the workflow token stops the action from minting its own
           # app token, bypassing Anthropic's OIDC app-token exchange -- the
           # source of the observed intermittent "Workflow validation failed"
