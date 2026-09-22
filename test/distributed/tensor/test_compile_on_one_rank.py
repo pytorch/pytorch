@@ -895,39 +895,54 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_device_is_usable_as_a_dict_key_under_coor(self):
-        # Two reads of the current device are the same device, so they are one key.
-        # Equality already says so; hashing has to agree or the keys land in
-        # different buckets and never get compared. Sourceless tensors take the
-        # identity-hash fallback and silently produce two keys; a sourced one
-        # graph-breaks instead, so cover both.
+    def test_device_as_dict_key_is_an_error_under_coor(self):
+        # Hashing the current device cannot be made correct. Equality reports it
+        # equal to an explicit cuda:N, so any trace-time hash of the indexless
+        # device puts equal keys in different buckets --
+        # len({x.device: 1, torch.device("cuda:0"): 2}) would be 1 eagerly and 2
+        # compiled. Keying on a device is outside what compile_on_one_rank can
+        # express, so it raises. Deliberately not a graph break: that would drop
+        # the frame back to eager, which is what the feature is there to avoid.
+        from torch._dynamo.exc import CompileOnOneRankUnsupported
         from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
         def sourceless():
             x = torch.randn(4, device="cuda")
             y = torch.randn(4, device="cuda")
-            return len({x.device: 1, y.device: 2}), len(
-                _group_tensors_by_device_and_dtype([[x, y]])
-            )
+            return len({x.device: 1, y.device: 2})
 
         def sourced(x, y):
-            return len({x.device: 1, y.device: 2}), len(
-                _group_tensors_by_device_and_dtype([[x, y]])
-            )
+            return len({x.device: 1, y.device: 2})
 
-        torch._dynamo.reset()
-        self.assertEqual(
-            torch.compile(sourceless, backend="eager", fullgraph=True)(),
-            (1, 1),
-        )
+        def mixed(x):
+            return len({x.device: 1, torch.device("cuda:0"): 2})
 
-        torch._dynamo.reset()
+        def grouped(x, y):
+            return len(_group_tensors_by_device_and_dtype([[x, y]]))
+
         x = torch.randn(4, device="cuda")
         y = torch.randn(4, device="cuda")
-        self.assertEqual(
-            torch.compile(sourced, backend="eager", fullgraph=True)(x, y),
-            (1, 1),
+        cases = (
+            (sourceless, ()),
+            (sourced, (x, y)),
+            (mixed, (x,)),
+            (grouped, (x, y)),
         )
+        # Raises whether or not graph breaks are allowed -- there is no fallback.
+        for fullgraph in (True, False):
+            for fn, args in cases:
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    CompileOnOneRankUnsupported, "hash a rank-relative device"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=fullgraph)(*args)
+
+        # Without compile_on_one_rank the device is an ordinary constant again.
+        with compiler_config.patch(compile_on_one_rank=False):
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(mixed, backend="eager", fullgraph=True)(x), mixed(x)
+            )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)

@@ -3448,6 +3448,9 @@ class FakeTensorMode(TorchDispatchMode):
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
         aten.stack.default,
+        aten.arange.default,
+        aten.arange.start,
+        aten.arange.start_step,
     )
 
     _unbacked_special_fake_handling_ops = ordered_set(
