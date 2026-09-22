@@ -630,6 +630,10 @@ class _DynamoCodeCacheEntry:
          of that code object included, since install() would have used none.
          TODO(#196773): prune only the guarded codes whose bytecode names the
          missing backend at write time, so the other variants stay installable.
+      11. Why the entry is bypassed, while it is: the reason the last compile
+         gave up, known at the bypass site and otherwise only reachable via
+         tlparse. None whenever the entry is not bypassed, and None for the
+         save-time bypass above, which records its cause in the trace instead.
     """
 
     python_code: SerializedCode
@@ -642,6 +646,12 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    bypass_reason: str | None = None
+
+
+# A bypass reason can embed repr() of user objects; cap it before it is
+# pickled into the artifact so a pathological repr cannot bloat the file.
+_BYPASS_REASON_MAX_CHARS = 2048
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -1234,6 +1244,7 @@ class CompilePackage:
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
         self._current_entry.bypassed = False
+        self._current_entry.bypass_reason = None
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
@@ -1251,7 +1262,7 @@ class CompilePackage:
         # must not erase the accelerator an earlier frame named.
         self._device_types |= _graph_device_types(graph)
 
-    def bypass_current_compile(self) -> None:
+    def bypass_current_compile(self, reason: str | None = None) -> None:
         """Drop the backend ids the current compile registered on its entry.
 
         Only this compile is lost: its guarded code is never recorded
@@ -1261,7 +1272,8 @@ class CompilePackage:
         installable, so a reload keeps them and only re-traces the inputs that
         would have matched the dropped one. An entry left with no guarded code
         is marked bypassed so install() re-traces the frame instead of skipping
-        it as trivial.
+        it as trivial, and `reason` is recorded on it; an entry that keeps an
+        installable variant records none.
         """
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_compile")
@@ -1270,6 +1282,11 @@ class CompilePackage:
             self._cached_backends.pop(backend_id, None)
         self._current_backend_ids = []
         self._current_entry.bypassed = not self._current_entry.guarded_codes
+        if reason is not None and len(reason) > _BYPASS_REASON_MAX_CHARS:
+            reason = reason[:_BYPASS_REASON_MAX_CHARS] + " ... (truncated)"
+        self._current_entry.bypass_reason = (
+            reason if self._current_entry.bypassed else None
+        )
 
     def add_resume_function(
         self,

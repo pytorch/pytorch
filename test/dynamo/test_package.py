@@ -318,6 +318,41 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.backend_ids, [backend_id])
         self.assertTrue(package.cache_entry().source_info.inlined_sources)
 
+    def test_bypass_reason_is_recorded_only_while_the_entry_is_bypassed(self):
+        def fn(x):
+            return x + 1
+
+        code = compiled_region_with_backend_id_for_package_test.__code__
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.bypass_current_compile("x" * 3000)
+        entry = package.cache_entry().codes[0]
+        self.assertTrue(entry.bypassed)
+        self.assertEqual(len(entry.bypass_reason), 2048 + len(" ... (truncated)"))
+        self.assertTrue(entry.bypass_reason.endswith(" ... (truncated)"))
+        # A recorded variant clears the reason with the flag.
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(b"", code)
+        self.assertFalse(entry.bypassed)
+        self.assertIsNone(entry.bypass_reason)
+        # A bypass that leaves that variant installable records no reason.
+        with package.code_context(fn.__code__):
+            package.bypass_current_compile("config cannot pickle")
+        self.assertFalse(entry.bypassed)
+        self.assertIsNone(entry.bypass_reason)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_bypass_reason_names_the_guard_that_could_not_serialize(self):
+        def fn(x, cfg=UnpicklableConfig()):
+            return x.sin() * cfg.scale
+
+        x = torch.randn(3)
+        with self.assertLogs("torch._dynamo", level="WARNING"):
+            self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertTrue(entry.codes[0].bypassed)
+        self.assertIn("config cannot pickle", entry.codes[0].bypass_reason)
+
     @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_bypassed_guards_keep_the_frames_earlier_variant(self, config_cls):
