@@ -110,7 +110,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import vt_is_iterable
+from .object_protocol import pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -1259,6 +1259,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 # Use math.fma if constants
                 return None
+
+        @register(math.gcd)
+        def handle_gcd(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
+
+        @register(math.lcm)
+        def handle_lcm(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(
@@ -2793,6 +2821,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.current_stream,
             torch.cuda.current_stream,
+            torch.mtia.current_stream,
             torch.xpu.current_stream,
         )
         def handle_current_stream(
@@ -2843,6 +2872,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         _synchronize_fn_to_device_type = {
             torch.cuda.synchronize: "cuda",
+            torch.mtia.synchronize: "mtia",
             torch.xpu.synchronize: "xpu",
             torch.mps.synchronize: "mps",
             torch.cpu.synchronize: "cpu",
@@ -2851,6 +2881,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.synchronize,
             torch.cuda.synchronize,
+            torch.mtia.synchronize,
             torch.xpu.synchronize,
             torch.mps.synchronize,
             torch.cpu.synchronize,
