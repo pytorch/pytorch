@@ -309,7 +309,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         # lobpcg.backward has some limitations. Checks for unsupported input
         if A.is_sparse or (B is not None and B.is_sparse and ctx.needs_input_grad[2]):
             raise ValueError(
-                "lobpcg.backward does not support sparse input yet."
+                "lobpcg.backward does not support sparse input yet. "
                 "Note that lobpcg.forward does though."
             )
         if (
@@ -318,7 +318,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
             and B.dtype in (torch.complex64, torch.complex128)
         ):
             raise ValueError(
-                "lobpcg.backward does not support complex input yet."
+                "lobpcg.backward does not support complex input yet. "
                 "Note that lobpcg.forward does though."
             )
         if B is not None:
@@ -557,8 +557,8 @@ def lobpcg(
     else:
         if A.requires_grad or (B is not None and B.requires_grad):
             raise RuntimeError(
-                "Script and require grads is not supported atm."
-                "If you just want to do the forward, use .detach()"
+                "Script and require grads is not supported atm. "
+                "If you just want to do the forward, use .detach() "
                 "on A and B before calling into lobpcg"
             )
 
@@ -618,7 +618,7 @@ def _lobpcg(
 
     if m < 3 * n:
         raise ValueError(
-            f"LPBPCG algorithm is not applicable when the number of A rows (={m})"
+            f"LOBPCG algorithm is not applicable when the number of A rows (={m})"
             f" is smaller than 3 x the number of requested eigenpairs (={n})"
         )
 
@@ -735,7 +735,7 @@ class LOBPCG:
         self.bvars: dict[str, bool] = {"_": False}
 
     def __str__(self):
-        lines = ["LOPBCG:"]
+        lines = ["LOBPCG:"]
         lines += [f"  iparams={self.iparams}"]
         lines += [f"  fparams={self.fparams}"]
         lines += [f"  bparams={self.bparams}"]
@@ -756,10 +756,14 @@ class LOBPCG:
     def update(self):
         """Set and update iteration variables."""
         if self.ivars["istep"] == 0:
-            X_norm = float(torch.norm(self.X))
+            X_norm = float(torch.linalg.vector_norm(self.X))
             iX_norm = X_norm**-1
-            A_norm = float(torch.norm(_utils.matmul(self.A, self.X))) * iX_norm
-            B_norm = float(torch.norm(_utils.matmul(self.B, self.X))) * iX_norm
+            A_norm = (
+                float(torch.linalg.vector_norm(_utils.matmul(self.A, self.X))) * iX_norm
+            )
+            B_norm = (
+                float(torch.linalg.vector_norm(_utils.matmul(self.B, self.X))) * iX_norm
+            )
             self.fvars["X_norm"] = X_norm
             self.fvars["A_norm"] = A_norm
             self.fvars["B_norm"] = B_norm
@@ -792,8 +796,9 @@ class LOBPCG:
         A_norm = self.fvars["A_norm"]
         B_norm = self.fvars["B_norm"]
         E, X, R = self.E, self.X, self.R
-        rerr = torch.norm(R, 2, (0,)) / (
-            torch.norm(X, 2, (0,)) * (A_norm + torch.abs(E[: X.shape[-1]]) * B_norm)
+        rerr = torch.linalg.vector_norm(R, ord=2, dim=(0,)) / (
+            torch.linalg.vector_norm(X, ord=2, dim=(0,))
+            * (A_norm + torch.abs(E[: X.shape[-1]]) * B_norm)
         )
         converged = rerr < tol
         count = 0
@@ -947,7 +952,7 @@ class LOBPCG:
         C = (S^TBS) C E` to a standard eigenvalue problem :math: `(Ri^T
         S^TAS Ri) Z = Z E` where `C = Ri Z`.
 
-        .. note:: In the original Rayleight-Ritz procedure in
+        .. note:: In the original Rayleigh-Ritz procedure in
           [DuerschEtal2018], the problem is formulated as follows::
 
             SAS = S^T A S
@@ -960,7 +965,7 @@ class LOBPCG:
 
           To reduce the number of matrix products (denoted by empty
           space between matrices), here we introduce element-wise
-          products (denoted by symbol `*`) so that the Rayleight-Ritz
+          products (denoted by symbol `*`) so that the Rayleigh-Ritz
           procedure becomes::
 
             SAS = S^T A S
@@ -1002,7 +1007,7 @@ class LOBPCG:
         .. note:: When `drop` is `False` then `svqb` is based on the
                   Algorithm 4 from [DuerschPhD2015] that is a slight
                   modification of the corresponding algorithm
-                  introduced in [StathopolousWu2002].
+                  introduced in [StathopoulosWu2002].
 
         Args:
 
@@ -1072,7 +1077,7 @@ class LOBPCG:
                   `_get_ortho` is based on the Algorithm 3 from
                   [DuerschPhD2015] that is a slight modification of
                   the corresponding algorithm introduced in
-                  [StathopolousWu2002]. Otherwise, the method
+                  [StathopoulosWu2002]. Otherwise, the method
                   implements Algorithm 6 from [DuerschPhD2015]
 
         .. note:: If all U columns are B-collinear to V then the
@@ -1109,7 +1114,7 @@ class LOBPCG:
         self.ivars.pop("ortho_i", 0)
         self.ivars.pop("ortho_j", 0)
 
-        BV_norm = torch.norm(mm_B(self.B, V))
+        BV_norm = torch.linalg.vector_norm(mm_B(self.B, V))
         BU = mm_B(self.B, U)
         VBU = mm(V.mT, BU)
         i = j = 0
@@ -1131,10 +1136,10 @@ class LOBPCG:
                     return U
                 BU = mm_B(self.B, U)
                 UBU = mm(U.mT, BU)
-                U_norm = torch.norm(U)
-                BU_norm = torch.norm(BU)
+                U_norm = torch.linalg.vector_norm(U)
+                BU_norm = torch.linalg.vector_norm(BU)
                 R = UBU - torch.eye(UBU.shape[-1], device=UBU.device, dtype=UBU.dtype)
-                R_norm = torch.norm(R)
+                R_norm = torch.linalg.vector_norm(R)
                 # https://github.com/pytorch/pytorch/issues/33810 workaround:
                 rerr = float(R_norm) * float(BU_norm * U_norm) ** -1
                 vkey = f"ortho_UBUmI_rerr[{i}, {j}]"
@@ -1142,8 +1147,8 @@ class LOBPCG:
                 if rerr < tau_ortho:
                     break
             VBU = mm(V.mT, BU)
-            VBU_norm = torch.norm(VBU)
-            U_norm = torch.norm(U)
+            VBU_norm = torch.linalg.vector_norm(VBU)
+            U_norm = torch.linalg.vector_norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1
             vkey = f"ortho_VBU_rerr[{i}]"
             self.fvars[vkey] = rerr

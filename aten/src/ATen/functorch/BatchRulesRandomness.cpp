@@ -212,8 +212,8 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   double scale = p1m == 0 ? 0. : 1. / p1m;
   Tensor mask = at::empty_like(tensor, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   mask.bernoulli_(p1m);
-  const auto output = tensor.mul(mask).mul_(scale);
-  return std::make_tuple(output, mask);
+  auto output = tensor.mul(mask).mul_(scale);
+  return std::make_tuple(std::move(output), std::move(mask));
 }
 
 static Tensor native_dropout_backward_batch_rule(const Tensor& grad_out, const Tensor& mask, double scale){
@@ -434,13 +434,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
 
   RANDOM_BATCH_RULE(randn);
   RANDOM_BATCH_RULE2(randn, generator);
-  RANDOM_BATCH_RULE2(randn, generator_with_names);
-  RANDOM_BATCH_RULE2(randn, names);
 
   RANDOM_BATCH_RULE(rand);
   RANDOM_BATCH_RULE2(rand, generator);
-  RANDOM_BATCH_RULE2(rand, generator_with_names);
-  RANDOM_BATCH_RULE2(rand, names);
 
   RANDOM_INPLACE_BATCH_RULE(random_);
   RANDOM_INPLACE_BATCH_RULE2(random_, from);

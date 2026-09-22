@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -150,7 +149,6 @@ const Tensor& resize_as_(
     }
     self.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
-  namedinference::propagate_names(result, the_template);
   return result;
 }
 
@@ -235,20 +233,27 @@ static const Tensor& _resize_(
     ArrayRef<T> size,
     std::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
-  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
+  auto maybe_old_storage_nbytes_to_fill_resize = [&]() -> std::optional<int64_t> {
+    if (!at::globalContext().deterministicAlgorithms() ||
+        !at::globalContext().deterministicFillUninitializedMemory()) {
+      return std::nullopt;
+    }
+    if (!self_->unsafe_storage()) {
+      return 0;
+    }
+    return self_->unsafe_storage().sym_nbytes().maybe_as_int();
+  }();
   _resize_impl_<T>(self_, size, /*stride=*/std::nullopt, true);
   if (optional_memory_format.has_value()) {
-    auto memory_format =
-        optional_memory_format.value();
+    auto memory_format = optional_memory_format.value();
     TORCH_CHECK(
         memory_format != MemoryFormat::Preserve,
         "Unsupported memory format",
         memory_format);
     self_->empty_tensor_restride(memory_format);
   }
-  // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory() && old_storage_nbytes != -1)) {
-    at::native::fill_resize_deterministic_(self, old_storage_nbytes);
+  if (C10_UNLIKELY(maybe_old_storage_nbytes_to_fill_resize.has_value())) {
+    at::native::fill_resize_deterministic_(self, *maybe_old_storage_nbytes_to_fill_resize);
   }
   return self;
 }
@@ -257,9 +262,6 @@ const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
     std::optional<MemoryFormat> optional_memory_format) {
-  if (self.has_names()) {
-    return resize_named_tensor_(self, size, optional_memory_format);
-  }
   return _resize_(self, size, optional_memory_format);
 }
 
@@ -267,7 +269,6 @@ const Tensor& resize__symint(
     const Tensor& self,
     c10::SymIntArrayRef size,
     std::optional<MemoryFormat> optional_memory_format) {
-  TORCH_INTERNAL_ASSERT(!self.has_names())
   return _resize_(self, size, optional_memory_format);
 }
 

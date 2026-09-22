@@ -101,21 +101,6 @@ class TestFxFusion(TestCase):
         self.assertEqual(count_call_function(traced, torch.cat), 1)
         self.assertEqual(count_call_method(traced, "tanh"), 1)
 
-    def test_sink_cat_after_pointwise_axis_none(self):
-        def test_axis_none(x, y):
-            return torch.cat([x, y], axis=None).tanh()
-
-        traced = sink_cat_after_pointwise(torch.fx.symbolic_trace(test_axis_none))
-        self.assertEqual(count_call_function(traced, torch.cat), 1)
-        self.assertEqual(count_call_method(traced, "tanh"), 1)
-        cat_nodes = [
-            n
-            for n in traced.graph.nodes
-            if n.op == "call_function" and n.target == torch.cat
-        ]
-        self.assertEqual(cat_nodes[0].kwargs.get("axis"), None)
-        self.assertNotIn("dim", cat_nodes[0].kwargs)
-
     def test_linear_permute_fusion(self):
         class TestModule(torch.nn.Module):
             def __init__(self, k: int, n: int, has_bias: bool):

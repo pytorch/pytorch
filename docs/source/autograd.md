@@ -217,7 +217,7 @@ like the following:
 
 ## Context method mixins
 
-When creating a new {class}`Function`, the following methods are available to `ctx`.
+When creating a new {class}`Function`, the following members are available to `ctx`.
 
 ```{eval-rst}
 .. autoclass:: torch.autograd.function.FunctionCtx
@@ -230,6 +230,7 @@ When creating a new {class}`Function`, the following methods are available to `c
     :toctree: generated
     :nosignatures:
 
+    function.FunctionCtx.input_grad_buffers
     function.FunctionCtx.mark_dirty
     function.FunctionCtx.mark_non_differentiable
     function.FunctionCtx.save_for_backward
@@ -409,7 +410,9 @@ You can also define how these saved tensors should be packed / unpacked using ho
 A common application is to trade compute for memory by saving those intermediary results
 to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
 notice your model fits on GPU during evaluation, but not training.
-Also see {ref}`saved-tensors-hooks-doc`.
+When writing a ``pack_hook`` that keeps its input tensor, call ``.detach()`` on it first
+to avoid a reference cycle when the saved tensor is a graph output; see
+{ref}`saved-tensors-hooks-doc` for details.
 
 ```{eval-rst}
 .. autoclass:: torch.autograd.graph.saved_tensors_hooks
@@ -428,6 +431,10 @@ Also see {ref}`saved-tensors-hooks-doc`.
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.autograd.graph.node_creation_hook
+```
+
+```{eval-rst}
 .. autoclass:: torch.autograd.graph.allow_mutation_on_saved_tensors
 ```
 
@@ -437,6 +444,10 @@ Also see {ref}`saved-tensors-hooks-doc`.
 
 ```{eval-rst}
 .. autofunction:: torch.autograd.graph.get_gradient_edge
+```
+
+```{eval-rst}
+.. autofunction:: torch.autograd.graph.queue_callback
 ```
 
 ```{eval-rst}

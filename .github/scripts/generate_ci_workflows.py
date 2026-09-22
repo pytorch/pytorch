@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import os
 import sys
 from collections.abc import Iterable
@@ -65,6 +66,8 @@ class BinaryBuildWorkflow:
     # Libtorch extraction configs: lightweight jobs that extract libtorch
     # from a wheel build instead of building libtorch from scratch
     libtorch_extraction_configs: list[dict[str, str]] = field(default_factory=list)
+    # Owner labels emitted as the "# Owner(s):" header; see WORKFLOWOWNERS lint.
+    owners: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.build_environment == "":
@@ -73,6 +76,19 @@ class BinaryBuildWorkflow:
                 for item in [self.os, "binary", self.package_type, self.build_variant]
                 if item != ""
             )
+        if not self.owners:
+            self.owners = ["oncall: releng"]
+            if self.os in (OperatingSystem.MACOS, OperatingSystem.MACOS_ARM64):
+                self.owners.append("module: macos")
+            elif self.os in (OperatingSystem.WINDOWS, OperatingSystem.WINDOWS_ARM64):
+                self.owners.append("module: windows")
+            # A single binary workflow bundles configs for every gpu_arch_type, so
+            # add the accelerator-team owners for whichever ones the matrix includes.
+            arches = {config.get("gpu_arch_type") for config in self.build_configs}
+            if "rocm" in arches:
+                self.owners.append("module: rocm")
+            if "xpu" in arches:
+                self.owners.append("module: xpu")
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = (
@@ -81,7 +97,12 @@ class BinaryBuildWorkflow:
         )
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
-            output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
+            output_file.writelines(
+                [
+                    f"# Owner(s): {json.dumps(self.owners)}\n",
+                    f"# @{GENERATED} DO NOT EDIT MANUALLY\n",
+                ]
+            )
             try:
                 content = workflow_template.render(asdict(self))
             except Exception as e:
@@ -155,20 +176,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         ),
     ),
     BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.DEBUG,
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="wheel",
         build_configs=_WINDOWS_ARM64_WHEEL_CONFIGS,
@@ -183,21 +190,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
             OperatingSystem.WINDOWS_ARM64,
             _WINDOWS_ARM64_WHEEL_CONFIGS,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS_ARM64,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS_ARM64,
-            generate_binary_build_matrix.DEBUG,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
         ),
     ),
 ]

@@ -45,7 +45,7 @@ TEST(JitTypeTest, UnifyTypes) {
   ss << (*out)->annotation_str();
   testing::FileCheck()
       .check("Optional[Tuple[Optional[int], Optional[int]]]")
-      ->run(ss.str());
+      ->run(std::move(ss).str());
 
   auto fut_1 = FutureType::create(IntType::get());
   auto fut_2 = FutureType::create(NoneType::get());

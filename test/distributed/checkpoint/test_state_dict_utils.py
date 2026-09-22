@@ -23,16 +23,14 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
 
 
-class TestStateDictUtils(DTensorTestBase):
-    @property
-    def world_size(self):
-        return min(4, torch.accelerator.device_count())
+class TestStateDictUtils(DTensorContinuousTestBase):
+    world_size = min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -45,7 +43,7 @@ class TestStateDictUtils(DTensorTestBase):
         state_dict = {"dtensor": dist_tensor}
 
         gathered_state_dict = _gather_state_dict(state_dict)
-        expected_gathered_dtensor = funcol.all_gather_tensor(
+        expected_gathered_dtensor = funcol.all_gather_single(
             dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
         self.assertEqual(expected_gathered_dtensor, gathered_state_dict["dtensor"])
@@ -64,7 +62,7 @@ class TestStateDictUtils(DTensorTestBase):
         gathered_state_dict = _gather_state_dict(
             state_dict, cpu_offload=True, ranks_only=(0, 2)
         )
-        expected_gathered_dtensor = funcol.all_gather_tensor(
+        expected_gathered_dtensor = funcol.all_gather_single(
             dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
         if dist.get_rank() in (0, 2):
@@ -102,7 +100,7 @@ class TestStateDictUtils(DTensorTestBase):
             torch.random.manual_seed(dist.get_rank())
             local_tensor = torch.randn(3, 3, 3)
             dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
-            tensor = funcol.all_gather_tensor(
+            tensor = funcol.all_gather_single(
                 dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
             return tensor, dist_tensor
