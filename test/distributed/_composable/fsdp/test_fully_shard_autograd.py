@@ -33,7 +33,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-
 class TestFullyShardAutograd(FSDPTestContinuous):
     hw_classification = HardwareClassification.ACCELERATOR
 
