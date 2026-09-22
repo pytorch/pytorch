@@ -4434,14 +4434,19 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # use), so the mark lands on exactly what travels.
                 stack.extend(value)
                 stack.extend(value.values())
-            elif isinstance(value, (list, tuple, set, frozenset, dict_keys)):
-                # A dict_keys view is a KeysView, not a set, and its reducer
-                # pickles each key as its own object.
+            elif isinstance(
+                value, (list, tuple, set, frozenset, dict_keys, collections.deque)
+            ):
+                # A dict_keys view is a KeysView, not a set, and a deque has no
+                # instance dict; the reducers of both pickle each item on its own.
                 stack.extend(value)
             if (fields := _instance_dict(value)) is not None:
                 # A by-value comparison reads every field, so the protection
                 # is transitive through an object's instance dict; a container
                 # subclass with instance state gets its elements and its fields.
+                # The dict itself is marked too: an exact dict a scope leaf
+                # registered would otherwise be swapped whole by persistent_id.
+                self._verbatim_elements[id(fields)] = fields
                 stack.extend(fields.values())
 
     @classmethod
@@ -4598,10 +4603,13 @@ class GuardsStatePickler(FunctionPicklerBase):
     # a MAPPING_KEYS_CHECK key are recorded there too (_compared_by_value):
     # the key managers and those guards bake them and compare by value at run
     # time, and that comparison reads every field, so the protection extends
-    # through the key's instance dict. Two known limits: a slotted key's slot
-    # values are not marked, and a tensor or nn.Module field still goes through
-    # its own guard_tree_values check (a loaded copy could not compare equal to
-    # the run-time object anyway). A dict/tuple SUBCLASS is verbatim whenever
+    # through the key's instance dict. Known limits: a slotted key's slot
+    # values are not marked (KeysView/ValuesView/ItemsView are slotted too), and
+    # the reducer_override branches that return the sentinel without consulting
+    # the mark (a tensor or nn.Module outside the guard tree, a capsule, the
+    # unsupported types, an fqn-mismatched function, a distributed Work) keep
+    # doing so: each of those compares by identity, so a carried copy could not
+    # make the guard match anyway. A dict/tuple SUBCLASS is verbatim whenever
     # kept, since its type must survive for the guard reading the slot
     # (_keep_container_verbatim).
 
