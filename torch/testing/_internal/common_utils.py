@@ -1381,26 +1381,6 @@ def get_report_path(argv=None, pytest=False):
     return test_report_path
 
 
-def sanitize_pytest_xml(xml_file: str):
-    # pytext xml is different from unittext xml, this function makes pytest xml more similar to unittest xml
-    # consider somehow modifying the XML logger in conftest to do this instead
-    import xml.etree.ElementTree as ET
-    tree = ET.parse(xml_file)
-    for testcase in tree.iter('testcase'):
-        full_classname = testcase.attrib.get("classname")
-        if full_classname is None:
-            continue
-        # The test prefix is optional
-        regex_result = re.search(r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$", full_classname)
-        if regex_result is None:
-            continue
-        classname = regex_result.group("classname")
-        file = regex_result.group("file").replace(".", "/")
-        testcase.set("classname", classname)
-        testcase.set("file", f"{file}.py")
-    tree.write(xml_file)
-
-
 def get_pytest_test_cases(argv: list[str]) -> list[str]:
     class TestCollectorPlugin:
         def __init__(self) -> None:
@@ -1598,8 +1578,6 @@ def run_tests(argv=None):
         import pytest
         os.environ["NO_COLOR"] = "1"
         exit_code = pytest.main(args=pytest_args)
-        if TEST_SAVE_XML:
-            sanitize_pytest_xml(test_report_path)
 
         # exitcode of 5 means no tests were found, which happens since some test configs don't
         # run tests from certain files
