@@ -4282,10 +4282,18 @@ def _instance_dict(obj: Any) -> dict[str, Any] | None:
 _PLAIN_INSTANCE_SIZE = type("_PlainInstance", (), {}).__basicsize__
 
 
+# Hooks ``object`` itself lacks, so an instance __getattr__ can supply them
+# (3.10 has no object.__getstate__ either); asked for on a hollow instance.
+_INSTANCE_HOOKS = ("__setstate__", "__getnewargs__", "__getnewargs_ex__") + (
+    () if hasattr(object, "__getstate__") else ("__getstate__",)
+)
+
+
 def _pickles_by_default(obj: Any) -> bool:
     """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``,
-    judged from the type: its own hooks, its copyreg registration and its
-    instance layout. A hook set on the instance itself is not seen.
+    judged from the type (its own hooks, its copyreg registration and its
+    instance layout) and from a hollow instance of it, asked for the hooks the
+    way pickle asks. A hook set on the instance itself is not seen.
 
     Attribute pruning is only sound for that protocol. A custom __reduce_ex__
     (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
@@ -4302,14 +4310,17 @@ def _pickles_by_default(obj: Any) -> bool:
     ``("a", "__dict__")`` has the plain size; an EMPTY __slots__ (abc.ABC,
     typing.Generic, Protocol) adds no state and does not count. A __new__ of
     the class's own is refused as well: the load side calls ``cls.__new__(cls)``
-    with no arguments, which a __new__ that takes any fails. A metaclass hook
-    that raises on any of these reads is answered with False: not pruning is
-    always safe, and the failure it would turn into is the one being avoided.
+    with no arguments, which a __new__ that takes any fails. The hooks object
+    lacks are looked up on an instance by pickle (BUILD asks the hollow one
+    NEWOBJ made for __setstate__), so a __getattr__ that serves any name
+    supplies them where a read on the type sees nothing; they are asked for the
+    same way here. A hook that raises on that read is answered with False: not
+    pruning is always safe, and the failure it would turn into is the one being
+    avoided.
     """
     cls = type(obj)
-    default_getstate = getattr(object, "__getstate__", None)
     try:
-        return (
+        if not (
             cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
             and all(c.__itemsize__ == 0 for c in cls.__mro__)
             and not any(vars(c).get("__slots__") for c in cls.__mro__)
@@ -4317,11 +4328,12 @@ def _pickles_by_default(obj: Any) -> bool:
             and cls.__new__ is object.__new__
             and cls.__reduce_ex__ is object.__reduce_ex__
             and cls.__reduce__ is object.__reduce__
-            and getattr(cls, "__getstate__", None) is default_getstate
-            and not hasattr(cls, "__setstate__")
-            and not hasattr(cls, "__getnewargs__")
-            and not hasattr(cls, "__getnewargs_ex__")
-        )
+            and getattr(cls, "__getstate__", None)
+            is getattr(object, "__getstate__", None)
+        ):
+            return False
+        hollow = object.__new__(cls)
+        return all(getattr(hollow, name, None) is None for name in _INSTANCE_HOOKS)
     except Exception:
         return False
 
@@ -4380,14 +4392,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             if id(value) in self._verbatim_elements:
                 continue
             self._verbatim_elements.add(id(value))
-            if isinstance(value, (list, tuple, set, frozenset)):
-                stack.extend(value)
-            elif isinstance(value, dict):
-                # Keys too: missing_values prunes hashable objects (a frozen
-                # dataclass), so a key can be one or hold one.
-                stack.extend(value)
-                stack.extend(value.values())
-            elif inspect.ismodule(value) or isinstance(
+            if inspect.ismodule(value) or isinstance(
                 value, (torch.Tensor, torch.nn.Module)
             ):
                 # A module is pickled by name and its dict leads into every other
@@ -4397,10 +4402,18 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # equal to the run-time object anyway (an nn.Module compares by
                 # identity). Descending would only switch pruning off for
                 # everything they hold.
-                pass
-            elif (fields := _instance_dict(value)) is not None:
+                continue
+            if isinstance(value, dict):
+                # Keys too: missing_values prunes hashable objects (a frozen
+                # dataclass), so a key can be one or hold one.
+                stack.extend(value)
+                stack.extend(value.values())
+            elif isinstance(value, (list, tuple, set, frozenset)):
+                stack.extend(value)
+            if (fields := _instance_dict(value)) is not None:
                 # A by-value comparison reads every field, so the protection
-                # is transitive through an object's instance dict.
+                # is transitive through an object's instance dict; a container
+                # subclass with instance state gets its elements and its fields.
                 stack.extend(fields.values())
 
     @classmethod
