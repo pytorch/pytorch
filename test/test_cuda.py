@@ -12357,14 +12357,13 @@ class TestCudaGreenContexts(TestCase):
 
         green_contexts._get_driver_version.cache_clear()
         try:
-            with patch.object(
-                drv,
-                "cuDriverGetVersion",
-                return_value=(drv.CUresult.CUDA_ERROR_UNKNOWN, 0),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "CUDA_ERROR_UNKNOWN"):
+            with patch.object(green_contexts, "_get_cuda_library") as library:
+                library.return_value.cuDriverGetVersion.return_value = (
+                    drv.CUresult.CUDA_ERROR_UNKNOWN.value
+                )
+                with self.assertRaisesRegex(RuntimeError, "unknown error"):
                     green_contexts._get_driver_version()
-                with self.assertRaisesRegex(RuntimeError, "CUDA_ERROR_UNKNOWN"):
+                with self.assertRaisesRegex(RuntimeError, "unknown error"):
                     green_contexts.is_localization_supported()
         finally:
             green_contexts._get_driver_version.cache_clear()
@@ -12566,9 +12565,10 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
         code = """
 import sys
 import torch
-from torch.cuda.green_contexts import get_num_locality_domains
+from torch.cuda.green_contexts import get_num_locality_domains, is_localization_supported
 from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
 count = get_num_locality_domains(int(sys.argv[1]))
+is_localization_supported()
 print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetCurrent())))
 """
         output = subprocess.check_output(
@@ -12582,7 +12582,7 @@ print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetC
             with self.assertRaises(RuntimeError):
                 query(torch.cuda.device_count())
 
-    @parametrize("visibility", ["ordinal", "uuid", "partial_uuid"])
+    @parametrize("visibility", ["ordinal", "uuid", "partial_uuid", "unknown"])
     def test_greencontext_locality_nvml(self, device, visibility):
         from torch.cuda import green_contexts
 
@@ -12597,24 +12597,62 @@ print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetC
             visible = uuid[:20]
         code = """
 import json
+import multiprocessing
+import os
+import sys
+from ctypes import byref, c_int
 import torch
 from torch.cuda import green_contexts as g
 from cuda.bindings import driver as drv
+if sys.argv[1] == 'unknown':
+    os.environ['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE'] = '100'
 nvml = g._is_localization_supported_nvml(0)
-supported = g.is_localization_supported(0)
-uninitialized = drv.cuDeviceGet(0)[0] == drv.CUresult.CUDA_ERROR_NOT_INITIALIZED
-count = g.get_num_locality_domains(0)
-print(json.dumps([nvml, supported, uninitialized, count, torch.cuda.is_initialized()]))
+supported = error = None
+try:
+    supported = g.is_localization_supported()
+except RuntimeError as exc:
+    if nvml is not None:
+        raise
+    error = str(exc)
+device = c_int()
+uninitialized = (
+    g._get_cuda_library().cuDeviceGet(byref(device), 0)
+    == drv.CUresult.CUDA_ERROR_NOT_INITIALIZED.value
+)
+torch_initialized = torch.cuda.is_initialized()
+if sys.argv[1] == 'unknown':
+    del os.environ['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE']
+def worker():
+    count = g.get_num_locality_domains(0)
+    value = torch.ones(1, device='cuda').item()
+    print(json.dumps([nvml, supported, error, uninitialized, count, torch_initialized, value]))
+process = multiprocessing.get_context('fork').Process(target=worker)
+process.start()
+process.join(timeout=30)
+if process.is_alive():
+    process.kill()
+    process.join()
+    raise RuntimeError('Forked CUDA worker timed out')
+if process.exitcode != 0:
+    raise RuntimeError(f'Forked CUDA worker failed: {process.exitcode}')
 """
         output = subprocess.check_output(
-            [sys.executable, "-c", code],
+            [sys.executable, "-c", code, visibility],
             env={**os.environ, "CUDA_VISIBLE_DEVICES": visible},
             text=True,
         )
-        nvml, supported, uninitialized, count, torch_initialized = json.loads(output)
-        self.assertEqual(supported, count > 1)
-        self.assertEqual(uninitialized, nvml is not None)
+        nvml, supported, error, uninitialized, count, torch_initialized, value = (
+            json.loads(output)
+        )
+        if nvml is None:
+            self.assertRegex(error, "Cannot determine locality-domain support")
+        else:
+            self.assertEqual(supported, count > 1)
+        if visibility == "unknown":
+            self.assertIsNone(nvml)
+        self.assertTrue(uninitialized)
         self.assertFalse(torch_initialized)
+        self.assertEqual(value, 1)
 
     @parametrize("visible", ["", "GPU-invalid"])
     def test_greencontext_locality_invalid_visibility(self, visible):
@@ -12625,8 +12663,14 @@ print(json.dumps([nvml, supported, uninitialized, count, torch.cuda.is_initializ
         except RuntimeError as error:
             self.skipTest(str(error))
         code = """
+from ctypes import byref, c_int
+from torch.cuda._utils import _get_cuda_library
 from torch.cuda.green_contexts import is_localization_supported
-is_localization_supported(0)
+try:
+    is_localization_supported(0)
+finally:
+    device = c_int()
+    print(_get_cuda_library().cuDeviceGet(byref(device), 0))
 """
         result = subprocess.run(
             [sys.executable, "-c", code],
@@ -12635,7 +12679,8 @@ is_localization_supported(0)
             text=True,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertRegex(result.stderr, "CUDA_ERROR_(NO|INVALID)_DEVICE")
+        self.assertRegex(result.stderr, "Cannot determine locality-domain support")
+        self.assertEqual(result.stdout.strip(), "3")
 
     @serialTest()
     def test_greencontext_locality_split(self, device):
@@ -12644,6 +12689,15 @@ is_localization_supported(0)
 
         count = self._require_locality_domains(device)
         device_id = torch.device(device).index
+        with self.assertRaisesRegex(
+            ValueError, f"contains {count}.*0 through {count - 1}"
+        ):
+            GreenContext.split(
+                num_sms=2,
+                coscheduled_sm_count=2,
+                locality_domain_ids=count,
+                device_id=device_id,
+            )
         sms_per_domain = _check_cuda_bindings(
             drv.cuDeviceGetAttribute(
                 drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_MULTIPROCESSOR_COUNT,
@@ -12695,8 +12749,17 @@ is_localization_supported(0)
     def test_greencontext_locality_backfill(self, device):
         from torch.cuda.green_contexts import SMPartition
 
-        self._require_locality_domains(device)
+        count = self._require_locality_domains(device)
         source = SMPartition.from_device(torch.device(device).index)
+        with self.assertRaisesRegex(
+            ValueError, f"contains {count}.*0 through {count - 1}"
+        ):
+            source.split(
+                num_sms=2,
+                coscheduled_sm_count=2,
+                locality_domain_ids=count,
+                backfill=True,
+            )
         with self.assertRaises(RuntimeError):
             source.split(
                 num_sms=source.sm_count, coscheduled_sm_count=2, locality_domain_ids=0

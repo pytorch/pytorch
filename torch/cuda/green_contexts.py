@@ -5,15 +5,18 @@ import os
 import sys
 import warnings
 from collections.abc import Sequence
+from ctypes import byref, c_int
 from typing import Any
 from typing_extensions import deprecated
 
 import torch
 from torch.cuda._utils import (
+    _check_cuda,
     _check_cuda_bindings,
     _cuda_bindings_driver as _drv,
     _cuda_bindings_runtime as _rt,
     _ensure_cuda_bindings_version,
+    _get_cuda_library,
     _HAS_CUDA_BINDINGS,
 )
 
@@ -43,8 +46,10 @@ _CONTEXT_STACK_DEPRECATION = (
 # the driver version cannot change during the lifetime of a process
 @functools.cache
 def _get_driver_version() -> int:
-    # pyrefly: ignore [missing-attribute]
-    return _check_cuda_bindings(_drv.cuDriverGetVersion())
+    # Loading cuda.bindings' driver dispatch alongside NVML can break CUDA after fork.
+    version = c_int()
+    _check_cuda(_get_cuda_library().cuDriverGetVersion(byref(version)))
+    return version.value
 
 
 def _ensure_cuda_version(version: int, message: str) -> None:
@@ -76,12 +81,23 @@ def _ensure_locality_supported() -> None:
     _ensure_cuda_version(13040, message)
 
 
+def _get_locality_domain_count(device: int) -> int:
+    count = c_int()
+    # pyrefly: ignore [missing-attribute]
+    attribute = _drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_COUNT
+    _check_cuda(
+        _get_cuda_library().cuDeviceGetAttribute(byref(count), attribute.value, device)
+    )
+    return count.value
+
+
 def get_num_locality_domains(device_id: int | None = None) -> int:
     r"""Return the device's locality-domain count reported by CUDA.
 
     Requires CUDA driver and bindings 13.4+. Initializes the CUDA driver.
     This query does not create a context when ``device_id`` is specified.
     Unsupported software and failed driver queries raise an error.
+    Initializing the driver can prevent CUDA use in subsequently forked children.
 
     Args:
         device_id (int, optional): Device index. When ``None``, uses the current
@@ -91,31 +107,28 @@ def get_num_locality_domains(device_id: int | None = None) -> int:
     _ensure_locality_supported()
     if device_id is None:
         device_id = torch.cuda.current_device()
-    _check_cuda_bindings(_drv.cuInit(0))  # pyrefly: ignore [missing-attribute]
-    # pyrefly: ignore [missing-attribute]
-    device = _check_cuda_bindings(_drv.cuDeviceGet(device_id))
-    return _check_cuda_bindings(
-        _drv.cuDeviceGetAttribute(  # pyrefly: ignore [missing-attribute]
-            # pyrefly: ignore [missing-attribute]
-            _drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_COUNT,
-            device,
-        )
-    )
+    driver = _get_cuda_library()
+    _check_cuda(driver.cuInit(0))
+    device = c_int()
+    _check_cuda(driver.cuDeviceGet(byref(device), device_id))
+    return _get_locality_domain_count(device.value)
 
 
 def is_localization_supported(device_id: int | None = None) -> bool:
     r"""Return whether the software supports localization on a multi-domain GPU.
 
     Returns ``False`` when the required software is unavailable or the device
-    has at most one locality domain. Before CUDA initialization, attempts a
+    has at most one locality domain. Before driver initialization, attempts a
     best-effort NVML capability check based on architecture and system
-    configuration. If NVML cannot determine support, queries CUDA as described
-    in :func:`get_num_locality_domains`. This fallback initializes the driver;
-    invalid devices and failed driver queries raise. Splitting and context
-    creation always use CUDA to validate the actual resources.
+    configuration, raising if NVML cannot determine support. Once the driver
+    is initialized, queries CUDA directly; invalid devices and failed queries
+    raise. This function does not initialize the driver or a context and does
+    not poison subsequent forks. Splitting and context creation always use CUDA
+    to validate the actual resources.
 
     Args:
-        device_id (int, optional): Device index. Default: current PyTorch device.
+        device_id (int, optional): Device index. Default: current PyTorch device
+            if PyTorch CUDA is initialized, otherwise ``0``.
     """
     if (
         torch.version.cuda is None
@@ -130,17 +143,21 @@ def is_localization_supported(device_id: int | None = None) -> bool:
         _ensure_cuda_bindings_version(13040, "Locality domains require bindings 13.4+")
     except RuntimeError:
         return False
-    probe_device = 0 if device_id is None else device_id
+    if device_id is None:
+        device_id = torch.cuda.current_device() if torch.cuda.is_initialized() else 0
+    device = c_int()
+    result = _get_cuda_library().cuDeviceGet(byref(device), device_id)
     # pyrefly: ignore [missing-attribute]
-    result = _drv.cuDeviceGet(probe_device)
-    # pyrefly: ignore [missing-attribute]
-    if result[0] == _drv.CUresult.CUDA_ERROR_NOT_INITIALIZED:
-        supported = _is_localization_supported_nvml(probe_device)
-        if supported is not None:
-            return supported
-    else:
-        _check_cuda_bindings(result)
-    return get_num_locality_domains(device_id) > 1
+    if result == _drv.CUresult.CUDA_ERROR_NOT_INITIALIZED.value:
+        supported = _is_localization_supported_nvml(device_id)
+        if supported is None:
+            raise RuntimeError(
+                "Cannot determine locality-domain support through NVML without "
+                "initializing CUDA. Initialize CUDA explicitly before querying again."
+            )
+        return supported
+    _check_cuda(result)
+    return _get_locality_domain_count(device.value) > 1
 
 
 def _is_localization_supported_nvml(device_id: int) -> bool | None:
@@ -391,14 +408,21 @@ class SMPartition:
         preferred = values["preferred_coscheduled_sm_count"]
         backfills = values["backfill"]
         domains = values["locality_domain_ids"]
-        if any(domain is not None for domain in domains):
-            _ensure_locality_supported()
+        num_domains = None
         for domain in domains:
-            if domain is not None and (
-                not isinstance(domain, int) or isinstance(domain, bool) or domain < 0
-            ):
+            if domain is None:
+                continue
+            if not isinstance(domain, int) or isinstance(domain, bool) or domain < 0:
                 raise ValueError(
                     "locality_domain_ids entries must be nonnegative integers or None"
+                )
+            if num_domains is None:
+                _ensure_locality_supported()
+                num_domains = _get_locality_domain_count(self.device_id)
+            if domain >= num_domains:
+                raise ValueError(
+                    f"locality_domain_ids contains {domain}, but valid IDs for "
+                    f"device {self.device_id} are 0 through {num_domains - 1}"
                 )
         for name, values in (
             ("num_sms", counts),

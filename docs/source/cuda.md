@@ -514,13 +514,16 @@ reported metadata and returns `None` if CUDA does not specify a domain.
 `get_num_locality_domains` queries CUDA directly and raises if the required
 software is unavailable or the query fails. Supplying an explicit device index
 initializes only the driver, without initializing PyTorch CUDA state or creating
-a primary context.
+a primary context. Driver initialization can still prevent CUDA use in
+subsequently forked children.
 
 `is_localization_supported` returns false for unsupported software or devices
-with at most one domain. Before CUDA initialization, it attempts a best-effort
+with at most one domain. Before driver initialization, it attempts a best-effort
 NVML capability check using `CUDA_VISIBLE_DEVICES`. If NVML cannot determine
-support, it falls back to a CUDA query, which initializes the driver. Driver
-query errors propagate. After CUDA initialization, the query always uses CUDA.
+support, it raises; initialize CUDA explicitly before querying again if needed.
+After driver initialization, the query always uses CUDA and query errors
+propagate. The predicate does not initialize the driver or a context, so calling
+it does not poison subsequent forks.
 Actual splitting and context creation always use CUDA, independently of this
 capability check.
 
