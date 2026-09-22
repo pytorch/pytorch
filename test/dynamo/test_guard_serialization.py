@@ -1234,9 +1234,10 @@ class _KeyWithSub:
         return hash(self.name)
 
 
-class _TaggedTuple(tuple):
-    # A tuple subclass with instance state: == reads the elements, a subclass
-    # __eq__ may read the fields, so a by-value key of this shape needs both.
+class _TaggedTuple(tuple):  # noqa: SLOT001
+    # A tuple subclass with instance state (the dict SLOT001 would remove is the
+    # point): == reads the elements, a subclass __eq__ may read the fields, so
+    # a by-value key of this shape needs both.
     def __new__(cls, items, meta=None):
         self = super().__new__(cls, items)
         self.meta = meta
