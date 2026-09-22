@@ -75,8 +75,6 @@ class TORCH_API MPSStream {
   }
 
   MPSCommandBuffer_t commandBuffer();
-  // Must be called from a block running on queue(), and the returned encoder
-  // is only valid for the rest of that block.
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
