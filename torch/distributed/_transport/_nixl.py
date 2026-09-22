@@ -111,7 +111,15 @@ class NIXLMemory:
 
 
 class NIXLTransport(Transport):
-    """One-sided tensor transport backed by a NIXL plugin."""
+    """One-sided tensor transport backed by a NIXL plugin.
+
+    Backend options accepted by :func:`new_transport` include ``plugin="UCX"``,
+    ``agent_name=None``, ``num_threads=0``, ``enable_prog_thread=True``,
+    ``capture_telemetry=False``, ``backend_options=None``, and ``timeout=30.0``.
+    ``backend_options`` maps plugin parameter names to strings and is forwarded
+    to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
+    when selected.
+    """
 
     def __init__(
         self,
