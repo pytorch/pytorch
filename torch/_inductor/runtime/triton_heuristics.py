@@ -19,6 +19,7 @@ import re
 import sys
 import threading
 import time
+import weakref
 from collections import namedtuple
 from typing import (
     Any,
@@ -576,8 +577,8 @@ class _JITFallbackCoordinator:
         autotuner: CachingAutotuner,
         compile_kernel_from_src: Callable[[], CachingAutotuner],
     ) -> None:
-        self._autotuner = autotuner
-        self._run_static = autotuner.run
+        self._autotuner_ref = weakref.ref(autotuner)
+        self._run_static = type(autotuner).run
         self._compile_kernel_from_src = compile_kernel_from_src
         self._condition = threading.Condition()
         self._active_runs = 0
@@ -586,6 +587,9 @@ class _JITFallbackCoordinator:
         self._fallback: CachingAutotuner | None = None
 
     def _run_fallback(self, *args, stream, benchmark_run, **kwargs):
+        autotuner = self._autotuner_ref()
+        if autotuner is None:
+            raise RuntimeError("static autotuner was released during JIT fallback")
         owns_compilation = False
         try:
             while True:
@@ -618,7 +622,7 @@ class _JITFallbackCoordinator:
             from torch._dynamo.convert_frame import compile_lock
 
             with compile_lock:
-                self._autotuner.release_benchmark_artifacts()
+                autotuner.release_benchmark_artifacts()
                 fallback = compile_kernel_from_src()
                 result = fallback.run(
                     *args, stream=stream, benchmark_run=benchmark_run, **kwargs
@@ -635,11 +639,14 @@ class _JITFallbackCoordinator:
             self._compile_kernel_from_src = None
             self._pending = False
             self._compiling = False
-            self._autotuner.run = fallback.run  # type: ignore[method-assign]
+            autotuner.run = fallback.run  # type: ignore[method-assign]
             self._condition.notify_all()
         return result
 
     def run(self, *args, stream, benchmark_run=False, **kwargs):
+        autotuner = self._autotuner_ref()
+        if autotuner is None:
+            raise RuntimeError("static autotuner was released before launch")
         with self._condition:
             if self._fallback is not None:
                 fallback = self._fallback
@@ -663,10 +670,14 @@ class _JITFallbackCoordinator:
 
         try:
             return self._run_static(
-                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+                autotuner,
+                *args,
+                stream=stream,
+                benchmark_run=benchmark_run,
+                **kwargs,
             )
         except MissingTritonKernelError:
-            self._autotuner._post_launch()
+            autotuner._post_launch()
             with self._condition:
                 self._pending = True
         finally:
