@@ -31,7 +31,12 @@ permissions:
   contents: read
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   docker-build:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240
@@ -43,22 +48,32 @@ jobs:
         # both amd64 and arm64 builds. Only `buildkit_addr` differs per arch.
         buildkit_addr: ["tcp://buildkitd-amd64.buildkit:1234"]
         docker-image-name: [
+          pytorch-linux-jammy-cuda12.6-cudnn9-py3.11-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11,
+          pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda13.4-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks,
-          pytorch-linux-jammy-py3.10-clang18,
-          pytorch-linux-jammy-py3.11-clang18,
-          pytorch-linux-jammy-py3.12-clang18,
-          pytorch-linux-jammy-py3.13-clang18,
-          pytorch-linux-jammy-py3.14-clang18,
-          pytorch-linux-jammy-py3.14t-clang18,
+          pytorch-linux-jammy-py3.10-clang21,
+          pytorch-linux-jammy-py3.11-clang21,
+          pytorch-linux-jammy-py3.12-clang21,
+          pytorch-linux-jammy-py3.13-clang21,
+          pytorch-linux-jammy-py3.14-clang21,
+          pytorch-linux-jammy-py3.14t-clang21,
+          pytorch-linux-jammy-py3.15-clang21,
           pytorch-linux-jammy-rocm-n-py3,
-          pytorch-linux-noble-rocm-n-py3,
-          pytorch-linux-noble-rocm-nightly-py3,
+          pytorch-linux-noble-rocm-n-py3.11,
+          pytorch-linux-noble-rocm-preview-py3.12,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
-          pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang18,
+          pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang20,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-clang20,
+          pytorch-linux-jammy-cuda13.4-cudnn9-py3.10-clang20,
           pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-cuda13.0-py3.12-pallas,
@@ -70,11 +85,20 @@ jobs:
           pytorch-linux-jammy-linter,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter,
           # TODO: Re-enable me when docker pin update happens
-          # pytorch-linux-jammy-py3-clang18-executorch,
+          # pytorch-linux-jammy-py3-clang21-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
           pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
         ]
         include:
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.10-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             runner_label: mt-l-arm64g4-16-62

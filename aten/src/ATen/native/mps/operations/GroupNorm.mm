@@ -42,13 +42,8 @@ static void group_norm_forward(const Tensor& X,
   TORCH_INTERNAL_ASSERT(X.numel() == N * C * HxW);
   TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == C);
   TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == C);
-  TORCH_INTERNAL_ASSERT(X.is_contiguous());
   TORCH_INTERNAL_ASSERT(!(gamma.defined() && beta.defined()) || (gamma.scalar_type() == beta.scalar_type()));
   TORCH_INTERNAL_ASSERT(mean.scalar_type() == rstd.scalar_type());
-
-  if (X.numel() == 0) {
-    return;
-  }
 
   idx_T channels_per_group = C / group;
   idx_T elements_per_group = channels_per_group * HxW;
@@ -87,12 +82,12 @@ static void group_norm_forward(const Tensor& X,
                                                   scalarToMetalTypeString(gamma_opt),
                                                   scalarToMetalTypeString(beta_opt),
                                                   std::is_same_v<idx_T, uint32_t> ? "uint32_t" : "uint64_t"));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm", {X});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm", {X}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, Y, mean, rstd, X, gamma_opt, beta_opt, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(num_threadgroups, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 }
@@ -157,12 +152,12 @@ static void group_norm_backward_x(const Tensor& dY,
                                                   scalarToMetalTypeString(mean),
                                                   scalarToMetalTypeString(gamma_opt),
                                                   std::is_same_v<idx_T, uint32_t> ? "uint32_t" : "uint64_t"));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_x", {dY, X});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_x", {dY, X}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, dX, dY, X, mean, rstd, gamma_opt, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(num_threadgroups, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 }
@@ -204,12 +199,12 @@ static void group_norm_backward_affine(const Tensor& dY,
                                                   scalarToMetalTypeString(mean),
                                                   scalarToMetalTypeString(dgamma),
                                                   std::is_same_v<idx_T, uint32_t> ? "uint32_t" : "uint64_t"));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_affine", {dY, X});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_affine", {dY, X}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, dgamma, dbeta, dY, X, mean, rstd, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(C, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 }
@@ -226,15 +221,6 @@ static void GroupNormBackwardKernelImpl(const Tensor& dY,
                                         Tensor& dX,
                                         Tensor& dgamma,
                                         Tensor& dbeta) {
-  if (X.numel() == 0) {
-    if (dgamma.defined()) {
-      dgamma.zero_();
-    }
-    if (dbeta.defined()) {
-      dbeta.zero_();
-    }
-    return;
-  }
   if (dX.defined()) {
     if (X.numel() >= (uint64_t(1) << 32)) {
       group_norm_backward_x<uint64_t>(dY, X, mean, rstd, gamma, N, C, HxW, group, dX);

@@ -160,7 +160,10 @@ def _decompose_scatter_functional(
     view_updated = aten.slice_scatter(view, src, 1, 10, -10)
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
-    assert node.target is _generalized_scatter  # noqa: S101
+    if node.target is not _generalized_scatter:
+        raise AssertionError(
+            f"expected node.target to be _generalized_scatter, got {node.target}"
+        )
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -179,9 +182,11 @@ def _decompose_scatter_mutating(
     slice2.copy_(src)
 
     """
-    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)  # noqa: S101
+    if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
+        raise AssertionError(f"unexpected node.target: {node.target}")
     inp, src, view_ops = node.args
-    assert not node.kwargs  # noqa: S101
+    if node.kwargs:
+        raise AssertionError(f"expected no kwargs, got {node.kwargs}")
 
     if node.target is _generalized_scatter:
         inp = graph_call_function(graph, aten.clone, inp)
@@ -222,7 +227,15 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, _src, _view_ops = node.args
+    inp, src, _view_ops = node.args
+
+    # The mutating decomposition is view(inp).copy_(src). If src is itself a
+    # view of inp's storage (x[1:] = x[:-1].clone(), once the clone has been
+    # removed as a no-op), that copy reads what it is overwriting.
+    if isinstance(inp, torch.fx.Node) and isinstance(src, torch.fx.Node):
+        inp_storage = get_node_storage(inp)
+        if inp_storage is not None and inp_storage == get_node_storage(src):
+            return False
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
@@ -372,6 +385,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
 
 inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
+    aten._scaled_addmm.default: InplaceableOp(aten._scaled_addmm_.default, 0),
     aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
     _generalized_scatter: InplaceableOp(
@@ -380,9 +394,11 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
         extra_check=should_reinplace_scatter,
     ),
     # Stateless Philox RNG: reinplace the functionalized clone onto the dead
-    # output buffer, so out-of-place uniform()/normal() don't pay an extra copy.
+    # output buffer, so out-of-place uniform()/normal()/bits() don't pay an
+    # extra copy.
     aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
     aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
+    aten._philox_randint.default: InplaceableOp(aten._philox_randint_.default, 0),
 }
 
 try:
@@ -781,7 +797,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
-                        # output atindex size(out)+i.
+                        # output at index size(out)+i.
                         # This used to compare string with integers before for auto_functionalize_v2. Not sure
                         # if it was needed for inplaceable_triton_ops?
                         if user.target is operator.getitem and user.args[1] == arg:
