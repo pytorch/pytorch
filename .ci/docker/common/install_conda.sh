@@ -66,11 +66,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
              pip \
              "icu<78"
 
-  # Miniforge installer doesn't install sqlite by default
-  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    conda_install sqlite
-  fi
-
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
   # and libpython-static for torch deploy
   conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
@@ -79,7 +74,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   # Magma is installed from a tarball in the ossci-linux bucket into the conda env
   if [ -n "$CUDA_VERSION" ]; then
-    conda_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
+    env_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
   fi
 
   if [[ "$UBUNTU_VERSION" == "24.04"* ]] ; then
@@ -91,9 +86,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
-
-  # Installed spmd-types with --no-deps to avoid pulling torch dependency at this point
-  pip_install --no-deps spmd-types==0.2.1
 
   if [ -n "$DOCS" ]; then
     apt-get update

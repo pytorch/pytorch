@@ -434,7 +434,6 @@ class BlasLapackOpsModule(torch.nn.Module):
             # torch.ormqr(a, m, v),
             torch.outer(v, v),
             # torch.pinverse(m),
-            # torch.qr(a),
             # torch.solve(m, m),
             # torch.svd(a),
             # torch.svd_lowrank(a),

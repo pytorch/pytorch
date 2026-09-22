@@ -29,6 +29,7 @@
 //
 
 #include <array>
+#include <bit>
 #include <tuple>
 #include <type_traits>
 
@@ -78,6 +79,14 @@ constexpr auto sum_of_sizes(args_t args, std::index_sequence<Is...>) {
     }
 }
 
+template <typename args_t, size_t... Is>
+constexpr size_t max_of_sizes(args_t, std::index_sequence<Is...>) {
+  size_t max_size = 0;
+  ((max_size = std::max(max_size, sizeof(std::tuple_element_t<Is, args_t>))),
+   ...);
+  return max_size;
+}
+
 #ifdef USE_ROCM
 template <int io_sizes>
 constexpr auto elems_per_thread(){
@@ -98,6 +107,23 @@ constexpr auto elems_per_thread(){
     return 8;
   }
 }
+
+// Rubin (SM 10.7) supports 1024 resident threads per SM. Target 128 bytes of
+// input per thread to keep roughly 128 KiB in flight per SM.
+template <size_t input_size>
+constexpr auto elems_per_thread_128b(size_t output_size) {
+  if constexpr (input_size == 0) {
+    // note: without inputs, we simply double the number of elements per thread
+    // for SM 10.7 as there are half the number of threads per SM compared
+    // to previous generations.
+    return output_size == 1 ? 32 : 16;
+  } else if constexpr (input_size >= 128) {
+    return 1;
+  } else {
+    constexpr auto rounded_input_size = std::bit_ceil(input_size);
+    return static_cast<int>(128 / rounded_input_size);
+  }
+}
 #endif
 
 
@@ -106,11 +132,6 @@ constexpr auto elems_per_thread(){
 constexpr int elementwise_thread_work_size() {return 4;}
 constexpr int elementwise_block_work_size() {
   return elementwise_thread_work_size() * num_threads();
-}
-
-template <int io_sizes>
-constexpr auto io_block_work_size() {
-  return num_threads() * elems_per_thread<io_sizes>();
 }
 
 #ifdef USE_ROCM
@@ -160,68 +181,73 @@ constexpr auto calc_io_size(){
 
 #ifndef USE_ROCM
 // To save on binary size of libtorch_cuda.so, we split the vectorized_elementwise_kernel
-// into two: one for vec_size=8 and one for vec_size=[2, 4], since vec8 is going to be
-// used on sm_90 and sm_10x exclusively.
-template <int vec_size, typename func_t, typename array_t>
+// into three: one targeting 128 bytes per thread (and only vec_size=8), one for
+// vec_size=8, and one for vec_size=[2, 4]. vec_size=8 is only used on sm_90
+// and sm_10x, and the 128-byte-per-thread configuration is only used on sm_10x.
+template <int vec_size, int tws, typename func_t, typename array_t>
+__forceinline__ __device__ void vectorized_elementwise_kernel_impl(
+    int N,
+    func_t f,
+    array_t data) {
+  using traits = function_traits<func_t>;
+  static_assert(tws > 0, "Thread work size must be positive");
+  constexpr int bws = tws * num_threads();
+  int remaining = N - bws * blockIdx.x;
+
+  // The compiler generally preserves source order, so keep the hot path first
+  // to improve instruction cache use.
+  if (remaining >= bws) {
+    elementwise_kernel_helper(
+        f, memory::policies::vectorized<vec_size, array_t, tws>(data));
+  } else {
+    auto input_calc = TrivialOffsetCalculator<traits::arity>();
+    auto output_calc = TrivialOffsetCalculator<1>();
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
+    auto policy = memory::policies::unroll<
+        array_t,
+        decltype(input_calc),
+        decltype(output_calc),
+        memory::LoadWithoutCast,
+        memory::StoreWithoutCast,
+        tws>(data, remaining, input_calc, output_calc, loader, storer);
+    elementwise_kernel_helper(f, policy);
+  }
+}
+
+template <
+    int vec_size,
+    typename func_t,
+    typename array_t,
+    bool use_128b_tws = false>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
-  if constexpr (vec_size == 8) {
-#if __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
-    using traits = function_traits<func_t>;
-    constexpr auto io_size = calc_io_size<func_t>();
-    int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
-
-    // note: unless the compiler has a good reason to move code, it won't.
-    // Thus, the if-condition typically comes first in SASS, so the "hot" path
-    // should go first, improving instruction cache use.
-    if (remaining >= io_block_work_size<io_size>()) { // if this block has a full `block_work_size` data to handle, use
-      // vectorized memory access
-      elementwise_kernel_helper(
-        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
-    } else { // if this block handles the reminder,
-      // just do a naive unrolled loop
-      auto input_calc = TrivialOffsetCalculator<traits::arity>();
-      auto output_calc = TrivialOffsetCalculator<1>();
-      auto loader = memory::LoadWithoutCast();
-      auto storer = memory::StoreWithoutCast();
-      auto policy = memory::policies::unroll<
-      array_t,
-      decltype(input_calc),
-      decltype(output_calc),
-      memory::LoadWithoutCast,
-      memory::StoreWithoutCast,
-      elems_per_thread<io_size>()>(
-      data, remaining, input_calc, output_calc, loader, storer);
-      elementwise_kernel_helper(f, policy);
-    }
+  if constexpr (vec_size == 8 && use_128b_tws) {
+#if __CUDA_ARCH__ / 100 == 10
+    using output_t = typename function_traits<func_t>::result_type;
+    constexpr auto input_size = calc_io_size<func_t>() - sizeof(output_t);
+    constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(output_t));
+    vectorized_elementwise_kernel_impl<vec_size, tws_128b>(N, f, data);
 #else
-    CUDA_KERNEL_ASSERT(false && "Fatal! vectorized_elementwise_kernel<8,...> supports only sm_90 and sm_10x. Please report an issue on GitHub.");
+    CUDA_KERNEL_ASSERT(
+        false &&
+        "Fatal! vectorized_elementwise_kernel<8,...> with 128-byte-per-thread "
+        "work size supports only sm_10x. Please report an issue on GitHub.");
+#endif
+  } else if constexpr (vec_size == 8) {
+#if __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
+    constexpr auto io_size = calc_io_size<func_t>();
+    constexpr auto tws = elems_per_thread<io_size>();
+    vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
+#else
+    CUDA_KERNEL_ASSERT(
+      false && "Fatal! vectorized_elementwise_kernel<8,...> supports only "
+      "sm_90 and sm_10x. Please report an issue on GitHub.");
 #endif // __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
   } else {
-    using traits = function_traits<func_t>;
     constexpr auto io_size = calc_io_size<func_t>();
-    int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
-
-    if (remaining >= io_block_work_size<io_size>()) { // if this block has a full `block_work_size` data to handle, use
-      // vectorized memory access
-      elementwise_kernel_helper(
-        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
-    } else { // if this block handles the reminder,
-      // just do a naive unrolled loop
-      auto input_calc = TrivialOffsetCalculator<traits::arity>();
-      auto output_calc = TrivialOffsetCalculator<1>();
-      auto loader = memory::LoadWithoutCast();
-      auto storer = memory::StoreWithoutCast();
-      auto policy = memory::policies::unroll<
-      array_t,
-      decltype(input_calc),
-      decltype(output_calc),
-      memory::LoadWithoutCast,
-      memory::StoreWithoutCast,
-      elems_per_thread<io_size>()>(
-      data, remaining, input_calc, output_calc, loader, storer);
-      elementwise_kernel_helper(f, policy);
-    }
+    constexpr auto tws = elems_per_thread<io_size>();
+    vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
   }
 }
 
@@ -313,11 +339,24 @@ static inline void launch_vectorized_kernel(
   using cpp_type = typename function_traits<func_t>::result_type;
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
   uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
+  cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
+  // Empirical benchmarking set this threshold; retain the existing path for
+  // smaller workloads to avoid performance regressions
+  // (the larger thread work size decreases thread level parallelism,
+  // which is important for small footprints).
+  constexpr int64_t min_sm107_io_size = 16 * 1024 * 1024;
+  const bool use_sm107_optimizations =
+      p->major == 10 && p->minor == 7 && N * io_size >= min_sm107_io_size;
+  if (use_sm107_optimizations) {
+    using args_t = typename function_traits<func_t>::ArgsTuple;
+    constexpr auto max_input_size = at::native::max_of_sizes(
+        args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{});
+    vec_size = 32 / static_cast<uint16_t>(std::max(sizeof(cpp_type), max_input_size));
+  }
   vec_size = std::min<uint16_t>(vec_size, max_vec_size);
   // due to excessive binary size the `vectorized_elementwise_kernel` of
   // the size 8 is compiled for sm_90 and sm_10x only.
   // TODO: Lift this limitation when CUDA 12.x support is fully dropped
-  cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
   if (p->major != 9 && p->major != 10) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
@@ -327,6 +366,11 @@ static inline void launch_vectorized_kernel(
   }
 #endif
   int tws = elems_per_thread<io_size>();
+  constexpr auto input_size = io_size - sizeof(cpp_type);
+  constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(cpp_type));
+  if (tws_128b >= 8 && use_sm107_optimizations && vec_size == 8) {
+    tws = tws_128b;
+  }
 #endif
   int bws = tws * num_threads();
   int64_t grid = (N + bws - 1) / bws;
@@ -339,8 +383,18 @@ static inline void launch_vectorized_kernel(
       break;
 #endif
     case 8:
+#ifdef USE_ROCM
       vectorized_elementwise_kernel<8, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
+#else
+      if (use_sm107_optimizations) {
+        vectorized_elementwise_kernel<8, func_t, array_t, tws_128b >= 8>
+            <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      } else {
+        vectorized_elementwise_kernel<8, func_t, array_t>
+            <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      }
+#endif
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 4:

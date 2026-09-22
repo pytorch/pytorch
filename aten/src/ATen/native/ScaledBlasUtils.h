@@ -3,6 +3,12 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/core/Tensor.h>
 
+#include <array>
+#include <functional>
+#include <string>
+#include <tuple>
+#include <vector>
+
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
@@ -23,6 +29,47 @@ enum class ScaledGemmImplementation {
   NVFP4_NVFP4_SINGLE_SCALE = 8,
   MXFP4_MXFP4 = 9,
 };
+
+/**
+ * Signature of the per-recipe acceptance functions in this header
+ * (check_tensorwise_recipe, check_rowwise_recipe, ...). Each backend
+ * builds an array of (name, acceptance_fn, ScaledGemmImplementation)
+ * to enumerate the scaling configurations it supports.
+ */
+using acceptance_fn = std::function<bool(
+    c10::ScalarType,
+    std::vector<ScalingType>&,
+    c10::ArrayRef<Tensor>&,
+    c10::ScalarType,
+    std::vector<ScalingType>&,
+    c10::ArrayRef<Tensor>&)>;
+
+using ScaleKernelDispatchEntry =
+    std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>;
+
+/**
+ * Walk a backend's dispatch table and return the first
+ * ScaledGemmImplementation whose acceptance function matches the inputs.
+ * Returns ScaledGemmImplementation::NONE if no entry matches; the caller
+ * is responsible for raising a backend-appropriate error in that case.
+ */
+template <size_t N>
+ScaledGemmImplementation find_scaled_gemm_impl(
+    const std::array<ScaleKernelDispatchEntry, N>& dispatch,
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    c10::ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    c10::ArrayRef<Tensor>& scales_b) {
+  for (const auto& fn_entry : dispatch) {
+    const auto& accept_fn = std::get<1>(fn_entry);
+    if (accept_fn(type_a, recipe_a, scales_a, type_b, recipe_b, scales_b)) {
+      return std::get<2>(fn_entry);
+    }
+  }
+  return ScaledGemmImplementation::NONE;
+}
 
 /**
  * Convert passed int (enum) from python back into a
@@ -135,4 +182,37 @@ bool check_mxfp4_recipe(
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b);
 
-} // namespace at::scaled
+/**
+ * Validate v2 _scaled_mm inputs and per-recipe scale shapes/dtypes.
+ * Centralized here so it can be called from both TORCH_META_FUNC (so
+ * `torch.compile` tracing fails fast with a precise message) and the
+ * eager IMPL_FUNCs.
+ */
+TORCH_API
+void validate_scaled_mm_v2_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    ArrayRef<Tensor> scale_a,
+    ArrayRef<ScalingType> recipe_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    ArrayRef<Tensor> scale_b,
+    ArrayRef<ScalingType> recipe_b,
+    ArrayRef<SwizzleType> swizzle_b);
+
+/**
+ * Validate the basic (recipe-independent) inputs of `_scaled_grouped_mm_v2`.
+ * Centralized here so it can be called from TORCH_META_FUNC, which runs both
+ * in eager (before the structured kernel) and during `torch.compile` tracing.
+ * Per-recipe scale-shape checks and the device-capability gate deliberately
+ * stay in the CUDA kernel (they depend on layout/arch and the offset values).
+ */
+TORCH_API
+void validate_scaled_grouped_mm_v2_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    at::OptionalTensorRef offs,
+    at::OptionalTensorRef bias,
+    ArrayRef<int64_t> contraction_dim,
+    std::optional<c10::ScalarType> out_dtype);
+
+} // namespace at::native::scaled

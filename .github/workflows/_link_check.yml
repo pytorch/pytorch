@@ -5,6 +5,9 @@ on:
       runner:
         type: string
         required: true
+      docker-image:
+        type: string
+        required: true
       ref:
         type: string
         required: true
@@ -15,7 +18,7 @@ jobs:
     uses: ./.github/workflows/_lint.yml
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
+      docker-image: ${{ inputs.docker-image }}
       script: |
         ./scripts/lint_urls.sh $(
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -36,7 +39,7 @@ jobs:
     uses: ./.github/workflows/_lint.yml
     with:
       runner: mt-l-x86iamx-8-16
-      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
+      docker-image: ${{ inputs.docker-image }}
       script: |
         ./scripts/lint_xrefs.sh $(
           if [ "${{ github.event_name }}" = "pull_request" ]; then
