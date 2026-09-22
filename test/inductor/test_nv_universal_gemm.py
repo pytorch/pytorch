@@ -3309,6 +3309,11 @@ class TestNVUniversalGemmHeuristics(TestCase):
             patch.object(nv_universal_gemm_kernel, "_restore_max_active_clusters"),
             patch.object(
                 nv_universal_gemm_kernel,
+                "_get_scaled_gemm_modes",
+                return_value=(MagicMock(),) * 4,
+            ),
+            patch.object(
+                nv_universal_gemm_kernel,
                 "_compile_nvgemm",
                 return_value=(artifact, MagicMock(), MagicMock(), False),
             ) as compile_nvgemm,
