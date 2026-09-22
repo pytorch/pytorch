@@ -79,8 +79,8 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   if(WERROR)
-    target_compile_options_if_supported(c10 PRIVATE "-Werror=sign-compare")
-    target_compile_options_if_supported(c10 PRIVATE "-Werror=shadow")
+    target_compile_options_if_supported(c10 "-Werror=sign-compare")
+    target_compile_options_if_supported(c10 "-Werror=shadow")
   endif()
 
   # ---[ Dependency of c10

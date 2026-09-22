@@ -588,12 +588,15 @@ autotune_cudagraph_benchmarking: bool = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
 )
 
-# Number of callable invocations captured in each CUDA graph used for
-# autotuning. Replaying a graph has a fixed launch cost which can dominate
-# sub-10us kernels and change their relative ordering. Capturing multiple
-# invocations amortizes that cost; timings are normalized per invocation.
-autotune_cudagraph_unroll = int(
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_UNROLL", "1")
+# Number of calls of the benchmarked callable captured into each CUDA graph by
+# benchmark_gpu_with_cuda_graph; the replay time is divided by this count so the
+# graph launch and inter-kernel gaps are amortized. With 1 (the default) each
+# timed sample is a full graph launch, which for microsecond kernels exceeds the
+# kernel time and hides the differences between autotune choices. Counts above
+# 1 trade cold-cache fidelity for launch-overhead rejection: the L2 flush in
+# benchmark_gpu runs once per replay, so only the first captured call is cold.
+autotune_cudagraph_benchmarking_iters: int = int(
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING_ITERS", "1")
 )
 
 
@@ -2370,6 +2373,13 @@ class triton:
     # TMA descriptors are only going to be generated if the above conditions
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
+
+    # Whether FlexAttention forward/decode may select AMD TDM descriptors on
+    # gfx1250. Defaults on: selection is capability-driven, so this is a kill
+    # switch for callers that do not own the flex_attention() call site and
+    # therefore cannot pass USE_TMA. It does not affect NVIDIA, XPU, dense GEMM
+    # or generic descriptor codegen.
+    enable_flex_tdm = True
 
     # (Experimental)
     # Whether to allow reordering tensor descriptor matches with descending

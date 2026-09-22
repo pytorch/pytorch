@@ -432,7 +432,9 @@ class TestBenchmarker(TestCase):
         self.assertEqual(result, 3.0)
         self.assertEqual(calls, ["enter", (1, 2, True), "fn", "exit"])
 
-    def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
+    def _run_fake_cuda_graph_benchmark(
+        self, iters, return_mode="min", grads=None, cudagraph_unroll=None
+    ):
         from torch._inductor.runtime import benchmarking as _bench
 
         class FakeCUDAGraph:
@@ -444,6 +446,8 @@ class TestBenchmarker(TestCase):
             def benchmark_gpu(self, _callable, **kwargs):
                 calls.append("benchmark_gpu")
                 _callable()
+                if kwargs.get("return_mode") == "all":
+                    return [9.0, 18.0]
                 return 9.0
 
         benchmarker = FakeBenchmarker()
@@ -469,6 +473,11 @@ class TestBenchmarker(TestCase):
         previous = _bench.set_gpu_benchmark_lock_context(custom_context)
         try:
             with (
+                patch.object(
+                    _bench.inductor_config,
+                    "autotune_cudagraph_benchmarking_iters",
+                    iters,
+                ),
                 patch("torch.cuda.synchronize"),
                 patch("torch.cuda.Stream", FakeStream),
                 patch("torch.cuda.current_stream", return_value=current_stream),
@@ -476,12 +485,21 @@ class TestBenchmarker(TestCase):
                 patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
                 patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
             ):
+                kwargs = {}
+                if cudagraph_unroll is not None:
+                    kwargs["cudagraph_unroll"] = cudagraph_unroll
                 result = benchmarker.benchmark_gpu_with_cuda_graph(
-                    lambda: calls.append("call")
+                    lambda: calls.append("call"),
+                    grad_to_none=grads,
+                    return_mode=return_mode,
+                    **kwargs,
                 )
         finally:
             _bench.set_gpu_benchmark_lock_context(previous)
+        return result, calls
 
+    def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
+        result, calls = self._run_fake_cuda_graph_benchmark(iters=1)
         self.assertEqual(result, 9.0)
         self.assertEqual(
             calls,
@@ -498,39 +516,61 @@ class TestBenchmarker(TestCase):
             ],
         )
 
-    def test_benchmark_gpu_with_cuda_graph_unrolls_and_normalizes(self):
-        class FakeCUDAGraph:
-            def replay(self):
-                calls.append("replay")
+    @parametrize(
+        "return_mode, expected",
+        (("min", 0.9), ("all", [0.9, 1.8])),
+    )
+    def test_benchmark_gpu_with_cuda_graph_amortizes_launches(
+        self, return_mode, expected
+    ):
+        # 10 calls captured per graph; the replay time is reported per call
+        result, calls = self._run_fake_cuda_graph_benchmark(
+            iters=10, return_mode=return_mode
+        )
+        self.assertEqual(result, expected)
+        self.assertEqual(calls.count("call"), 2 + 10)
+        self.assertEqual(calls[-4:], ["benchmark_gpu", "replay", "exit", "exit"])
 
-        class FakeBenchmarker(Benchmarker):
-            def benchmark_gpu(self, _callable, **kwargs):
-                _callable()
-                return 12.0
+    def test_benchmark_gpu_with_cuda_graph_overrides_configured_unroll(self):
+        result, calls = self._run_fake_cuda_graph_benchmark(
+            iters=10, cudagraph_unroll=4
+        )
+        self.assertEqual(result, 2.25)
+        self.assertEqual(calls.count("call"), 2 + 4)
 
-        class FakeStream:
-            def wait_stream(self, stream):
-                pass
+    @parametrize("configured_unroll", (0, -1))
+    def test_benchmark_gpu_with_cuda_graph_clamps_invalid_configured_unroll(
+        self, configured_unroll
+    ):
+        result, calls = self._run_fake_cuda_graph_benchmark(iters=configured_unroll)
+        self.assertEqual(result, 9.0)
+        self.assertEqual(calls.count("call"), 2 + 1)
 
-            def synchronize(self):
-                pass
-
-        calls = []
-        current_stream = FakeStream()
-        with (
-            patch("torch.cuda.synchronize"),
-            patch("torch.cuda.Stream", FakeStream),
-            patch("torch.cuda.current_stream", return_value=current_stream),
-            patch("torch.cuda.stream", return_value=contextlib.nullcontext()),
-            patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
-            patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
-        ):
-            result = FakeBenchmarker().benchmark_gpu_with_cuda_graph(
-                lambda: calls.append("call"), cudagraph_unroll=4
+    @parametrize("cudagraph_unroll", (0, -1))
+    def test_benchmark_gpu_with_cuda_graph_rejects_invalid_unroll(
+        self, cudagraph_unroll
+    ):
+        with self.assertRaisesRegex(ValueError, "must be at least 1"):
+            self._run_fake_cuda_graph_benchmark(
+                iters=10, cudagraph_unroll=cudagraph_unroll
             )
 
-        self.assertEqual(result, 3.0)
-        self.assertEqual(calls, ["call"] * 6 + ["replay"])
+    def test_benchmark_gpu_with_cuda_graph_clears_grads_per_iteration(self):
+        class FakeTensor:
+            def __init__(self):
+                self.grad_clear_count = 0
+
+            @property
+            def grad(self):
+                return None
+
+            @grad.setter
+            def grad(self, _value):
+                self.grad_clear_count += 1
+
+        tensor = FakeTensor()
+        self._run_fake_cuda_graph_benchmark(iters=3, grads=[tensor])
+        self.assertEqual(tensor.grad_clear_count, 1 + 3)
 
     def test_autotune_cudagraph_benchmarking_requires_max_autotune(self):
         from torch._inductor.runtime import benchmarking as _bench
