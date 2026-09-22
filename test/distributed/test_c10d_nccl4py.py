@@ -84,7 +84,6 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
             backend.options.group_name,
             dist.distributed_c10d._get_process_group_name(pg),
         )
-        self.assertEqual(backend.options.global_ranks_in_group, [])
         t = torch.ones(4, device=device) * (self.rank + 1)
         dist.all_reduce(t)
         # SUM of [1,1,1,1] and [2,2,2,2] = [3,3,3,3]

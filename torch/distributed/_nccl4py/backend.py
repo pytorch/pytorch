@@ -4,15 +4,7 @@ Wraps NVIDIA's official nccl4py bindings to provide a Python NCCL backend for
 torch.distributed. Uses the PyBackend trampoline so that ProcessGroup dispatches
 collective calls into Python overrides in this class.
 
-Register with
-    dist.Backend.register_backend(
-        "nccl4py",
-        _create_nccl4py_backend,
-        extended_api=True,
-        devices=["cuda"],
-    )
-
-Or use
+Use with
     dist.init_process_group("nccl4py", ...)
 """
 
