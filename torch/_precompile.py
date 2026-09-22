@@ -160,7 +160,10 @@ it.
 #    a DTensor shard on cuda:0) is tied to that device index, as parameters already
 #    are. The graph is specialized to the example input shapes (invariant 3);
 #    tensor-subclass outputs in particular are rebuilt with constant outer sizes/strides,
-#    so a different runtime shape is undefined. The inductor backend ADDITIONALLY bakes
+#    so a different runtime shape is undefined. A subclass INPUT's shape is not recorded:
+#    the inductor backend's assert_size_stride still rejects a differently-sharded input
+#    on each inner leaf the graph reads, but under backend='eager' a subclass input of a
+#    different outer shape is not checked. The inductor backend ADDITIONALLY bakes
 #    each read input's stride / memory format (it emits assert_size_stride) -- and this
 #    applies to model PARAMETERS/BUFFERS too, not only user inputs, since they are graph
 #    inputs the kernels read. So a same-shape runtime input OR a same-shape/same-dtype
@@ -388,10 +391,7 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
     Tensor subclasses (e.g. DTensor) go through AOTAutograd's flatten path, so their
     outer shape is not the dense shape the inductor artifact bakes; record ``None`` and
     skip them in the shape check only; dtype and device are still recorded and checked.
-    A subclass's inner shapes are not recorded either: the default backend's baked
-    assert_size_stride rejects a differently-sharded input on every inner leaf the graph
-    reads, but with backend="eager", or for an inner leaf the graph never reads, it runs
-    against capture's local shapes unchecked.
+    What that leaves unchecked is stated at invariant 6.
     """
     if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
         return tuple(t.shape)
@@ -1818,9 +1818,9 @@ class PrecompiledModule(PrecompiledRunnable):
         # exactly the params that received one, leaving frozen / non-contributing
         # params' .grad as None.
         self._grad_param_indices: list[int] = []
-        # Per user-input-leaf example shape, dtype, and device (None for a non-tensor leaf,
-        # shape None for a subclass leaf; a marked-dynamic dim is None within the shape tuple); the drivers
-        # reject a runtime mismatch (invariants 3 and 6). Stride / memory format is enforced
+        # Per user-input-leaf example shape, dtype, and device (None for a non-tensor
+        # leaf, shape None for a subclass leaf; a marked-dynamic dim is None within the
+        # shape tuple); the drivers reject a runtime mismatch (invariants 3 and 6). Stride / memory format is enforced
         # by the inductor artifact's own assert_size_stride, not recorded here. Populated by
         # _compile().
         self._user_input_shapes: list[tuple[int | None, ...] | None] = []
