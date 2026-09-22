@@ -74,11 +74,12 @@ __global__ void upsample_linear1d_out_frame(
 // Unrolled version for upsample_linear1d_out_frame
 // This version exposes more parallelism by launching more threads.
 // Instead of each thread looping over "batchsize" and "channels",
-// more threads are launched and each thread does only one interpolation
+// more threads are launched and each thread does only one interpolation.
+// The launch site only takes this path when batchsize * channels * width2 fits
+// in an int32, so the flat thread index stays 32-bit.
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(512)
 __global__ void upsample_linear1d_out_frame_unrolled(
-    const int num_kernels,
     const accscalar_t rwidth,
     const bool align_corners,
     const PackedTensorAccessor64<const scalar_t, 3> idata,
@@ -93,33 +94,27 @@ __global__ void upsample_linear1d_out_frame_unrolled(
   const int num_total = batchsize * channels * width2;
   if (thread_id >= num_total) return;
 
-  // Get a unique (n, c, index) from thread_id
+  // Get a unique (n, c, w2) from thread_id
   const int n = thread_id / (channels * width2);
   const int c = (thread_id - n*(channels * width2)) / width2;
-  const int index = thread_id - n*(channels * width2) - c*width2;
+  const int w2 = thread_id - n*(channels * width2) - c*width2;
 
-  // Do only one interpolation for the (n, c, index) coordinate
-  if (index < num_kernels) {
-    const int w2 = index % width2;
-    // special case: just copy
-    if (width1 == width2) {
-      const int w1 = w2;
-      const scalar_t val = idata[n][c][w1];
-      odata[n][c][w2] = val;
-      return;
-    }
-    //
-    const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
-        rwidth, w2, align_corners, /*cubic=*/false);
-    const int w1 = w1r;
-    const int w1p = (w1 < width1 - 1) ? 1 : 0;
-    const accscalar_t w1lambda = w1r - w1;
-    const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
-    //
-    const accscalar_t val =
-        w0lambda * idata[n][c][w1] + w1lambda * idata[n][c][w1 + w1p];
-    odata[n][c][w2] = static_cast<scalar_t>(val);
+  // special case: just copy
+  if (width1 == width2) {
+    odata[n][c][w2] = idata[n][c][w2];
+    return;
   }
+
+  const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+      rwidth, w2, align_corners, /*cubic=*/false);
+  const int w1 = w1r;
+  const int w1p = (w1 < width1 - 1) ? 1 : 0;
+  const accscalar_t w1lambda = w1r - w1;
+  const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+  const accscalar_t val =
+      w0lambda * idata[n][c][w1] + w1lambda * idata[n][c][w1 + w1p];
+  odata[n][c][w2] = static_cast<scalar_t>(val);
 }
 
 
@@ -175,11 +170,11 @@ __global__ void upsample_linear1d_out_frame_backward(
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 // Unrolled version for upsample_linear1d_out_frame_backward
 // This version exposes more parallelism by launching more threads
-// and each thread does only one backward interpolation.
+// and each thread does only one backward interpolation. As in the forward
+// kernel, the launch site keeps the flat thread index within an int32.
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(512)
 __global__ void upsample_linear1d_out_frame_backward_unrolled(
-    const int num_kernels,
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 3> idata,
@@ -194,34 +189,28 @@ __global__ void upsample_linear1d_out_frame_backward_unrolled(
   const int num_total = batchsize * channels * width2;
   if (thread_id >= num_total) return;
 
-  // Get a unique (n, c, index) from thread_id
+  // Get a unique (n, c, w2) from thread_id
   const int n = thread_id / (channels * width2);
   const int c = (thread_id - n*(channels * width2)) / width2;
-  const int index = thread_id - n*(channels * width2) - c*width2;
+  const int w2 = thread_id - n*(channels * width2) - c*width2;
 
-  // Do only one backward interpolation for the (n, c, index) coordinate
-  if (index < num_kernels) {
-    const int w2 = index % width2;
-    // special case: just copy
-    if (width1 == width2) {
-      const int w1 = w2;
-      const scalar_t val = odata[n][c][w1];
-      idata[n][c][w2] = val;
-      return;
-    }
-    //
-    const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
-        rwidth, w2, align_corners, /*cubic=*/false);
-    const int w1 = w1r;
-    const int w1p = (w1 < width1 - 1) ? 1 : 0;
-    const accscalar_t w1lambda = w1r - w1;
-    const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
-    //
-    const scalar_t d2val = odata[n][c][w2];
-    gpuAtomicAddNoReturn(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
-    gpuAtomicAddNoReturn(
-        &idata[n][c][w1 + w1p], static_cast<scalar_t>(w1lambda * d2val));
+  // special case: just copy
+  if (width1 == width2) {
+    idata[n][c][w2] = odata[n][c][w2];
+    return;
   }
+
+  const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+      rwidth, w2, align_corners, /*cubic=*/false);
+  const int w1 = w1r;
+  const int w1p = (w1 < width1 - 1) ? 1 : 0;
+  const accscalar_t w1lambda = w1r - w1;
+  const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+  const scalar_t d2val = odata[n][c][w2];
+  gpuAtomicAddNoReturn(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
+  gpuAtomicAddNoReturn(
+      &idata[n][c][w1 + w1p], static_cast<scalar_t>(w1lambda * d2val));
 }
 
 static void upsample_linear1d_out_cuda_template(
@@ -253,10 +242,11 @@ static void upsample_linear1d_out_cuda_template(
   // The unrolled kernels index one thread per output element with 32-bit math,
   // and on ROCm gridDim.x * blockDim.x must fit in uint32_t (the HSA AQL
   // dispatch packet stores grid_size_{x,y,z} as uint32_t). Both limits are
-  // respected by only taking that path when the output fits in an int32.
+  // respected by only taking that path when the output fits in an int32, minus
+  // the num_threads that ceil_div adds before dividing.
   const int64_t num_total = input.size(0) * input.size(1) * output_width;
   const bool use_unrolled = num_blocks < num_blocks_threshold &&
-      num_total <= std::numeric_limits<int32_t>::max();
+      num_total <= std::numeric_limits<int32_t>::max() - num_threads;
 
   // Use unrolled version if the number of blocks is small
   if (use_unrolled){
@@ -276,7 +266,7 @@ static void upsample_linear1d_out_cuda_template(
             <<<ceil_div(static_cast<int>(num_total), num_threads),
                num_threads,
                0,
-               stream>>>(num_kernels, rwidth, align_corners, idata, odata);
+               stream>>>(rwidth, align_corners, idata, odata);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     return;
@@ -336,7 +326,7 @@ static void upsample_linear1d_backward_out_cuda_template(
   // to fit in an int32 for both 32-bit indexing and the ROCm grid limit.
   const int64_t num_total = input_size[0] * input_size[1] * output_width;
   const bool use_unrolled = num_blocks < num_blocks_threshold &&
-      num_total <= std::numeric_limits<int32_t>::max();
+      num_total <= std::numeric_limits<int32_t>::max() - num_threads;
 
   // Use unrolled version if the number of blocks is small
   if (use_unrolled){
@@ -355,7 +345,7 @@ static void upsample_linear1d_backward_out_cuda_template(
             <<<ceil_div(static_cast<int>(num_total), num_threads),
                num_threads,
                0,
-               stream>>>(num_kernels, rwidth, align_corners, idata, odata);
+               stream>>>(rwidth, align_corners, idata, odata);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     return;
