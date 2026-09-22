@@ -292,7 +292,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         torch.manual_seed(42)
         # Keep sequential fp16 sums exactly representable in the threaded PG.
         unsharded_grads = [
-            torch.ones_like(param) * (self.rank % 8) for param in orig_params
+            torch.full_like(param, self.rank % 8, dtype=reduce_scatter_dtype)
+            for param in orig_params
         ]
         reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         group = fsdp_param_group.mesh_info.shard_process_group
@@ -345,7 +346,10 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         for fsdp_param, reduced_grad in zip(fsdp_params, reduced_grads):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
-            self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
+            self.assertEqual(
+                sharded_grad.full_tensor(),
+                reduced_grad.to(fsdp_param.sharded_grad_dtype),
+            )
 
 
 class TestFullyShardCommunication(FSDPTestContinuous):
