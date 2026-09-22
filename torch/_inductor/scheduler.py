@@ -360,6 +360,8 @@ class MixOrderReduction:
             return False
         if node1.has_strict_reduction() or node2.has_strict_reduction():
             return False
+        if node1.has_reduction_result() or node2.has_reduction_result():
+            return False
 
         if (node1.ancestors & node2.get_operation_names()) or (
             node2.ancestors & node1.get_operation_names()
@@ -4506,6 +4508,8 @@ class FusedMixOrderReductions(FusedSchedulerNode):
 
     def can_fuse_with(self, other: BaseSchedulerNode):
         if self.has_strict_reduction() or other.has_strict_reduction():
+            return False
+        if self.has_reduction_result() or other.has_reduction_result():
             return False
         # Limit tl.load() count in the fused RSPLIT loop to avoid register
         # spills. See https://github.com/pytorch/pytorch/issues/179423
