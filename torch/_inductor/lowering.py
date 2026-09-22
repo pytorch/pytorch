@@ -8454,7 +8454,10 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         from .kernel.bounded_group import bounded_group
 
         # The counting sort keeps equal keys in input order, so it is stable.
-        V.graph.bounded_sort_keys[node] = x
+        # Preserve the histogram's keys across mutations before it is lowered.
+        keys = clone(x)
+        V.graph.register_users_of(keys)
+        V.graph.bounded_sort_keys[node] = keys
         return bounded_group(x, bound)
 
     result = _triton_sort(x, dim=dim, stable=stable, descending=descending)

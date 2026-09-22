@@ -4343,7 +4343,7 @@ class TopkRegressionTests(TestCase):
         self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
 
     @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
-    @parametrize("rows", [33, 129])
+    @parametrize("rows", [33, 65, 129])
     @config.patch(
         {
             "triton.mix_order_reduction_non_strict_mode": True,
@@ -4352,7 +4352,8 @@ class TopkRegressionTests(TestCase):
     )
     def test_topk_fusible_ir_result_partial_row_tile(self, device, rows):
         def f(x):
-            return *torch.topk(x, 3, dim=1), x.sum(dim=0)
+            values, indices = torch.topk(x, 3, dim=1)
+            return values + 1, indices, x.sum(dim=0)
 
         x = torch.arange(rows * 65, device=device, dtype=torch.float32).reshape(
             rows, 65
@@ -4361,6 +4362,50 @@ class TopkRegressionTests(TestCase):
         self.assertEqual(actual, f(x), atol=0, rtol=0)
         # The column sum stays out of the top-k kernel (it may itself split).
         self.assertGreaterEqual(code.count("async_compile.triton("), 2)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @config.patch(
+        {
+            "reorder_for_locality": False,
+            "triton.mix_order_reduction_non_strict_mode": True,
+            "triton.mix_order_reduction_split_size": 16,
+        }
+    )
+    def test_topk_fusible_ir_mix_order_append(self, device):
+        from unittest import mock
+
+        from torch._inductor.scheduler import FusedMixOrderReductions, MixOrderReduction
+        from torch._inductor.test_operators import realize
+
+        def f(x):
+            # Realize the sums before top-k to exercise mixed-group append.
+            inner = realize(x.sum(1))
+            outer = realize(x.sum(0))
+            values, indices = torch.topk(x, 3, dim=1)
+            return inner, outer, values + 1, indices
+
+        saw_ranked_append = False
+        can_fuse_with = FusedMixOrderReductions.can_fuse_with
+
+        def record_append(group, other):
+            nonlocal saw_ranked_append
+            saw_ranked_append |= (
+                not group.has_reduction_result() and other.has_reduction_result()
+            )
+            return can_fuse_with(group, other)
+
+        x = torch.arange(129 * 65, device=device, dtype=torch.float32).reshape(129, 65)
+        # Form the mixed group before the competing same-axis top-k fusion.
+        with (
+            mock.patch.object(
+                MixOrderReduction, "get_fusion_score", return_value=10**9
+            ),
+            mock.patch.object(FusedMixOrderReductions, "can_fuse_with", record_append),
+        ):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        self.assertTrue(saw_ranked_append)
+        self.assertIn("'grid_type': 'MixOrderReductionGrid'", code)
 
     @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
     @parametrize("tiling", ["prefer_nd_tiling", "tile_reductions"])
@@ -4501,6 +4546,25 @@ class TopkRegressionTests(TestCase):
         actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
         self.assertEqual(actual, f(x), atol=0, rtol=0)
         FileCheck().check("torch.ops.aten.histc.default(").run(code)
+
+    @skipCUDAIf(not SM90OrLater, "bounded grouping requires SM90 or newer")
+    @parametrize("mutation", ["index_put", "fill"])
+    def test_bounded_topk_histogram_mutation(self, device, mutation):
+        def f(x, positions):
+            keys = torch.topk(x, 2).indices.flatten()
+            sorted_keys, permutation = keys.sort(stable=True)
+            if mutation == "index_put":
+                keys.index_put_((positions,), torch.zeros_like(positions))
+            else:
+                keys.fill_(0)
+            histogram = torch.histc(sorted_keys.to(torch.int32), 8, 0, 7)
+            return keys, sorted_keys, permutation, histogram.cumsum(0)
+
+        x = torch.arange(24, device=device, dtype=torch.float32).reshape(3, 8)
+        positions = torch.arange(6, device=device)
+        self.assertEqual(
+            torch.compile(f, fullgraph=True)(x, positions), f(x, positions)
+        )
 
     @skipCUDAIf(not SM90OrLater, "bounded grouping requires SM90 or newer")
     def test_bounded_topk_requires_triton(self, device):
