@@ -2,6 +2,7 @@
 
 #include <torch/headeronly/cuda/KernelUtils.h>
 #include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/Half.h>
 
 #include <cuda_runtime.h>
@@ -21,13 +22,14 @@ namespace {
     }                                                      \
   } while (0)
 
-#define CUDA_ASSERT_OK(expr)                                            \
-  do {                                                                  \
-    cudaError_t err_ = (expr);                                          \
-    if (err_ != cudaSuccess) {                                          \
-      throw std::runtime_error(                                         \
-          std::string(#expr) + " failed: " + cudaGetErrorString(err_)); \
-    }                                                                   \
+#define CUDA_ASSERT_OK(expr)                                        \
+  do {                                                              \
+    cudaError_t err_ = (expr);                                      \
+    STD_TORCH_CHECK(                                                \
+        err_ == cudaSuccess,                                        \
+        #expr,                                                      \
+        " failed: ",                                                \
+        cudaGetErrorString(err_));                                  \
   } while (0)
 
 template <typename scalar_t, typename index_t>
