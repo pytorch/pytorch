@@ -2070,6 +2070,32 @@ class TestPrecompile(TestCase):
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    def test_capture_leaves_the_ambient_rng_state_alone(self):
+        # Capture runs fn for real under make_fx, so a graph that draws consumes the
+        # caller's RNG stream as a side effect of asking for an artifact. Nothing about
+        # requesting a compile should advance the caller's randomness, so capture
+        # snapshots the state and rewinds it once it knows the graph drew.
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        torch.compiler.precompile(
+            lambda a: torch.rand_like(a), torch.empty(4), backend="eager"
+        )
+        self.assertEqual(torch.random.get_rng_state(), before)
+
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_capture_leaves_the_accelerator_rng_state_alone(self):
+        # Same guarantee on the device generator: a graph that draws on the accelerator
+        # advances that device's stream, not the CPU one, so the snapshot has to cover
+        # whichever generators the graph actually touched.
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state()
+        torch.compiler.precompile(
+            lambda a: torch.rand_like(a),
+            torch.empty(4, device="cuda"),
+            backend="eager",
+        )
+        self.assertEqual(torch.cuda.get_rng_state(), before)
+
     def test_concurrent_captures_are_serialized(self):
         # Capture mutates process-global state (RNG snapshots, inductor's codegen
         # config) and runs fn for real, so two captures in flight at once would
