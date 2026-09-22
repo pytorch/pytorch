@@ -4289,20 +4289,15 @@ def _instance_dict(obj: Any) -> dict[str, Any] | None:
 _PLAIN_INSTANCE_SIZE = type("_PlainInstance", (), {}).__basicsize__
 
 
-# Hooks ``object`` itself lacks, so an instance __getattr__ can supply them
-# (3.10 has no object.__getstate__ either); asked for on a hollow instance.
-_INSTANCE_HOOKS = ("__setstate__", "__getnewargs__", "__getnewargs_ex__") + (
-    () if hasattr(object, "__getstate__") else ("__getstate__",)
-)
+# Declaring any of these makes a class unfit for attribute pruning, by name
+# along the MRO (object itself declares __getattribute__).
+_REFUSED_METHODS = frozenset({"__del__", "__getattr__", "__getattribute__"})
 
 
 def _pickles_by_default(cls: type) -> bool:
     """Whether an instance of ``cls`` round-trips as ``cls.__new__(cls)`` plus its
-    ``__dict__``, judged from the type (its own hooks, its copyreg registration
-    and its instance layout) and from a hollow instance of it, asked for the
-    hooks the way pickle asks. A hook set on the instance itself, or served by
-    a __getattr__ that reads instance state, is not seen (pickle resolves
-    __getnewargs__(_ex) on the real object at dump).
+    ``__dict__``, judged from the type: its own hooks, its copyreg registration
+    and its instance layout. A hook set on the instance itself is not seen.
 
     Attribute pruning is only sound for that protocol. A custom __reduce_ex__
     (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
@@ -4319,40 +4314,38 @@ def _pickles_by_default(cls: type) -> bool:
     ``("a", "__dict__")`` has the plain size; an EMPTY __slots__ (abc.ABC,
     typing.Generic, Protocol) adds no state and does not count. A __new__ of
     the class's own is refused as well: the load side calls ``cls.__new__(cls)``
-    with no arguments, which a __new__ that takes any fails. The hooks object
-    lacks are looked up on an instance by pickle (BUILD asks the hollow one
-    NEWOBJ made for __setstate__), so a __getattr__ that serves any name
-    supplies them where a read on the type sees nothing; they are asked for the
-    same way here, and as the C unpickler asks (does the lookup raise
-    AttributeError, not is the result None: a __getattr__ returning None gives
-    BUILD a None to call). A hook that raises on that read is answered with
-    False: not pruning is always safe, and the failure it would turn into is
-    the one being avoided. A class with a __del__ is refused before the probe
-    instantiates: a finalizer must not run from a predicate, and a pruned
-    object's would later run against the sentinels.
+    with no arguments, which a __new__ that takes any fails. So is a class
+    declaring __getattr__ or __getattribute__: pickle resolves __setstate__ on
+    the hollow instance at load and __getnewargs__(_ex) on the real one at
+    dump, so such a class can supply hooks a read on the type cannot see (one
+    serving every name hands BUILD a __setstate__ to call), and asking an
+    instance would run user code from a predicate, which the common delegating
+    forwarder answers by recursing. A __del__ is refused because a pruned
+    object's finalizer would run against the sentinels. A hook that raises on
+    any of these reads (a metaclass __getattr__) is answered with False: not
+    pruning is always safe, and the failure it would turn into is the one being
+    avoided.
     """
     try:
-        if not (
+        return (
             cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
             and all(c.__itemsize__ == 0 for c in cls.__mro__)
             and not any(vars(c).get("__slots__") for c in cls.__mro__)
-            and not any("__del__" in vars(c) for c in cls.__mro__)
+            and not any(
+                vars(c).keys() & _REFUSED_METHODS
+                for c in cls.__mro__
+                if c is not object
+            )
             and cls not in copyreg.dispatch_table
             and cls.__new__ is object.__new__
             and cls.__reduce_ex__ is object.__reduce_ex__
             and cls.__reduce__ is object.__reduce__
             and getattr(cls, "__getstate__", None)
             is getattr(object, "__getstate__", None)
-        ):
-            return False
-        hollow = object.__new__(cls)
-        for name in _INSTANCE_HOOKS:
-            try:
-                getattr(hollow, name)
-            except AttributeError:
-                continue
-            return False
-        return True
+            and not hasattr(cls, "__setstate__")
+            and not hasattr(cls, "__getnewargs__")
+            and not hasattr(cls, "__getnewargs_ex__")
+        )
     except Exception:
         return False
 
