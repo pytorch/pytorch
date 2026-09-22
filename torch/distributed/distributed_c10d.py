@@ -2699,7 +2699,17 @@ def init_process_group(
             _store_based_barrier(rank, store, group_name, world_size, timeout)
 
 
-def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
+def _get_split_source(
+    pg: ProcessGroup, requested_backend: str | Backend
+) -> C10DBackend | None:
+    """Return a split source only when the requested backend matches it.
+
+    An eagerly initialized default process group is not, by itself, enough to
+    make a subgroup eligible for communicator splitting. A split preserves the
+    parent's backend implementation, so a request for a different backend must
+    create a fresh communicator instead. In particular, non-members must not
+    issue a NOCOLOR split on the parent when members will create a fresh backend.
+    """
     split_from = None
     if pg.bound_device_id:
         split_from = pg._get_backend(pg.bound_device_id)
@@ -2720,7 +2730,57 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
     while is_gloo_available() and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
+    split_device = pg.bound_device_id
+    if split_device is None:
+        return None
+
+    parent_pg_state = _world.pg_map.get(pg)
+    if parent_pg_state is None:
+        return None
+
+    parent_backend, _ = parent_pg_state
+    parent_backend_name = _get_backend_name_for_device(
+        parent_backend, split_device.type
+    )
+    requested_backend_name = _get_backend_name_for_device(
+        requested_backend, split_device.type
+    )
+    if (
+        parent_backend_name is None
+        or requested_backend_name is None
+        or parent_backend_name != requested_backend_name
+    ):
+        return None
     return split_from
+
+
+def _get_backend_name_for_device(
+    backend: str | Backend, device_type: str
+) -> str | None:
+    """Resolve one device's backend name without registration or validation."""
+    normalized_backend = str(backend).lower()
+    if normalized_backend == Backend.UNDEFINED:
+        return Backend.default_device_backend_map.get(device_type)
+    if ":" not in normalized_backend:
+        supported_devices = Backend.backend_capability.get(normalized_backend)
+        if supported_devices is not None and device_type not in supported_devices:
+            return None
+        return normalized_backend or None
+
+    result: str | None = None
+    seen_devices: set[str] = set()
+    for pair in normalized_backend.split(","):
+        pieces = pair.split(":")
+        if len(pieces) != 2:
+            return None
+        device, backend_name = pieces
+        if not device or not backend_name or device in seen_devices:
+            return None
+        seen_devices.add(device)
+        if device != device_type:
+            continue
+        result = backend_name
+    return result
 
 
 # Backends that feed a FlightRecorder without any help: ProcessGroupGloo
@@ -2842,7 +2902,7 @@ def _new_process_group_helper(
     # split when we *know* the default PG has already started communicator initialization.
     # We know this if we have bound a device id to the default pg (eager initialized).
     if is_initialized() and _get_default_group().bound_device_id:
-        split_from = _get_split_source(_get_default_group())
+        split_from = _get_split_source(_get_default_group(), backend)
     else:
         split_from = None
 
