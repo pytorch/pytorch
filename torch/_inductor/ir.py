@@ -3214,6 +3214,32 @@ TOPK_MAX_SORT_BLOCK = 16384
 
 
 @ir_dataclass
+class ScanScatter(Scan):
+    """A scan whose dense result is consumed only by a masked scatter store."""
+
+    # (idx, scan result) -> (store index, stored value, store predicate)
+    scatter: Callable[
+        [Sequence[Expr], tuple[OpsValue, ...]],
+        tuple[Sequence[Expr], OpsValue, OpsValue],
+    ]
+
+    def store_reduction(
+        self,
+        output_name: str | None,
+        indexer: Callable[[Sequence[Expr]], Expr],
+        vars: Sequence[Expr],
+        scan_vars: Sequence[Symbol],
+    ) -> Any:
+        idx = self.reindex(vars, scan_vars)
+        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
+        index, value, mask = self.scatter(
+            idx, ops.scan(self.dtypes, self.combine_fn, values)
+        )
+        value = ops.set_store_mask(value, mask)
+        return ops.store(output_name or "unnamed", indexer(index), value)
+
+
+@ir_dataclass
 class Sort(Loops):
     """Sort a tuple of key/value pairs, optionally retaining only a Top-K prefix."""
 
