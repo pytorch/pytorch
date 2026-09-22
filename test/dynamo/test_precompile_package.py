@@ -7,6 +7,7 @@ import enum
 import functools
 import importlib.machinery
 import importlib.util
+import io
 import itertools
 import math
 import os
@@ -2353,9 +2354,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.wont_generalize, ("mode",))
         self.assertEqual(summary.capture_errors, ("boom",))
 
-    def test_precompile_session_captures_variants_and_renders(self):
-        from torch._precompile import _parse_artifact_metadata
-
+    def test_precompile_session_captures_variants_and_summarizes(self):
         def step(model, x):
             y = model(x)
             torch._dynamo.graph_break()
@@ -2379,33 +2378,71 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         self.assertTrue(summary.kept_guards)
         self.assertEqual(summary.risky_dropped_guards, ())
-        python_code, cache = session.snapshot_artifact()
-        meta = _parse_artifact_metadata(python_code)
-        self.assertEqual(meta["TRACER"], "dynamo")
-        self.assertEqual(len(meta["FRAMES"]), 2)
-        self.assertEqual(
-            meta["DROPPED_GUARDS"], [list(s) for s in summary.dropped_guards]
-        )
-        with self.assertRaisesRegex(PackageError, "dropped .* guard"):
-            session.snapshot_artifact(require_no_dropped_guards=True)
         with self.assertRaisesRegex(PackageError, "not active"):
             call(model, x2)
+        # A call that raised is a capture error, and the summary is not complete.
+        failed = precompile_package.precompile_capture(step, backend="eager")
+        with failed as call:
+            with self.assertRaises(RuntimeError):
+                call(model, torch.ones(2, 5))
+        self.assertFalse(failed.summary().complete)
+        self.assertEqual(len(failed.summary().capture_errors), 1)
         # A second session on the same function compiles into its own cache
         # region rather than serving the first one's entries.
         second = precompile_package.precompile_capture(step, backend="eager")
         with second as call:
             call(model, x2)
         self.assertGreaterEqual(second.summary().guarded_codes, 2)
-        # A session that never ran its callable has nothing to render.
+        with self.assertRaisesRegex(PackageError, "partial"):
+            precompile_package.precompile_capture(functools.partial(step, model))
+        with self.assertRaisesRegex(PackageError, "CALLS the model"):
+            precompile_package.precompile_capture(model)
+
+    def test_precompile_session_renders_behind_the_gates(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0]
+
+        model = torch.nn.Linear(4, 4)
+        session = precompile_package.precompile_capture(step, backend="eager")
+        with session as call:
+            call(model, torch.ones(2, 4))
+            # Rendering mid-block leaves the session able to capture more.
+            python_code, _ = session.snapshot_artifact()
+            self.assertEqual(len(_parse_artifact_metadata(python_code)["FRAMES"]), 2)
+            call(model, torch.ones(3, 4))
+        summary = session.summary()
+        python_code, cache = session.snapshot_artifact()
+        meta = _parse_artifact_metadata(python_code)
+        self.assertEqual(meta["TRACER"], "dynamo")
+        self.assertEqual(meta["FN_NAME"], step.__qualname__)
+        self.assertEqual(sum(n for _, n in meta["FRAMES"]), summary.guarded_codes)
+        self.assertEqual(
+            meta["DROPPED_GUARDS"], [list(s) for s in summary.dropped_guards]
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertEqual((blob["backend"], blob["tracer"]), ("eager", "dynamo"))
+        with self.assertRaisesRegex(PackageError, "dropped .* guard"):
+            session.snapshot_artifact(require_no_dropped_guards=True)
+        # A session that never ran its callable has nothing to render, and one
+        # whose call raised is refused as incomplete unless the caller accepts it.
         empty = precompile_package.precompile_capture(step, backend="eager")
         with empty:
             pass
         with self.assertRaisesRegex(PackageError, "no compiled code"):
             empty.snapshot_artifact()
-        with self.assertRaisesRegex(PackageError, "partial"):
-            precompile_package.precompile_capture(functools.partial(step, model))
-        with self.assertRaisesRegex(PackageError, "CALLS the model"):
-            precompile_package.precompile_capture(model)
+        failed = precompile_package.precompile_capture(step, backend="eager")
+        with failed as call:
+            call(model, torch.ones(2, 4))
+            with self.assertRaises(RuntimeError):
+                call(model, torch.ones(2, 5))
+        with self.assertRaisesRegex(PackageError, "captured call raised"):
+            failed.snapshot_artifact()
+        python_code, _ = failed.snapshot_artifact(require_complete=False)
+        self.assertEqual(_parse_artifact_metadata(python_code)["TRACER"], "dynamo")
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
