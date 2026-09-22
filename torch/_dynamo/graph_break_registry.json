@@ -2778,6 +2778,26 @@
       ]
     }
   ],
+  "GB5567": [
+    {
+      "Gb_type": "Unsupported random.Random argument",
+      "Context": "method: random.Random.{name}",
+      "Explanation": "Dynamo cannot reconstruct this random call argument before the compiled graph runs.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6541": [
+    {
+      "Gb_type": "Unsupported random.Random scalar result",
+      "Context": "method: random.Random.{name}",
+      "Explanation": "Dynamo cannot safely represent every runtime result of random.Random.{name}() as a graph input.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0169": [
     {
       "Gb_type": "Write to immutable cell",
@@ -4110,6 +4130,16 @@
       ]
     }
   ],
+  "GB7912": [
+    {
+      "Gb_type": "Unsupported random.Random state operation",
+      "Context": "operation: {operation}",
+      "Explanation": "Dynamo cannot apply this operation to a runtime random state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0248": [
     {
       "Gb_type": "improper torch.get_device_module arguments",
@@ -4991,6 +5021,44 @@
       "Gb_type": "constant-like method call with unsupported return type",
       "Context": "{self._error_prefix}.{name}(*{args}, **{kwargs}) returned {result}",
       "Explanation": "Attempted to call {self._error_prefix}.{name}, got unsupported return value {result}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9250": [
+    {
+      "Gb_type": "Unsupported random state value",
+      "Context": "value type: {type(value).__name__}",
+      "Explanation": "Dynamo cannot model this runtime random state value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0995": [
+    {
+      "Gb_type": "Unsupported random.Random sequence",
+      "Context": "method: random.Random.{name}",
+      "Explanation": "Dynamo cannot represent the runtime-dependent result of random.Random.{name}() for this population.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4916": [
+    {
+      "Gb_type": "Unsupported random.Random state",
+      "Context": "state cannot be represented as a Python constant",
+      "Explanation": "Dynamo cannot represent this random state value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported random.Random state",
+      "Context": "state: {state_arg}",
+      "Explanation": "Dynamo cannot represent this random state value.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
