@@ -1104,7 +1104,9 @@ class TestPrecompile(TestCase):
             exec(compile(code, "<dt>", "exec"), ns)
             self.assertEqual(ns["forward"](m, x).to_local(), ref.to_local())
 
-            # A subclass input's outer dtype is checked like a dense one (invariant 6).
+            # A subclass input's outer dtype and device are recorded and checked like a
+            # dense one's (invariant 6).
+            self.assertIn("USER_INPUT_DEVICES = ['cpu']", code)
             x64 = distribute_tensor(torch.randn(5, 4).double(), mesh, [Replicate()])
             with self.assertRaisesRegex(PrecompileError, "runtime input has dtype"):
                 f_c(m, x64)
