@@ -149,10 +149,11 @@ def _epilogue_outputs(args, attr: str) -> tuple[EpilogueOutputPack, int]:
 
 
 def _ones_alpha():
-    """Cached per-device one-element alpha TensorWrapper (identity scale).
+    """Cached per-device (4,)-ones alpha TensorWrapper (identity global scale).
 
     The kernel always takes an alpha arg so its signature is consistent across
-    compile/run paths; when not fusing we pass one (a no-op *1.0).
+    compile/run paths; when not fusing we pass ones (a no-op *1.0). Len is a
+    multiple of 4 (CuTeDSL requires the operand's last dim divisible by 4).
     """
     from cutlass.operators.utils.tensor import TensorWrapper
 
@@ -161,10 +162,7 @@ def _ones_alpha():
     dev = torch.cuda.current_device()
     tw = _ONES_ALPHA.get(dev)
     if tw is None:
-        tw = TensorWrapper(
-            torch.ones(1, dtype=torch.float32, device=f"cuda:{dev}"),
-            alignment_bytes=4,
-        )
+        tw = TensorWrapper(torch.ones(4, dtype=torch.float32, device=f"cuda:{dev}"))
         _ONES_ALPHA[dev] = tw
     return tw
 
@@ -273,7 +271,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         alpha = getattr(args, "alpha", None)
         if alpha is None:
             alpha = cute.runtime.make_fake_compact_tensor(
-                cutlass.Float32, (1,), assumed_align=4
+                cutlass.Float32, (4,), assumed_align=16
             )
 
         def epilogue_op(v):
@@ -729,19 +727,38 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         return True
 
     @classmethod
+    def generate_operators_for_policy(
+        cls,
+        metadata_filter: Callable[[OperatorMetadata], bool],
+        *,
+        prefetch_mode: str,
+        use_pdl: bool,
+    ) -> list[VendoredDenseBlockScaledGemmKernel]:
+        """Generate operators without consulting mutable process-wide config."""
+        if use_pdl:
+            return []
+        return cls._generate_operators(
+            metadata_filter,
+            prefetch_mode=prefetch_mode,
+        )
+
+    @classmethod
     def _generate_operators(
         cls,
         metadata_filter: Callable[[OperatorMetadata], bool],
         epilogue_args=None,
         target_sm: TargetSm | None = None,
         args=None,
+        *,
+        prefetch_mode: str | None = None,
     ) -> list[VendoredDenseBlockScaledGemmKernel]:
         if target_sm is not None and target_sm.cc not in [100, 101, 103]:
             return []
         if epilogue_args is not None:
             return []
 
-        prefetch_mode = config.nvgemm_prefetch
+        if prefetch_mode is None:
+            prefetch_mode = config.nvgemm_prefetch
         prefetch_options = {
             "0": [False],
             "1": [True],

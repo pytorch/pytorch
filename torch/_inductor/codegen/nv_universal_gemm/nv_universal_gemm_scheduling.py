@@ -134,16 +134,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         )
 
     @staticmethod
-    def _has_output_scale(ir_node: Any) -> bool:
-        if isinstance(ir_node, NVUniversalGemmBuffer):
-            return ir_node.output_scale_node is not None
-        return isinstance(ir_node, MultiTemplateBuffer) and any(
-            isinstance(choice, NVUniversalGemmCaller)
-            and choice.output_scale_node is not None
-            for choice in ir_node._choices
-        )
-
-    @staticmethod
     def is_nv_universal_gemm_template(node: BaseSchedulerNode) -> bool:
         """Check if a node is an NVGEMM template SchedulerNode."""
         if not isinstance(node, SchedulerNode):
@@ -388,8 +378,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         ir_node = gemm_template_node.node
         if not isinstance(ir_node, (NVUniversalGemmBuffer, MultiTemplateBuffer)):
             return NVGemmVerticalFusionDecision.DEFER
-        if self._has_output_scale(ir_node):
-            return NVGemmVerticalFusionDecision.DEFER
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
             if ir_node.variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
@@ -457,9 +445,22 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         except NotImplementedError as exc:
             log.debug("NVGEMM cannot orient fused reductions: %s", exc)
             return NVGemmVerticalFusionDecision.DEFER
+        if epilogue_program.has_composite_generated_reduction_plan:
+            log.debug("NVGEMM direct EFC supports one generated reduction")
+            return NVGemmVerticalFusionDecision.DEFER
         if reduction_plan is not None and not all(
             variant.supports_reduction(reduction_plan) for variant in variants
         ):
+            return NVGemmVerticalFusionDecision.DEFER
+        if isinstance(ir_node, MultiTemplateBuffer) and not any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.supports_epilogue_fusion
+            and self._supports_reduction_layout(choice, epilogue_program.min_tile_shape)
+            for choice in ir_node._choices
+        ):
+            log.debug(
+                "NVGEMM epilogue fusion: no EFC kernel supports the reduction layout"
+            )
             return NVGemmVerticalFusionDecision.DEFER
 
         for s_node in all_scheduler_nodes:
@@ -1056,7 +1057,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         if only_gen_src_code:
             return NVGemmGeneratedSource(
                 source=src_code,
-                epilogue_reads=kernel.epilogue.reads,
+                epilogue_reads=lowered_epilogue.reads,
                 output_buffers=tuple(kernel.ordered_output_buffers()),
             )
 
@@ -1215,7 +1216,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             template_node, require_epilogue_fusion=bool(epilogue_nodes)
         )
 
-        input_nodes = cast(list[Buffer], ctb.gemm_inputs())
+        input_nodes = cast(list[Buffer], ctb.inputs)
         # Output store layouts in out_ptr order. A multi-store epilogue has one
         # per graph output; otherwise a single output (the fused final node, or
         # the plain GEMM layout).
@@ -1260,10 +1261,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
 
             for read_name in epilogue_reads:
                 buf = V.graph.get_buffer(read_name)
-                if buf is None:
-                    buf = V.graph.graph_inputs.get(read_name)
-                if buf is None:
-                    raise AssertionError(f"missing NVGEMM epilogue input {read_name}")
                 size = V.graph.sizevars.optimization_hints(buf.get_size())
                 stride = V.graph.sizevars.optimization_hints(buf.get_stride())
                 dtype = buf.get_dtype()
