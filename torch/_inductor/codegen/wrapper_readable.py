@@ -3,41 +3,22 @@
 Inductor's normal python wrapper is written to be loaded by inductor. This variant is
 written to be opened by a person (or an agent) who wants to retune the generated kernel
 in place: it emits Triton kernels as ordinary module-level code rather than as source
-strings handed to ``AsyncCompile``, and it drops the ``AsyncCompile`` lifecycle when no
-backend still needs it. See ``torch.compiler.export_python``, which is the consumer.
+strings handed to ``AsyncCompile``. See ``torch.compiler.export_python``, which is the
+consumer.
 
-The tradeoff is deliberate and is the reason this is opt-in: a kernel defined at module
-level compiles serially, in process, on its first launch, instead of fanning out to the
-compile worker pool.
+The tradeoffs are deliberate and are the reason this is opt-in: a kernel defined at
+module level compiles serially, in process, on its first launch, instead of fanning out
+to the compile worker pool. And every hoisted kernel names itself by the wrapper's
+``__file__``, so they all share one autotune-cache key; that cache is effectively off in
+this mode (its configs_hash check keeps a wrong config from being applied).
 """
 
 from typing_extensions import override
 
 import torch._inductor.config as config
-from torch.utils._indented_buffer import DeferredLineBase
 
 from .. import ir
 from .wrapper import PythonWrapperCodegen, SubgraphPythonWrapperCodegen
-
-
-class _LineIfAsyncCompileUsed(DeferredLineBase):
-    """A line that survives assembly only if some kernel actually bound via AsyncCompile.
-
-    Whether the emitted module needs an ``AsyncCompile`` is not known when the preamble
-    is written -- ``write_header`` runs from ``__init__``, before a single kernel has
-    been defined -- so the decision is deferred to ``getvalue()``, which runs after
-    every kernel definition has been replayed.
-    """
-
-    def __init__(self, line: str, wrapper: PythonWrapperCodegen) -> None:
-        super().__init__(line)
-        self.wrapper = wrapper
-
-    def __call__(self) -> str | None:
-        return self.line if self.wrapper.uses_async_compile else None
-
-    def _new_line(self, line: str) -> "_LineIfAsyncCompileUsed":
-        return _LineIfAsyncCompileUsed(line, self.wrapper)
 
 
 class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
@@ -83,20 +64,6 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
                 else None
             ),
         )
-
-    @override
-    def write_async_compile_binding(self) -> None:
-        self.header.writeline(
-            _LineIfAsyncCompileUsed("async_compile = AsyncCompile()", self)
-        )
-
-    @override
-    def write_async_compile_wait(self) -> None:
-        self.prefix.writeline("")
-        self.prefix.writeline(
-            _LineIfAsyncCompileUsed("async_compile.wait(globals())", self)
-        )
-        self.prefix.writeline(_LineIfAsyncCompileUsed("del async_compile", self))
 
     @override
     @staticmethod

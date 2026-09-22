@@ -1697,9 +1697,6 @@ class PythonWrapperCodegen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
-        # Set by define_kernel when a backend binds its kernel through AsyncCompile.
-        # Only meaningful once every kernel has been defined, i.e. after line replay.
-        self.uses_async_compile = False
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
         # Nesting depth of the kernel-profiling {} scope blocks currently open.
         # A symbolic numel emitted inside one is block-scoped, so it has to be
@@ -1861,10 +1858,10 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
+                async_compile = AsyncCompile()
             """,
             strip=True,
         )
-        self.write_async_compile_binding()
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
@@ -2056,9 +2053,6 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
-
-    def write_async_compile_binding(self) -> None:
-        self.header.writeline("async_compile = AsyncCompile()")
 
     def write_async_compile_wait(self) -> None:
         self.prefix.splice(
@@ -3658,11 +3652,6 @@ class PythonWrapperCodegen(CodeGen):
         standalone: bool = False,
         autotune_body: str | None = None,
     ):
-        # Every backend's kernel definition funnels through here, so this is the one
-        # place that can tell whether the emitted module still needs an AsyncCompile at
-        # all -- ten of the eleven backends bind their kernel by calling one.
-        if "async_compile." in kernel_body:
-            self.uses_async_compile = True
         self.writeline(
             KernelDefinitionLine(
                 self,
