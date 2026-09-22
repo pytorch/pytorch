@@ -262,6 +262,10 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
+    def set_store_mask(self, value: T, mask: T) -> T:
+        """Attach an additional predicate to the eventual store of ``value``."""
+        raise NotImplementedError
+
     # TODO: Better explain how the "collective" semantics of these ops;
     # remember that the input value is a scalar, you can't reduce on it in the
     # traditional sense!
