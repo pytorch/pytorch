@@ -291,6 +291,7 @@ class TestStaticTritonLauncherUnit(TestCase):
             "CUDA driver error: 209",
             "CUDA driver error: 218",
             "CUDA driver error: 500",
+            "CUDA driver error: a PTX JIT compilation failed",
             "L0 runtime error: 70000004",
             "L0 runtime error: 78000008",
             "L0 runtime error: 7800000F",
