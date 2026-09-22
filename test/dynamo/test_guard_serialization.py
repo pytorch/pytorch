@@ -1234,6 +1234,15 @@ class _KeyWithSub:
         return hash(self.name)
 
 
+class _TaggedTuple(tuple):
+    # A tuple subclass with instance state: == reads the elements, a subclass
+    # __eq__ may read the fields, so a by-value key of this shape needs both.
+    def __new__(cls, items, meta=None):
+        self = super().__new__(cls, items)
+        self.meta = meta
+        return self
+
+
 class _KeyWithBystanders:
     # A by-value key whose fields are the shapes the verbatim walk stops at.
     def __init__(self, t, net, mod):
@@ -2535,6 +2544,21 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())["k"]
         self.assertEqual(out.sub, {sub: 1})
         self.assertEqual(next(iter(out.sub)).tags, ["t"])
+
+    def test_a_container_subclass_key_marks_its_fields_too(self):
+        # The walk descends a container's elements AND its instance dict, so a
+        # tuple subclass key with instance state keeps a field registered as
+        # missing by some scope leaf.
+        meta = _SubCfg(2.0, ["t"])
+        key = _TaggedTuple((1, 2), meta)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {id(meta): meta}, {id(key): key}, buf).dump(
+            {"k": key}
+        )
+        out = load_guards_state(buf.getvalue())["k"]
+        self.assertEqual(out, (1, 2))
+        self.assertEqual(out.meta, meta)
+        self.assertEqual(out.meta.tags, ["t"])
 
     def test_a_by_value_field_that_cannot_pickle_fails_the_dump_loudly(self):
         # The mark switches pruning off for the key's whole closure, by design:
