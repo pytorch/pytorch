@@ -4368,45 +4368,56 @@ exit(2)
         if torch.cuda.get_device_capability()[0] != 9:
             self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
 
-        # gfx9 only touches the workspace for split-K / stream-K kernels, which
-        # need a large K; the SM90 shape leaves it untouched and is vacuous here.
-        rows, depth, width = (32, 65536, 2048) if TEST_WITH_ROCM else (32768, 640, 640)
-        stream = torch.cuda.Stream()
-        left = torch.zeros(
-            (rows, depth), device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-        right = torch.zeros(
-            (depth, width), device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-        stream.wait_stream(torch.cuda.current_stream())
-
-        def capture_eval():
-            eval_left = torch.zeros((rows, depth), device="cuda", dtype=torch.bfloat16)
-            eval_right = torch.zeros(
-                (depth, width), device="cuda", dtype=torch.bfloat16
+        # With TORCH_CUBLAS_WORKSPACE_CACHE=1 the first shape faults on SM90 and
+        # gfx90a, and on gfx950 corrupts the canary through the backward's weight
+        # gradient (K=32768). The second shape does so in the forward on gfx950.
+        shapes = [(32768, 640, 640)]
+        if TEST_WITH_ROCM:
+            shapes.append((32, 65536, 2048))
+        for rows, depth, width in shapes:
+            stream = torch.cuda.Stream()
+            left = torch.zeros(
+                (rows, depth), device="cuda", dtype=torch.bfloat16, requires_grad=True
             )
-            eval_left @ eval_right
-            graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph, stream=stream):
+            right = torch.zeros(
+                (depth, width), device="cuda", dtype=torch.bfloat16, requires_grad=True
+            )
+            stream.wait_stream(torch.cuda.current_stream())
+
+            def capture_eval():
+                eval_left = torch.zeros(
+                    (rows, depth), device="cuda", dtype=torch.bfloat16
+                )
+                eval_right = torch.zeros(
+                    (depth, width), device="cuda", dtype=torch.bfloat16
+                )
                 eval_left @ eval_right
-            graph.replay()
-            graph.reset()
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph, stream=stream):
+                    eval_left @ eval_right
+                graph.replay()
+                graph.reset()
 
-        with torch.cuda.stream(stream):
-            output = left @ right
-            torch.autograd.grad(output, (left, right), torch.ones_like(output))
-
-            output_grad = torch.ones_like(output)
-            training_graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(training_graph, stream=stream):
+            with torch.cuda.stream(stream):
                 output = left @ right
-                torch.autograd.grad(output, (left, right), output_grad)
+                torch.autograd.grad(output, (left, right), torch.ones_like(output))
 
-            capture_eval()
-            capture_eval()
-            training_graph.replay()
+                output_grad = torch.ones_like(output)
+                training_graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(training_graph, stream=stream):
+                    output = left @ right
+                    torch.autograd.grad(output, (left, right), output_grad)
 
-        stream.synchronize()
+                capture_eval()
+                capture_eval()
+                # A replay that writes a freed workspace can land in memory that
+                # was reallocated since, without faulting.
+                canary = torch.full((128 << 20,), 7, device="cuda", dtype=torch.uint8)
+                training_graph.replay()
+
+            stream.synchronize()
+            with self.subTest(shape=(rows, depth, width)):
+                self.assertEqual((canary != 7).sum().item(), 0)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -4418,10 +4429,8 @@ exit(2)
             self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
 
         torch._C._cuda_clearCublasWorkspaces()
-        # gfx9 needs a larger K than SM90 before a split-K kernel is selected.
-        depth = 65536 if TEST_WITH_ROCM else 10944
-        x = torch.randn(32, depth, device="cuda", dtype=torch.bfloat16)
-        weight = torch.randn(2048, depth, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(32, 10944, device="cuda", dtype=torch.bfloat16)
+        weight = torch.randn(2048, 10944, device="cuda", dtype=torch.bfloat16)
         expected = torch.nn.functional.linear(x, weight)
 
         stream = torch.cuda.Stream()
