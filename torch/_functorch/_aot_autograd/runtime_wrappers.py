@@ -14,6 +14,7 @@ import itertools
 import pprint
 import typing
 import warnings
+import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -26,10 +27,7 @@ from torch import Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
-from torch._dynamo.graph_bytecode_inputs import (
-    index_to_external_object_weakref,
-    set_external_object_by_index,
-)
+from torch._dynamo.graph_bytecode_inputs import index_to_external_object_weakref
 from torch._dynamo.utils import (
     CompileEventLogger,
     deferred_full_gc,
@@ -119,7 +117,7 @@ def _snapshot_external_objects(ctx: Any) -> None:
     """Snapshot the external object registry onto ctx for backward restore."""
     ctx._external_objects = {
         k: ref()
-        for k, ref in enumerate(index_to_external_object_weakref)
+        for k, ref in index_to_external_object_weakref.items()
         if ref() is not None
     }
 
@@ -3628,7 +3626,7 @@ class _AOTDispatchAutogradFunctionFactory:
                     )
 
                 for idx, obj in getattr(ctx, "_external_objects", {}).items():
-                    set_external_object_by_index(idx, obj)
+                    index_to_external_object_weakref[idx] = weakref.ref(obj)
 
                 return call_func_at_runtime_with_args(
                     compiled_bw,
