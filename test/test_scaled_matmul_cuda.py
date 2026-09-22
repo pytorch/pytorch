@@ -2660,7 +2660,7 @@ class TestFP8Matmul(TestCase):
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
         # TODO: the SM*OrLater checks are meaningless on ROCm; fix them in common_cuda.py
-        if recipe == "mxfp4" and not torch.version.hip and SM120OrLater:
+        if recipe == "mxfp4" and not torch.version.rocm and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         if "xpu" in device:
             if fast_accum:
@@ -3022,7 +3022,7 @@ class TestFP8Matmul(TestCase):
             if recipe == "nvfp4" and torch.version.hip:
                 raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
             # TODO: the SM*OrLater checks are meaningless on ROCm; fix them in common_cuda.py
-            if recipe == "mxfp4" and not torch.version.hip and SM120OrLater:
+            if recipe == "mxfp4" and not torch.version.rocm and SM120OrLater:
                 raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
@@ -3323,7 +3323,7 @@ class TestFP8Matmul(TestCase):
         if recipe == "nvfp4" and torch.version.hip:
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         # TODO: the SM*OrLater checks are meaningless on ROCm; fix them in common_cuda.py
-        if recipe == "mxfp4" and not torch.version.hip and SM120OrLater:
+        if recipe == "mxfp4" and not torch.version.rocm and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         M, K, N = 128, 128, 128
