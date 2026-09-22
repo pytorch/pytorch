@@ -3623,6 +3623,28 @@ def forward(self, primals_1):
     return (as_strided_scatter, view_1)""",
         )
 
+    def test_input_mutation_aliases_offset_input_output_alias(self):
+        # b is a view of a with a non-zero storage offset and a different shape.
+        # Views of b that are returned must be regenerated relative to b (the
+        # original input), not relative to the synthetic base: replaying b's
+        # ViewMeta sequence on the base returned a[0] instead of b[0] and
+        # asserted on a shape mismatch for b.view(-1).
+        def f(a, b):
+            a.add_(100)
+            return b[0], b.view(-1)
+
+        def inp_callable(req_grad):
+            base = torch.arange(24.0, requires_grad=req_grad).reshape(4, 6)
+            x = base.add(1)
+            return [base], [x, x[1:]]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
     def test_input_aliased_with_mutation_output_alias(self):
         def f(a, b, c):
             # a and c alias
