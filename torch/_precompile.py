@@ -431,7 +431,8 @@ class Capture:
     to write what has been captured so far to those same files without ending
     the capture. A block that raises writes nothing it has not already saved,
     and a block that made no call raises ``PrecompileError`` on exit rather
-    than writing an empty artifact.
+    than writing an empty artifact. A capture is single-use: once its block
+    exits it cannot be entered again, so call ``capture()`` again to retry.
     """
 
     def __enter__(self) -> Self:
@@ -446,6 +447,12 @@ class Capture:
     def save(self) -> None:
         """Write everything captured so far to the artifact files without ending the capture."""
         raise NotImplementedError
+
+
+_SPENT_CAPTURE = (
+    "capture is not active: its block has already exited, and a capture is "
+    "single-use; call capture() again for a fresh one."
+)
 
 
 class _MakeFxCapture(Capture):
@@ -501,6 +508,8 @@ class _MakeFxCapture(Capture):
         call, so there is nothing further to fold in; save() and block exit
         write the same files.
         """
+        if self._exited:
+            raise PrecompileError(_SPENT_CAPTURE)
         if not self._entered:
             raise PrecompileError(
                 "capture is not active: enter it with a `with` block before "
@@ -512,7 +521,8 @@ class _MakeFxCapture(Capture):
         if self._rendered is None:
             raise PrecompileError(
                 "nothing was captured: call the capture with your example "
-                "arguments inside the `with` block."
+                "arguments inside the `with` block (a call whose serve raised "
+                "captured nothing)."
             )
         try:
             _write_artifact(self._artifact_path, self._cache_path, *self._rendered)
@@ -523,6 +533,8 @@ class _MakeFxCapture(Capture):
             ) from e
 
     def __call__(self, *args: object, **kwargs: object) -> object:
+        if self._exited:
+            raise PrecompileError(_SPENT_CAPTURE)
         if not self._entered:
             raise PrecompileError(
                 "capture is not active: enter it with a `with` block before "
@@ -3021,10 +3033,10 @@ def capture(
 
     Capture is caller-driven: this returns a capture object rather than running
     anything. Enter it as a context manager, call it exactly as you would ``fn``
-    inside the block -- each call runs for real, folds what it exercised into the
-    capture, and returns that run's result -- and the ``(python_code, cache)``
-    artifact is written to ``artifact_path`` / ``cache_path`` when the block
-    exits::
+    inside the block (a :class:`MakeFxTracer` capture takes exactly one call) --
+    each call runs for real, folds what it exercised into the capture, and
+    returns that run's result -- and the ``(python_code, cache)`` artifact is
+    written to ``artifact_path`` / ``cache_path`` when the block exits::
 
         with torch.compiler.precompile.capture(
             fn, artifact_path="m.py", cache_path="m.cache"
@@ -3036,7 +3048,8 @@ def capture(
     values stay available, so the capture drops into an ordinary pipeline loop.
     To write the artifact before the block ends, call ``cap.save()`` inside it.
     A block that raises writes nothing it has not already saved, and a block
-    that made no call raises ``PrecompileError`` on exit.
+    that made no call raises ``PrecompileError`` on exit. A capture is single-use:
+    to capture again, call ``capture()`` again.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven

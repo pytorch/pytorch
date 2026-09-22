@@ -4336,12 +4336,12 @@ class TestPrecompileCapture(TestCase):
         with self.assertRaisesRegex(RuntimeError, "boom"):
             with cap:
                 raise RuntimeError("boom")
-        with self.assertRaisesRegex(PrecompileError, "not active"):
+        with self.assertRaisesRegex(PrecompileError, "already exited"):
             cap(self.model, self.x)
         self.assertFalse(os.path.exists(self.artifact))
         with self._capture(backend="eager") as cap:
             cap(self.model, self.x)
-        with self.assertRaisesRegex(PrecompileError, "not active"):
+        with self.assertRaisesRegex(PrecompileError, "already exited"):
             cap(self.model, self.x)
 
     def test_a_serve_that_raises_leaves_the_capture_retryable(self):
@@ -4357,6 +4357,15 @@ class TestPrecompileCapture(TestCase):
             self.assertFalse(os.path.exists(self.artifact))
             self.assertEqual(cap(self.model, self.x), self.model(self.x))
         self.assertTrue(os.path.exists(self.artifact))
+
+    def test_a_swallowed_serve_failure_is_named_at_exit(self):
+        serve = RuntimeError("serve failed")
+        patch = mock.patch("torch._precompile._runnable_from_pair", side_effect=serve)
+        with self.assertRaisesRegex(PrecompileError, "whose serve raised"):
+            with self._capture(backend="eager") as cap:
+                with patch, self.assertRaises(RuntimeError):
+                    cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
 
     def test_capture_takes_pathlike_paths(self):
         import pathlib
@@ -4406,7 +4415,7 @@ class TestPrecompileCapture(TestCase):
             with cap:
                 cap(self.model, self.x)
                 raise RuntimeError("boom")
-        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+        with self.assertRaisesRegex(PrecompileError, "already exited"):
             cap.save()
         self.assertFalse(os.path.exists(self.artifact))
 
