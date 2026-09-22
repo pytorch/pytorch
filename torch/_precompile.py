@@ -463,22 +463,17 @@ class _MakeFxCapture(Capture):
         *,
         backend: str,
         decompositions: dict | None,
-        training: bool,
     ) -> None:
-        if isinstance(fn, functools.partial):
-            raise PrecompileError(
-                "precompile cannot capture a partial. Pass the underlying function "
-                "and give its bound arguments as call arguments."
-            )
         self._module = PrecompiledModule(
             fn, backend=backend, tracer="make_fx", decompositions=decompositions
         )
         self._artifact_path = artifact_path
         self._cache_path = cache_path
-        self._training = training
+        self._entered = False
         self._rendered: tuple[str, bytes] | None = None
 
     def __enter__(self) -> Self:
+        self._entered = True
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -503,6 +498,11 @@ class _MakeFxCapture(Capture):
         _write_artifact(self._artifact_path, self._cache_path, *self._rendered)
 
     def __call__(self, *args: object, **kwargs: object) -> object:
+        if not self._entered:
+            raise PrecompileError(
+                "capture is not active: enter it with a `with` block before "
+                "calling it, or nothing is written when the block exits."
+            )
         if kwargs:
             raise ValueError(
                 "MakeFxTracer takes positional arguments only; pass the model(s) "
@@ -514,17 +514,24 @@ class _MakeFxCapture(Capture):
                 "traced; a make_fx trace records one execution, so a second call "
                 "has nothing to add."
             )
-        # make_fx traces one execution of fn under fake mode, so the trace itself
-        # produces no result; the call is then served through the artifact by the
-        # same path load() takes, so what the caller gets back is exactly what
-        # serving produces (invariants checked, grads scattered onto the model).
-        # python_code is built ONCE and threaded into to_cache_bytes so code_hash
-        # covers exactly the bytes written. The caller drives the grad mode.
-        with torch.enable_grad() if self._training else torch.no_grad():
-            self._module._compile(args)
-            python_code = self._module.to_python_code()
-            self._rendered = (python_code, self._module.to_cache_bytes(python_code))
-            return _runnable_from_pair(*self._rendered, _trusted=True)(*args)
+        # make_fx traces one execution of fn and lowers it to the artifact; we then
+        # serve that artifact on the real args through the SAME load() path a caller
+        # would take, so the value handed back is exactly what serving produces
+        # (invariants checked, grads scattered onto the model) rather than a bare
+        # trace with no result. Single-shot: a make_fx trace records one path, so a
+        # second call has nothing new to add. Build python_code ONCE and thread it
+        # into to_cache_bytes (the metadata + embedded kernel source is not rebuilt,
+        # and code_hash is sha256 over exactly the bytes written on exit). The pair is
+        # recorded only once the serve has returned: a serve that raised leaves the
+        # capture retryable and nothing for exit or save() to write. The trace runs
+        # with grad enabled and the drivers pin their own grad mode, so the caller's
+        # ambient mode is not consulted.
+        self._module._compile(args)
+        python_code = self._module.to_python_code()
+        rendered = (python_code, self._module.to_cache_bytes(python_code))
+        result = _runnable_from_pair(*rendered, _trusted=True)(*args)
+        self._rendered = rendered
+        return result
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -2110,6 +2117,14 @@ class PrecompiledModule(PrecompiledRunnable):
         # ``fn`` is the whole computation: an nn.Module, or a callable that closes
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
         # step that computes a loss and torch.autograd.grad).
+        if backend not in ("inductor", "eager"):
+            raise ValueError(
+                f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
+            )
+        if tracer not in ("make_fx", "dynamo"):
+            raise ValueError(
+                f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
+            )
         self._fn = fn
         self._backend = backend
         self._tracer = tracer
@@ -2768,7 +2783,6 @@ def capture(
     cache_path: str | os.PathLike[str],
     tracer: MakeFxTracer = MakeFxTracer(),
     backend: str = "inductor",
-    training: bool = False,
 ) -> Capture:
     """Capture ``fn`` across the calls YOUR loop makes, writing the artifact on exit.
 
@@ -2810,9 +2824,9 @@ def capture(
     (default) lowers through AOTAutograd + Inductor into one self-contained
     module, and the cache holds the bundle that primes the inductor kernel caches
     on load; ``"eager"`` keeps the captured ATen graph and runs it as-is (no
-    kernels, so the cache carries no artifact). ``training`` runs the call with
-    grad enabled so a ``fn`` that runs a backward captures it; the resulting
-    parameter gradients are scattered onto the runtime model exactly like eager
+    kernels, so the cache carries no artifact). A ``fn`` that runs a backward
+    captures it: the trace runs with grad enabled, the resulting parameter
+    gradients are scattered onto the runtime model exactly like eager
     ``.backward()``, and the artifact returns ``fn``'s own result.
 
     .. note::
@@ -2827,6 +2841,13 @@ def capture(
         raise ValueError(
             f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
         )
+    if isinstance(fn, functools.partial):
+        raise TypeError(
+            "precompile.capture takes the function itself, not a functools.partial: "
+            "the artifact rebuilds the call from the function's own parameters, so a "
+            "pre-bound model or argument would not be one of them. Pass them as call "
+            "arguments instead."
+        )
     if not isinstance(tracer, MakeFxTracer):
         raise TypeError(
             f"precompile.capture tracer must be a MakeFxTracer, got "
@@ -2838,7 +2859,6 @@ def capture(
         cache_path,
         backend=backend,
         decompositions=tracer.decompositions,
-        training=bool(training),
     )
 
 
@@ -2857,10 +2877,10 @@ def load(
     exactly the python_code bytes it was emitted with).
 
     The driver runs from ``python_code`` -- the single source of truth for the whole
-    calling convention. ``load`` reads the cache's ``BACKEND`` (to check the pairing)
-    and, for the inductor backend, primes the inductor kernel caches from its bundle
-    so a warm reload loads precompiled kernels instead of JIT-compiling; then it
-    exec's ``python_code``. With no usable cache it degrades to JIT'ing from
+    calling convention. ``load`` reads the source's ``BACKEND``, checks the cache's
+    ``backend`` tag against it, primes the inductor kernel caches when the cache
+    carries a bundle so a warm reload loads precompiled kernels instead of
+    JIT-compiling, and then exec's ``python_code``. With no usable cache it degrades to JIT'ing from
     ``python_code``. Both files are trusted, EXECUTABLE input: load only artifacts
     you produced or otherwise trust.
 
