@@ -405,11 +405,20 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
         ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
         self.assertTrue(live.codes[0].backend_ids)
+        artifacts = dict(PrecompileContext._backend_artifacts_by_key)
         PrecompileContext._backend_artifacts_by_key.clear()
         saved, _ = PrecompileContext.create_cache_entries()
         self.assertIsNot(saved[key].dynamo, live)
         self.assertTrue(saved[key].dynamo.codes[0].bypassed)
         self.assertFalse(live.codes[0].bypassed)
+        # Backend artifacts are recorded lazily (a backward's at its first
+        # compile), so a later save can find what an earlier one missed. It
+        # must then write an installable entry, and with every backend present
+        # the code passes through as the live object.
+        PrecompileContext._backend_artifacts_by_key.update(artifacts)
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertFalse(saved[key].dynamo.codes[0].bypassed)
+        self.assertIs(saved[key].dynamo.codes[0], live.codes[0])
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):

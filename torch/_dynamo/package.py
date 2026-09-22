@@ -953,6 +953,10 @@ class PrecompileCacheEntry:
         backend_content: dict[_BackendId, Any] = {}
         # Non-mutating: the entry handed in may be the live one still serving
         # this process, so a code whose backend is missing is bypassed on a copy.
+        # The copy is shallow: the returned entry shares the live containers
+        # (guarded_codes, backend_ids, import_sources, function_names), which
+        # suits the one caller, which pickles it at once. Detaching them is the
+        # load path's job (CompilePackage.initialize).
         codes: list[_DynamoCodeCacheEntry] = []
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
