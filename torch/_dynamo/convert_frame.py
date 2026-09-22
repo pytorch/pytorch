@@ -152,7 +152,13 @@ from .symbolic_convert import (
     SpeculationLog,
 )
 from .trace_rules import is_numpy
-from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
+from .types import (
+    ConvertFrameReturn,
+    FrameAction,
+    FrameExecStrategy,
+    GuardFilterEntry,
+    wrap_guarded_code,
+)
 from .utils import (
     _get_error_on_graph_break,
     chromium_event_timed,
@@ -804,7 +810,12 @@ class ConvertFrameAssert:
             # Restore the previous initial_global_state for nested compilation handling
             initial_global_state = prev_initial_global_state
 
-        if config.caching_precompile and self._package is not None:
+        # An explicit capture is saved by its caller, never by the ambient cache.
+        if (
+            config.caching_precompile
+            and self._package is not None
+            and not self._package.explicit_capture
+        ):
             from .package import DynamoCache
 
             # Record that the dynamo package has changed
@@ -1009,6 +1020,12 @@ class DynamoOutput:
         save: bool = False,
         cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1029,14 +1046,28 @@ class DynamoOutput:
 
         if not fx_experimental_config.translation_validation:
             return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
+                code,
+                output_graph,
+                cache_entries,
+                hooks,
+                save,
+                strict_error,
+                serialization_guard_filter_fn,
+                explicit_capture,
             )
 
         from torch.fx.experimental.validator import bisect, ValidationException
 
         try:
             return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
+                code,
+                output_graph,
+                cache_entries,
+                hooks,
+                save,
+                strict_error,
+                serialization_guard_filter_fn,
+                explicit_capture,
             )
         except ValidationException:
             bisect(output_graph.shape_env)
@@ -1050,6 +1081,12 @@ class DynamoOutput:
         hooks: Hooks | None,
         save: bool,
         strict_error: bool,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
@@ -1059,6 +1096,8 @@ class DynamoOutput:
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
             strict_error=strict_error,
+            serialization_guard_filter_fn=serialization_guard_filter_fn,
+            explicit_capture=explicit_capture,
         )
 
     def graph_capture_output(
@@ -1960,12 +1999,22 @@ def _compile(
             build_guards_ctx.enter_context(
                 torch_function_mode_stack_state_mgr.temp_restore_stack()
             )
+        # An explicit capture records only the filtered copy of its guards and
+        # fails loudly where the ambient cache would bypass the compile.
+        explicit_capture = package is not None and package.explicit_capture
         with dynamo_timed("build_guards", log_pt2_compile_event=True), build_guards_ctx:
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
                 save=output.package is not None,
                 cache_entries=cache_entries,
+                serialization_guard_filter_fn=(
+                    package.serialization_guard_filter_fn
+                    if package is not None
+                    else None
+                ),
+                explicit_capture=explicit_capture,
+                strict_error=explicit_capture,
             )
 
         # bypass_package sets output.package to None when this compile cannot be
