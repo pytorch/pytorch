@@ -350,6 +350,13 @@ class Capability:
         mem_efficient_attention = "attention.mem_efficient_attention"
 
 
+# The category inner classes of Capability (e.g. Capability.dtype), used to reject
+# unknown categories passed to DeviceTypeTestBase.get_capabilities().
+_CAPABILITY_CATEGORIES = frozenset(
+    value for value in vars(Capability).values() if isinstance(value, type)
+)
+
+
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
@@ -421,10 +428,14 @@ class DeviceTypeTestBase(TestCase):
     # Returns the capability map used by @requires_capabilities.
     # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
     # declare supported capabilities. This method evaluates the support checks.
-    # Pass a category namespace (e.g. Capability.attention) to only evaluate and
-    # return the capabilities of that category.
+    # Pass one of the Capability category classes (e.g. Capability.attention) to only
+    # evaluate and return the capabilities of that category. Only the inner classes
+    # of Capability are accepted; any other class raises ValueError.
     @classmethod
     def get_capabilities(cls, category: type | None = None) -> dict[str, bool]:
+        if category is not None and category not in _CAPABILITY_CATEGORIES:
+            raise ValueError(f"Unknown capability category: {category}")
+
         prefix = "" if category is None else f"{category.__name__}."
         return {
             k: bool(fn())
@@ -1300,6 +1311,11 @@ def instantiate_device_type_tests(
 
         device_type_test_class.setUpClass = _setUpClass
         device_type_test_class.tearDownClass = _tearDownClass
+
+        # Initialize device state before test instantiation so that callable
+        # parametrizers observe the final device type (e.g. the registered
+        # backend name rather than "privateuse1").
+        device_type_test_class._init_and_get_primary_device()
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
