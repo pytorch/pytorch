@@ -529,6 +529,16 @@ def capture_logs(log_name, log_level):
         logger.setLevel(old_level)
 
 
+@contextmanager
+def set_trace(callback):
+    previous_trace = sys.gettrace()
+    sys.settrace(callback)
+    try:
+        yield
+    finally:
+        sys.settrace(previous_trace)
+
+
 class MyModelConv2d(torch.nn.Module):
     def __init__(self, dim=512):
         super().__init__()
@@ -1205,8 +1215,11 @@ class TestFxGraphCache(TestCase):
                 static_autotuner.kernel_name,
                 metadata.statically_launched_kernel_names,
             )
-            cubin_path = static_autotuner.kernel.compile_results[0].kernel.cubin_path
-            self.assertIsNotNone(cubin_path)
+            cubin_path = os.path.join(
+                triton_cache_dir(artifacts.device),
+                artifacts.kernel_hash,
+                binary.filename,
+            )
             with open(cubin_path, "rb") as file:
                 self.assertEqual(file.read(), invalid_payload)
             graph.after_deserialization(CompiledFxGraphConstants())
@@ -1217,7 +1230,16 @@ class TestFxGraphCache(TestCase):
                 self.assertNotEqual(file.read(), invalid_payload)
 
     @requires_cuda_and_triton
-    @parametrize("bundle_damage", ("invalid", "ambiguous", "ambiguous_after_emit"))
+    @parametrize(
+        "bundle_damage",
+        (
+            "invalid",
+            "valid_alternate",
+            "omitted",
+            "ambiguous",
+            "ambiguous_after_emit",
+        ),
+    )
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_damaged_bundle_does_not_trust_loadable_local_binary(self, bundle_damage):
         def alternate_fn(x):
@@ -1237,6 +1259,10 @@ class TestFxGraphCache(TestCase):
             artifacts.artifacts[binary_index] = TritonKernelArtifact(
                 binary.filename, b"invalid bundled binary"
             )
+        elif bundle_damage == "valid_alternate":
+            artifacts.artifacts[binary_index] = alternate_binary
+        elif bundle_damage == "omitted":
+            self.clear_retained_static_binaries(bundle, static_autotuner.kernel)
         else:
             self.add_conflicting_bundled_binary(
                 bundle, device=artifacts.device, payload=b"conflicting binary"
@@ -1546,11 +1572,8 @@ class TestFxGraphCache(TestCase):
                 damage_phase = "deleted"
             return delete_before_native_load
 
-        sys.settrace(delete_before_native_load)
-        try:
+        with set_trace(delete_before_native_load):
             graph.after_deserialization(CompiledFxGraphConstants())
-        finally:
-            sys.settrace(None)
         self.assertEqual(damage_phase, f"{first_load_damage}d")
         if deleted_path is not None:
             self.assertNotEqual(deleted_path, cubin_path)
@@ -1681,11 +1704,8 @@ class TestFxGraphCache(TestCase):
             torch.cuda.device(1),
         ):
             x1 = torch.randn(32, device="cuda")
-            sys.settrace(damage_before_native_load)
-            try:
+            with set_trace(damage_before_native_load):
                 self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-            finally:
-                sys.settrace(None)
         expected_damage_phase = (
             "recreated" if cache_damage == "delete_recreate" else "pending"
         )

@@ -325,21 +325,29 @@ class TritonBundler:
                             continue
 
                         bundled_cubin = None
-                        ambiguous_bundled_cubin = False
+                        reject_bundled_cubin = False
                         if binary_index is not None:
                             matches = binary_index.matching_payloads(
                                 compile_result.bundled_artifact_identity()
                             )
                             if len(matches) == 1:
-                                bundled_cubin = next(iter(matches))
+                                candidate = next(iter(matches))
+                                if compile_result.matches_expected_cubin(candidate):
+                                    bundled_cubin = candidate
+                                else:
+                                    reject_bundled_cubin = True
+                                    log.warning(
+                                        "Ignoring mismatched bundled binary for %s",
+                                        result.kernel_name,
+                                    )
                             elif len(matches) > 1:
-                                ambiguous_bundled_cubin = True
+                                reject_bundled_cubin = True
                                 log.warning(
                                     "Ignoring ambiguous bundled binaries for %s",
                                     result.kernel_name,
                                 )
 
-                        if ambiguous_bundled_cubin:
+                        if reject_bundled_cubin:
                             force_recompile = True
                             break
 
@@ -353,6 +361,13 @@ class TritonBundler:
 
                         compile_result.reload_cubin_path()
                         kernel.retain_cubin_from_path()
+                        if not compile_result.matches_expected_cubin(kernel.cubin_raw):
+                            log.warning(
+                                "Ignoring mismatched local binary for %s",
+                                result.kernel_name,
+                            )
+                            force_recompile = True
+                            break
                 except MissingTritonKernelError:
                     log.warning(
                         "Failed to reload cubin file statically launchable autotuner %s",

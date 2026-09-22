@@ -56,6 +56,7 @@ def _is_invalid_kernel_image_error(error: RuntimeError) -> bool:
             "invalid image",
             "invalid kernel image",
             "invalid device function",
+            "a ptx jit compilation failed",
             "kernel image is invalid",
             "kernel image is empty",
             "no kernel image is available",
@@ -262,7 +263,6 @@ class StaticallyLaunchedTritonKernel:
         # single-process multi-device path is sequential in practice); concurrent
         # first-launch on two new devices would need external locking.
         self.device_agnostic: bool = False
-        self._cubin_raw_authoritative: bool = False
         self._use_stable_cubin_path: bool = False
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
@@ -350,7 +350,7 @@ class StaticallyLaunchedTritonKernel:
                     temporary_load_path = file.name
                     file.write(self.cubin_raw)
                 load_path = temporary_load_path
-            elif getattr(self, "_cubin_raw_authoritative", False):
+            elif self.device_agnostic and bool(self.functions):
                 self.reload_cubin_from_raw(cubin_path, force=True)
 
             candidate_restored = False
@@ -367,9 +367,15 @@ class StaticallyLaunchedTritonKernel:
                     if not (path_missing or missing_file_error or invalid_image):
                         raise
 
-                    restore_current = self.cubin_raw is not None and (
-                        not candidate_restored
-                        and (not stable_load or not invalid_image)
+                    restore_current = (
+                        self.cubin_raw is not None
+                        and not candidate_restored
+                        and (
+                            path_missing
+                            or missing_file_error
+                            or not stable_load
+                            or not invalid_image
+                        )
                     )
                     if restore_current:
                         # A cache artifact can disappear after materialization.
@@ -399,7 +405,6 @@ class StaticallyLaunchedTritonKernel:
                         cubin_path,
                         exc_info=True,
                     )
-            self._cubin_raw_authoritative = self.device_agnostic
             return loaded_kernel
         finally:
             if temporary_load_path is not None:
@@ -438,7 +443,6 @@ class StaticallyLaunchedTritonKernel:
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
         self.cubin_raw = None
-        self._cubin_raw_authoritative = False
         self._use_stable_cubin_path = False
 
     def _current_device(self) -> int:
@@ -758,7 +762,6 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.module = None
         self.cubin_path = None
         self.cubin_raw = None
-        self._cubin_raw_authoritative = False
         self._use_stable_cubin_path = False
 
     def _current_device(self) -> int:

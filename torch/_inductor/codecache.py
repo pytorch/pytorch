@@ -5693,7 +5693,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
                 "source reload callbacks must be set before calling result()"
             )
         if self.force_recompile:
-            log.warning("Bundled Triton kernel is ambiguous; forcing JIT compilation")
+            log.warning("Bundled Triton kernel is untrusted; forcing JIT compilation")
             self.static_autotuner.release_benchmark_artifacts()
             return self.compile_kernel_from_src(True)
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):

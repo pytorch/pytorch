@@ -3025,6 +3025,26 @@ class StaticTritonCompileResult(CompileResult[_T]):
     which vastly simplifies the setup and metadata needed to be kept.
     """
 
+    def __init__(
+        self,
+        kernel: _T,
+        config: Config,
+        compile_meta: dict[str, Any],
+        inductor_meta: InductorMeta,
+    ) -> None:
+        super().__init__(kernel, config, compile_meta, inductor_meta)
+        cubin_raw = getattr(kernel, "cubin_raw", None)
+        self.expected_cubin_digest = (
+            hashlib.sha256(cubin_raw).digest() if cubin_raw is not None else None
+        )
+
+    def matches_expected_cubin(self, payload: bytes) -> bool:
+        expected_digest = getattr(self, "expected_cubin_digest", None)
+        return (
+            expected_digest is not None
+            and hashlib.sha256(payload).digest() == expected_digest
+        )
+
     def bundled_artifact_identity(self) -> tuple[int | None, str, str]:
         device_type = self.compile_meta.get("device_type", "cuda")
         binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
