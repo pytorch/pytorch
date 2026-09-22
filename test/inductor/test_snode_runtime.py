@@ -10,6 +10,7 @@ from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -102,6 +103,10 @@ class UnsupportedTests(TestCase):
         self.assertZero(calculate_runtime(f, *inp))
 
 
+@skipIfXpu(
+    msg="get_device_tflops returns 0 on XPU so runtime estimate is 0; "
+    "https://github.com/intel/torch-xpu-ops/issues/5444"
+)
 class ComputeBoundedTests(TestCase):
     device = DEVICE
 
@@ -164,7 +169,10 @@ class ComputeBoundedTests(TestCase):
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
-
+@skipIfXpu(
+    msg="get_device_tflops returns 0 on XPU so runtime estimate is 0; "
+    "https://github.com/intel/torch-xpu-ops/issues/5444"
+)
 class MemoryBoundedTests(TestCase):
     device = DEVICE
 
