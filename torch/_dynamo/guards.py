@@ -3378,11 +3378,11 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
 
-        code = []
-        code.append(f"list({ref}.keys()) == {list(value.keys())}")
+        keys = list(value.keys())
+        code = [f"list({ref}.keys()) == {keys}"]
         # The keys, not the values: the leaf snapshots them and compares the
         # list by value at run time.
-        for key in value.keys():
+        for key in keys:
             self._compared_by_value(key)
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_mapping_keys_guard(
@@ -4428,7 +4428,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # Keys too: missing_values prunes hashable objects (a frozen
                 # dataclass), so a key can be one or hold one. A mappingproxy
                 # reached as a field is compared with == like a dict, and its
-                # reducer pickles each key on its own.
+                # reducer pickles each key on its own. Read through the
+                # subclass's own __iter__ and values() on purpose: that is what
+                # its reducer pickles (unlike the builtin reads the C++ guards
+                # use), so the mark lands on exactly what travels.
                 stack.extend(value)
                 stack.extend(value.values())
             elif isinstance(value, (list, tuple, set, frozenset, dict_keys)):
