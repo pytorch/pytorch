@@ -1112,8 +1112,15 @@ class TestPrecompile(TestCase):
 
             # A subclass input's outer dtype is checked like a dense one (invariant 6).
             x64 = distribute_tensor(torch.randn(5, 4).double(), mesh, [Replicate()])
-            with self.assertRaisesRegex(PrecompileError, "dtype"):
+            with self.assertRaisesRegex(PrecompileError, "runtime input has dtype"):
                 f_c(m, x64)
+            code_e, cache_e = torch.compiler.precompile(
+                lambda model, x: model(x), m, x, backend="eager"
+            )
+            f_e = torch.compiler.precompile.load(code_e, cache_e)
+            self.assertEqual(f_e(m, x).to_local(), ref.to_local())
+            with self.assertRaisesRegex(PrecompileError, "runtime input has dtype"):
+                f_e(m, x64)
         finally:
             dist.destroy_process_group()
             for k, v in saved_env.items():
@@ -3048,6 +3055,7 @@ class TestPrecompile(TestCase):
             op = torch.ops.quantized.mlprecompile_unbacked_no_meta
             with self.assertRaises(UnsupportedOperatorException):
                 _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
+
     def test_capture_leaves_the_ambient_rng_state_alone(self):
         # Capture runs fn for real under make_fx, so a graph that draws consumes the
         # caller's RNG stream as a side effect of asking for an artifact. Nothing about
@@ -3060,7 +3068,7 @@ class TestPrecompile(TestCase):
         )
         self.assertEqual(torch.random.get_rng_state(), before)
 
-    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA")
     def test_capture_leaves_the_accelerator_rng_state_alone(self):
         # Same guarantee on the device generator: a graph that draws on the accelerator
         # advances that device's stream, not the CPU one, so the snapshot has to cover
@@ -3074,14 +3082,149 @@ class TestPrecompile(TestCase):
         )
         self.assertEqual(torch.cuda.get_rng_state(), before)
 
+    def _reseeded_cpu_state(self):
+        torch.random.default_generator.manual_seed(7)
+        return torch.random.get_rng_state()
+
+    def test_capture_of_a_graph_that_does_not_draw_restores_nothing(self):
+        # A reseed the trace cannot see stands in for a concurrent thread's draw: the
+        # graph has nothing of its own to undo, so restoring would replay that draw.
+        def reseed_then_add(a):
+            torch.random.default_generator.manual_seed(7)
+            return a + 1
+
+        torch.manual_seed(0)
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            torch.compiler.precompile(reseed_then_add, torch.empty(4), backend="eager")
+        self.assertTrue(any("does not draw" in m for m in cm.output), cm.output)
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA")
+    def test_capture_drawing_only_on_cuda_leaves_the_cpu_generator_alone(self):
+        # Attribution is per device: the CUDA draw is rewound, while a CPU generator
+        # change made during the same capture is not the graph's and stands.
+        def reseed_then_draw(a):
+            torch.random.default_generator.manual_seed(7)
+            return torch.rand_like(a)
+
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state()
+        x = torch.empty(4, device="cuda")
+        torch.compiler.precompile(reseed_then_draw, x, backend="eager")
+        self.assertEqual(torch.cuda.get_rng_state(), before)
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+
+    def test_capture_rejected_after_tracing_still_restores_rng(self):
+        # These rejections all fire with a complete graph in hand, so they know what
+        # the capture drew and must not leave the caller's stream advanced.
+        const = torch.ones(4)
+        rejected = {
+            "neither a graph input": lambda a: torch.rand_like(a) + const,
+            "user input received a gradient": lambda a: (
+                (torch.rand_like(a) * a).sum().backward()
+            ),
+        }
+        x = torch.ones(4, requires_grad=True)
+        for pattern, fn in rejected.items():
+            with self.subTest(pattern):
+                torch.manual_seed(0)
+                before = torch.random.get_rng_state()
+                with self.assertRaisesRegex(PrecompileError, pattern):
+                    torch.compiler.precompile(fn, x, backend="eager")
+                self.assertEqual(torch.random.get_rng_state(), before)
+
+    def test_capture_through_an_opaque_op_restores_every_generator(self):
+        # A custom op can draw inside its own kernel with nothing in the graph to say
+        # so; its presence alone makes capture restore every saved generator.
+        from torch.library import _scoped_library
+
+        with _scoped_library("precompile_rng", "DEF") as lib:
+            lib.define("draw(Tensor x) -> Tensor")
+            lib.impl(
+                "draw", lambda x: x + torch.rand_like(x), "CompositeExplicitAutograd"
+            )
+            torch.manual_seed(0)
+            before = torch.random.get_rng_state()
+            op = torch.ops.precompile_rng.draw.default
+            torch.compiler.precompile(op, torch.empty(4), backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), before)
+
+    def test_capture_drawing_from_an_explicit_generator_rewinds_no_default(self):
+        # The named generator cannot be saved before capture names it, and rewinding
+        # its device's default generator instead would replay unrelated draws.
+        gen = torch.Generator().manual_seed(0)
+
+        def reseed_then_draw(a):
+            torch.random.default_generator.manual_seed(7)
+            return a + torch.rand(a.shape, generator=gen)
+
+        gen_before = gen.get_state()
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            torch.compiler.precompile(reseed_then_draw, torch.empty(4), backend="eager")
+        self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+        self.assertNotEqual(gen.get_state(), gen_before)
+
+    def test_capture_of_a_seeded_op_that_cannot_draw_restores_nothing(self):
+        # SDPA traces to a tagged op either way; only the literal dropout_p decides
+        # whether it drew, so p=0.0 leaves a reseed made during capture in place and
+        # p=0.5 rewinds it.
+        def attention(p):
+            def run(a):
+                torch.random.default_generator.manual_seed(7)
+                return torch.nn.functional.scaled_dot_product_attention(
+                    a, a, a, dropout_p=p
+                )
+
+            return run
+
+        q = torch.randn(1, 1, 8, 16)
+        torch.manual_seed(0)
+        with self.assertLogs("torch._precompile", level="WARNING"):
+            torch.compiler.precompile(attention(0.0), q, backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        torch.compiler.precompile(attention(0.5), q, backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), before)
+
+    def test_rng_gate_table_matches_the_op_registry(self):
+        # The table is a hand-listed subset of the op registry, so it rots silently in
+        # both directions: a typo'd key never fires, and a newly tagged gated op that
+        # is missing is treated as always-drawing. Rebuild it from the static schema
+        # registry, which unlike dir(torch.ops.aten) does not grow as tests touch ops.
+        # "p"/"prob" are NOT gates: bernoulli(p=0.0) still consumes randomness.
+        from torch._precompile import _RNG_GATED_BY_ARG
+
+        def tagged(name, overload):
+            packet = getattr(torch.ops.aten, name.split("::")[1], None)
+            op = getattr(packet, overload or "default", None)
+            return op is not None and torch.Tag.nondeterministic_seeded in op.tags
+
+        gates = ("dropout_p", "train", "training")
+        discovered, never = {}, set()
+        for schema in torch._C._jit_get_all_schemas():
+            if not schema.name.startswith("aten::"):
+                continue
+            if not tagged(schema.name, schema.overload_name):
+                continue
+            args = [a.name for a in schema.arguments]
+            gate = next((g for g in gates if g in args), None)
+            if gate is None:
+                never.add(schema.name)
+            else:
+                discovered.setdefault(schema.name, gate)
+        gated = {k: v for k, v in _RNG_GATED_BY_ARG.items() if v is not None}
+        self.assertEqual(discovered, gated)
+        # Never-drawing entries are tagged ops without a gate argument.
+        self.assertLessEqual(set(_RNG_GATED_BY_ARG) - set(gated), never)
+
     def test_concurrent_captures_are_serialized(self):
         # Capture clears the example tensors' .grad and reparametrizes the example
         # module in place, so two captures of a shared model in flight at once would
         # undo each other's mutations. One process-wide lock keeps a capture atomic
         # with respect to another; assert no two are ever inside _capture.
         import threading
-        import time
-        from unittest.mock import patch
 
         import torch._precompile as precompile_impl
 
@@ -3089,14 +3232,18 @@ class TestPrecompile(TestCase):
         state_lock = threading.Lock()
         active = 0
         max_active = 0
+        all_in = threading.Event()
 
         def spy(*args, **kwargs):
             nonlocal active, max_active
             with state_lock:
                 active += 1
                 max_active = max(max_active, active)
+                if active == 4:
+                    all_in.set()
             try:
-                time.sleep(0.02)
+                # Without the lock all four workers meet here; with it this times out.
+                all_in.wait(timeout=0.5)
                 return real(*args, **kwargs)
             finally:
                 with state_lock:
@@ -3111,7 +3258,7 @@ class TestPrecompile(TestCase):
                 lambda a: a + 1, torch.ones(2), backend="eager"
             )
 
-        with patch.object(precompile_impl, "_capture", spy):
+        with mock.patch.object(precompile_impl, "_capture", spy):
             threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
             for thread in threads:
                 thread.start()
@@ -3146,7 +3293,10 @@ class TestPrecompile(TestCase):
         )
         thread.start()
         thread.join(120)
-        self.assertFalse(thread.is_alive(), "nested precompile deadlocked")
+        if thread.is_alive():
+            # The wedged thread holds the lock forever; free it for the later tests.
+            torch._precompile._CAPTURE_LOCK = threading.RLock()
+            self.fail("nested precompile deadlocked")
         code, _cache = results[0]
         self.assertIn("def forward", code)
 
@@ -4862,8 +5012,8 @@ class TestExportPython(TestCase):
         self.assertEqual(run(x, out=x), x + x)
 
     def test_capture_failure_leaves_rng_alone(self, device):
-        # A rejected capture has no graph to attribute draws to, so it must not rewind:
-        # capture rejections are routine and would replay a concurrent thread's draws.
+        # A capture that fails before it has a graph has nothing to attribute draws
+        # to, so it must not rewind: that would replay a concurrent thread's draws.
         import torch._precompile as precompile_impl
 
         x = make_tensor((4,), device=device, dtype=torch.float32)
