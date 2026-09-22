@@ -31,9 +31,7 @@ def _cubin_stat_identity(cubin_path: str) -> tuple[int, int, int, int] | None:
     return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
 
 
-def _read_cubin_snapshot(
-    cubin_path: str,
-) -> tuple[tuple[int, int, int, int], bytes] | None:
+def _read_cubin_snapshot(cubin_path: str) -> bytes | None:
     """Read bytes with enough file identity to detect an atomic replacement."""
     before_identity = _cubin_stat_identity(cubin_path)
     if before_identity is None:
@@ -47,7 +45,7 @@ def _read_cubin_snapshot(
     after_identity = _cubin_stat_identity(cubin_path)
     if before_identity != after_identity:
         return None
-    return after_identity, payload
+    return payload
 
 
 def _is_invalid_kernel_image_error(error: RuntimeError) -> bool:
@@ -265,7 +263,6 @@ class StaticallyLaunchedTritonKernel:
         # first-launch on two new devices would need external locking.
         self.device_agnostic: bool = False
         self._cubin_raw_authoritative: bool = False
-        self._fallback_cubin_raw: bytes | None = None
         self._use_stable_cubin_path: bool = False
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
@@ -291,7 +288,7 @@ class StaticallyLaunchedTritonKernel:
         # before native loading can silently accept it.
         if force:
             snapshot = _read_cubin_snapshot(filepath)
-            needs_write = snapshot is None or snapshot[1] != self.cubin_raw
+            needs_write = snapshot is None or snapshot != self.cubin_raw
         else:
             needs_write = not os.path.exists(filepath)
         if needs_write:
@@ -316,7 +313,7 @@ class StaticallyLaunchedTritonKernel:
             raise MissingTritonKernelError(
                 f"Triton kernel binary not readable at {self.cubin_path}"
             )
-        self.cubin_raw = snapshot[1]
+        self.cubin_raw = snapshot
 
     def _agnostic_cubin_path(self) -> str:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
@@ -326,6 +323,11 @@ class StaticallyLaunchedTritonKernel:
             raise AssertionError(
                 "device-agnostic kernel cannot reload its cubin for a new device"
             )
+        if (
+            getattr(self, "_use_stable_cubin_path", False)
+            and self.cubin_raw is not None
+        ):
+            return self.cubin_path
         return self.reload_cubin_from_raw(self.cubin_path)
 
     def _load_kernel_from_path(self, cubin_path: str, device: int):
@@ -376,17 +378,6 @@ class StaticallyLaunchedTritonKernel:
                         candidate_restored = True
                         continue
 
-                    fallback_cubin = self._fallback_cubin_raw if invalid_image else None
-                    if fallback_cubin is not None:
-                        # The primary payload is exact but unusable. Try the
-                        # distinct, stable local snapshot exactly once.
-                        self.cubin_raw = fallback_cubin
-                        self._fallback_cubin_raw = None
-                        self._cubin_raw_authoritative = True
-                        self.reload_cubin_from_raw(load_path, force=True)
-                        candidate_restored = True
-                        continue
-
                     if invalid_image:
                         raise InvalidTritonKernelArtifactError(
                             f"Triton kernel binary is unusable at {cubin_path}"
@@ -408,7 +399,6 @@ class StaticallyLaunchedTritonKernel:
                         cubin_path,
                         exc_info=True,
                     )
-            self._fallback_cubin_raw = None
             self._cubin_raw_authoritative = self.device_agnostic
             return loaded_kernel
         finally:
@@ -448,7 +438,6 @@ class StaticallyLaunchedTritonKernel:
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
         self.cubin_raw = None
-        self._fallback_cubin_raw = None
         self._cubin_raw_authoritative = False
         self._use_stable_cubin_path = False
 
@@ -769,7 +758,6 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.module = None
         self.cubin_path = None
         self.cubin_raw = None
-        self._fallback_cubin_raw = None
         self._cubin_raw_authoritative = False
         self._use_stable_cubin_path = False
 

@@ -5666,7 +5666,9 @@ class StaticAutotunerFuture(CodeCacheFuture):
     A statically launchable CachingAutotuner, loaded from TritonBundler
     """
 
-    def __init__(self, static_autotuner: CachingAutotuner) -> None:
+    def __init__(
+        self, static_autotuner: CachingAutotuner, *, force_recompile: bool = False
+    ) -> None:
         # Pickled version of CachingAutotuner
         self.static_autotuner = static_autotuner
         # This needs to be set in AsyncCompile.triton, in case
@@ -5675,6 +5677,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
         self.compile_kernel_from_src: Callable[[bool], CachingAutotuner] | None = None
+        self.force_recompile = force_recompile
 
     def result(self, timeout: float | None = None) -> CachingAutotuner:
         # timeout is accepted for interface parity with other CodeCacheFuture
@@ -5689,6 +5692,10 @@ class StaticAutotunerFuture(CodeCacheFuture):
             raise AssertionError(
                 "source reload callbacks must be set before calling result()"
             )
+        if self.force_recompile:
+            log.warning("Bundled Triton kernel is ambiguous; forcing JIT compilation")
+            self.static_autotuner.release_benchmark_artifacts()
+            return self.compile_kernel_from_src(True)
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
             try:
                 self.static_autotuner.recheck_autotune_cache(

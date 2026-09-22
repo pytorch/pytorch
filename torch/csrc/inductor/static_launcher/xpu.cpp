@@ -286,9 +286,20 @@ inline sycl::kernel* _createKernel(
       {module, sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
   destroy_module_on_error.release();
-  auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
-      {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
-      syclContext);
+  auto fun = [&]() {
+    try {
+      return sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
+          {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
+          syclContext);
+    } catch (...) {
+      // `mod` now owns the module and is destroyed before the earlier scope
+      // guard during unwinding. Release the raw kernel first so module
+      // destruction cannot fail with ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE.
+      ze().zeKernelDestroy(kernel);
+      destroy_kernel_on_error.release();
+      throw;
+    }
+  }();
   destroy_kernel_on_error.release();
   return new sycl::kernel(std::move(fun));
 }

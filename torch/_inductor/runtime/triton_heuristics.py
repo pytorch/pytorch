@@ -3112,30 +3112,36 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 raise e
             return None
 
-    def reload_cubin_path(self, *, force: bool = False):
-        """
-        When loading from cache on disk, we want to reload cubin
-        files from their appropriate location on disc.
-        """
+    def cubin_path(self) -> str:
+        """Return the canonical cache path for this result's GPU binary."""
         device_type = (
             "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
         )
-        _, kernel_hash, binary_filename = self.bundled_artifact_identity()
-        cubin_location = os.path.join(
-            triton_cache_dir(
-                _resolve_load_device(self.compile_meta.get("device"), device_type)
-            ),
+        device, kernel_hash, binary_filename = self.bundled_artifact_identity()
+        return os.path.join(
+            triton_cache_dir(_resolve_load_device(device, device_type)),
             kernel_hash,
             binary_filename,
         )
-        self.kernel.reload_cubin_from_raw(cubin_location, force=force)
+
+    def set_cubin_path(self) -> None:
+        """Point the launcher at its canonical path without materializing it."""
+        self.kernel.cubin_path = self.cubin_path()
+
+    def reload_cubin_path(self) -> None:
+        """Reload this result's GPU binary at its canonical cache path."""
+        self.kernel.reload_cubin_from_raw(self.cubin_path())
 
     def make_launcher(self) -> LauncherType:
         # If at least one static make_launcher call occurs,
         # we're sure static cuda launcher was used for this compile
         set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
-        if not self.kernel.cubin_path or not os.path.exists(self.kernel.cubin_path):
+        if not self.kernel.cubin_path:
+            self.set_cubin_path()
+        if not getattr(
+            self.kernel, "_use_stable_cubin_path", False
+        ) and not os.path.exists(self.kernel.cubin_path):
             self.reload_cubin_path()
         # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
         # kernel, so the launcher must keep its loaded handles per device.

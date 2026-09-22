@@ -1217,16 +1217,96 @@ class TestFxGraphCache(TestCase):
                 self.assertNotEqual(file.read(), invalid_payload)
 
     @requires_cuda_and_triton
+    @parametrize("bundle_damage", ("invalid", "ambiguous", "ambiguous_after_emit"))
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
+    def test_damaged_bundle_does_not_trust_loadable_local_binary(self, bundle_damage):
+        def alternate_fn(x):
+            return x + 2
+
+        alternate_binary = self.compile_alternate_unary_binary(alternate_fn)
+
+        def fn(x):
+            return x + 1
+
+        x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn
+        )
+        artifacts, binary_index, binary = self.find_bundled_binary(bundle)
+        self.assertEqual(binary.filename, alternate_binary.filename)
+        if bundle_damage == "invalid":
+            artifacts.artifacts[binary_index] = TritonKernelArtifact(
+                binary.filename, b"invalid bundled binary"
+            )
+        else:
+            self.add_conflicting_bundled_binary(
+                bundle, device=artifacts.device, payload=b"conflicting binary"
+            )
+        local_cubin_path = os.path.join(
+            triton_cache_dir(artifacts.device),
+            artifacts.kernel_hash,
+            binary.filename,
+        )
+        if bundle_damage == "ambiguous_after_emit":
+            os.remove(local_cubin_path)
+        else:
+            write_atomic(local_cubin_path, alternate_binary.payload, make_dirs=True)
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        if bundle_damage == "ambiguous_after_emit":
+            write_atomic(local_cubin_path, alternate_binary.payload, make_dirs=True)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
+        self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
+
+    @requires_cuda_and_triton
+    @parametrize("compile_on_one_rank", (False, True))
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
+    def test_missing_binary_in_read_only_cache_uses_bundle(self, compile_on_one_rank):
+        if compile_on_one_rank and not TEST_MULTIGPU:
+            self.skipTest("device-agnostic case requires two GPUs")
+
+        def fn(x):
+            return x.sin()
+
+        with torch.compiler.config.patch(compile_on_one_rank=compile_on_one_rank):
+            x, expected, graph, bundle, static_autotuner = (
+                self.compile_unary_static_graph(fn)
+            )
+        artifacts, _, binary = self.find_bundled_binary(bundle)
+        cubin_path = os.path.join(
+            triton_cache_dir(artifacts.device),
+            artifacts.kernel_hash,
+            binary.filename,
+        )
+        os.remove(cubin_path)
+        cache_group = os.path.dirname(cubin_path)
+        original_mode = os.stat(cache_group).st_mode
+
+        self.reset()
+        os.chmod(cache_group, 0o555)
+        try:
+            TritonBundler.read_and_emit(bundle)
+            graph.after_deserialization(CompiledFxGraphConstants())
+            loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
+            self.assertIs(loaded_autotuner, static_autotuner.kernel)
+            self.assertEqual(graph.current_callable([x.clone()])[0], expected)
+            if compile_on_one_rank:
+                with torch.cuda.device(1):
+                    x1 = x.clone().to(1)
+                    self.assertEqual(graph.current_callable([x1])[0], fn(x1))
+            self.assertFalse(os.path.exists(cubin_path))
+        finally:
+            os.chmod(cache_group, original_mode)
+
+    @requires_cuda_and_triton
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_loader_oom_does_not_rewrite_bundled_cubin(self):
         def fn(x):
             return x.sin()
 
         _, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(fn)
-        artifacts, index, binary = self.find_bundled_binary(bundle)
-        artifacts.artifacts[index] = TritonKernelArtifact(
-            binary.filename, b"different bundled binary"
-        )
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
@@ -1244,80 +1324,40 @@ class TestFxGraphCache(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
-    @parametrize("damaged_source", ("bundle", "bundle_deleted_before_load", "local"))
     @torch.compiler.config.patch(compile_on_one_rank=True)
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
-    def test_device_agnostic_retains_successful_local_binary(self, damaged_source):
+    def test_device_agnostic_ignores_damaged_local_binary(self):
         def fn(x):
             return x.sin()
 
         x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn, device=0
         )
-        artifacts, index, binary = self.find_bundled_binary(bundle)
+        artifacts, _, binary = self.find_bundled_binary(bundle)
         expected_cubin = binary.payload
-        if damaged_source.startswith("bundle"):
-            artifacts.artifacts[index] = TritonKernelArtifact(
-                binary.filename, b"invalid bundled binary"
-            )
-        else:
-            local_cubin_path = os.path.join(
-                triton_cache_dir(artifacts.device),
-                artifacts.kernel_hash,
-                binary.filename,
-            )
-            write_atomic(local_cubin_path, b"invalid local binary", make_dirs=True)
+        local_cubin_path = os.path.join(
+            triton_cache_dir(artifacts.device),
+            artifacts.kernel_hash,
+            binary.filename,
+        )
+        write_atomic(local_cubin_path, b"invalid local binary", make_dirs=True)
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
         missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
         self.assertFalse(os.path.exists(missing_libdevice_path))
-        static_kernel = static_autotuner.kernel.compile_results[0].kernel
-        damage_phase = "pending"
-        deleted_path = None
-
-        def delete_before_native_load(frame, event, arg):
-            nonlocal damage_phase, deleted_path
-            if (
-                damaged_source == "bundle_deleted_before_load"
-                and damage_phase == "pending"
-                and event == "line"
-                and frame.f_code is static_kernel._load_kernel_from_path.__code__
-                and frame.f_locals.get("temporary_load_path") is not None
-                and frame.f_locals.get("load_path")
-                == frame.f_locals["temporary_load_path"]
-            ):
-                deleted_path = frame.f_locals["load_path"]
-                os.remove(deleted_path)
-                damage_phase = "deleted"
-            return delete_before_native_load
-
-        sys.settrace(delete_before_native_load)
         with _set_env("TRITON_LIBDEVICE_PATH", missing_libdevice_path):
-            try:
-                graph.after_deserialization(CompiledFxGraphConstants())
-            finally:
-                sys.settrace(None)
+            graph.after_deserialization(CompiledFxGraphConstants())
             loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
             self.assertIs(loaded_autotuner, static_autotuner.kernel)
             static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
             self.assertEqual(static_kernel.cubin_raw, expected_cubin)
 
-            if damaged_source.startswith("bundle"):
-                with open(static_kernel.cubin_path, "wb") as file:
-                    file.write(b"truncated after successful local load")
-            else:
-                shutil.rmtree(os.path.join(cache_dir(), "triton"))
+            shutil.rmtree(os.path.join(cache_dir(), "triton"))
             x1 = torch.randn(32, device="cuda")
             with torch.cuda.device(1):
                 x1 = x1.to(1)
                 self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        expected_damage_phase = (
-            "deleted" if damaged_source == "bundle_deleted_before_load" else "pending"
-        )
-        self.assertEqual(damage_phase, expected_damage_phase)
-        if deleted_path is not None:
-            self.assertNotEqual(deleted_path, static_kernel.cubin_path)
         self.assertEqual(static_kernel.cubin_raw, expected_cubin)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -1351,7 +1391,7 @@ class TestFxGraphCache(TestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
         metadata = TritonBundler.read_and_emit(bundle)
         self.assertIsNotNone(metadata)
-        self.assertNotIn(
+        self.assertIn(
             static_autotuner.kernel_name, metadata.statically_launched_kernel_names
         )
         emitted_binary = os.path.join(
