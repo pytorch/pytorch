@@ -206,7 +206,7 @@ class FSDPParam:
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
-    _all_gather_num_prefixes: tuple[int, ...]
+    _all_gather_outer_sizes: tuple[int, ...]
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
@@ -841,9 +841,9 @@ class FSDPParam:
             )
         if has_fsdp_pre_all_gather:
             self._extensions_data = ExtensionsData()
-            self._all_gather_num_prefixes = ()
+            self._all_gather_outer_sizes = ()
         else:
-            self._all_gather_num_prefixes = (
+            self._all_gather_outer_sizes = (
                 math.prod(self.padded_sharded_param_size[: self.fsdp_placement.dim])
                 if self.padded_sharded_param_size.numel()
                 else 1,
@@ -974,10 +974,10 @@ class FSDPParam:
         )
 
     @property
-    def all_gather_num_prefixes(self) -> tuple[int, ...]:
+    def all_gather_outer_sizes(self) -> tuple[int, ...]:
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             return (1,)
-        return self._all_gather_num_prefixes
+        return self._all_gather_outer_sizes
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
@@ -1173,7 +1173,7 @@ class FSDPParam:
                     if isinstance(self.mesh_info, FSDPMeshInfo)
                     else 1
                 )
-                self._all_gather_num_prefixes = _get_all_gather_num_prefixes(
+                self._all_gather_outer_sizes = _get_all_gather_outer_sizes(
                     self._extensions_data.all_gather_input_sizes,
                     world_size=world_size,
                     shard_dim=self.fsdp_placement.dim,
@@ -1373,7 +1373,7 @@ class FSDPParam:
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
 
 
-def _get_all_gather_num_prefixes(
+def _get_all_gather_outer_sizes(
     input_sizes: Sequence[torch.Size],
     *,
     world_size: int,
@@ -1391,8 +1391,8 @@ def _get_all_gather_num_prefixes(
         and any(numel != padded_numel for numel in input_numels)
         and (not all_gather_outputs or len(all_gather_outputs) == len(input_sizes))
     )
-    num_prefixes = math.prod(padded_sharded_size[:dim]) if dim else 1
-    prefixes: list[int] = []
+    outer_size = math.prod(padded_sharded_size[:dim]) if dim else 1
+    outer_sizes: list[int] = []
     for i, (input_size, input_numel) in enumerate(zip(input_sizes, input_numels)):
         if require_padding and input_size != padded_sharded_size:
             raise AssertionError(
@@ -1415,8 +1415,8 @@ def _get_all_gather_num_prefixes(
                     f"{padded_sharded_size} and world size "
                     f"{world_size}, but got {output_numel}"
                 )
-        prefixes.append(num_prefixes if input_numel else 1)
-    return tuple(prefixes)
+        outer_sizes.append(outer_size if input_numel else 1)
+    return tuple(outer_sizes)
 
 
 def alloc_storage(tensor: torch.Tensor) -> None:

@@ -8,7 +8,7 @@ TORCH_API void check_all_gather_copy_out_inputs(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
-    at::IntArrayRef num_prefixes,
+    at::IntArrayRef outer_sizes,
     int64_t num_chunks);
 
 TORCH_API void check_reduce_scatter_copy_in_inputs(
@@ -21,7 +21,7 @@ TORCH_API void all_gather_copy_out(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
-    at::IntArrayRef num_prefixes,
+    at::IntArrayRef outer_sizes,
     int64_t num_chunks);
 
 TORCH_API at::Tensor& reduce_scatter_copy_in(
