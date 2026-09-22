@@ -379,6 +379,7 @@ def helper(x):
             value = ops.add(xvalue, rvalue)
             value = ops.add(value, ops.constant(0.25, torch.float32))
             ops.partial_accumulate("out", reduction_type, value, {})
+            kernel.fixed_config = None
             kernel.codegen_body()
 
         code = kernel.body.getvalue()
