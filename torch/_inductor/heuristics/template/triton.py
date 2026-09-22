@@ -3050,9 +3050,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         if dp == 2 and block_m not in (128, 256):
             return False
         if template_kwargs.get("TWO_CTAS", False):
-            # Inductor only emits TWO_CTAS from this MetaWS config family. Its
-            # current paired-CTA output protocol is validated only for the TMA
-            # epilogue-store path; this does not constrain non-WS 2CTA kernels.
+            # This MetaWS 2CTA template currently requires TMA epilogue stores.
             if not (has_two_ctas() and config.triton.enable_template_tma_store):
                 return False
             # 2CTA halves B along N. Each CTA's slice must still span at least
