@@ -513,7 +513,7 @@ def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     world_size: int,
 ) -> ReduceScatterInput:
-    r"""Prepare gradients and select their reduce-scatter copy.
+    r"""Prepare gradients and their reduce-scatter copy.
 
     Contiguous nonzero-dimension shards copy directly into the collective buffer.
     Noncontiguous gradients use the existing chunk-and-concatenate reorder.
@@ -543,20 +543,18 @@ def _default_reduce_scatter_input_fn(
         padded_unsharded_sizes.append(
             _get_dim0_padded_size(unsharded_grad.size(), world_size)
         )
-    copy_in = foreach_reduce_scatter_copy_in
-    if any(num_leading_dims):
 
-        def copy_in(
-            unsharded_grads: list[torch.Tensor],
-            output: torch.Tensor,
-            world_size: int,
-        ) -> None:
-            torch.ops.fsdp._reduce_scatter_copy_in_(
-                output.view(world_size, -1),
-                unsharded_grads,
-                num_leading_dims,
-                world_size,
-            )
+    def copy_in(
+        unsharded_grads: list[torch.Tensor],
+        output: torch.Tensor,
+        world_size: int,
+    ) -> None:
+        torch.ops.fsdp._reduce_scatter_copy_in_(
+            output.view(world_size, -1),
+            unsharded_grads,
+            num_leading_dims,
+            world_size,
+        )
 
     return ReduceScatterInput(padded_unsharded_sizes, copy_in)
 
