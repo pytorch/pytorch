@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import threading
 import unittest
 import weakref
 from types import SimpleNamespace
@@ -788,6 +789,7 @@ def kernel_many_args(out_tensor, {decl}):
                 self.function = 0xF00D
                 self.functions = {}
                 self.modules = {}
+                self._load_lock = threading.Lock()
                 self.C_impl = FakeImpl
 
             def close(self):
