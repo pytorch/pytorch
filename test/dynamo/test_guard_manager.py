@@ -547,13 +547,18 @@ user_stack=None)
             type(nested),
             torch._C._dispatch_keys(nested),
         )
-        state = torch._C._get_torch_function_state()
-        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
-            root.check({"x": nested})
-        self.assertEqual(torch._C._get_torch_function_state(), state)
-        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
-            root.check_verbose({"x": nested})
-        self.assertEqual(torch._C._get_torch_function_state(), state)
+        # Under a non-default state, so restoring the captured old state is
+        # told apart from resetting to ENABLED.
+        err = "NestedTensorImpl doesn't support"
+        with torch._C.DisableTorchFunctionSubclass():
+            state = torch._C._get_torch_function_state()
+            self.assertEqual(state, torch._C._TorchFunctionState.SUBCLASSES_DISABLED)
+            with self.assertRaisesRegex(RuntimeError, err):
+                root.check({"x": nested})
+            self.assertEqual(torch._C._get_torch_function_state(), state)
+            with self.assertRaisesRegex(RuntimeError, err):
+                root.check_verbose({"x": nested})
+            self.assertEqual(torch._C._get_torch_function_state(), state)
 
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
