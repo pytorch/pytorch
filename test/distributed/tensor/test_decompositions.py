@@ -18,7 +18,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    NUM_DEVICES,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -255,6 +256,8 @@ class TestDecompSharding(TestCase):
 class TestDecompShardingWithComms(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    world_size = NUM_DEVICES
+    
     @with_comms
     def test_decomp_schema_caches_static_args(self):
         """
