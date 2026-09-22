@@ -1717,6 +1717,26 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   res = at::empty({B, M, num_heads, Kv}, query.options());
 
+  // Neither ROCm backend tolerates an empty launch (CK rejects the dtype
+  // before looking at sizes, AOTriton fails with hipErrorInvalidValue), and
+  // there is nothing to compute; the CUTLASS path returns early for zero
+  // heads the same way. The logsumexp is zero-filled rather than left
+  // uninitialized because it can be non-empty when only Kv is zero.
+  if (res.numel() == 0) {
+    const auto lse_batch_size =
+        seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B;
+    logsumexp = at::zeros(
+        {lse_batch_size, num_heads, compute_logsumexp ? max_seqlen_q : 0},
+        query.options().dtype(at::ScalarType::Float));
+    return std::make_tuple(
+        std::move(res),
+        std::move(logsumexp),
+        std::move(seed_t),
+        std::move(offset_t),
+        max_seqlen_q,
+        max_seqlen_k_.has_value() ? max_seqlen_k_.value() : max_seqlen_k);
+  }
+
   if(at::globalContext().getROCmFAPreferredBackend() ==
     at::ROCmFABackend::Ck) {
 

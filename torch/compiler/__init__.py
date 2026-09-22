@@ -1016,6 +1016,12 @@ def load_compiled_function(
 
         This API is currently experimental and subject to change.
 
+    When ``f_globals`` is passed and a global is itself the source of a kept
+    guard, the returned callable re-reads that global from it before every call,
+    so it is not safe to share between threads that rebind such a global
+    concurrently, with or without the GIL; load the artifact once per thread
+    instead.
+
     Args:
         file: A file-like object containing the serialized compiled function.
         f_globals: Optional live global scope enclosing the compiled function,
@@ -1044,12 +1050,25 @@ def load_compiled_function(
                    and ``__builtins__`` when it has to build the builtins dict
                    one of those names holds, never overwriting a key it already
                    binds, and a global rebound in it afterwards is what the
-                   guards check on the next call. The compiled bytecode instead
-                   reads a load-time snapshot of this dict merged over the
-                   globals serialized with the artifact, so a name this dict
-                   omits still resolves there and a rebind the guards ACCEPT
-                   leaves the call computing with the load-time value -- a known
-                   limitation rather than a contract to rely on.
+                   guards check on the next call. The compiled bytecode reads a
+                   load-time snapshot of this dict merged over the globals
+                   serialized with the artifact, so a name this dict omits
+                   still resolves there; on top of that, a global that is
+                   itself the source of a kept guard is re-read from this dict
+                   on every call, so a rebind the guards ACCEPT -- a
+                   same-metadata swap under a kept ``TENSOR_MATCH``, which
+                   checks metadata, not values -- is what the call computes
+                   with, and a store the compiled function itself makes to
+                   such a global does not carry over to its next call. A
+                   global that is not itself a kept guard's source keeps its
+                   load-time value -- one only a symbolic-shape guard reads
+                   included -- and so does a container a guard reaches only
+                   through a sub-path such as ``D['a']``, whose other members
+                   nothing certifies: a rebind of either is not seen, even
+                   when the guard on ``D['a']`` passes. The re-read is not
+                   atomic with the guard check before it, and it writes into
+                   the loaded callable's own globals, shared by every call of
+                   it; the user guide covers both.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
