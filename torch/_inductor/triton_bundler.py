@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 _BinaryArtifactIdentity = tuple[int | None, str, str]
 _BinaryArtifactName = tuple[str, str]
 _BinaryArtifactGroup = tuple[int | None, str]
+_BinaryResolutionKey = tuple[_BinaryArtifactIdentity, bytes | None]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -135,6 +136,57 @@ class _BundledBinaryIndex:
         if device in by_device:
             return OrderedSet(((device, kernel_hash),))
         return OrderedSet()
+
+
+@dataclasses.dataclass(frozen=True)
+class _BundledBinaryResolution:
+    payload: bytes | None
+    rejected: bool
+
+
+@dataclasses.dataclass
+class _BundledBinaryResolutions:
+    """Trusted payload decisions shared by bundle emission and static loading."""
+
+    by_key: dict[_BinaryResolutionKey, _BundledBinaryResolution]
+    untrusted_groups: OrderedSet[_BinaryArtifactGroup]
+
+    @staticmethod
+    def _key(compile_result) -> _BinaryResolutionKey:
+        return (
+            compile_result.bundled_artifact_identity(),
+            getattr(compile_result, "expected_cubin_digest", None),
+        )
+
+    @classmethod
+    def from_autotuners(
+        cls,
+        static_autotuners: list[StaticallyLaunchedAutotuner],
+        binary_index: _BundledBinaryIndex,
+    ) -> "_BundledBinaryResolutions":
+        resolutions = cls({}, OrderedSet())
+        for result in static_autotuners:
+            for compile_result in result.kernel.compile_results:
+                key = cls._key(compile_result)
+                if key in resolutions.by_key:
+                    continue
+                identity, _ = key
+                payloads = binary_index.matching_payloads(identity)
+                payload = next(iter(payloads)) if len(payloads) == 1 else None
+                rejected = len(payloads) > 1 or (
+                    payload is not None
+                    and not compile_result.matches_expected_cubin(payload)
+                )
+                if rejected:
+                    resolutions.untrusted_groups.update(
+                        binary_index.matching_groups(identity)
+                    )
+                    payload = None
+                resolutions.by_key[key] = _BundledBinaryResolution(payload, rejected)
+        return resolutions
+
+    def get(self, compile_result) -> _BundledBinaryResolution:
+        return self.by_key[self._key(compile_result)]
 
 
 class TritonBundler:
@@ -269,29 +321,11 @@ class TritonBundler:
             counters["inductor"]["triton_bundler_save_static_autotuner"] += 1
             return cls._static_autotuners, static_autotuner_names
 
-    @staticmethod
-    def _untrusted_binary_artifact_groups(
-        static_autotuners: list[StaticallyLaunchedAutotuner] | None,
-        binary_index: _BundledBinaryIndex,
-    ) -> OrderedSet[_BinaryArtifactGroup]:
-        """Find bundle cache groups that cannot be trusted by a static result."""
-        untrusted_groups: OrderedSet[_BinaryArtifactGroup] = OrderedSet()
-        for result in static_autotuners or ():
-            for compile_result in result.kernel.compile_results:
-                identity = compile_result.bundled_artifact_identity()
-                payloads = binary_index.matching_payloads(identity)
-                if len(payloads) > 1 or (
-                    len(payloads) == 1
-                    and not compile_result.matches_expected_cubin(next(iter(payloads)))
-                ):
-                    untrusted_groups.update(binary_index.matching_groups(identity))
-        return untrusted_groups
-
     @classmethod
     def load_autotuners(
         cls,
         static_autotuners: list[StaticallyLaunchedAutotuner] | None,
-        binary_index: _BundledBinaryIndex | None = None,
+        binary_resolutions: _BundledBinaryResolutions | None = None,
     ) -> list[str]:
         """
         Load statically launchable CachingAutotuners into async_compile.CompiledTritonKernels
@@ -316,7 +350,6 @@ class TritonBundler:
                     for compile_result in result.kernel.compile_results:
                         kernel = compile_result.kernel
                         has_retained_cubin = kernel.cubin_raw is not None
-                        kernel._use_stable_cubin_path = True
                         if has_retained_cubin:
                             if not compile_result.matches_expected_cubin(
                                 kernel.cubin_raw
@@ -332,24 +365,13 @@ class TritonBundler:
 
                         bundled_cubin = None
                         reject_bundled_cubin = False
-                        if binary_index is not None:
-                            matches = binary_index.matching_payloads(
-                                compile_result.bundled_artifact_identity()
-                            )
-                            if len(matches) == 1:
-                                candidate = next(iter(matches))
-                                if compile_result.matches_expected_cubin(candidate):
-                                    bundled_cubin = candidate
-                                else:
-                                    reject_bundled_cubin = True
-                                    log.warning(
-                                        "Ignoring mismatched bundled binary for %s",
-                                        result.kernel_name,
-                                    )
-                            elif len(matches) > 1:
-                                reject_bundled_cubin = True
+                        if binary_resolutions is not None:
+                            resolution = binary_resolutions.get(compile_result)
+                            bundled_cubin = resolution.payload
+                            reject_bundled_cubin = resolution.rejected
+                            if reject_bundled_cubin:
                                 log.warning(
-                                    "Ignoring ambiguous bundled binaries for %s",
+                                    "Ignoring untrusted bundled binary for %s",
                                     result.kernel_name,
                                 )
 
@@ -507,13 +529,14 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
-            binary_index = None
+            binary_resolutions = None
             untrusted_artifact_groups: OrderedSet[_BinaryArtifactGroup] = OrderedSet()
             if config.use_static_triton_launcher and bundle.static_autotuners:
                 binary_index = _BundledBinaryIndex.from_bundle(bundle)
-                untrusted_artifact_groups = cls._untrusted_binary_artifact_groups(
+                binary_resolutions = _BundledBinaryResolutions.from_autotuners(
                     bundle.static_autotuners, binary_index
                 )
+                untrusted_artifact_groups = binary_resolutions.untrusted_groups
 
             for artifacts in bundle.kernel_artifacts:
                 if (
@@ -574,7 +597,7 @@ class TritonBundler:
 
             if config.use_static_triton_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
-                    bundle.static_autotuners, binary_index
+                    bundle.static_autotuners, binary_resolutions
                 )
             else:
                 static_kernel_names = []
