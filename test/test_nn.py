@@ -6721,41 +6721,42 @@ class TestNNDeviceType(NNTestCase):
     def test_grid_sample_3d(self, device):
         # Backward pass of native C++ and CUDA/accelerator kernels branch depending on whether input
         # requires gradient, so we test both cases.
-        def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners):
-            input_cpu = torch.randn(C, N, ID, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
-            grid_cpu = torch.randn(D, N, H, W, 3).transpose(0, 1).requires_grad_()
-            out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
-                                    align_corners=align_corners)
-            self.assertTrue(out_cpu.size() == torch.Size([N, C, D, H, W]))
-
-            gradients = torch.randn_like(out_cpu)
-            out_cpu.backward(gradients)
-
-            if torch.device(device).type != 'cpu':
-                input_device = input_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_(
-                    input_requires_grad)
-                grid_device = grid_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_()
-                out_device = F.grid_sample(input_device, grid_device, mode=mode, padding_mode=padding_mode,
-                                           align_corners=align_corners)
-                self.assertEqual(out_cpu, out_device)
-
-                out_device.backward(gradients.to(device))
-                if input_requires_grad:
-                    self.assertEqual(input_cpu.grad, input_device.grad)
-                self.assertEqual(grid_cpu.grad, grid_device.grad, atol=5e-5, rtol=0)
-
-                # check that zero-dimensional input strides don't error out
-                base_input = torch.randn(N, C, 1, IH, IW)
-                input_cpu = base_input.expand_as(input_device).requires_grad_(input_requires_grad)
-                grid_cpu = torch.randn(N, D, H, W, 3, requires_grad=True)
+        def test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad):
+            def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners):
+                input_cpu = torch.randn(C, N, ID, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
+                grid_cpu = torch.randn(D, N, H, W, 3).transpose(0, 1).requires_grad_()
                 out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                         align_corners=align_corners)
+                self.assertTrue(out_cpu.size() == torch.Size([N, C, D, H, W]))
 
-                input_device = base_input.to(device).expand_as(input_device).requires_grad_(input_requires_grad)
-                grid_device = grid_cpu.detach().to(device).requires_grad_()
-                out_device = F.grid_sample(input_device, grid_device, mode=mode, padding_mode=padding_mode,
-                                           align_corners=align_corners)
-                self.assertEqual(out_cpu, out_device)
+                gradients = torch.randn_like(out_cpu)
+                out_cpu.backward(gradients)
+
+                if torch.device(device).type != 'cpu':
+                    input_device = input_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_(
+                        input_requires_grad)
+                    grid_device = grid_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_()
+                    out_device = F.grid_sample(input_device, grid_device, mode=mode, padding_mode=padding_mode,
+                                               align_corners=align_corners)
+                    self.assertEqual(out_cpu, out_device)
+
+                    out_device.backward(gradients.to(device))
+                    if input_requires_grad:
+                        self.assertEqual(input_cpu.grad, input_device.grad)
+                    self.assertEqual(grid_cpu.grad, grid_device.grad, atol=5e-5, rtol=0)
+
+                    # check that zero-dimensional input strides don't error out
+                    base_input = torch.randn(N, C, 1, IH, IW)
+                    input_cpu = base_input.expand_as(input_device).requires_grad_(input_requires_grad)
+                    grid_cpu = torch.randn(N, D, H, W, 3, requires_grad=True)
+                    out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
+                                            align_corners=align_corners)
+
+                    input_device = base_input.to(device).expand_as(input_device).requires_grad_(input_requires_grad)
+                    grid_device = grid_cpu.detach().to(device).requires_grad_()
+                    out_device = F.grid_sample(input_device, grid_device, mode=mode, padding_mode=padding_mode,
+                                               align_corners=align_corners)
+                    self.assertEqual(out_cpu, out_device)
 
             # test same size output
             test_shape(N, C, D, H, W, D, H, W, mode, padding_mode, align_corners)
@@ -6825,7 +6826,6 @@ class TestNNDeviceType(NNTestCase):
         for mode in ('bilinear', 'nearest', 'bicubic'):
             for padding_mode in ('zeros', 'border', 'reflection'):
                 for align_corners in (True, False):
-                    # do gradcheck
                     N = random.randint(2, 5)
                     C = random.randint(2, 4)
                     D = random.randint(2, 5)
