@@ -438,8 +438,8 @@ def create_flex_flash_attention_kernel(
     if device is None:
         raise AssertionError("Device must be specified")
 
-    # Match stride pattern from query tensor
-    q_strides = query.get_stride()
+    # The independent output only uses the query's stride order as a preference.
+    q_strides = query.get_stride_hint()
     out_size = [batch_size, num_heads, seq_len_q, v_head_dim]
     out_strides = infer_dense_strides(out_size, q_strides)
 
@@ -699,7 +699,7 @@ def create_flex_flash_attention_backward_kernel(
         raise AssertionError("Device must not be None")
 
     grad_query_strides = infer_dense_strides(
-        [batch_size, num_heads, seq_len_q, head_dim], query.get_stride()
+        [batch_size, num_heads, seq_len_q, head_dim], query.get_stride_hint()
     )
     grad_query = empty_strided(
         size=[batch_size, num_heads, seq_len_q, head_dim],
@@ -709,7 +709,7 @@ def create_flex_flash_attention_backward_kernel(
     )
 
     grad_key_strides = infer_dense_strides(
-        [batch_size, num_heads_kv, seq_len_kv, head_dim], key.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, head_dim], key.get_stride_hint()
     )
     grad_key = empty_strided(
         size=[batch_size, num_heads_kv, seq_len_kv, head_dim],
@@ -719,7 +719,7 @@ def create_flex_flash_attention_backward_kernel(
     )
 
     grad_value_strides = infer_dense_strides(
-        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], value.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], value.get_stride_hint()
     )
     grad_value = empty_strided(
         size=[batch_size, num_heads_kv, seq_len_kv, v_head_dim],

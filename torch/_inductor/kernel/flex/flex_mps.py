@@ -6,7 +6,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 
-from ...ir import FixedLayout, ShapeAsConstantBuffer, TensorBox
+from ...ir import FixedLayout, freeze_storage_layout, ShapeAsConstantBuffer, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import realize_inputs
 from ...utils import expr_fits_within_32bit
@@ -140,6 +140,8 @@ def lower_mps(
                 metas.append(("scalar",))
                 scalars.append(cap)
                 continue
+            # strides below are baked into the Metal shader source
+            freeze_storage_layout(cap)
             metas.append(
                 (
                     "tensor",
@@ -178,6 +180,9 @@ def lower_mps(
     )
 
     out_size = [B, Hq, seq_len_q, v_head_dim]
+    for t in (query, key, value):
+        # stride exprs persist in scalar_args, emitted at wrapper codegen
+        freeze_storage_layout(t)
     out_strides = infer_dense_strides(out_size, query.get_stride())
     layout = FixedLayout(
         query.get_device(),
@@ -276,6 +281,7 @@ def lower_mps(
 def _get_strides(node):
     if node is None:
         return []
+    freeze_storage_layout(node)
     return list(node.get_stride())
 
 
