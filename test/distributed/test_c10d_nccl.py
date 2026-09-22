@@ -232,99 +232,105 @@ class RendezvousEnvTest(TestCase):
         not TEST_ACCELERATOR, "No accelerator available, skipping test"
     )
     def test_common_errors(self):
-        vars = {
-            "WORLD_SIZE": "1",
-            "RANK": "0",
-            "MASTER_ADDR": "127.0.0.1",
-            "MASTER_PORT": str(common.find_free_port()),
-        }
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so the default process group must not survive a failed attempt.
+        try:
+            vars = {
+                "WORLD_SIZE": "1",
+                "RANK": "0",
+                "MASTER_ADDR": "127.0.0.1",
+                "MASTER_PORT": str(common.find_free_port()),
+            }
 
-        class Env:
-            def __init__(self, vars):
-                self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
+            class Env:
+                def __init__(self, vars):
+                    self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
 
-            def __enter__(self):
-                self.env_patcher.start()
+                def __enter__(self):
+                    self.env_patcher.start()
 
-            def __exit__(self, type, value, traceback):
-                self.env_patcher.stop()
+                def __exit__(self, type, value, traceback):
+                    self.env_patcher.stop()
 
-        def without(d, key):
-            d = d.copy()
-            d.pop(key)
-            return d
-
-        def withouts(d, keys):
-            d = d.copy()
-            for key in keys:
+            def without(d, key):
+                d = d.copy()
                 d.pop(key)
-            return d
+                return d
 
-        with Env(without(vars, "WORLD_SIZE")):
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
-            c10d.init_process_group(backend=BACKEND, world_size=1)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            def withouts(d, keys):
+                d = d.copy()
+                for key in keys:
+                    d.pop(key)
+                return d
 
-        with Env(without(vars, "RANK")):
-            self.assertEqual(None, os.environ.get("RANK"))
-            with self.assertRaisesRegex(ValueError, "RANK expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
-            c10d.init_process_group(backend=BACKEND, rank=0)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(without(vars, "WORLD_SIZE")):
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
+                c10d.init_process_group(backend=NCCL_BACKEND, world_size=1)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
-            self.assertEqual(None, os.environ.get("RANK"))
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            c10d.init_process_group(backend=BACKEND, rank=0, world_size=1)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(without(vars, "RANK")):
+                self.assertEqual(None, os.environ.get("RANK"))
+                with self.assertRaisesRegex(ValueError, "RANK expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
+                c10d.init_process_group(backend=NCCL_BACKEND, rank=0)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(vars):
-            c10d.init_process_group(backend=BACKEND)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+                self.assertEqual(None, os.environ.get("RANK"))
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                c10d.init_process_group(backend=NCCL_BACKEND, rank=0, world_size=1)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(without(vars, "MASTER_ADDR")):
-            self.assertEqual(None, os.environ.get("MASTER_ADDR"))
-            with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
+            with Env(vars):
+                c10d.init_process_group(backend=NCCL_BACKEND)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(without(vars, "MASTER_PORT")):
-            self.assertEqual(None, os.environ.get("MASTER_PORT"))
-            with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
+            with Env(without(vars, "MASTER_ADDR")):
+                self.assertEqual(None, os.environ.get("MASTER_ADDR"))
+                with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
 
-        with Env(without(vars, "WORLD_SIZE")):
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous(f"env://?world_size={1}")
-            _, _, size = next(gen)
-            self.assertEqual(size, 1)
+            with Env(without(vars, "MASTER_PORT")):
+                self.assertEqual(None, os.environ.get("MASTER_PORT"))
+                with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
 
-        with Env(without(vars, "RANK")):
-            self.assertEqual(None, os.environ.get("RANK"))
-            gen = c10d.rendezvous(f"env://?rank={0}")
-            _, rank, _ = next(gen)
-            self.assertEqual(rank, 0)
+            with Env(without(vars, "WORLD_SIZE")):
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                gen = c10d.rendezvous(f"env://?world_size={1}")
+                _, _, size = next(gen)
+                self.assertEqual(size, 1)
 
-        with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
-            self.assertEqual(None, os.environ.get("RANK"))
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous(f"env://?rank={0}&world_size={1}")
-            _, rank, size = next(gen)
-            self.assertEqual(rank, 0)
-            self.assertEqual(size, 1)
+            with Env(without(vars, "RANK")):
+                self.assertEqual(None, os.environ.get("RANK"))
+                gen = c10d.rendezvous(f"env://?rank={0}")
+                _, rank, _ = next(gen)
+                self.assertEqual(rank, 0)
+
+            with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+                self.assertEqual(None, os.environ.get("RANK"))
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                gen = c10d.rendezvous(f"env://?rank={0}&world_size={1}")
+                _, rank, size = next(gen)
+                self.assertEqual(rank, 0)
+                self.assertEqual(size, 1)
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
@@ -865,11 +871,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         x = torch.empty((1,), device=device)
         work = c10d.all_reduce(x, async_op=True)
 
-        # Wait for non-0 ranks to garbage collect Work -- this is the latest
-        # point where extra CUDA context can be created
-        if self.rank == 0:
-            time.sleep(5)
         del work
+        # Wait for every rank to delete Work without touching another CUDA context.
+        store = c10d.distributed_c10d._get_default_store()
+        store.barrier("work_deleted", self.world_size)
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         nprocs = len(processes)
@@ -975,9 +980,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.reduce_scatter_single(x, y)
         c10d.barrier()
 
-        # Wait a bit for remote processes to touch my device
-        if self.rank == 0:
-            time.sleep(5)
+        # Wait for every rank to finish the operations without touching CUDA.
+        store.barrier("sync_ops_done", self.world_size)
 
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
@@ -2697,7 +2701,7 @@ class DistributedDataParallelTest(
         if self.rank != 0:
             # Time out due to rank 0 not calling into allreduce.
             with self.assertRaises(dist.DistBackendError):
-                pg.allreduce([inp]).wait(timedelta(seconds=5))
+                pg.allreduce([inp]).wait(timedelta(milliseconds=1))
 
             # Now when nonzero rank attempts to use communicator, original failure reason should be logged.
             try:
@@ -4504,6 +4508,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # avoid watchdog thread interference
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_PROPAGATE_ERROR"] = "1"
+        os.environ["TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"] = "0"
         # set heartbeat timeout to a small value so that we don't wait too long for things to shutdown
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "5"
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -6361,9 +6366,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
-        t = pickle.loads(_dump_fr_trace(includeCollectives=include_collectives))
+        torch.cuda.synchronize(device=device)
+        pg._wait_for_pending_works()
+        t = pickle.loads(
+            torch._C._distributed_c10d._dump_nccl_trace(
+                includeCollectives=include_collectives
+            )
+        )
         self._verify_trace(
             t,
             include_collectives=include_collectives,
@@ -6390,15 +6399,14 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
-        _reset_fr_recording()
+        pg._wait_for_pending_works()
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
         for _ in range(4):
             f = pg.allreduce(a)
         f.wait()
-        device_module.synchronize(device=device)
-        time.sleep(1)
-        t = pickle.loads(_dump_fr_trace())
+        torch.cuda.synchronize(device=device)
+        pg._wait_for_pending_works()
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), 4)
         dist.destroy_process_group()
 
@@ -6717,7 +6725,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+            pg._wait_for_pending_works()
 
         t = pickle.loads(_dump_fr_trace())
         self.assertEqual(len(t["entries"]), num_coalesced_ops * (ops_per_coalesce + 1))
@@ -7268,7 +7276,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         device_module.synchronize(device=self.local_device)
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+            pg._wait_for_pending_works()
 
         t = pickle.loads(_dump_fr_trace())
         self.assertEqual(len(t["entries"]), num_repeats * (ops_per_repeat))
@@ -7321,7 +7329,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(output_tensor, expected_tensor)
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+            pg._wait_for_pending_works()
 
         t = pickle.loads(_dump_fr_trace())
         self.assertEqual(len(t["entries"]), self.world_size + 1)
@@ -7377,7 +7385,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+            pg._wait_for_pending_works()
 
         t = pickle.loads(_dump_fr_trace())
 
@@ -7438,7 +7446,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify buffer is full with 10 entries
         t = pickle.loads(_dump_fr_trace())
@@ -7452,7 +7460,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify we get exactly 10 new entries, not 20
         t = pickle.loads(_dump_fr_trace())
@@ -7499,7 +7507,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Reset the flight recorder
         _reset_fr_recording()
@@ -7509,7 +7517,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify we only get the 3 new entries, not 10
         t = pickle.loads(_dump_fr_trace())
@@ -7551,7 +7559,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Reset at this point (reset happens at index 5)
         _reset_fr_recording()
@@ -7562,7 +7570,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Should get exactly 8 entries, properly ordered
         t = pickle.loads(_dump_fr_trace())
@@ -7607,7 +7615,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # First reset
         _reset_fr_recording()
@@ -7617,7 +7625,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Second reset
         _reset_fr_recording()
@@ -7627,7 +7635,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Should only see the last 4 entries
         t = pickle.loads(_dump_fr_trace())
