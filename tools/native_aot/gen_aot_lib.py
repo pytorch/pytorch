@@ -64,9 +64,8 @@ FILE_TMPL = """\
 // AT_PER_OPERATOR_HEADERS exists to avoid. TensorIterator.h and ops/empty.h are
 // unconditional because preludes commonly need them and there is no
 // per-declaration include hook yet; a body calling another at:: FACTORY needs its
-// op header added here. torch/library.h is emitted only for ops with cpp_covers,
-// its sole consumer being the covers registration below, and it pulls the whole
-// dispatcher (~110 headers).
+// op header added here. torch/library.h is emitted only when registering generated
+// coverage predicates, and it pulls the whole dispatcher (~110 headers).
 #include <ATen/core/Tensor.h>
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
@@ -86,6 +85,7 @@ bool {op}_{key_lc}_aot_kernel({params}) {{
 {guards}
   return false;
 }}
+{runtime_covers_fn}
 {covers_fn}
 }} // namespace
 
@@ -94,6 +94,7 @@ bool {op}_{key_lc}_aot_kernel({params}) {{
 namespace at::native {{
 REGISTER_{key_uc}_DISPATCH({op}_aot_stub, &::{op}_{key_lc}_aot_kernel)
 }} // namespace at::native
+{runtime_covers_reg}
 {covers_reg}"""
 
 # Emitted only into files whose kind narrows shapes (see
@@ -124,6 +125,19 @@ bool {op}_{key_lc}_covers({params}) {{
 COVERS_REG_TMPL = """
 TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
   m.def("{schema}", &::{op}_{key_lc}_covers);
+}}
+"""
+
+RUNTIME_COVERS_FN_TMPL = """
+bool {op}_{key_lc}_runtime_covers({params}) {{
+{body}
+  return true;
+}}
+"""
+
+RUNTIME_COVERS_REG_TMPL = """
+TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
+  m.def("{schema}", &::{op}_{key_lc}_runtime_covers);
 }}
 """
 
@@ -195,10 +209,24 @@ def _first_tensor_name(params: str) -> str | None:
     return None
 
 
-def _device_match(major: int, minor: int) -> str:
-    """The device predicate for one compute capability, read through the local
-    _gate_for assigns the properties expression to."""
-    return f"{_PROPS_LOCAL}->major == {major} && {_PROPS_LOCAL}->minor == {minor}"
+def _device_match(arch: str) -> str:
+    """The device predicate for one compile target.
+
+    The Python family registry is the source of truth; emitting its finite members
+    keeps generated C++ from independently guessing that a major number is a family.
+    """
+    by_major: dict[int, list[int]] = {}
+    for major, minor in decl.target_devices(arch):
+        by_major.setdefault(major, []).append(minor)
+    clauses = []
+    for major, minors in by_major.items():
+        minor_match = " || ".join(
+            f"{_PROPS_LOCAL}->minor == {minor}" for minor in minors
+        )
+        if len(minors) > 1:
+            minor_match = f"({minor_match})"
+        clauses.append(f"{_PROPS_LOCAL}->major == {major} && {minor_match}")
+    return " || ".join(f"({clause})" for clause in clauses)
 
 
 def _spec_from_json(spec):
@@ -216,17 +244,13 @@ def _spec_from_json(spec):
     return spec
 
 
-def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
-    """Group sidecars by the compute capability they were compiled for, in ascending
-    order, dropping the loser of the arch-conditional tie-break.
+def _by_arch(sidecars: list[dict]) -> dict[str, list[dict]]:
+    """Group sidecars by compile target in runtime dispatch order.
 
-    Grouped rather than one gate over the union, because each device must run kernels
-    built for exactly its capability; a union gate would accept a device nothing was
-    compiled for. Within one capability both "sm_100a" and "sm_100" run on the
-    hardware and the conditional wins, being what the kernels were written against. A
-    sidecar with no recorded arch is rejected: there is no hardware to match it to."""
-    groups: dict[tuple[int, int], list[dict]] = {}
-    conditional: dict[tuple[int, int], bool] = {}
+    Narrower target coverage runs before broader coverage. Targets with identical
+    device coverage are redundant, so only the strongest is linked.
+    """
+    groups: dict[str, list[dict]] = {}
     for sc in sidecars:
         arch = sc.get("arch")
         if not isinstance(arch, str):
@@ -235,16 +259,20 @@ def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
                 f"records no arch. Re-export: the runtime gate is built from "
                 f"the arch each artifact was compiled for."
             )
-        cc = decl.cc_of(arch)
-        is_cond = arch.endswith("a")
-        if cc in groups and conditional.get(cc, False) != is_cond:
-            # A conditional build for this cc wins outright; a plain one loses.
-            if not is_cond:
-                continue
-            groups[cc] = []
-        groups.setdefault(cc, []).append(sc)
-        conditional[cc] = conditional.get(cc, False) or is_cond
-    return {cc: groups[cc] for cc in sorted(groups)}
+        decl.cc_of(arch)
+        groups.setdefault(arch, []).append(sc)
+
+    by_coverage: dict[tuple[tuple[int, int], ...], list[str]] = {}
+    for arch in groups:
+        by_coverage.setdefault(decl.target_devices(arch), []).append(arch)
+    for candidates in by_coverage.values():
+        keep = min(candidates, key=decl.target_order_key)
+        for arch in candidates:
+            if arch != keep:
+                del groups[arch]
+
+    ordered = sorted(groups, key=decl.target_order_key)
+    return {arch: groups[arch] for arch in ordered}
 
 
 # Tensor-shaped C++ types the gate must recognize or refuse: torchgen renders
@@ -327,6 +355,7 @@ def gen_op(
     covers: tuple[str, str, str] | None = None,
     precomputed: list[str] | None = None,
     decl_path: str = "",
+    runtime_covers: tuple[str, str] | None = None,
 ) -> str:
     def _branch(s: dict, pad: str) -> str:
         spec = _spec_from_json(s["spec"])
@@ -337,7 +366,7 @@ def gen_op(
             f"{pad}  return true;\n{pad}}}"
         )
 
-    # One cond chain per compute capability (see _by_arch).
+    # One cond chain per compile target (see _by_arch).
     groups = _by_arch(sidecars)
     # Shipping an arch the declaration disowns is a packaging bug: error rather
     # than gate on kernels the op does not claim to support. Over EVERY exported
@@ -368,10 +397,10 @@ def gen_op(
     sidecars = surviving_sidecars(op, sidecars)
 
     def _gate_for(props: str) -> str:
-        accept = " || ".join(f"({_device_match(*cc)})" for cc in groups)
+        accept = " || ".join(f"({_device_match(arch)})" for arch in groups)
         return (
-            f"  // Device gate: one branch per shipped capability "
-            f"({', '.join(f'{maj}.{min_}' for maj, min_ in groups)})\n"
+            f"  // Device gate: one branch per shipped target "
+            f"({', '.join(groups)})\n"
             f"  // Read once into a local: this gate and every branch below ask\n"
             f"  // the same question, and the accessor is a call per read.\n"
             f"  const auto* {_PROPS_LOCAL} = {props};\n"
@@ -380,10 +409,10 @@ def gen_op(
 
     arch_gate = _gate_for(_CURRENT_PROPS)
     branches = [
-        f"  if ({_device_match(*cc)}) {{\n"
+        f"  if ({_device_match(arch)}) {{\n"
         + "\n".join(_branch(s, "    ") for s in scs)
         + "\n  }"
-        for cc, scs in groups.items()
+        for arch, scs in groups.items()
     ]
     # Defaulted to a callable so the use sites need no condition. `or (lambda)`
     # rather than a getattr default: the contract's other spelling of "no hook" is
@@ -399,6 +428,36 @@ def gen_op(
     narrows = any(
         toolchains.get_toolchain(sc["kind"]).NARROWS_SHAPES_TO_INT32 for sc in sidecars
     )
+    runtime_covers_fn = runtime_covers_reg = ""
+    if runtime_covers is not None:
+        runtime_params, runtime_schema = runtime_covers
+        runtime_tensor = _first_tensor_name(runtime_params)
+        if runtime_tensor is None:
+            raise RuntimeError(
+                f"{op}: runtime coverage needs a plain at::Tensor parameter to "
+                f"read the device from, and this signature has none "
+                f"({runtime_params})."
+            )
+        runtime_props = (
+            f"at::cuda::getDeviceProperties({runtime_tensor}.device().index())"
+        )
+        runtime_body = (
+            f"  if (!{runtime_tensor}.is_cuda()) return false;\n"
+            + _gate_for(runtime_props)
+            + (_int32_size_gate(runtime_params) if narrows else "")
+        )
+        runtime_covers_fn = RUNTIME_COVERS_FN_TMPL.format(
+            op=op,
+            key_lc=key.lower(),
+            params=runtime_params,
+            body=runtime_body,
+        )
+        runtime_covers_reg = RUNTIME_COVERS_REG_TMPL.format(
+            op=op,
+            key_lc=key.lower(),
+            schema=runtime_schema.replace("\\", "\\\\").replace('"', '\\"'),
+        )
+
     covers_fn = covers_reg = ""
     if covers is not None:
         covers_params, covers_schema, covers_body = covers
@@ -460,10 +519,14 @@ def gen_op(
         key_uc=key.upper(),
         decl_path=decl_path or f"the declaration for aten::{op}",
         precompute_note=note,
+        runtime_covers_fn=runtime_covers_fn,
+        runtime_covers_reg=runtime_covers_reg,
         covers_fn=covers_fn,
         covers_reg=covers_reg,
         covers_include=(
-            "#include <torch/library.h>\n\n" if covers is not None else "\n"
+            "#include <torch/library.h>\n\n"
+            if covers is not None or runtime_covers is not None
+            else "\n"
         ),
         kernel_includes="\n".join(
             dict.fromkeys(  # ordered dedup across sidecars
@@ -524,11 +587,11 @@ def precomputed_args(op: str) -> list[str]:
 
 
 def covers_signature(op: str) -> tuple[str, str]:
-    """(C++ params, torch.library schema) for the fast coverage
-    predicate: the FUNCTIONAL schema arguments (SymInt degraded to int
-    -- symbolic sizes can't be covered anyway; a failed bind falls back
-    to the Python path) plus the out variant's outputs as trailing
-    optionals so calls arriving through the .out overload bind too.
+    """(C++ params, torch.library schema) for generated coverage predicates.
+
+    Uses the FUNCTIONAL schema arguments (SymInt degraded to int -- symbolic sizes
+    cannot be covered anyway) plus the out variant's outputs as trailing optionals
+    so calls arriving through the .out overload bind too.
     """
     from torchgen.api.types import DispatcherSignature
     from torchgen.context import native_function_manager
@@ -593,8 +656,8 @@ def surviving_sidecars(op: str, sidecars: list[dict]) -> list[dict]:
     kept = [sc for scs in _by_arch(sidecars).values() for sc in scs]
     if dropped := {sc["arch"] for sc in sidecars} - {sc["arch"] for sc in kept}:
         print(
-            f"{op}: ignoring artifacts for {sorted(dropped)} -- an "
-            f"arch-conditional build for the same capability wins. They are not "
+            f"{op}: ignoring artifacts for {sorted(dropped)} -- a stronger target "
+            f"with the same device coverage wins. They are not "
             f"linked; delete those trees to reclaim the disk."
         )
     return kept
@@ -1175,12 +1238,14 @@ def main(argv: list[str] | None = None) -> None:
             _delete_generated(args.artifacts_dir, entry, "no sidecars remain")
             continue
         did, key = decl.decl_id(d), d.DISPATCH_KEY
-        covers = None
+        covers_params, covers_schema = covers_signature(d.ATEN_OP)
+        runtime_schema = covers_schema.replace(
+            f"covers_{did}(", f"runtime_covers_{did}(", 1
+        )
+        runtime_covers = (covers_params, runtime_schema)
         covers_fn = getattr(d, "cpp_covers", None)
         covers_body = (covers_fn() or "") if covers_fn else ""
-        if covers_body:
-            params, schema = covers_signature(d.ATEN_OP)
-            covers = (params, schema, covers_body)
+        covers = (covers_params, covers_schema, covers_body) if covers_body else None
         # Every refusal runs before anything is written, and sources are buffered to
         # the end of the loop: a refusal partway through must not leave earlier
         # declarations' fresh sources paired with the previous run's link set, which
@@ -1216,6 +1281,7 @@ def main(argv: list[str] | None = None) -> None:
             covers,
             precomputed_args(d.ATEN_OP),
             decl_path,
+            runtime_covers,
         )
         # The source covers every arch this declaration shipped, so it belongs to
         # no single arch tree: always <root>/<decl_id>/.

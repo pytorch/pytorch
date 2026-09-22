@@ -22,6 +22,7 @@ import importlib.util
 import inspect
 import os
 import re
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 
@@ -30,7 +31,7 @@ class AotDeclaration(Protocol):
     DISPATCH_KEY: str
     KERNEL_MODULE: str
     # Architectures this op's kernels are valid on (sm strings, e.g.
-    # ("sm_90a", "sm_100a")). OPTIONAL in source declarations, so read it
+    # ("sm_90", "sm_100f")). OPTIONAL in source declarations, so read it
     # through archs_of(d), never d.ARCHS. Export skips (declaration x
     # arch) pairs outside it; gen_aot_lib emits a runtime gate from the
     # intersection with the arches actually shipped.
@@ -75,22 +76,37 @@ _OPTIONAL_FNS = {
     "cpp_covers": 0,
 }
 
-# Every sm spelling this tooling can parse and target. export checks an explicit
-# --arch against it before touching the disk, so a typo bails out naming the set
-# instead of matching no declaration and exporting nothing at exit 0. Deliberately
-# WIDER than EXPORTABLE_ARCHES below: an explicit --arch is how a hand run targets
-# something the release wheels do not.
-KNOWN_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
 
-# Which of them the STANDARD build ships: the TORCH_CUDA_ARCH_LIST entries eligible
-# on the automatic export path, which an explicit --arch bypasses. Both spellings of
-# a capability are listed because they are distinct nvcc targets for the same
-# hardware -- "10.0a" (needed by tcgen05/wgmma) in native-aot.yml, plain "10.0"
-# in the manywheel lists -- and omitting either silently exports nothing there. Each
-# entry also costs another full set of compiled kernels in every wheel naming it, and
-# makes the DSL runtimes mandatory on a builder with that GPU. sm_103 stays out: no
-# arch list we see names 10.3.
-EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+@dataclass(frozen=True)
+class ArchFamily:
+    """An ordered CUDA architecture family and its standard portable target."""
+
+    name: str
+    members: tuple[tuple[int, int], ...]
+    portable_target: str
+
+
+# Family membership is CUDA compatibility metadata, not something inferred from a
+# compute capability's major number. An f target serves its member and every later
+# member in this tuple.
+ARCH_FAMILIES = (ArchFamily("sm_100f", ((10, 0), (10, 3), (10, 7)), "sm_100f"),)
+
+
+# Every sm spelling this tooling can target. This is wider than
+# EXPORTABLE_ARCHES: an explicit --arch requests a target the standard build omits.
+KNOWN_ARCHES = (
+    "sm_90",
+    "sm_90a",
+    "sm_100f",
+    "sm_100a",
+    "sm_103f",
+    "sm_103a",
+    "sm_107a",
+)
+
+# Which targets the standard build ships. archs_from_cuda_arch_list() maps each
+# device architecture onto its family's portable target where one exists.
+EXPORTABLE_ARCHES = ("sm_90", "sm_100f")
 if not set(EXPORTABLE_ARCHES) <= set(KNOWN_ARCHES):
     raise AssertionError(
         f"EXPORTABLE_ARCHES names arches this tooling cannot target: "
@@ -104,7 +120,7 @@ if not set(EXPORTABLE_ARCHES) <= set(KNOWN_ARCHES):
 # target this arch" is not "every declaration's kernels work on it".
 _DEFAULT_ARCHS = KNOWN_ARCHES
 
-_SM_RE = r"sm_\d+a?"
+_SM_RE = r"sm_\d+[af]?"
 
 
 def load_by_path(name: str, path: str):
@@ -142,11 +158,11 @@ _KNOWN_MAJORS = range(3, 13)
 # prefix and suffix and re-testing the middle. ASCII classes, not \d or
 # str.isdigit(): both are Unicode-aware, and full-width or Arabic-Indic digits
 # then read as an ordinary capability.
-_SM_SPELLING = re.compile(r"sm_([1-9][0-9]{1,2})a?")
+_SM_SPELLING = re.compile(r"sm_([1-9][0-9]{1,2})([af]?)")
 
 
 def cc_of(arch: str) -> tuple[int, int]:
-    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103a" -> (10, 3).
+    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103f" -> (10, 3).
 
     Shared, because the exporter (matching a detected arch against ARCHS) and the
     generator (grouping sidecars by capability) must agree what an sm string
@@ -156,9 +172,8 @@ def cc_of(arch: str) -> tuple[int, int]:
 
     Refuses what it cannot parse rather than computing a capability: "sm_9" gives
     (0, 9) and "sm_1000" (100, 0), each a gate no device satisfies, so the op
-    ships, links and declines every call unreported. Suffixes other than the
-    arch-conditional "a" (CUDA 12.9+'s family-conditional "f") are refused too --
-    they mean something the generator has not been taught.
+    ships, links and declines every call unreported. Only CUDA's arch-conditional
+    "a" and family-conditional "f" suffixes are accepted.
 
     _KNOWN_MAJORS would reject "sm_9" and "sm_1000" anyway (as capability 0.9 and
     100.0), so the digit count in _SM_SPELLING is there for the DIAGNOSTIC: a
@@ -168,7 +183,7 @@ def cc_of(arch: str) -> tuple[int, int]:
     if m is None:
         raise RuntimeError(
             f"cannot read a compute capability from arch {arch!r}: expected "
-            f"sm_<major><minor>[a], e.g. sm_90a or sm_100"
+            f"sm_<major><minor>[a|f], e.g. sm_90a, sm_100f or sm_100"
         )
     major, minor = divmod(int(m.group(1)), 10)
     if major not in _KNOWN_MAJORS:
@@ -178,6 +193,107 @@ def cc_of(arch: str) -> tuple[int, int]:
             f"{_KNOWN_MAJORS.stop - 1}; a gate for it would match no device"
         )
     return major, minor
+
+
+def suffix_of(arch: str) -> str:
+    """The CUDA feature-set suffix ("a", "f", or "") of a validated target."""
+    # cc_of owns the diagnostic for malformed strings and the known-major check.
+    cc_of(arch)
+    match = _SM_SPELLING.fullmatch(arch)
+    if match is None:
+        raise AssertionError(f"cc_of accepted an unparsable arch {arch!r}")
+    return match.group(2)
+
+
+def family_for_cc(cc: tuple[int, int]) -> ArchFamily | None:
+    """The declared CUDA architecture family containing ``cc``, if any."""
+    found = [family for family in ARCH_FAMILIES if cc in family.members]
+    if len(found) > 1:
+        raise RuntimeError(
+            f"compute capability {cc[0]}.{cc[1]} belongs to multiple CUDA "
+            f"architecture families: {', '.join(f.name for f in found)}"
+        )
+    return found[0] if found else None
+
+
+def target_devices(target: str) -> tuple[tuple[int, int], ...]:
+    """Known device capabilities on which ``target`` can run."""
+    target_cc = cc_of(target)
+    if suffix_of(target) != "f":
+        return (target_cc,)
+    family = family_for_cc(target_cc)
+    if family is None:
+        raise RuntimeError(
+            f"family-specific target {target} has no entry in ARCH_FAMILIES"
+        )
+    return family.members[family.members.index(target_cc) :]
+
+
+def target_can_run_on(target: str, device_cc: tuple[int, int]) -> bool:
+    """Whether ``target``'s cubin can run on a device compute capability."""
+    return device_cc in target_devices(target)
+
+
+def portable_target_for(device_cc: tuple[int, int]) -> str | None:
+    """The standard portable target for a device family, if it has one."""
+    family = family_for_cc(device_cc)
+    if family is None:
+        return None
+    target = family.portable_target
+    return target if target_can_run_on(target, device_cc) else None
+
+
+_SUFFIX_STRENGTH = {"": 0, "f": 1, "a": 2}
+
+
+def target_order_key(target: str) -> tuple[int, int, int, int]:
+    """Static dispatch order: narrower coverage and stronger targets first."""
+    major, minor = cc_of(target)
+    return (
+        len(target_devices(target)),
+        major,
+        -minor,
+        -_SUFFIX_STRENGTH[suffix_of(target)],
+    )
+
+
+def compatible_targets(
+    targets: tuple[str, ...] | list[str], device_cc: tuple[int, int]
+) -> tuple[str, ...]:
+    """Compatible targets in runtime dispatch preference order."""
+    return tuple(
+        sorted(
+            (target for target in targets if target_can_run_on(target, device_cc)),
+            key=target_order_key,
+        )
+    )
+
+
+def _validate_arch_families() -> None:
+    seen: dict[tuple[int, int], str] = {}
+    for family in ARCH_FAMILIES:
+        if not family.members or len(set(family.members)) != len(family.members):
+            raise AssertionError(f"{family.name}: members must be non-empty and unique")
+        for cc in family.members:
+            if cc in seen:
+                raise AssertionError(
+                    f"compute capability {cc} belongs to both {seen[cc]} and "
+                    f"{family.name}"
+                )
+            seen[cc] = family.name
+        if suffix_of(family.portable_target) != "f":
+            raise AssertionError(
+                f"{family.name}: portable target must be family-specific"
+            )
+        if cc_of(family.portable_target) != family.members[0]:
+            raise AssertionError(
+                f"{family.name}: portable target must anchor the first family member"
+            )
+    for target in KNOWN_ARCHES:
+        target_devices(target)
+
+
+_validate_arch_families()
 
 
 def _check_arity(mod, name: str, want: int, path: str) -> None:
@@ -219,7 +335,7 @@ def _validate(d, path: str, label: str) -> None:
     ):
         raise RuntimeError(
             f"{path}: {label} ARCHS must be a non-empty sequence of sm "
-            f"strings (e.g. ('sm_90a', 'sm_100a')), got {archs!r}"
+            f"strings (e.g. ('sm_90', 'sm_100f')), got {archs!r}"
         )
     # ...and each one must name a capability, not merely look like an sm string.
     # _SM_RE accepts "sm_9" and "sm_1000", which cc_of refuses -- and export
@@ -229,7 +345,7 @@ def _validate(d, path: str, label: str) -> None:
     # the only place that knows which file to name.
     for a in archs:
         try:
-            cc_of(a)
+            target_devices(a)
         except RuntimeError as e:
             raise RuntimeError(f"{path}: {label} ARCHS entry {a!r}: {e}") from e
 

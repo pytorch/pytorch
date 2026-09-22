@@ -486,7 +486,12 @@ def should_run() -> bool:
         # Through a subprocess, not export._detected_arch(), which would
         # initialize CUDA here -- what _torch_probe exists to avoid.
         local = _torch_value("'sm_%d%d' % torch.cuda.get_device_capability()")
-        if local not in export_mod.EXPORTABLE_ARCHES:
+        target = (
+            export_mod._claimed_spelling(local, export_mod.EXPORTABLE_ARCHES)
+            if local
+            else None
+        )
+        if target is None:
             _report(
                 f"skipped (local GPU is {local or 'undetectable'}; exportable: "
                 f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"

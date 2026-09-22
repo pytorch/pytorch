@@ -62,8 +62,8 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-native-aot-h100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
-      # 9.0a, not 9.0: the two spellings are different nvcc targets, and the
-      # declaration's ARCHS claim the conditional one.
+      # The main build uses its architecture-specific target; native-AOT maps this
+      # to the portable sm_90 target declared by topk.
       cuda-arch-list: '9.0a'
       # Same reason as the B200 build below.
       allow-reuse-old-whl: false

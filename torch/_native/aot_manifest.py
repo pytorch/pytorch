@@ -8,10 +8,10 @@ keeps its JIT override eligibility.
 
 A call is covered iff some point of the declaration's ``kernel_precompile_grid()``
 matches every field ``covered_axes()`` returns; dtypes match by canonical torch
-dtype, grid-only fields like block sizes are ignored, and an exception degrades to
-uncovered. The C++ dispatch chain in the AOT library is the authority on what
-actually launches, and drift is benign: a call both sides decline lands on stock
-aten.
+dtype and grid-only fields like block sizes are ignored. Generated runtime coverage
+first gates this answer on the artifact targets actually embedded, including CUDA
+family compatibility. An exception degrades to uncovered. The C++ dispatch chain in
+the AOT library is the authority on what actually launches.
 """
 
 import functools
@@ -46,6 +46,11 @@ class _Coverage:
         # because the library loads after coverage is built.
         self._cpp_covers: Callable[..., bool] | None = None
         self._cpp_probed = False
+        # Every declaration also gets a generated predicate for the device and ABI
+        # gates. The Python path uses it when cpp_covers is absent, so declared
+        # support is not confused with the sidecars actually embedded.
+        self._runtime_covers: Callable[..., bool] | None = None
+        self._runtime_probed = False
 
     def _resolve_cpp_covers(self) -> Callable[..., bool] | None:
         if not self._cpp_probed:
@@ -59,6 +64,19 @@ class _Coverage:
                     pass
         return self._cpp_covers
 
+    def _resolve_runtime_covers(self) -> Callable[..., bool] | None:
+        if not self._runtime_probed:
+            self._runtime_probed = True
+            ns = getattr(torch.ops, "_native_aot", None)
+            if ns is not None:
+                try:
+                    self._runtime_covers = getattr(
+                        ns, f"runtime_covers_{decl_id_for_op(self._op)}"
+                    )
+                except (AttributeError, RuntimeError):
+                    pass
+        return self._runtime_covers
+
     def covers(self, args: tuple, kwargs: dict) -> bool:
         # Gate on the same Context switch the stub consultations read: with AOT
         # masked, a covered call must keep its JIT route rather than decline into a
@@ -71,6 +89,13 @@ class _Coverage:
                 return cpp(*args, **kwargs)
             except Exception:
                 # Arguments the schema cannot bind: uncovered, so the cond decides.
+                return False
+        runtime = self._resolve_runtime_covers()
+        if runtime is not None:
+            try:
+                if not runtime(*args, **kwargs):
+                    return False
+            except Exception:
                 return False
         try:
             values = self._covered_axes(*args, **kwargs)

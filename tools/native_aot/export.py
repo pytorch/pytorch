@@ -32,7 +32,7 @@ compile per process for that; see tools/native_aot/cutedsl_warmup.py.
 Usage (from the repo root, in a venv with torch built and the DSL wheel active):
     python tools/native_aot/export.py [--out-dir build/native_aot]
                                         [--ops topk] [--force] [--jobs 8]
-                                        [--arch sm_90a sm_100a]
+                                        [--arch sm_90 sm_100f]
 """
 
 import argparse
@@ -219,14 +219,20 @@ def _effective_arch(arch: str | None) -> str | None:
     return _detected_arch()
 
 
-def _claimed_spelling(arch: str, claimed: tuple[str, ...]) -> str | None:
-    """The spelling in ``claimed`` for ``arch``'s capability, or None.
+def _claimed_spelling(
+    arch: str, claimed: tuple[str, ...], *, prefer_portable: bool = False
+) -> str | None:
+    """The best target in ``claimed`` that can run on ``arch``, or None.
 
-    Prefers the arch-conditional spelling when a declaration lists both, matching
-    the generator's tie-break: it is what the kernels were written against."""
+    Explicit routing prefers the narrowest compatible target. Automatic on-device
+    export can instead request the family's standard portable target."""
     want = decl.cc_of(arch)
-    same_cc = [a for a in claimed if decl.cc_of(a) == want]
-    return min(same_cc, key=lambda a: (not a.endswith("a"), a)) if same_cc else None
+    if prefer_portable:
+        portable = decl.portable_target_for(want)
+        if portable in claimed:
+            return portable
+    compatible = decl.compatible_targets(claimed, want)
+    return compatible[0] if compatible else None
 
 
 def export_point(
@@ -342,19 +348,18 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                 #     claiming it is skipped. Resolving it to another spelling would
                 #     name the tree something generation was never told about, and
                 #     nothing would be embedded.
-                #   * an ON-DEVICE arch adopts the spelling the declaration claims
-                #     for the detected capability, matching the generator's
-                #     tie-break. It passes no --archs, so it cannot desynchronize,
-                #     and it needs resolving because the device reports the plain
-                #     spelling while a declaration may pin the conditional one.
+                #   * an ON-DEVICE arch adopts the best compatible target the
+                #     declaration claims, matching the generator's tie-break. It
+                #     passes no --archs, so it cannot desynchronize. This is also how
+                #     an SM103 device selects a family-portable sm_100f target.
                 if arch is not None:
                     # main() has already refused an --arch outside KNOWN_ARCHES, so
                     # the string comparison below is against a spelling that parses.
                     claims = decl.archs_of(d)
                     if layout_arch not in claims:
-                        # REPORTED, not refused: the spellings are distinct nvcc
-                        # targets, so a declaration pinning one cannot serve a build
-                        # compiled for the other, and aten is the right answer there.
+                        # REPORTED, not refused: explicit --arch names a compile
+                        # target, so a compatible but differently named declaration
+                        # target is not silently substituted.
                         # Per arch, because the whole-declaration misses below are
                         # suppressed once anything ships -- which hid this case.
                         other = _claimed_spelling(layout_arch, claims)
@@ -362,17 +367,18 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                             print(
                                 f"{did}: declares kernels but none for this build -- "
                                 f"requested {layout_arch}, and the declaration's "
-                                f"ARCHS ({' '.join(claims)}) names that capability "
-                                f"only as {other}, so this op falls back to aten on "
-                                f"{layout_arch} hardware. The spellings must match "
-                                f"exactly."
+                                f"ARCHS ({' '.join(claims)}) has compatible target "
+                                f"{other}, so this explicit target exports nothing. "
+                                f"Pass --arch {other} to export it."
                             )
                         else:
                             skipped.setdefault(did, []).append(layout_arch)
                             declared[did] = claims
                         continue
                 else:
-                    claimed = _claimed_spelling(layout_arch, decl.archs_of(d))
+                    claimed = _claimed_spelling(
+                        layout_arch, decl.archs_of(d), prefer_portable=True
+                    )
                     if claimed is None:
                         # The explicit path's miss, on the automatic path: without
                         # this an on-device run that ships nothing for the local
@@ -396,7 +402,7 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                 f"{did}: declares kernels but none for this build -- requested "
                 f"{' '.join(missed)}, and the declaration's ARCHS "
                 f"({' '.join(declared[did])}) names none of them, so this op falls back "
-                f"to aten. The spellings must match exactly."
+                f"to aten. Explicit compile targets must match exactly."
             )
     return jobs
 
@@ -602,34 +608,31 @@ def _run_job(job) -> str:
 
 
 def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
-    """TORCH_CUDA_ARCH_LIST -> the sm strings in it that are EXPORTABLE_ARCHES,
-    order-preserving and deduplicated. "9.0a;10.0a" (or space-separated) ->
-    ["sm_90a", "sm_100a"].
+    """TORCH_CUDA_ARCH_LIST -> portable native-AOT compile targets.
+
+    The result is order-preserving and deduplicated. Exact targets from the main
+    build are mapped onto a compatible standard target, so "9.0a;10.0a" becomes
+    ["sm_90", "sm_100f"]. Family compatibility comes from ARCH_FAMILIES; no
+    compute-capability major is treated specially.
 
     A +PTX suffix is stripped and named entries ("Hopper") are not translated; CI
     passes numeric lists. Deduplicated because "10.0;10.0+PTX" names one arch twice,
-    which would read as multi-arch downstream.
-
-    One arch per compute capability, preferring the arch-conditional spelling:
-    "10.0;10.0a" is one piece of hardware, and exporting both would build two full
-    sets of kernels for it, of which generation links one."""
+    which would read as multi-arch downstream."""
     out = []
     for entry in arch_list.replace(";", " ").split():
         major, _, minor = entry.removesuffix("+PTX").partition(".")
-        suffix = "a" if minor.endswith("a") else ""
-        minor = minor.removesuffix("a")
+        suffix = minor[-1:] if minor.endswith(("a", "f")) else ""
+        minor = minor.removesuffix(suffix) if suffix else minor
         # isascii too: str.isdigit is Unicode-aware, so an Arabic-Indic or
         # full-width digit satisfies it AND converts, which torchgen's sm parsing
         # rejects for the same reason.
         if not all(p.isascii() and p.isdigit() for p in (major, minor)):
             continue  # named arch ("Hopper") or malformed: skip
-        sm = f"sm_{int(major) * 10 + int(minor)}{suffix}"
-        if sm in EXPORTABLE_ARCHES and sm not in out:
-            out.append(sm)
-    # Collapse per capability, keeping the conditional spelling wherever the
-    # list named it. Order-preserving on the survivors.
-    conditional = {a.removesuffix("a") for a in out if a.endswith("a")}
-    return [a for a in out if a.endswith("a") or a not in conditional]
+        requested = f"sm_{int(major) * 10 + int(minor)}{suffix}"
+        target = _claimed_spelling(requested, EXPORTABLE_ARCHES)
+        if target is not None and target not in out:
+            out.append(target)
+    return out
 
 
 # Re-exported: build_stage2 and the tests read the shipped-arch set off the exporter.
@@ -660,7 +663,7 @@ def main(argv: list[str] | None = None) -> None:
         nargs="*",
         default=None,
         metavar="SM",
-        help="target architecture(s), e.g. --arch sm_90a sm_100a. With an "
+        help="target architecture(s), e.g. --arch sm_90 sm_100f. With an "
         "explicit arch, export never touches the CUDA driver and runs on "
         "GPU-less machines (CuTeDSL via --gpu-arch; Triton via an "
         "explicit GPUTarget). Default: detect from the local device.",

@@ -61,7 +61,10 @@ loud "'empty' is not a member of 'at'" at build time, not a silent one.
 Optional exports:
 
   ARCHS: tuple[str, ...]      architectures the op's kernels are valid
-                              on (sm strings). Defaults to all sm90+.
+                              on (sm strings). An ``a`` target is exact-only;
+                              an ``f`` target serves itself and later members of
+                              its declared CUDA family. Defaults to all known
+                              sm90+ targets.
                               Export skips arches outside it; codegen
                               emits a runtime device gate from
                               ARCHS intersect shipped-arches, so

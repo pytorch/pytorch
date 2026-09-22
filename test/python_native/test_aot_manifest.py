@@ -144,6 +144,16 @@ class TestCovers(TestCase):
             # Too few args to bind at all:
             self.assertFalse(aot_manifest.covers("fakeop", "CUDA", (), {}))
 
+    def test_generated_runtime_gate_limits_python_coverage(self):
+        with ManifestFixture():
+            coverage = aot_manifest.get_coverage("fakeop", "CUDA")
+            coverage._runtime_probed = True
+            coverage._runtime_covers = lambda *args, **kwargs: False
+            self.assertFalse(coverage.covers((self._covered_tensor(), 8), {}))
+
+            coverage._runtime_covers = lambda *args, **kwargs: True
+            self.assertTrue(coverage.covers((self._covered_tensor(), 8), {}))
+
 
 class TestGetCoverage(TestCase):
     def test_declared_op_has_coverage(self):
