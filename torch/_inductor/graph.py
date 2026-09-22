@@ -3012,7 +3012,13 @@ class GraphLowering(torch.fx.Interpreter):
 
     def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
+            from torch._inductor.ir_printer import log_post_lowering_inductor_ir
+
             self.init_wrapper_code()
+
+            # Before _update_scheduler: no scheduler nodes exist yet, so this
+            # renders the as-lowered loop orders.
+            log_post_lowering_inductor_ir(self)
 
             self._update_scheduler()
             V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
