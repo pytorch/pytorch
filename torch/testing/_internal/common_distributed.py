@@ -1186,8 +1186,9 @@ class MultiProcessTestCase(TestCase):
                     for p in self.processes:
                         p.terminate()
                     break
-                # Sleep to avoid excessive busy polling.
-                time.sleep(0.1)
+                pending = [p.sentinel for p in self.processes if p.exitcode is None]
+                if pending:
+                    multiprocessing.connection.wait(pending, timeout=0.1)
 
             elapsed_time = time.time() - start_time
             self._check_return_codes(fn, elapsed_time)

@@ -549,7 +549,7 @@ class Barrier:
 
             if time.time() - start_time > timeout:
                 raise RuntimeError("barrier timeout")
-            time.sleep(0.1)
+            time.sleep(0.01)
 
 
 class TestDistBackend(MultiProcessTestCase):
