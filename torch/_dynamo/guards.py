@@ -3382,7 +3382,7 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"list({ref}.keys()) == {list(value.keys())}")
         # The keys, not the values: the leaf snapshots them and compares the
         # list by value at run time.
-        for key in value:
+        for key in value.keys():
             self._compared_by_value(key)
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_mapping_keys_guard(
