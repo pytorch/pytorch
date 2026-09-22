@@ -28,11 +28,13 @@ ENDIF()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # TODO: See https://github.com/pytorch/pytorch/issues/56285
-  set_source_files_properties(src/operator-run.c PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-  set_source_files_properties(src/conv-run.cc PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-  set_source_files_properties(src/deconv-run.cc PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-  set_source_files_properties(src/fc-run.cc PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-  set_source_files_properties(src/fc-dynamic-run.cc PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  set_source_files_properties(
+    src/operator-run.c
+    src/conv-run.cc
+    src/deconv-run.cc
+    src/fc-run.cc
+    src/fc-dynamic-run.cc
+    PROPERTIES COMPILE_OPTIONS -Wno-deprecated-declarations)
 endif()
 
 # ---[ CMake options
@@ -296,30 +298,30 @@ set_target_properties(pytorch_qnnpack PROPERTIES
   C_STANDARD 11
   C_EXTENSIONS YES)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^armv[5-8]" OR IOS_ARCH MATCHES "^armv7")
-  set_property(SOURCE ${PYTORCH_QNNPACK_ARM_NEON_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 -marm -mfpu=neon ")
+  set_property(SOURCE ${PYTORCH_QNNPACK_ARM_NEON_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -O2 -marm -mfpu=neon)
   if(IOS)
-    set_property(SOURCE ${PYTORCH_QNNPACK_AARCH32_ASM_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -arch ${IOS_ARCH} ")
+    set_property(SOURCE ${PYTORCH_QNNPACK_AARCH32_ASM_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -arch ${IOS_ARCH})
   endif()
 endif()
 if(PYTORCH_QNNPACK_TARGET_PROCESSOR MATCHES "^(aarch64|arm64)$" OR IOS_ARCH MATCHES "^arm64.*")
-  set_property(SOURCE ${PYTORCH_QNNPACK_ARM_NEON_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 ")
+  set_property(SOURCE ${PYTORCH_QNNPACK_ARM_NEON_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -O2)
   if(IOS)
-    set_property(SOURCE ${PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -arch ${IOS_ARCH} ")
+    set_property(SOURCE ${PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -arch ${IOS_ARCH})
   endif()
 endif()
 if(PYTORCH_QNNPACK_TARGET_PROCESSOR MATCHES "^(i[3-6]86|x86_64)$" OR IOS_ARCH MATCHES "^(i386|x86_64)$")
-  set_property(SOURCE ${PYTORCH_QNNPACK_X86_SSE2_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 -msse2 ")
+  set_property(SOURCE ${PYTORCH_QNNPACK_X86_SSE2_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -O2 -msse2)
 endif()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^armv[5-8]" OR IOS_ARCH MATCHES "^armv7")
-  set_property(SOURCE ${PYTORCH_QNNPACK_PSIMD_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 -marm -mfpu=neon ")
-  set_property(SOURCE ${PYTORCH_QNNPACK_SCALAR_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 -marm ")
+  set_property(SOURCE ${PYTORCH_QNNPACK_PSIMD_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -O2 -marm -mfpu=neon)
+  set_property(SOURCE ${PYTORCH_QNNPACK_SCALAR_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -O2 -marm)
 else()
-  set_property(SOURCE ${PYTORCH_QNNPACK_PSIMD_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 ")
-  set_property(SOURCE ${PYTORCH_QNNPACK_SCALAR_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 ")
+  set_property(SOURCE ${PYTORCH_QNNPACK_PSIMD_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -O2)
+  set_property(SOURCE ${PYTORCH_QNNPACK_SCALAR_UKERNELS} APPEND PROPERTY COMPILE_OPTIONS -O2)
 endif()
-set_property(SOURCE ${PYTORCH_QNNPACK_INIT_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -Os ")
+set_property(SOURCE ${PYTORCH_QNNPACK_INIT_SRCS} APPEND PROPERTY COMPILE_OPTIONS -Os)
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-  set_property(SOURCE ${PYTORCH_QNNPACK_OPERATOR_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 ")
+  set_property(SOURCE ${PYTORCH_QNNPACK_OPERATOR_SRCS} APPEND PROPERTY COMPILE_OPTIONS -O2)
 endif()
 target_include_directories(pytorch_qnnpack PUBLIC include)
 target_include_directories(pytorch_qnnpack PUBLIC src)
