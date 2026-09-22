@@ -313,19 +313,20 @@ class TritonBundler:
         kernel_names = []
         with dynamo_timed("TritonBundler.load_cached_static_autotuners"):
             for result in static_autotuners:
+                force_recompile = False
                 try:
                     # Make sure the cubin path exists and is valid
                     for compile_result in result.kernel.compile_results:
                         kernel = compile_result.kernel
                         has_retained_cubin = kernel.cubin_raw is not None
-                        kernel._fallback_cubin_raw = None
                         kernel._cubin_raw_authoritative = has_retained_cubin
                         kernel._use_stable_cubin_path = True
                         if has_retained_cubin:
-                            compile_result.reload_cubin_path()
+                            compile_result.set_cubin_path()
                             continue
 
                         bundled_cubin = None
+                        ambiguous_bundled_cubin = False
                         if binary_index is not None:
                             matches = binary_index.matching_payloads(
                                 compile_result.bundled_artifact_identity()
@@ -333,10 +334,15 @@ class TritonBundler:
                             if len(matches) == 1:
                                 bundled_cubin = next(iter(matches))
                             elif len(matches) > 1:
+                                ambiguous_bundled_cubin = True
                                 log.warning(
                                     "Ignoring ambiguous bundled binaries for %s",
                                     result.kernel_name,
                                 )
+
+                        if ambiguous_bundled_cubin:
+                            force_recompile = True
+                            break
 
                         local_cubin = None
                         try:
@@ -344,20 +350,17 @@ class TritonBundler:
                             kernel.retain_cubin_from_path()
                             local_cubin = kernel.cubin_raw
                         except MissingTritonKernelError:
-                            pass
+                            if bundled_cubin is None:
+                                raise
 
                         # The serialized bundle is the graph's primary source.
-                        # A distinct local snapshot remains available only if
-                        # native validation rejects that exact payload.
+                        # A merely loadable local binary cannot authenticate the
+                        # graph's semantics, so never use it after bundle failure.
                         if bundled_cubin is not None:
                             kernel.cubin_raw = bundled_cubin
-                            if local_cubin != bundled_cubin:
-                                kernel._fallback_cubin_raw = local_cubin
-                            compile_result.reload_cubin_path()
+                            compile_result.set_cubin_path()
                         elif local_cubin is not None:
                             kernel.cubin_raw = local_cubin
-                        else:
-                            compile_result.reload_cubin_path()
                 except MissingTritonKernelError:
                     log.warning(
                         "Failed to reload cubin file statically launchable autotuner %s",
@@ -370,7 +373,7 @@ class TritonBundler:
                 # can launch a worker without waiting on the blocking step of
                 # StaticAutotunerFuture.result().
                 CompiledTritonKernels._cache[result.cache_key] = StaticAutotunerFuture(
-                    result.kernel
+                    result.kernel, force_recompile=force_recompile
                 )
                 counters["inductor"]["triton_bundler_load_static_autotuner"] += 1
                 kernel_names.append(result.kernel_name)
