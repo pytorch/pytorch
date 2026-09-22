@@ -53,6 +53,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    CompileOnOneRankUnsupported,
     ObservedAttributeError,
     raise_observed_exception,
     raise_type_error,
@@ -230,10 +231,14 @@ def _current_device_index_variable(
     change within a graph, so a fresh node per read would allocate a fresh unbacked
     symbol each time -- leaving two reads incomparable to each other, and costing a
     fallback kernel and a cudagraph partition boundary apiece.
+
+    Cached on the tracer, not the graph. A higher-order op traces each subgraph with
+    its own tracer, and a proxy created under a sibling cannot be reused here.
     """
     from .builder import wrap_fx_proxy
 
-    cached = tx.output.coor_current_device_index_var
+    tracer = tx.output.current_tracer
+    cached = tracer.coor_current_device_index_var
     if cached is not None:
         return cached
     var = wrap_fx_proxy(
@@ -245,7 +250,7 @@ def _current_device_index_variable(
             {},
         ),
     )
-    tx.output.coor_current_device_index_var = var
+    tracer.coor_current_device_index_var = var
     return var
 
 
@@ -274,17 +279,27 @@ class CurrentDeviceVariable(VariableTracker):
         return "torch.fx.experimental.proxy_tensor._coor_current_device()"
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # Keyed on the device type, to agree with tp_richcompare_impl below: two
-        # reads of the current device are the same device. Without this the base
-        # class falls back to an identity hash, so equal keys land in different
-        # dict buckets and are never compared -- a silently wrong answer for
-        # anything that groups by device, _group_tensors_by_device_and_dtype and
-        # the fused optimizers behind it included.
+        # There is no trace-time hash that can be right. tp_richcompare_impl below
+        # reports this device equal to an explicit cuda:N whenever N is the running
+        # rank's index, so hashing the indexless device puts equal keys in different
+        # buckets: len({x.device: 1, torch.device("cuda:0"): 2}) is 1 eagerly and 2
+        # compiled. A correct hash needs the index, which is the one thing
+        # compile_on_one_rank exists to keep out of the graph -- so refuse instead
+        # of answering wrongly.
         #
-        # is_fake: this is not the runtime hash. At runtime the device carries an
-        # index, so hash(torch.device("cuda", N)) differs from what we return
-        # here, and the value must not escape into output bytecode.
-        return hash(self.value), True
+        # A hard error, not a graph break: breaking out would quietly drop the
+        # frame back to eager, which is the one thing compile_on_one_rank was
+        # turned on to avoid. Keying on a device is outside what the feature can
+        # express, so say so instead of deoptimizing behind the user's back.
+        raise CompileOnOneRankUnsupported(
+            "Cannot hash a rank-relative device under compile_on_one_rank. The "
+            "current device's index is only known at runtime, and it compares "
+            f"equal to an explicit {self.value.type}:N, so any hash chosen here "
+            "would put equal devices in different dict buckets.\n"
+            "Next steps: key on `x.device.type` instead of the device itself, "
+            "pass an explicit device if it is the same on every rank, or turn off "
+            "compile_on_one_rank for this region.",
+        )
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
