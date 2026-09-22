@@ -361,21 +361,21 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             if self.local_reduce_feeds_main and self.local_reduce_axis == 0
             else 3
         )
-        if cutlass.const_expr(self.has_cross_warp_local_reduce):
-            self.local_reduce_smem_shape = (
-                self.cta_tile_shape_mnk[1],
-                self.local_reduce_smem_cols,
-            )
-            self.local_reduce_smem_stride = (self.local_reduce_smem_cols, 1)
-            local_reduce_smem_layout = cute.make_layout(
-                self.local_reduce_smem_shape,
-                stride=self.local_reduce_smem_stride,
-            )
-            self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
-        else:
-            self.local_reduce_smem_shape = None
-            self.local_reduce_smem_stride = None
-            self.local_reduce_elements = 0
+        self.local_reduce_smem_shape = (
+            (self.cta_tile_shape_mnk[1], self.local_reduce_smem_cols)
+            if self.has_cross_warp_local_reduce
+            else 1
+        )
+        self.local_reduce_smem_stride = (
+            (self.local_reduce_smem_cols, 1)
+            if self.has_cross_warp_local_reduce
+            else None
+        )
+        local_reduce_smem_layout = cute.make_layout(
+            self.local_reduce_smem_shape,
+            stride=self.local_reduce_smem_stride,
+        )
+        self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
             self.mma_tiler,
@@ -845,11 +845,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         """
         GPU device kernel performing the Persistent batched GEMM computation.
         """
-        # Alpha is always supplied by the wrapper (one when output scaling is
-        # absent). Load it once so every epilogue subtile reuses the same FP32
-        # register instead of rebuilding the tensor load in the inner loop.
-        alpha_value = alpha_tensor[0].to(cutlass.Float32)
-
         warp_idx = cute.arch.warp_idx()
         warp_idx = cute.arch.make_warp_uniform(warp_idx)
 
@@ -889,14 +884,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         #
         smem = utils.SmemAllocator()
         storage = smem.allocate(self.shared_storage)
-        if cutlass.const_expr(self.has_cross_warp_local_reduce):
-            local_reduce_smem_layout = cute.make_layout(
-                self.local_reduce_smem_shape,
-                stride=self.local_reduce_smem_stride,
-            )
-            sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
-        else:
-            sLocalReduce = None
+        local_reduce_smem_layout = cute.make_layout(
+            self.local_reduce_smem_shape,
+            stride=self.local_reduce_smem_stride,
+        )
+        sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
 
         # Initialize mainloop ab_pipeline (barrier) and states
         ab_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
@@ -1573,6 +1565,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     cur_tile_coord[1],
                     cur_tile_coord[2],
                 )
+                mma_tile_offset_m = (
+                    mma_tile_coord_mnl[0] * self.mma_tiler[0]
+                    + mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                )
 
                 #
                 # Slice to per mma tile index
@@ -1656,13 +1652,17 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     # Convert to C type
                     #
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
-                    # Fused global scale. Closure capture cannot read a runtime
-                    # tensor here, so alpha is a kernel argument.
+                    # Fused global scale: multiply by runtime alpha[0] (a traced
+                    # kernel-arg scalar) when provided. Closure capture cannot
+                    # read a runtime tensor here, so alpha must be a kernel arg.
                     # Apply in fp32 (acc_dtype) BEFORE the downcast to c_dtype so
                     # low-range outputs (fp8/fp16) don't overflow/saturate on the
                     # cast before alpha (typically < 1) restores range, and before
                     # epilogue_op so the epilogue sees the true scaled value.
-                    acc_vec = alpha_value * acc_vec
+                    # const_expr makes this a compile-time branch (skipped when
+                    # alpha_tensor is None) rather than device control flow.
+                    if cutlass.const_expr(alpha_tensor is not None):
+                        acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
                     has_epilogue_tensors = cutlass.const_expr(
                         len(epilogue_inputs.values) > 0
                     )
@@ -1706,10 +1706,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 row_idx = coord_flt[i][0]
                                 col_idx = coord_flt[i][1]
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + row_idx
-                                )
+                                global_m = mma_tile_offset_m + row_idx
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + col_idx
@@ -1801,10 +1798,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         ):
                             row_idx = coord_flt[i][0]
                             col_idx = coord_flt[i][1]
-                            global_m = (
-                                mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                + row_idx
-                            )
+                            global_m = mma_tile_offset_m + row_idx
                             global_n = (
                                 mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                 + col_idx
@@ -1835,10 +1829,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 row_idx = coord_flt[i][0]
                                 col_idx = coord_flt[i][1]
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + row_idx
-                                )
+                                global_m = mma_tile_offset_m + row_idx
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + col_idx
@@ -1889,10 +1880,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     init_val=self.local_reduce_init,
                                     reduction_profile=((None, 1, None), 1, 1),
                                 )
-                            if cutlass.const_expr(
-                                group <= fragment_n
-                                and not self.tensor_epilogue_returns_local_reduce
-                            ):
+                            if cutlass.const_expr(group <= fragment_n):
                                 reduced = self.local_reduce_finalize(reduced, group)
                             reduced = reduced.reshape(((1, 1, repeats), 1, 1))
                             reduced = reduced.broadcast_to(grouped.shape)
@@ -1930,20 +1918,19 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             )
                             gReduce = cute.local_tile(
                                 mReduce,
-                                (self.cta_tile_shape_mnk[0], groups_per_cta),
+                                (self.mma_tiler[0], groups_per_cta),
                                 mma_tile_coord_mnl[:2],
                             )
-                            limit_m = min(
-                                cute.size(local_reduce_tensor, mode=[1])
-                                - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
-                                self.cta_tile_shape_mnk[0],
-                            )
+                            row_offset = mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                            limit_m = cute.size(local_reduce_tensor, mode=[1])
                             limit_groups = cute.size(local_reduce_tensor, mode=[2])
                             for i in cutlass.range(
                                 cute.size(reduced_flt), unroll_full=True
                             ):
                                 row_idx = coord_flt[i][0]
                                 n_idx = coord_flt[i][1]
+                                output_row = row_idx + row_offset
+                                global_row = mma_tile_offset_m + row_idx
                                 group_idx = n_idx // group
                                 global_group_idx = (
                                     mma_tile_coord_mnl[1] * groups_per_cta + group_idx
@@ -1951,10 +1938,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 if (
                                     should_store
                                     and n_idx % group == store_offset
-                                    and row_idx < limit_m
+                                    and global_row < limit_m
                                     and global_group_idx < limit_groups
                                 ):
-                                    gReduce[row_idx, group_idx] = reduced_flt[i]
+                                    gReduce[output_row, group_idx] = reduced_flt[i]
                         else:
                             tDrReduce = cute.make_rmem_tensor_like(
                                 local_reduce_vec, self.acc_dtype
@@ -2143,11 +2130,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 ):
                                     row_idx = coord_flt[i][0]
                                     col_idx = coord_flt[i][1]
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + row_idx
-                                    )
+                                    global_m = mma_tile_offset_m + row_idx
                                     global_n = (
                                         mma_tile_coord_mnl[1]
                                         * self.cta_tile_shape_mnk[1]

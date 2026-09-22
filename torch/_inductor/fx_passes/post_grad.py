@@ -69,6 +69,7 @@ from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
+from .slice_scatter_chunking import slice_scatter_chunking_pass
 from .split_cat import POST_GRAD_PATTERNS
 
 
@@ -476,6 +477,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
+    if config.pattern_matcher:
+        introduced_mutation = GraphTransformObserver(
+            gm, "slice_scatter_chunking"
+        ).apply_graph_pass(
+            slice_scatter_chunking_pass,
+        )
+        if introduced_mutation:
+            fake_tensor_updater.incremental_update()
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
@@ -2212,121 +2221,6 @@ def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
 
     counters["inductor"]["addcdiv_fma_fused"] += 1
     match.replace_by_example(repl, [inp, t1, t2, value])
-
-
-def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
-    """Whether ``_scaled_mm(...) * scale`` can use its native output scale.
-
-    Restrict this rewrite to the NVGEMM path: other scaled-mm backends do not
-    uniformly expose ``scale_result`` through Inductor yet.  The vendored
-    Blackwell block-scaled kernel consumes one FP32 value through its alpha
-    argument, including 0-D and all-ones-shaped tensors.
-    """
-    if not (config.max_autotune or config.max_autotune_gemm):
-        return False
-    if "NVGEMM" not in {
-        backend.strip() for backend in config.max_autotune_gemm_backends.split(",")
-    }:
-        return False
-
-    output_scale = match.kwargs["output_scale"]
-    scale_val = output_scale.meta.get("val")
-    if not (
-        isinstance(scale_val, torch.Tensor)
-        and scale_val.device.type == "cuda"
-        and scale_val.dtype == torch.float32
-        and scale_val.numel() == 1
-    ):
-        return False
-
-    scaled_mm = next(
-        (
-            node
-            for node in match.nodes
-            if node.op == "call_function" and node.target is aten._scaled_mm.default
-        ),
-        None,
-    )
-    if scaled_mm is None:
-        return False
-
-    from torch.fx.operator_schemas import normalize_function
-
-    normalized = normalize_function(
-        scaled_mm.target,
-        scaled_mm.args,
-        scaled_mm.kwargs,
-        normalize_to_only_use_kwargs=True,
-    )
-    if normalized is None:
-        return False
-    return (
-        normalized.kwargs["bias"] is None and normalized.kwargs["scale_result"] is None
-    )
-
-
-_scaled_mm_without_output_scale = CallFunction(
-    aten._scaled_mm.default,
-    KeywordArg("mat_a"),
-    KeywordArg("mat_b"),
-    KeywordArg("scale_a"),
-    KeywordArg("scale_b"),
-    None,
-    None,
-    KeywordArg("out_dtype"),
-)
-
-
-@register_graph_pattern(
-    CallFunction(
-        aten.mul.Tensor,
-        _scaled_mm_without_output_scale,
-        KeywordArg("output_scale"),
-    ),
-    # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[1],
-    extra_check=_can_fold_scaled_mm_output_scale,
-)
-@register_graph_pattern(
-    CallFunction(
-        aten.mul.Tensor,
-        KeywordArg("output_scale"),
-        _scaled_mm_without_output_scale,
-    ),
-    # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[1],
-    extra_check=_can_fold_scaled_mm_output_scale,
-)
-def _fold_scaled_mm_output_scale(
-    match: Match,
-    mat_a,
-    mat_b,
-    scale_a,
-    scale_b,
-    out_dtype,
-    output_scale,
-) -> None:
-    """Move a scalar multiply into ``aten._scaled_mm.scale_result``.
-
-    Doing this before lowering is important for QKV projections: their scaled
-    output is split into multiple consumers, which prevents the scheduler's
-    ordinary single-consumer template-epilogue fusion from seeing the multiply.
-    """
-
-    def repl(mat_a, mat_b, scale_a, scale_b, out_dtype, output_scale):
-        return aten._scaled_mm.default(
-            mat_a,
-            mat_b,
-            scale_a=scale_a,
-            scale_b=scale_b,
-            scale_result=output_scale,
-            out_dtype=out_dtype,
-        )
-
-    counters["inductor"]["scaled_mm_output_scale_fused"] += 1
-    match.replace_by_example(
-        repl, [mat_a, mat_b, scale_a, scale_b, out_dtype, output_scale]
-    )
 
 
 def register_partial_reduction_pattern():

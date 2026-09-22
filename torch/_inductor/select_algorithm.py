@@ -90,6 +90,7 @@ from .utils import (
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
+    fp32_matmul_precision_key,
     get_dtype_size,
     is_gpu,
     Placeholder,
@@ -3883,15 +3884,11 @@ def create_inputs_key(input_nodes) -> str:
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
-    precision = torch.backends.cuda.matmul.fp32_precision
-    # bfx9 has no legacy equivalent, and the legacy getter may reject it.
-    if precision != "bfx9":
-        precision = torch.get_float32_matmul_precision()
     return ":".join(
         [
             name,
             inputs_key,
-            precision,
+            fp32_matmul_precision_key(),
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
@@ -4935,7 +4932,6 @@ class AlgorithmSelectorCache(PersistentCache):
                             swizzle_type_a=c.bmreq.swizzle_type_a,
                             swizzle_type_b=c.bmreq.swizzle_type_b,
                             has_bias_epilogue=c.bmreq.has_bias_epilogue,
-                            has_output_scale=c.bmreq.has_output_scale,
                             swap_ab=c.bmreq.swap_ab,
                             metadata=c.bmreq.kernel.metadata,
                         )
