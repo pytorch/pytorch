@@ -11,7 +11,10 @@ from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.nn import functional as F
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -97,7 +100,7 @@ def hard_mish(x):
 # evo_norm_inp = [(128, 2048, 8, 8)]
 
 
-def run_and_compare_activation(self, fn, inps, device):
+def run_and_compare_activation(self, device, fn, inps):
     with torch.jit.fuser("fuser1"):
         dtype = torch.float
         if isinstance(fn, nn.Module):
@@ -124,24 +127,30 @@ def run_and_compare_activation(self, fn, inps, device):
             self.assertEqual(ref_arg.grad, res_arg.grad)
 
 
-class TestMemoryEfficientOpAuthoring(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestMemoryEfficientOpAuthoringDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
     def test_gelu_bias(self, device):
-        run_and_compare_activation(self, gelu_bias, [(1024,), (1024,)], device)
+        run_and_compare_activation(self, device, gelu_bias, [(1024,), (1024,)])
 
+    @onlyAccelerator
     def test_mish(self, device):
-        run_and_compare_activation(self, mish, [(1024,)], device)
+        run_and_compare_activation(self, device, mish, [(1024,)])
 
+    @onlyAccelerator
     def test_swish(self, device):
-        run_and_compare_activation(self, swish, [(1024,)], device)
+        run_and_compare_activation(self, device, swish, [(1024,)])
 
+    @onlyAccelerator
     def test_hard_sigmoid(self, device):
-        run_and_compare_activation(self, hard_sigmoid, [(1024,)], device)
+        run_and_compare_activation(self, device, hard_sigmoid, [(1024,)])
 
+    @onlyAccelerator
     def test_hard_swish(self, device):
-        run_and_compare_activation(self, hard_swish, [(1024,)], device)
+        run_and_compare_activation(self, device, hard_swish, [(1024,)])
 
+    @onlyAccelerator
     def test_layer_norm(self, device):
         def layer_norm(x, weight, bias):
             dim = -1
@@ -156,8 +165,9 @@ class TestMemoryEfficientOpAuthoring(TestCase):
         bs = 10
         ln_size = 16
         layer_norm_inps = [(bs, ln_size), (ln_size,), (ln_size,)]
-        run_and_compare_activation(self, layer_norm, layer_norm_inps, device)
+        run_and_compare_activation(self, device, layer_norm, layer_norm_inps)
 
+    @onlyAccelerator
     def test_rmsnorm(self, device):
         class T5LayerNorm(nn.Module):
             def __init__(self, hidden_size, eps=1e-6):
@@ -186,7 +196,7 @@ class TestMemoryEfficientOpAuthoring(TestCase):
         hidden = 1024
         t5_norm = T5LayerNorm(hidden)
         t5_norm_inputs = [(bs, seq, hidden)]
-        run_and_compare_activation(self, t5_norm, t5_norm_inputs, device)
+        run_and_compare_activation(self, device, t5_norm, t5_norm_inputs)
 
     # TODO - Assertion failure
     # def test_hard_mish(self):
@@ -499,7 +509,10 @@ class RandomOpTestCase(TestCase):
 
 
 instantiate_device_type_tests(
-    TestMemoryEfficientOpAuthoring, globals(), only_for=("cuda",)
+    TestMemoryEfficientOpAuthoringDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 

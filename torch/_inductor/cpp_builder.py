@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
@@ -414,7 +415,40 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     return flavor
 
 
-def get_cpp_compiler() -> str:
+@functools.cache
+def _get_rocm_clang_cl_windows() -> str:
+    """
+    Locate the clang-cl shipped with the Windows ROCm SDK.
+
+    HIP host wrappers include headers with Clang-only syntax that MSVC cannot
+    parse. In the packaged Windows TheRock SDK, ``ROCM_HOME`` is the
+    ``_rocm_sdk_core`` package root and LLVM is under ``lib/llvm/bin``.
+    """
+    from torch.utils.cpp_extension import _join_rocm_home, ROCM_HOME
+
+    if ROCM_HOME:
+        candidate = _join_rocm_home("lib", "llvm", "bin", "clang-cl.exe")
+        if os.path.exists(candidate):
+            return candidate
+        log.warning(
+            "ROCm clang-cl was not found at %s; falling back to clang-cl on PATH",
+            candidate,
+        )
+    else:
+        log.warning("ROCM_HOME is not set; falling back to clang-cl on PATH")
+    return "clang-cl"
+
+
+def _normalize_device_type(device_type: str) -> str:
+    # Out-of-tree devices registered via DeviceInterface are not parseable by
+    # torch.device; pass their names through unchanged.
+    try:
+        return torch.device(device_type).type
+    except RuntimeError:
+        return device_type
+
+
+def get_cpp_compiler(device_type: str | None = None) -> str:
     if (
         config.aot_inductor.cross_target_platform == "windows"
         and sys.platform != "win32"
@@ -426,7 +460,15 @@ def get_cpp_compiler() -> str:
         return compiler
 
     if _IS_WINDOWS:
-        compiler = os.environ.get("CXX", "cl")
+        compiler = os.environ.get("CXX")
+        if compiler is None:
+            if device_type is not None:
+                device_type = _normalize_device_type(device_type)
+            compiler = (
+                _get_rocm_clang_cl_windows()
+                if device_type == "cuda" and torch.version.hip is not None
+                else "cl"
+            )
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
         check_msvc_cl_language_id(compiler)
@@ -2165,9 +2207,18 @@ def get_cpp_torch_device_options(
     3. MISC
     4. Return the build args
     """
-    # CppTorchDeviceOptions validates too, but this is a public entry point in
-    # its own right.
+    # Validate here because callers may bypass CppTorchDeviceOptions.
+    device_type = _normalize_device_type(device_type)
     _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
+
+    try:
+        device_options = get_interface_for_device(device_type).get_cpp_device_options(
+            aot_mode, compile_only
+        )
+    except NotImplementedError:
+        device_options = None
+    if device_options is not None:
+        return device_options
 
     definitions: list[str] = []
     include_dirs: list[str] = []
@@ -2210,6 +2261,10 @@ def get_cpp_torch_device_options(
                 libraries += ["amdhip64"]
             else:
                 libraries += ["torch_hip"]
+                if _IS_WINDOWS:
+                    # Windows import libraries do not transitively resolve the
+                    # HIP runtime symbols referenced by the generated wrapper.
+                    libraries += ["amdhip64"]
             definitions.append(" __HIP_PLATFORM_AMD__")
             _transform_rocm_paths(libraries_dirs)
         else:
@@ -2307,9 +2362,13 @@ class CppTorchDeviceOptions(CppTorchOptions):
         compiler: str = "",
         cpp_stdlib: CppStdlib = "libstdc++",
     ) -> None:
+        device_type = _normalize_device_type(device_type)
         # Validate before super().__init__, which runs the header setup that
         # would strip the default stdlib.
         _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
+        if not compiler:
+            # Resolve here because CppOptions has no device context.
+            compiler = get_cpp_compiler(device_type=device_type)
 
         super().__init__(
             vec_isa=vec_isa,
