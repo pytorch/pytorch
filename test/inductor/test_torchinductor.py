@@ -7281,6 +7281,11 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([2, 2, 3, 6]),),
         )
 
+    # same as test_adaptive_max_pool2d_transposed_indices: halide/mps take the
+    # non-logical-index path in _pool_argmax_inner_fn and still return physical
+    # window offsets.
+    @skip_if_halide
+    @skip_if_mps
     def test_max_pool2d_transposed_indices(self):
         # transposed input, indices must be logical and not physical offsets
         def fn(x):
