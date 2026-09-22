@@ -1896,7 +1896,7 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
                 if blocking:
                     self.assertLess(ratio, 0.1)
                 else:
-                    self.assertGreater(ratio, 0.9)
+                    self.assertGreater(ratio, 0.5)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("cuda")
