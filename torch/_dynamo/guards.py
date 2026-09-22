@@ -1111,6 +1111,9 @@ def getitem_on_dict_manager(
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
         # TODO - source debug string is probably wrong here.
+        # Not recorded by _compared_by_value (no builder here): a
+        # DictGuardManager exists only under guard_on_key_order, whose
+        # install_dict_keys_match_guard records the same key.
         base_guard_manager.get_key_manager(
             index=index,
             source=key_source,
@@ -2542,6 +2545,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___dict_contains({key!r}, {dict_ref})"
         if code in self.already_added_code_parts:
             return
+        self._compared_by_value(key)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
@@ -2562,6 +2566,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"not ___dict_contains({key!r}, {dict_ref})"
         if code in self.already_added_code_parts:
             return
+        self._compared_by_value(key)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
@@ -2584,6 +2589,7 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
 
+        self._compared_by_value(item)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
@@ -2606,6 +2612,7 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
 
+        self._compared_by_value(item)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
@@ -4289,11 +4296,13 @@ _INSTANCE_HOOKS = ("__setstate__", "__getnewargs__", "__getnewargs_ex__") + (
 )
 
 
-def _pickles_by_default(obj: Any) -> bool:
-    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``,
-    judged from the type (its own hooks, its copyreg registration and its
-    instance layout) and from a hollow instance of it, asked for the hooks the
-    way pickle asks. A hook set on the instance itself is not seen.
+def _pickles_by_default(cls: type) -> bool:
+    """Whether an instance of ``cls`` round-trips as ``cls.__new__(cls)`` plus its
+    ``__dict__``, judged from the type (its own hooks, its copyreg registration
+    and its instance layout) and from a hollow instance of it, asked for the
+    hooks the way pickle asks. A hook set on the instance itself, or served by
+    a __getattr__ that reads instance state, is not seen (pickle resolves
+    __getnewargs__(_ex) on the real object at dump).
 
     Attribute pruning is only sound for that protocol. A custom __reduce_ex__
     (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
@@ -4314,16 +4323,20 @@ def _pickles_by_default(obj: Any) -> bool:
     lacks are looked up on an instance by pickle (BUILD asks the hollow one
     NEWOBJ made for __setstate__), so a __getattr__ that serves any name
     supplies them where a read on the type sees nothing; they are asked for the
-    same way here. A hook that raises on that read is answered with False: not
-    pruning is always safe, and the failure it would turn into is the one being
-    avoided.
+    same way here, and as the C unpickler asks (does the lookup raise
+    AttributeError, not is the result None: a __getattr__ returning None gives
+    BUILD a None to call). A hook that raises on that read is answered with
+    False: not pruning is always safe, and the failure it would turn into is
+    the one being avoided. A class with a __del__ is refused before the probe
+    instantiates: a finalizer must not run from a predicate, and a pruned
+    object's would later run against the sentinels.
     """
-    cls = type(obj)
     try:
         if not (
             cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
             and all(c.__itemsize__ == 0 for c in cls.__mro__)
             and not any(vars(c).get("__slots__") for c in cls.__mro__)
+            and not any("__del__" in vars(c) for c in cls.__mro__)
             and cls not in copyreg.dispatch_table
             and cls.__new__ is object.__new__
             and cls.__reduce_ex__ is object.__reduce_ex__
@@ -4333,7 +4346,13 @@ def _pickles_by_default(obj: Any) -> bool:
         ):
             return False
         hollow = object.__new__(cls)
-        return all(getattr(hollow, name, None) is None for name in _INSTANCE_HOOKS)
+        for name in _INSTANCE_HOOKS:
+            try:
+                getattr(hollow, name)
+            except AttributeError:
+                continue
+            return False
+        return True
     except Exception:
         return False
 
@@ -4399,13 +4418,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         # tuple, see _keep_container_verbatim) must stay real even when an
         # unguarded attribute is the very same object and registers it mid-dump.
         # So must an object a guard compares by value itself (a dict key).
-        self._verbatim_elements: set[int] = set()
+        self._verbatim_elements: dict[int, Any] = {}
         stack = list(value_guarded_containers.values())
         while stack:
             value = stack.pop()
             if id(value) in self._verbatim_elements:
                 continue
-            self._verbatim_elements.add(id(value))
+            # Holds the value, like its sibling maps, so the id stays live: a
+            # __dict__ property may hand the walk a dict that dies with it.
+            self._verbatim_elements[id(value)] = value
             if inspect.ismodule(value) or isinstance(
                 value, (torch.Tensor, torch.nn.Module)
             ):
@@ -4422,7 +4443,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # dataclass), so a key can be one or hold one.
                 stack.extend(value)
                 stack.extend(value.values())
-            elif isinstance(value, (list, tuple, set, frozenset)):
+            elif isinstance(value, (list, tuple, set, frozenset, dict_keys)):
+                # A dict_keys view is a KeysView, not a set, and its reducer
+                # pickles each key as its own object.
                 stack.extend(value)
             if (fields := _instance_dict(value)) is not None:
                 # A by-value comparison reads every field, so the protection
@@ -4580,10 +4603,11 @@ class GuardsStatePickler(FunctionPicklerBase):
     # call-site default binding next to `f.__defaults__ == (...)`), and only
     # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
     # records those tuples in value_guarded_containers, which the pickler takes
-    # as a required argument. A non-const dict key is recorded there too
-    # (_compared_by_value): the key managers bake it and compare it by value at
-    # run time, and that comparison reads every field, so the protection extends
-    # through the key's instance dict. Two known limits: a slotted key's slot
+    # as a required argument. A non-const dict key and a *_CONTAINS comparand
+    # are recorded there too (_compared_by_value): the key managers and the
+    # contains guards bake them and compare by value at run time, and that
+    # comparison reads every field, so the protection extends through the
+    # key's instance dict. Two known limits: a slotted key's slot
     # values are not marked, and a tensor or nn.Module field still goes through
     # its own guard_tree_values check (a loaded copy could not compare equal to
     # the run-time object anyway). A dict/tuple SUBCLASS is verbatim whenever
@@ -5023,7 +5047,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not inspect.isfunction(obj)
             and type(obj).__qualname__ == type(obj).__name__
             and not _is_torch_type(type(obj))
-            and _pickles_by_default(obj)
+            and _pickles_by_default(type(obj))
             and not pytree.is_constant_class(type(obj))
             and not is_opaque_constant_type(type(obj))
             and id(obj) not in self._verbatim_elements
