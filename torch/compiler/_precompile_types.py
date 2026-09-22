@@ -1,10 +1,10 @@
 """Plain-data types the multi-graph precompile capture reports through.
 
-A leaf module on purpose. ``import torch`` loads ``torch.compiler``, and through
-it ``torch._precompile`` and the public types defined here, without loading
-``torch._dynamo``, so a type that public surface exports cannot live in the
-Dynamo-side internals, ``torch/_dynamo/precompile_package.py`` (which imports
-this module), without an import cycle. Import-wise the types could live in
+A leaf module on purpose: it must stay importable without ``torch._dynamo``, so
+that the public ``torch.compiler.precompile`` surface can export these types
+without ``import torch`` loading Dynamo, while the Dynamo-side internals
+(``torch/_dynamo/precompile_package.py``, which imports this module) use them
+without an import cycle. Import-wise the types could live in
 ``torch/_precompile.py``; keeping them out of it is layering: the Dynamo
 internals must not depend on the make_fx capture module, which the multi-graph
 capture session makes an importer of those internals. The types are frozen
@@ -106,28 +106,28 @@ class PrecompileSummary:
             for: no compile of the frame recorded a guarded code and one was
             bypassed (its guards could not be serialized, or its graph held
             parameters by static address), or a backend artifact was missing
-            when the package was saved. Not an
-            eager fallback: the frame ran compiled during capture, the package
-            kept no variant of it a load can serve, and an install re-traces it
-            rather than skipping it as trivial.
+            when the package was saved. Not an eager fallback: the frame ran
+            compiled during capture, the package kept no variant of it a load
+            can serve, and an install re-traces it rather than skipping it as
+            trivial.
         truncated: ``co_name (filename:firstlineno)`` of each frame that hit the
             recompile limit. A lower bound, which is why the digest prints it
             as ``>=``: from a limit hit on, that frame and the frames it calls
             run without tracing, so a limit hit that would follow it there is
             never recorded.
-        uncovered_frames: ``co_name``s of frames the capture ran that ended with no
-            guarded code and were not bypassed, so the artifact cannot serve
+        uncovered_frames: ``co_name``s of frames the capture ran that ended with
+            no guarded code and were not bypassed, so the artifact cannot serve
             them: a thin wrapper whose graphs all landed in an inner frame, a
             frame Dynamo gave up on, or a frame whose compile raised (its
             message is in ``capture_errors``, so one failure shows in both
-            digest clauses). A different cause and remedy from ``bypassed``
-            (an install leaves an uncovered frame to run eagerly, so only a
+            digest clauses). A different cause and remedy from ``bypassed`` (an
+            install leaves an uncovered frame to run eagerly, so only a
             re-capture recovers it, where it re-traces a bypassed one), never
-            the same frame; a frame that hit the recompile limit before it recorded a
-            guarded code is in ``truncated`` too. Not a remainder: which frames
-            count as a gap is the producer's decision, and a frame the package
-            holds an entry for but never ran is not one, so this is not
-            ``frames`` minus ``bypassed`` minus the frames that hold guarded
+            the same frame; a frame that hit the recompile limit before it
+            recorded a guarded code is in ``truncated`` too. Not a remainder:
+            which frames count as a gap is the producer's decision, and a frame
+            the package holds an entry for but never ran is not one, so this is
+            not ``frames`` minus ``bypassed`` minus the frames that hold guarded
             code.
         wont_generalize: Guard *sources* (not frame names) a kept value-equality
             guard on a bare argument name pins in some variant (``self.eps`` is
@@ -136,10 +136,10 @@ class PrecompileSummary:
             value. Observed, not proven: a variant that never guarded the source
             does not count as serving other values of it.
         dropped_guards: Slots the serialized copy's guard filter rejected; a
-            variant that dropped a slot does not check it, so a load through that
-            variant cannot notice whatever it checked. Which guards a filter
-            rejects is that filter's own contract and not repeated here; a
-            caller-supplied filter decides its own set. A slot is listed under
+            variant that dropped a slot does not check it, so a load through
+            that variant cannot notice whatever it checked. Which guards a
+            filter rejects is that filter's own contract and not repeated here;
+            a caller-supplied filter decides its own set. A slot is listed under
             the guard's own type whatever the reason for the drop, so a
             ``TENSOR_MATCH`` rejected for what its check derives is a dropped
             ``TENSOR_MATCH``.
@@ -154,21 +154,21 @@ class PrecompileSummary:
             Reported apart from ``dropped_guards`` because the remedy differs,
             and reported at all because a capture that discards a precondition
             should not look like one that had none.
-        dropped_guard_code: ``(guard_type, source, rendered_check)``, one per slot
-            of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
+        dropped_guard_code: ``(guard_type, source, rendered_check)``, one per
+            slot of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
             rendered a check (how the check is installed does not predict that,
             and a slot whose guard rendered none has no entry). One rendering
-            however many variants dropped the slot: where the check embeds the guarded value
-            (``EQUALS_MATCH`` renders ``L['n'] == 3``) it is one variant's, the
-            producer's pick rather than a merge, so it tells the form of the
-            check and not the value; that the slot varied at all is what
-            ``risky_dropped_guards`` records. Carried because a slot alone can
-            be ambiguous: a dropped ``('HASATTR', "counts['pixel']")`` is either
-            the benign companion of a kept ``TENSOR_MATCH`` on the same source
-            or the only guard on an optional attribute, and only the rendered
-            check tells them apart. Kept beside the slot lists so the slots stay
-            the identity the policy compares on; for programmatic consumers,
-            not the digest.
+            however many variants dropped the slot: where the check embeds the
+            guarded value (``EQUALS_MATCH`` renders ``L['n'] == 3``) it is one
+            variant's, the producer's pick rather than a merge, so it tells the
+            form of the check and not the value; that the slot varied at all is
+            what ``risky_dropped_guards`` records. Carried because a slot alone
+            can be ambiguous: a dropped ``('HASATTR', "counts['pixel']")`` is
+            either the benign companion of a kept ``TENSOR_MATCH`` on the same
+            source or the only guard on an optional attribute, and only the
+            rendered check tells them apart. Kept beside the slot lists so the
+            slots stay the identity the policy compares on; for programmatic
+            consumers, not the digest.
         capture_errors: One message per distinct exception a capture call raised
             (repeats of the same type and message collapse), the exception type
             first (``"RuntimeError: boom"``), so the digest's first line is
@@ -180,6 +180,7 @@ class PrecompileSummary:
     # _INVARIANT_DROPPABLE_GUARD_TYPES (policy_dropped_guards); a bypassed frame is
     # one OutputGraph.bypass_package flagged; dropped_guard_code holds the
     # Guard.code_list a GuardBuilder method rendered.
+
     frames: int
     resume_functions: int
     guarded_codes: int
