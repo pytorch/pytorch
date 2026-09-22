@@ -1228,8 +1228,8 @@ _T = TypeVar("_T")
 
 
 class _GenericHolder(Generic[_T]):
-    # typing.Generic declares an empty __slots__ (as abc.ABC does), which adds
-    # no instance state.
+    # A Generic subclass has the plain layout; through 3.11 typing.Generic also
+    # declares an empty __slots__ (as abc.ABC does), which adds no state.
     def __init__(self):
         self.it = (i for i in range(3))
         self.cfg = {"a": 1}
@@ -1353,6 +1353,17 @@ class _RaisingGetattr:
 
     def __getattr__(self, name):
         raise RuntimeError(name)
+
+
+class _RaisingMeta(type):
+    def __getattr__(cls, name):
+        raise RuntimeError(name)
+
+
+class _WithRaisingMeta(metaclass=_RaisingMeta):
+    # The hasattr reads on the class miss the MRO and reach the metaclass hook.
+    def __init__(self):
+        self.a = 1
 
 
 class _DelegatingForwarder:
@@ -3150,6 +3161,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # Every __getattr__ is refused by declaration; the two permissive ones
         # show why in pickle's own terms: BUILD calls what the hollow instance
         # resolves __setstate__ to, so the state is dropped or a None is called.
+        # A metaclass __getattr__ that raises is answered False, not raised.
         self.assertEqual(vars(pickle.loads(pickle.dumps(_PermissiveGetattr()))), {})
         with self.assertRaisesRegex(TypeError, "NoneType.*not callable"):
             pickle.loads(pickle.dumps(_NoneGetattr()))
@@ -3172,6 +3184,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _NoneGetattr(),
             _RaisingGetattr(),
             _DelegatingForwarder(_GenericHolder()),
+            _WithRaisingMeta(),
             _SlottedHolder(),
             _PureSlots(),
             _AttrDict(a=1),
@@ -3217,6 +3230,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 and all(x is None for x in r[3:5])
             )
 
+        self.addCleanup(_FINALIZED.clear)  # the zoo's _CountsDeletes appends
         Point = collections.namedtuple("Point", "x y")
         zoo = [
             _HolderWithGenerator(),
@@ -3239,6 +3253,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _NoneGetattr(),
             _RaisingGetattr(),
             _DelegatingForwarder(_GenericHolder()),
+            _WithRaisingMeta(),
+            _WithNewargsEx(1),
             _CountsDeletes(),
             types.SimpleNamespace(a=1),
             Point(1, 2),
