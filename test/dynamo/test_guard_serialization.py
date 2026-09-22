@@ -1305,14 +1305,22 @@ class _NewNeedsArg:
         return self
 
 
-class _RaisingMeta(type):
-    def __getattr__(cls, name):
+class _RaisingGetattr:
+    # pickle's BUILD asks the hollow instance for __setstate__; this raises.
+    def __init__(self):
+        self.a = 1
+
+    def __getattr__(self, name):
         raise RuntimeError(name)
 
 
-class _WithRaisingMeta(metaclass=_RaisingMeta):
+class _PermissiveGetattr:
+    # Serves any name, so BUILD gets a __setstate__ to call and drops the state.
     def __init__(self):
         self.a = 1
+
+    def __getattr__(self, name):
+        return lambda *args: None
 
 
 class _TupleSub(tuple):
@@ -1361,6 +1369,15 @@ class _KeyWithSub:
 
     def __hash__(self):
         return hash(self.name)
+
+
+class _TaggedTuple(tuple):
+    # A tuple subclass with instance state: == reads the elements, a subclass
+    # __eq__ may read the fields, so a by-value key of this shape needs both.
+    def __new__(cls, items, meta=None):
+        self = super().__new__(cls, items)
+        self.meta = meta
+        return self
 
 
 class _KeyWithBystanders:
@@ -2665,6 +2682,21 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.sub, {sub: 1})
         self.assertEqual(next(iter(out.sub)).tags, ["t"])
 
+    def test_a_container_subclass_key_marks_its_fields_too(self):
+        # The walk descends a container's elements AND its instance dict, so a
+        # tuple subclass key with instance state keeps a field registered as
+        # missing by some scope leaf.
+        meta = _SubCfg(2.0, ["t"])
+        key = _TaggedTuple((1, 2), meta)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {id(meta): meta}, {id(key): key}, buf).dump(
+            {"k": key}
+        )
+        out = load_guards_state(buf.getvalue())["k"]
+        self.assertEqual(out, (1, 2))
+        self.assertEqual(out.meta, meta)
+        self.assertEqual(out.meta.tags, ["t"])
+
     def test_a_by_value_field_that_cannot_pickle_fails_the_dump_loudly(self):
         # The mark switches pruning off for the key's whole closure, by design:
         # an empty comparand is a silent forever-miss, so a field pickle cannot
@@ -2674,6 +2706,148 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler = GuardsStatePickler({}, {}, missing, {id(key): key}, io.BytesIO())
         with self.assertRaisesRegex(TypeError, "cannot pickle 'generator' object"):
             pickler.dump({"k": key})
+
+    def test_pickles_by_default_admits_only_dict_only_plain_objects(self):
+        # The predicate the attribute pruner will gate on: an object round-trips
+        # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
+        # registration and no state outside __dict__ (slots, container items,
+        # var-sized or C layout) is involved. One refusal fixture per conjunct;
+        # a __getattr__ that serves any name is refused (BUILD would call what it
+        # returns as __setstate__), one that raises reads as False rather than
+        # failing the dump.
+        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
+        self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
+        self.assertTrue(_pickles_by_default(_GenericHolder()))
+        for obj in (
+            _PipelineWithSetstate(),
+            _WithGetstate(),
+            _RebuiltFromNewargs([1]),
+            _WithNewargsEx(1),
+            _WithReduce(),
+            _CopyregRegistered(),
+            _NewNeedsArg(1),
+            _PermissiveGetattr(),
+            _RaisingGetattr(),
+            _SlottedHolder(),
+            _PureSlots(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            _TupleSub((1,)),
+            enum.Enum("Color", "RED").RED,
+            torch.nn.Linear(1, 1),
+            torch.randn(1),
+        ):
+            self.assertFalse(_pickles_by_default(obj), type(obj).__name__)
+
+    def test_is_torch_type_walks_the_mro(self):
+        self.assertTrue(_is_torch_type(torch.nn.Linear))
+        self.assertTrue(_is_torch_type(type("_Sub", (torch.nn.Linear,), {})))
+        self.assertFalse(_is_torch_type(_HolderWithGenerator))
+        self.assertFalse(_is_torch_type(_ConstantCfg))
+
+    def test_pickles_by_default_is_sound_against_pickle_itself(self):
+        # Soundness, not a list of known holes: whenever the predicate says an
+        # object is rebuilt as cls.__new__ plus __dict__, pickle's own reduce of
+        # that object at every protocol from 2 up must be exactly that (newobj,
+        # no items, state is the instance dict), and pickle itself must rebuild
+        # the type from that reduce, for a zoo of shapes it was never written
+        # against.
+        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
+        import array
+        import decimal
+        import fractions
+        import pathlib
+
+        def dict_only_reduce(obj, protocol):
+            try:
+                r = obj.__reduce_ex__(protocol)
+            except Exception:
+                return False
+            return (
+                isinstance(r, tuple)
+                and len(r) >= 3
+                and getattr(r[0], "__name__", "") == "__newobj__"
+                and r[1] == (type(obj),)
+                and r[2] == (getattr(obj, "__dict__", None) or None)
+                and all(x is None for x in r[3:5])
+            )
+
+        Point = collections.namedtuple("Point", "x y")
+        zoo = [
+            _HolderWithGenerator(),
+            _GenericHolder(),
+            _OuterHolder(),
+            _ConstantCfg((0, 1), ["a"]),
+            _KeyCfg("a", ["t"]),
+            _PipelineWithSetstate(),
+            _RebuiltFromNewargs([1]),
+            _SlottedHolder(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            _TupleSub((1,)),
+            _PureSlots(),
+            _WithGetstate(),
+            _WithReduce(),
+            _CopyregRegistered(),
+            _NewNeedsArg(1),
+            _PermissiveGetattr(),
+            _RaisingGetattr(),
+            types.SimpleNamespace(a=1),
+            Point(1, 2),
+            collections.OrderedDict(a=1),
+            collections.defaultdict(int),
+            collections.deque([1]),
+            collections.Counter("ab"),
+            array.array("i", [1]),
+            decimal.Decimal("1.5"),
+            fractions.Fraction(1, 3),
+            pathlib.PurePosixPath("a/b"),
+            enum.Enum("Color", "RED").RED,
+            functools.partial(len),
+            weakref.WeakValueDictionary(),
+            threading.Lock(),
+            torch.randn(1),
+            torch.nn.Linear(1, 1),
+            torch.Size([1]),
+            torch.float32,
+            torch.device("cpu"),
+            torch.Generator(),
+        ]
+        # Every protocol the pickler could write with, DEFAULT_PROTOCOL included.
+        for protocol in range(2, pickle.HIGHEST_PROTOCOL + 1):
+            for obj in zoo:
+                if _pickles_by_default(obj):
+                    self.assertTrue(
+                        dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
+                    )
+                    # The load side through pickle itself: NEWOBJ builds the
+                    # hollow cls.__new__(cls), then BUILD asks that instance for
+                    # __setstate__ before applying the dict. Run on a hollow
+                    # instance given a picklable state, since the admitted zoo
+                    # entries hold a live generator by design.
+                    fn, args = obj.__reduce_ex__(protocol)[:2]
+                    hollow = fn(*args)
+                    vars(hollow)["probe"] = 1
+                    loaded = pickle.loads(pickle.dumps(hollow, protocol))
+                    self.assertIs(type(loaded), type(obj))
+                    self.assertEqual(vars(loaded), {"probe": 1})
+        # And the predicate is not vacuous: the plain shapes are admitted, and
+        # so is WeakValueDictionary, a pure-Python class whose state is its dict.
+        admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
+        self.assertLessEqual(
+            {
+                "_HolderWithGenerator",
+                "_GenericHolder",
+                "_OuterHolder",
+                "_KeyCfg",
+                "WeakValueDictionary",
+            },
+            admitted,
+        )
+        # A C type: layout differs, and it has a __reduce__ of its own.
+        self.assertNotIn("SimpleNamespace", admitted)
 
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
@@ -4062,143 +4236,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIsInstance(loaded, torch.nn.LSTM)
         self.assertEqual(loaded._all_weights, lstm._all_weights)
         self.assertEqual(loaded._flat_weights_names, lstm._flat_weights_names)
-
-    def test_pickles_by_default_admits_only_dict_only_plain_objects(self):
-        # The predicate the attribute pruner will gate on: an object round-trips
-        # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
-        # registration and no state outside __dict__ (slots, container items,
-        # var-sized or C layout) is involved. One refusal fixture per conjunct,
-        # and a metaclass whose __getattr__ raises RuntimeError reads as False
-        # rather than failing the dump.
-        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
-        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
-        self.assertTrue(_pickles_by_default(_HolderWithGenerator()))
-        self.assertTrue(_pickles_by_default(_GenericHolder()))
-        for obj in (
-            _PipelineWithSetstate(),
-            _WithGetstate(),
-            _RebuiltFromNewargs([1]),
-            _WithNewargsEx(1),
-            _WithReduce(),
-            _CopyregRegistered(),
-            _NewNeedsArg(1),
-            _WithRaisingMeta(),
-            _SlottedHolder(),
-            _PureSlots(),
-            _AttrDict(a=1),
-            _TaggedList([1]),
-            _TupleSub((1,)),
-            enum.Enum("Color", "RED").RED,
-            torch.nn.Linear(1, 1),
-            torch.randn(1),
-        ):
-            self.assertFalse(_pickles_by_default(obj), type(obj).__name__)
-
-    def test_is_torch_type_walks_the_mro(self):
-        self.assertTrue(_is_torch_type(torch.nn.Linear))
-        self.assertTrue(_is_torch_type(type("_Sub", (torch.nn.Linear,), {})))
-        self.assertFalse(_is_torch_type(_HolderWithGenerator))
-        self.assertFalse(_is_torch_type(_ConstantCfg))
-
-    def test_pickles_by_default_is_sound_against_pickle_itself(self):
-        # Soundness, not a list of known holes: whenever the predicate says an
-        # object is rebuilt as cls.__new__ plus __dict__, pickle's own reduce of
-        # that object at every protocol from 2 up must be exactly that (newobj,
-        # no items, state is the instance dict), and pickle itself must rebuild
-        # the type from that reduce, for a zoo of shapes it was never written
-        # against.
-        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
-        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
-        import array
-        import collections
-        import decimal
-        import fractions
-        import pathlib
-
-        def dict_only_reduce(obj, protocol):
-            try:
-                r = obj.__reduce_ex__(protocol)
-            except Exception:
-                return False
-            return (
-                isinstance(r, tuple)
-                and len(r) >= 3
-                and getattr(r[0], "__name__", "") == "__newobj__"
-                and r[1] == (type(obj),)
-                and r[2] == (getattr(obj, "__dict__", None) or None)
-                and all(x is None for x in r[3:5])
-            )
-
-        Point = collections.namedtuple("Point", "x y")
-        zoo = [
-            _HolderWithGenerator(),
-            _GenericHolder(),
-            _OuterHolder(),
-            _ConstantCfg((0, 1), ["a"]),
-            _KeyCfg("a", ["t"]),
-            _PipelineWithSetstate(),
-            _RebuiltFromNewargs([1]),
-            _SlottedHolder(),
-            _AttrDict(a=1),
-            _TaggedList([1]),
-            _TupleSub((1,)),
-            _PureSlots(),
-            _WithGetstate(),
-            _WithReduce(),
-            _CopyregRegistered(),
-            _NewNeedsArg(1),
-            _WithRaisingMeta(),
-            types.SimpleNamespace(a=1),
-            Point(1, 2),
-            collections.OrderedDict(a=1),
-            collections.defaultdict(int),
-            collections.deque([1]),
-            collections.Counter("ab"),
-            array.array("i", [1]),
-            decimal.Decimal("1.5"),
-            fractions.Fraction(1, 3),
-            pathlib.PurePosixPath("a/b"),
-            enum.Enum("Color", "RED").RED,
-            functools.partial(len),
-            weakref.WeakValueDictionary(),
-            threading.Lock(),
-            torch.randn(1),
-            torch.nn.Linear(1, 1),
-            torch.Size([1]),
-            torch.float32,
-            torch.device("cpu"),
-            torch.Generator(),
-        ]
-        # Every protocol the pickler could write with, DEFAULT_PROTOCOL included.
-        for protocol in range(2, pickle.HIGHEST_PROTOCOL + 1):
-            for obj in zoo:
-                if _pickles_by_default(obj):
-                    self.assertTrue(
-                        dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
-                    )
-                    # The load side through pickle itself, NEWOBJ then BUILD, on
-                    # a hollow instance so an unpicklable field (a live
-                    # generator) cannot stop the dump: cls.__new__(cls) must
-                    # take no argument and the dict must be the whole state.
-                    fn, args, state = obj.__reduce_ex__(protocol)[:3]
-                    hollow = pickle.loads(pickle.dumps(fn(*args), protocol))
-                    self.assertIs(type(hollow), type(obj))
-                    vars(hollow).update(state or {})
-                    self.assertEqual(vars(hollow), vars(obj))
-        # And the predicate is not vacuous: the plain shapes are admitted, and
-        # so is WeakValueDictionary, a pure-Python class whose state is its dict.
-        admitted = {type(o).__name__ for o in zoo if _pickles_by_default(o)}
-        self.assertLessEqual(
-            {
-                "_HolderWithGenerator",
-                "_GenericHolder",
-                "_OuterHolder",
-                "_KeyCfg",
-                "WeakValueDictionary",
-            },
-            admitted,
-        )
-        self.assertNotIn("SimpleNamespace", admitted)  # a C type: layout differs
 
     def test_a_dict_key_field_shared_with_a_module_attribute_stays_real(self):
         # The module path registers its unguarded list by id, and persistent_id
