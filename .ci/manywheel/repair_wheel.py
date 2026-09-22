@@ -101,19 +101,31 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
     )
 
 
-def rocm_rpaths() -> str:
+def rocm_rpaths(rocm_home: Path | None = None) -> str:
     """RPATH list for the TheRock wheel-based ROCm layout.
 
-    ROCm libs come from the `rocm` pip package, which unpacks under
-    <site-packages>/_rocm_sdk_core (a sibling of torch/), so point at it
-    $ORIGIN-relatively, mirroring cuda_rpaths(). No ROCm libs are bundled into
-    the wheel in this layout.
+    ROCm packages are siblings of torch, so paths are ``$ORIGIN``-relative.
+    Include flat and discovered per-target LLVM paths for ``libomp.so`` across
+    TheRock package layouts.
     """
-    return (
-        "$ORIGIN/../../_rocm_sdk_core/lib"
-        ":$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib"
-        ":$ORIGIN/../../_rocm_sdk_libraries/lib"
-    )
+    rpaths = [
+        "$ORIGIN/../../_rocm_sdk_core/lib",
+        "$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib",
+        "$ORIGIN/../../_rocm_sdk_libraries/lib",
+        "$ORIGIN/../../_rocm_sdk_core/lib/llvm/lib",
+    ]
+    if rocm_home is None:
+        env_home = os.environ.get("ROCM_HOME")
+        if env_home:
+            rocm_home = Path(env_home)
+    if rocm_home is not None:
+        llvm_lib = rocm_home / "lib" / "llvm" / "lib"
+        for libomp in sorted(llvm_lib.glob("*/libomp.so")):
+            if libomp.is_file():
+                rpaths.append(
+                    f"$ORIGIN/../../_rocm_sdk_core/lib/llvm/lib/{libomp.parent.name}"
+                )
+    return ":".join(rpaths)
 
 
 def arch_extra_deps(arch: str, use_cuda: bool) -> list[Path]:
@@ -271,6 +283,14 @@ def rocm_bundle(
     for os_lib in rocm_os_deps():
         if os_lib.is_file():
             libs.append(BundledLib(src=os_lib, dest_name=os_lib.name))
+        else:
+            # Silently omitting one of these produces a wheel that imports but
+            # misbehaves at runtime, and it took a release candidate to notice.
+            print(
+                f"WARNING: OS dependency not present on the builder, "
+                f"not bundled into the wheel: {os_lib}",
+                file=sys.stderr,
+            )
 
     archs = rocm_arch_filter(os.environ.get("PYTORCH_ROCM_ARCH", ""))
     aux: list[AuxFile] = []
@@ -474,10 +494,26 @@ def main() -> None:
             # TheRock wheel layout (rocm7.14): ROCm ships as the `rocm` pip
             # package (_rocm_sdk_core, a sibling of torch/). Resolve libs via
             # RPATH instead of bundling them, mirroring the CUDA/XPU wheels.
-            rpaths = rocm_rpaths()
+            rpaths = rocm_rpaths(rocm_home)
             c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
             lib_so_rpath = f"{rpaths}:$ORIGIN"
             force_rpath = True
+            # Pre-10.0 TheRock SDKs ship a rocSHMEM that dlopens the bare name
+            # "libnuma.so". At wheel runtime that name resolves nowhere: the
+            # SDK vendors numa only as librocm_sysdeps_numa.so.1, and on user
+            # systems the bare dev name exists only if numactl-devel is
+            # installed (#195670). The 10.0 SDK line links the vendored soname
+            # directly instead (rocm-systems#6640), so bundle a bare-named
+            # copy, reached via $ORIGIN on the RPATHs above, only for older
+            # SDKs. The builder image installs numactl-libs for this.
+            ver = gpu_arch_version
+            if not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0):
+                is_ubuntu = "Ubuntu" in Path("/etc/os-release").read_text()
+                libdir = "/usr/lib/x86_64-linux-gnu" if is_ubuntu else "/usr/lib64"
+                libnuma = Path(libdir) / "libnuma.so.1"
+                if not libnuma.is_file():
+                    sys.exit(f"libnuma to bundle for rocSHMEM not found: {libnuma}")
+                bundled_libs.append(BundledLib(src=libnuma, dest_name="libnuma.so"))
         else:
             # Legacy OS/tarball layout (/opt/rocm, e.g. rocm7.2): bundle the
             # ROCm libs into the wheel so it stays self-contained.

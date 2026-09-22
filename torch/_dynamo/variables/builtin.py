@@ -74,6 +74,8 @@ from ..utils import (
     get_fake_value,
     is_tensor_getset_descriptor,
     istype,
+    no_keywords,
+    no_positional,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -2030,6 +2032,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
         return generic_str(tx, arg)
+
+    def call_bytes(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        no_positional(tx, "bytes", list(args))
+        no_keywords(tx, "bytes", kwargs)
+        return variables.ConstantVariable.create(b"")
 
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
