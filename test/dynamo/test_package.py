@@ -26,6 +26,7 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    load_guards_state,
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.symbolic_convert import _import_module
@@ -1618,6 +1619,43 @@ def add(x, y):
         self.assertTrue(explicit.explicit_capture)
         self.assertIsNone(explicit.serialization_guard_filter_fn)
         self.assertTrue(CompilePackage(fn, serving=True).serving)
+
+    def _saved_guard_names(self, package):
+        names = set()
+        for guarded in package.cache_entry().codes[0].guarded_codes:
+            state = load_guards_state(guarded.guards_state)
+            names |= {g.create_fn_name() for g in state.output_graph.guards}
+        return names
+
+    def test_serialization_filter_applies_to_the_saved_guards_only(self):
+        # The live guards keep checking what they check, so the package still
+        # recompiles on a dtype change; only the serialized copy is filtered.
+        # The same filter on a non-explicit package does the same, and an
+        # explicit package without a filter saves its guards unfiltered.
+        def fn(x):
+            return x + 1
+
+        def drop_tensor_match(entries):
+            return [e.guard_type != "TENSOR_MATCH" for e in entries]
+
+        for explicit_capture in (True, False):
+            torch._dynamo.reset()
+            pkg = CompilePackage(
+                fn,
+                explicit_capture=explicit_capture,
+                serialization_guard_filter_fn=drop_tensor_match,
+            )
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch._dynamo.optimize(backend=counter, package=pkg)(fn)
+            compiled(torch.randn(3))
+            compiled(torch.randint(0, 5, (3,)))
+            self.assertEqual(counter.frame_count, 2)
+            self.assertNotIn("TENSOR_MATCH", self._saved_guard_names(pkg))
+
+        torch._dynamo.reset()
+        bare = CompilePackage(fn, explicit_capture=True)
+        torch._dynamo.optimize(backend="eager", package=bare)(fn)(torch.randn(3))
+        self.assertIn("TENSOR_MATCH", self._saved_guard_names(bare))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
