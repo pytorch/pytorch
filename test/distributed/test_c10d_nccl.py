@@ -83,9 +83,9 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfXpu,
     TEST_ACCELERATOR,
-    skipIfRocmArch,
     TEST_CUDA,
     TEST_MULTIACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
@@ -118,13 +118,15 @@ BACKEND = (
 )
 # ENABLE_TIMING is backend-prefixed; the flight-recorder vars have neutral
 # TORCH_FR_* spellings that fall back to the TORCH_NCCL_* ones.
-BACKEND_ENV_PREFIX = "TORCH_NCCL" if device_type == "cuda" else "TORCH_XCCL"
+BACKEND_ENV_PREFIX = ""
 # Not a plain prefix swap: NCCL spells this CUDA_EVENT_CACHE, XCCL XPU_EVENT_CACHE.
-EVENT_CACHE_ENV = (
-    "TORCH_NCCL_CUDA_EVENT_CACHE"
-    if device_type == "cuda"
-    else "TORCH_XCCL_XPU_EVENT_CACHE"
-)
+EVENT_CACHE_ENV = ""
+if device_type == "cuda":
+    BACKEND_ENV_PREFIX = "TORCH_NCCL"
+    EVENT_CACHE_ENV = "TORCH_NCCL_CUDA_EVENT_CACHE"
+elif device_type == "xpu":
+    BACKEND_ENV_PREFIX = "TORCH_XCCL"
+    EVENT_CACHE_ENV = "TORCH_XCCL_XPU_EVENT_CACHE"
 
 
 def _pg_options():
@@ -507,7 +509,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @skipIfXpu(msg="constructs ProcessGroupNCCL directly")
     def test_abort_pg(self):
@@ -551,7 +553,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("eager_init", [True, False])
     def test_close_pg(self, eager_init: bool):
@@ -582,7 +584,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_restart_pg(self):
         # Note: restart test passes steadily only for blocking mode for now.
@@ -626,7 +628,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_cuda_event_cache_mthd_race(self):
         # This unit test is to test the case when the collective is launched in
@@ -666,7 +668,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR,
-        "NCCL test requires 2+ GPUs",
+        "NCCL/XCCL test requires 2+ accelerators",
     )
     @parametrize(
         "type",
@@ -998,7 +1000,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_destruct_before_terminate_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
@@ -1016,7 +1018,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_abort_in_destroy_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
@@ -1039,7 +1041,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        device_module.device_count() < 2, "NCCL test requires 2+ GPUs"
+        device_module.device_count() < 2, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_abort_in_destroy_multi_pgs(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1063,7 +1065,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        device_module.device_count() < 2, "NCCL test requires 2+ GPUs"
+        device_module.device_count() < 2, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_abort_in_destroy_mixed_empty_pgs(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1086,7 +1088,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        device_module.device_count() < 2, "NCCL test requires 2+ GPUs"
+        device_module.device_count() < 2, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_file_store_check(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
@@ -1167,7 +1169,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("backend", [None, BACKEND])
     def test_set_nccl_pg_timeout(self, backend):
@@ -1195,7 +1197,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("backend", [None, BACKEND])
     def test_extend_nccl_pg_timeout(self, backend):
@@ -1246,7 +1248,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("eager_init", [True, False])
     def test_new_group(self, eager_init: bool):
@@ -1271,7 +1273,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @skip_but_pass_in_sandcastle_if(_is_ncclx(), "NCCL test not for NCCLX")
     def test_comm_split_subgroup(self):
@@ -1298,7 +1300,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_comm_eager_init_subgroup(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
@@ -1320,7 +1322,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_comm_split_group(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
@@ -1365,7 +1367,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_comm_split_initialized_parent_with_lazy_default(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1396,7 +1398,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @skipIfXpu(msg="constructs ProcessGroupNCCL directly")
     def test_comm_split_world_pg_created_after_another_nccl_pg(self):
@@ -1443,7 +1445,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_comm_split_group_mixed_backend(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
@@ -1501,7 +1503,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_comm_split_group_out_of_order_ranks(self):
         # Out-of-order ranks are preserved: position in the list determines
@@ -1526,7 +1528,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_comm_split_group_backend_filter(self):
         # Hybrid parent (cpu:gloo + cuda:nccl-legacy); request only cuda:nccl-legacy in the
@@ -1570,7 +1572,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_comm_split_group_backend_validation(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1601,7 +1603,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_non_blocking_init(self):
         # Test creating a pg using nonblocking mode but not eagerly
@@ -1625,7 +1627,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_non_blocking_with_eager_init(self):
         # Test creating a pg eagerly with nonblocking mode when
@@ -1651,7 +1653,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_non_blocking_p2p(self):
         # Test creating a pg using nonblocking mode but not eagerly
@@ -1671,7 +1673,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("eager_init", [True, False])
     def test_subgroup_p2p(self, eager_init: bool):
@@ -1698,7 +1700,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_get_uid(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1712,7 +1714,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_set_process_group_desc(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2310,7 +2312,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_deterministic_mode_no_break(self):
         torch.use_deterministic_algorithms(True)
@@ -2322,7 +2324,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_init_with_idx(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2337,7 +2339,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_block_current_stream(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2356,7 +2358,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         (2, 29, 7), "Need NCCL 2.29.7+ for backend.suspend and backend.memory_stats"
     )
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_suspend(self):
         """Test that suspend can be called on the NCCL backend."""
@@ -2377,7 +2379,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         (2, 29, 7), "Need NCCL 2.29.7+ for backend.memory_stats / ncclCommMemStats"
     )
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_get_memory_stats(self):
         """Test that get_memory_stats returns a dict of memory stats."""
@@ -2400,7 +2402,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         "Need NCCL 2.29.7+ for backend.resume, backend.suspend and backend.memory_stats",
     )
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_resume(self):
         """Test the full suspend/resume cycle with collectives."""
@@ -3634,7 +3636,7 @@ class DistributedDataParallelTest(
             not TEST_WITH_ROCM
             and BFLOAT16_AVAILABLE
             and c10d.is_nccl_available()
-            and _nccl_version_at_least((2, 10))
+            and torch.cuda.nccl.version() >= (2, 10)
         ):
             hook_options.append(default.bf16_compress_hook)
         for hook in hook_options:
@@ -4884,8 +4886,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     # hangs; passes on gfx950 outside those runners and on the mi300 runners
     # with the same image. Skipped on that arch until the runner P2P path is
     # understood.
-    @
-    (MI350_ARCH)
+    @skipIfRocmArch(MI350_ARCH)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -6318,7 +6319,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
@@ -6346,7 +6347,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
@@ -6383,7 +6384,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset(self, timing_enabled):
@@ -6412,7 +6413,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_dump_pipe(self):
         def open_file_with_timeout(file_path, mode, timeout=1.0):
@@ -6450,7 +6451,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
         msg="XCCL flight recorder does not mark works completed"
@@ -6493,7 +6494,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     def test_barrier_profiling(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
@@ -6519,7 +6520,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
         msg="XCCL flight recorder does not mark works completed"
@@ -6547,7 +6548,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     @parametrize("only_active", [True, False])
@@ -6620,7 +6621,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     def test_trace_while_stuck(self, timing_enabled):
@@ -6682,7 +6683,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize(
         "op_sizes_per_coalesce",
@@ -6789,7 +6790,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     @parametrize(
@@ -7238,7 +7239,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize(
         "op_sizes",
@@ -7419,7 +7420,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_circular_buffer_full(self, timing_enabled):
@@ -7479,7 +7480,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_partial_overwrite(self, timing_enabled):
@@ -7532,7 +7533,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_wraparound(self, timing_enabled):
@@ -7589,7 +7590,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_multiple_resets(self, timing_enabled):
