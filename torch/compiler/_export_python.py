@@ -947,10 +947,26 @@ class ExportedPythonArtifact:
             if self._loaded is None:
                 self._materializing = ident
                 try:
-                    self._loaded = self._materialize(args)
+                    self._loaded = self._serialize_first_launch(self._materialize(args))
                 finally:
                     self._materializing = None
             return self._loaded
+
+    def _serialize_first_launch(self, entry: Callable[..., Any]) -> Callable[..., Any]:
+        # The artifact compiles and autotunes its Triton kernels on its first launch,
+        # and inductor's autotuner is not safe to run from several threads at once: each
+        # tuner closes the launchers it did not pick, which a concurrent one may still
+        # be benchmarking or may have picked. So racing first calls take turns under
+        # the capture lock until one launch succeeds, and only then see the bare entry.
+        import torch._precompile as precompile_impl
+
+        def first_launch(*args: Any) -> Any:
+            with precompile_impl._CAPTURE_LOCK:
+                out = entry(*args)
+                self._loaded = entry
+                return out
+
+        return first_launch
 
     def _bind_positional(
         self,
