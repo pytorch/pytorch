@@ -602,7 +602,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         t0 = torch.rand(10, 10, device=device)
         # First allreduce to lazy initialize default pg
         dist.all_reduce(t0)
-        device_module.synchronize()
+        torch.accelerator.synchronize()
         # Destroy pg
         dist.destroy_process_group()
 
@@ -618,7 +618,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         t1 = torch.rand(5, 5, device=device)
         dist.all_reduce(t1)
-        device_module.synchronize()
+        torch.accelerator.synchronize()
         dist.destroy_process_group()
         # validate default pg is no longer valid
         with self.assertRaises(ValueError):
@@ -652,7 +652,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         side_thread = threading.Thread(target=init_collective_task, args=(t,))
         side_thread.start()
         side_thread.join()
-        device_module.synchronize()
+        torch.accelerator.synchronize()
 
         # reset ENV
         os.environ[EVENT_CACHE_ENV] = "0"
@@ -1315,7 +1315,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.broadcast(tensor, 0, group=new_group)
         # the default group should stay lazy
         self.assertEqual(backend._is_initialized(), False)
-        device_module.synchronize()
+        torch.accelerator.synchronize()
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -2350,7 +2350,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         device_module.current_stream().synchronize()
         work.wait()
-        device_module.synchronize()
+        torch.accelerator.synchronize()
 
     @requires_nccl_version(
         (2, 29, 7), "Need NCCL 2.29.7+ for backend.suspend and backend.memory_stats"
@@ -4624,7 +4624,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         t = torch.rand(5, 5, device=device)
         dist.all_reduce(t)
         self.assertEqual(new_nccl_backend.get_error(), ErrorType.SUCCESS)
-        device_module.synchronize()
+        torch.accelerator.synchronize()
         dist.destroy_process_group()
 
         # give some time for other ranks to exit first before destroying FileStore
@@ -5414,7 +5414,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         t = torch.ones(1024, device=device)
         # Warmup so NCCL init doesn't land inside the profiled region
         dist.all_reduce(t)
-        device_module.synchronize()
+        torch.accelerator.synchronize()
 
         with torch.profiler.profile(
             activities=[
@@ -5423,7 +5423,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             ],
         ) as prof:
             dist.all_reduce(t)
-            device_module.synchronize()
+            torch.accelerator.synchronize()
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             trace_path = f.name
@@ -6848,7 +6848,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                         tensor, torch.full(input_sizes, 2.0, device=self.local_device)
                     )
 
-        device_module.synchronize()
+        torch.accelerator.synchronize()
 
         if timing_enabled:
             time.sleep(1)
@@ -7934,7 +7934,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             self.assertIs(ng2, c10d.GroupMember.NON_GROUP_MEMBER)
         # a barrier and a cuda sync before destroying all pgs.
         dist.barrier(pg)
-        device_module.synchronize()
+        torch.accelerator.synchronize()
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -7994,7 +7994,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)
         # a barrier and a cuda sync before destroying all pgs.
         dist.barrier(pg)
-        device_module.synchronize()
+        torch.accelerator.synchronize()
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -8028,7 +8028,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             dist.all_reduce(torch.ones(1, device=device), group=half)
 
         dist.barrier(pg)
-        device_module.synchronize()
+        torch.accelerator.synchronize()
         # This must not hang.
         dist.destroy_process_group()
 
