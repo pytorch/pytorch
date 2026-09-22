@@ -64,9 +64,7 @@ class TestFullyShardGradientScaler(FSDPTest):
             input = torch.randn((2,), device=self.device_type)
 
         loss = model(input).sum()
-        scaler = GradScaler(
-            init_scale=2.0, enabled=True, device=self.device_type
-        )
+        scaler = GradScaler(init_scale=2.0, enabled=True, device=self.device_type)
         opt = torch.optim.Adam(model.parameters(), lr=1e-2)
         scaler.scale(loss).backward()
         inv_scale = scaler._scale.double().reciprocal().float()
