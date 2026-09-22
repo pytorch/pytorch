@@ -1008,7 +1008,7 @@ def _sfdp_extra_check(scale_factor_op=None, fp32_upcast_softmax=False):
         if fp32_upcast_softmax and "query" in match.kwargs:
             query = match.kwargs["query"].meta["val"]
             iface = get_interface_for_device(query.device.type)
-            if not iface.is_fp32_softmax_attention_fusion_safe(query.device.type):
+            if not iface.is_fp32_softmax_attention_fusion_safe(query.device):
                 return False
         if scale_factor_op is not None:
             scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
