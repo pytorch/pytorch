@@ -17,7 +17,11 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.unify_refinements import infer_symbolic_types
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.tensor_type import Dyn, is_consistent, is_more_precise, TensorType
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 try:
@@ -44,6 +48,8 @@ def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
 
 
 class AnnotationsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_annotations(self):
         """
         Test type annotations in the forward function.
@@ -142,6 +148,8 @@ class AnnotationsTest(TestCase):
 
 
 class TypeCheckerTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_type_check_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
