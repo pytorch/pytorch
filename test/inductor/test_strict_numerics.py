@@ -20,6 +20,7 @@ from torch._native.ops.reductions.inner_tree_plan import (
 )
 from torch.testing._internal.common_cuda import IS_SM100, IS_SM89, IS_SM90, SM90OrLater
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     ops,
 )
@@ -33,7 +34,11 @@ from torch.testing._internal.common_utils import (
     TEST_CUTEDSL,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
-from torch.testing._internal.opinfo.core import BinaryUfuncInfo, UnaryUfuncInfo
+from torch.testing._internal.opinfo.core import (
+    BinaryUfuncInfo,
+    generate_elementwise_binary_with_scalar_samples,
+    UnaryUfuncInfo,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_reduction_ordering
 
@@ -540,6 +545,8 @@ def _dtype_label(dtype):
 
 # Exhaust all 16-bit encodings and sample float32 bit patterns.
 NUM_BITPATTERN_SAMPLES = 65536
+# Opt in to all floating dtypes and reference inputs, including arbitrary strides.
+ALL_SAMPLES = os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
 
 _FINFO32 = torch.finfo(torch.float32)
 # Include exact values that random bit sampling is unlikely to hit.
@@ -708,6 +715,15 @@ BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 # (op_id, dtype_label) pairs that must still differ from eager.
 POINTWISE_XFAIL = frozenset(
     {
+        ("div_trunc_rounding", "bfloat16"),
+        ("div_trunc_rounding", "float16"),
+        ("xlogy", "float32"),
+        ("div_no_rounding_mode", "bfloat16"),
+        ("div_no_rounding_mode", "float16"),
+        ("special_ndtr", "bfloat16"),
+        ("special_ndtr", "float16"),
+        ("true_divide", "bfloat16"),
+        ("true_divide", "float16"),
         ("abs", "bfloat16"),
         ("abs", "float16"),
         ("abs", "float32"),
@@ -848,6 +864,34 @@ POINTWISE_XFAIL = frozenset(
 
 BACKWARD_XFAIL = frozenset(
     {
+        ("addcmul", "bfloat16"),
+        ("addcmul", "float16"),
+        ("deg2rad", "bfloat16"),
+        ("deg2rad", "float16"),
+        ("div_no_rounding_mode", "bfloat16"),
+        ("div_no_rounding_mode", "float16"),
+        ("erf", "bfloat16"),
+        ("erf", "float16"),
+        ("erfc", "bfloat16"),
+        ("erfc", "float16"),
+        ("erfinv", "bfloat16"),
+        ("erfinv", "float16"),
+        ("exp2", "bfloat16"),
+        ("exp2", "float16"),
+        ("lerp", "bfloat16"),
+        ("lerp", "float16"),
+        ("log10", "bfloat16"),
+        ("log10", "float16"),
+        ("log2", "bfloat16"),
+        ("log2", "float16"),
+        ("rad2deg", "bfloat16"),
+        ("rad2deg", "float16"),
+        ("sinc", "bfloat16"),
+        ("sinc", "float16"),
+        ("special_ndtr", "bfloat16"),
+        ("special_ndtr", "float16"),
+        ("true_divide", "bfloat16"),
+        ("true_divide", "float16"),
         ("remainder", "bfloat16"),
         ("remainder", "float16"),
         ("remainder", "float32"),
@@ -930,9 +974,44 @@ NONFLOAT_XFAIL = frozenset(
     }
 )
 
+
+class _strict_ops(ops):
+    def __init__(self, op_list, xfails):
+        super().__init__(op_list, allowed_dtypes=POINTWISE_DTYPES)
+        self.xfails = xfails
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        for case in super()._parametrize_test(test, generic_cls, device_cls):
+            params = case[2]
+            op, dtype = params["op"], params["dtype"]
+            supported = op.supported_dtypes(device_cls.device_type)
+            preferred = next(d for d in POINTWISE_DTYPES if d in supported)
+            if (
+                ALL_SAMPLES
+                or dtype == preferred
+                or (_op_id(op), _dtype_label(dtype)) in self.xfails
+            ):
+                yield case
+
+
 POINTWISE_STRICT_CFG = {
     "numerics": "strict",
+    "triton.autotune_pointwise": False,
 }
+
+# These pairs need expanded reference inputs to exercise existing mismatches.
+REFERENCE_INPUTS = frozenset(
+    {
+        ("addcdiv", "bfloat16"),
+        ("addcdiv", "float16"),
+        ("addcdiv", "float32"),
+        ("double", "float16"),
+        ("hypot", "float16"),
+        ("nn_functional_mish", "bfloat16"),
+        ("nn_functional_silu", "bfloat16"),
+        ("nn_functional_silu_complex", "complex128"),
+    }
+)
 
 
 # Skip raw-bit sweeps for prohibitively slow value-dependent series.
@@ -985,6 +1064,19 @@ class PointwiseStrictNumericsTest(TestCase):
         # Release large reference-input allocations between concurrent tests.
         torch.cuda.empty_cache()
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_keyword_input_grads(self, device, dtype):
+        inp = torch.tensor([-2.0], device=device, dtype=dtype)
+        weight = torch.tensor([0.25], device=device, dtype=dtype)
+
+        def fn(inp, args, kwargs):
+            return torch.nn.functional.prelu(inp, *args, **kwargs)
+
+        _, grads = self._input_grads(
+            fn, inp, (), {"weight": weight}, torch.ones_like(inp)
+        )
+        self.assertEqual(grads, (weight, inp))
+
     def _is_tensor_output(self, out):
         return isinstance(out, torch.Tensor) or (
             isinstance(out, (tuple, list))
@@ -1012,6 +1104,16 @@ class PointwiseStrictNumericsTest(TestCase):
                 calls.append((sample.input, tuple(sample.args), dict(sample.kwargs)))
         return calls
 
+    def _sample_inputs(self, op, device, dtype):
+        samples = list(op.sample_inputs(device, dtype, requires_grad=False))
+        if isinstance(op, BinaryUfuncInfo) and dtype.is_floating_point:
+            samples.extend(
+                generate_elementwise_binary_with_scalar_samples(
+                    op, device=device, dtype=dtype
+                )
+            )
+        return samples
+
     def _bitpattern_call(self, op, dtype, device):
         r"""Build valid raw-bit calls for each sampled signature and mask parity."""
         if op.name in BITPATTERN_SLOW:
@@ -1029,7 +1131,7 @@ class PointwiseStrictNumericsTest(TestCase):
         x = torch.cat([x, sp.repeat_interleave(sp.numel())])
         y = torch.cat([y, sp.repeat(sp.numel())])
         try:
-            samples = list(op.sample_inputs(device, dtype, requires_grad=False))
+            samples = self._sample_inputs(op, device, dtype)
         except Exception:
             return []
 
@@ -1071,12 +1173,24 @@ class PointwiseStrictNumericsTest(TestCase):
         r"""Return (source, input, args, kwargs) calls for both sweeps."""
         if op.name in COMPILE_UNSUPPORTED:
             self.skipTest("uncompilable op under fullgraph")
+        key = (_op_id(op), _dtype_label(dtype))
+        use_reference = ALL_SAMPLES or key in REFERENCE_INPUTS
+        calls = []
         try:
-            samples = list(op.reference_inputs(device, dtype, requires_grad=False))
+            if use_reference:
+                samples = list(op.reference_inputs(device, dtype, requires_grad=False))
+                calls = [("ref", *c) for c in self._build_calls(samples, dtype)]
+            calls += [("bits", *c) for c in self._bitpattern_call(op, dtype, device)]
+            # Preserve scalar/mixed-dtype signatures and float's layout conversion.
+            keep_samples = op.name in ("clamp", "float", "ldexp", "nn.functional.prelu")
+            if not use_reference and (not calls or keep_samples):
+                samples = self._sample_inputs(op, device, dtype)
+                sample_calls = self._build_calls(samples, dtype)
+                if not keep_samples:
+                    sample_calls = [c for c in sample_calls if c[0].numel() > 1][:1]
+                calls += [("sample", *c) for c in sample_calls]
         except Exception as e:
-            self.skipTest(f"reference_inputs failed: {type(e).__name__}")
-        calls = [("ref", *c) for c in self._build_calls(samples, dtype)]
-        calls += [("bits", *c) for c in self._bitpattern_call(op, dtype, device)]
+            self.skipTest(f"input generation failed: {type(e).__name__}")
         if not calls:
             self.skipTest("no usable sample")
         # Probe every call: RNG use can depend on the scalar signature.
@@ -1114,14 +1228,15 @@ class PointwiseStrictNumericsTest(TestCase):
             ),
         ):
             metrics.reset()
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, fullgraph=True, dynamic=False)
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 eager = fn(inp, args, kwargs)
                 if not self._is_tensor_output(eager):
                     continue
                 if not self._is_pointwise_output(inp, args, kwargs, eager):
                     continue
-                torch._dynamo.reset()
-                result = torch.compile(fn, fullgraph=True)(inp, args, kwargs)
+                result = compiled(inp, args, kwargs)
                 tested += 1
                 if not _outputs_equal(eager, result):
                     kind = _diff_kind(eager, result)
@@ -1148,7 +1263,7 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
-    @ops(POINTWISE_OPS, allowed_dtypes=POINTWISE_DTYPES)
+    @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
@@ -1183,7 +1298,8 @@ class PointwiseStrictNumericsTest(TestCase):
 
         inp2 = leafify(inp)
         args2 = tuple(leafify(a) for a in args)
-        out = call_fn(inp2, args2, kwargs)
+        kwargs2 = {k: leafify(v) for k, v in kwargs.items()}
+        out = call_fn(inp2, args2, kwargs2)
         target = _diff_output(out)
         if not leaves or target is None:
             return out, None
@@ -1211,6 +1327,8 @@ class PointwiseStrictNumericsTest(TestCase):
             ),
         ):
             metrics.reset()
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, fullgraph=True, dynamic=False)
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 with torch.no_grad():
                     probe = fn(inp, args, kwargs)
@@ -1222,7 +1340,7 @@ class PointwiseStrictNumericsTest(TestCase):
                 # Exclude broadcasted inputs whose gradients require a reduction.
                 diff_ts = [
                     t
-                    for t in (inp, *args)
+                    for t in (inp, *args, *kwargs.values())
                     if isinstance(t, torch.Tensor) and t.is_floating_point()
                 ]
                 if any(t.shape != probe_out.shape for t in diff_ts):
@@ -1247,8 +1365,6 @@ class PointwiseStrictNumericsTest(TestCase):
                     continue
                 if eager_grads is None:
                     continue
-                torch._dynamo.reset()
-                compiled = torch.compile(fn, fullgraph=True)
                 _, comp_grads = self._input_grads(
                     compiled, inp, args, kwargs, grad_output
                 )
@@ -1264,7 +1380,7 @@ class PointwiseStrictNumericsTest(TestCase):
             self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
-    @ops(BACKWARD_OPS, allowed_dtypes=POINTWISE_DTYPES)
+    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL)
     def test_pointwise_backward(self, device, dtype, op):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(

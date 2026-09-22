@@ -64,14 +64,23 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2fnuz>() {
 }
 
 // This code is instantiated regardless of ROCm version.
+// Prior to ROCm 6.3, we hard-code the known enum values.
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e4m3fn>() {
+#if ROCM_VERSION >= 60300
   return HIP_R_8F_E4M3;
+#else
+  return static_cast<hipDataType>(28);
+#endif
 }
 
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
+#if ROCM_VERSION >= 60300
   return HIP_R_8F_E5M2;
+#else
+  return static_cast<hipDataType>(29);
+#endif
 }
 
 // This type is not intended for matrix types but rather a scale factor.
@@ -83,7 +92,11 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
 
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float4_e2m1fn_x2>() {
+#if ROCM_VERSION >= 70000
   return HIP_R_4F_E2M1;
+#else
+  return static_cast<hipDataType>(33);
+#endif
 }
 
 template <typename T>
@@ -524,6 +537,13 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
+        // Only RowWise sets a scale mode below, so BlockWise1x32 block scales
+        // arrive with no mode set and are not read as e8m0 blocks: these
+        // candidates are numerically wrong for MX FP8 in either swizzle layout.
+        // (MX FP4 never gets here; no TUNABLE_DISPATCH branch matches its
+        // dtype.) A wrong candidate wins silently, since the numerical check is
+        // off by default. Pre-existing; MX FP8 should stay on the Default op,
+        // which sets the mode via cublasLtMatmulScaleMode.
         hipblasLtMatmulDescAttributes_t a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
         hipblasLtMatmulDescAttributes_t b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
         if (GetAScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
@@ -627,6 +647,14 @@ auto GetHipBlasLtTypeStringAndOps() {
   auto b_datatype = HipDataTypeFor<BT>();
   auto in_out_datatype = HipDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
+#if ROCM_VERSION == 60400
+  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
+  if ((a_datatype == HIP_R_32F || b_datatype == HIP_R_32F || in_out_datatype == HIP_R_32F)
+          && (transa_outer == HIPBLAS_OP_T && transb_outer == HIPBLAS_OP_T)) {
+    std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ignore;
+    return ignore;
+  }
+#endif
 
   hipblasComputeType_t computeType = HipBlasComputeTypeFor<CT>();
   if constexpr (std::is_same_v<CT, float>) {
