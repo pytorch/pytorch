@@ -876,7 +876,7 @@ class FSDPParamGroup:
             for param in self.fsdp_params
         ):
             raise RuntimeError(
-                "Synchronize or clear pending gradients before changing their reduction policy"
+                "Synchronize pending gradients before changing their reduction policy"
             )
 
     @torch.no_grad()

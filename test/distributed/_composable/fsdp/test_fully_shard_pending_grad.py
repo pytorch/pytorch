@@ -188,14 +188,44 @@ class TestFullyShardPendingGrad(FSDPTest):
         model.first.reshard()
         self.assertEqual(
             model.first.weight.grad.to(device).full_tensor(),
-            torch.ones((4, 4), device=device),
+            torch.full((4, 4), 5.0, device=device),
         )
-        if set_to_none and clear_root:
-            self.assertIsNone(model.second.weight.grad)
+        self.assertEqual(
+            model.second.weight.grad.to(device).full_tensor(),
+            torch.full((4, 4), 4.0 if clear_root else 6.0, device=device),
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("set_to_none", [False, True])
+    def test_sharded_clear_preserves_unsharded_grad(self, device, set_to_none):
+        device = torch.device(device).type
+        model = TwoLinear(device)
+        fully_shard(
+            [model.first, model.second],
+            mesh=init_device_mesh(device, (self.world_size,)),
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        fully_shard(model)
+        for sync, value in ((True, 4), (False, 2)):
+            model.set_requires_gradient_sync(sync)
+            model(
+                torch.full((1, 4), value, device=device, dtype=torch.bfloat16)
+            ).sum().backward()
+        model.first.zero_grad(set_to_none=set_to_none)
+        if set_to_none:
+            self.assertIsNone(model.first.weight.grad)
         else:
+            grad = model.first.weight.grad.to_local()
+            self.assertEqual(grad, torch.zeros_like(grad))
+        grad = model.second.weight.grad.to_local()
+        self.assertEqual(grad, torch.full_like(grad, 4))
+        model.first.unshard()
+        for param in model.parameters():
+            self.assertEqual(param.grad, torch.full_like(param.grad, 2))
+        model.synchronize_gradients()
+        for param, expected in zip(model.parameters(), (2.0, 6.0)):
             self.assertEqual(
-                model.second.weight.grad.to(device).full_tensor(),
-                torch.full((4, 4), 0.0 if clear_root else 6.0, device=device),
+                param.grad.full_tensor(), torch.full((4, 4), expected, device=device)
             )
 
     @skip_if_lt_x_gpu(2)
@@ -334,10 +364,15 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
         self._test_native_partial_ownership(device, cpu_offload, clear, shard_dim=0)
 
     @skip_if_lt_x_gpu(4)
-    def test_native_partial_ownership_shard1(self, device):
-        self._test_native_partial_ownership(device, False, None, shard_dim=1)
+    @parametrize("set_to_none", [False, True])
+    def test_native_partial_ownership_shard1(self, device, set_to_none):
+        self._test_native_partial_ownership(
+            device, False, set_to_none, shard_dim=1, clear_sharded=True
+        )
 
-    def _test_native_partial_ownership(self, device, cpu_offload, clear, shard_dim):
+    def _test_native_partial_ownership(
+        self, device, cpu_offload, clear, shard_dim, clear_sharded=False
+    ):
         device = torch.device(device).type
         in_features, out_features = (1, 5) if shard_dim == 0 else (4, 4)
         model = TwoLinear(device, in_features, out_features)
@@ -379,27 +414,28 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
         # The second parameter only has an internal HSDP partial to synchronize.
         self.assertIsNone(model.second.weight.grad)
         if clear is not None:
-            model.zero_grad(set_to_none=clear)
-            for param in model.parameters():
+            if clear_sharded:
+                model.first.reshard()
+            clear_module = model.first if clear_sharded else model
+            clear_module.zero_grad(set_to_none=clear)
+            for param in clear_module.parameters():
                 if clear:
                     self.assertIsNone(param.grad)
                 elif param.grad is not None:
                     self.assertEqual(param.grad, torch.zeros_like(param.grad))
         model.synchronize_gradients()
-        expected = 7 if clear is None else 0
+        expected_values = (7, 7)
+        if clear is not None:
+            expected_values = (3 if clear_sharded else 6, 7)
+        model.first.unshard()
         for param in model.parameters():
             self.assertIsNone(param.grad)
         model.first.reshard()
-        for param in model.parameters():
-            if clear is True:
-                self.assertIsNone(param.grad)
-            else:
-                self.assertEqual(
-                    param.grad.to(device).full_tensor(),
-                    torch.full(
-                        (out_features, in_features), float(expected), device=device
-                    ),
-                )
+        for param, expected in zip(model.parameters(), expected_values):
+            self.assertEqual(
+                param.grad.to(device).full_tensor(),
+                torch.full((out_features, in_features), float(expected), device=device),
+            )
         model.synchronize_gradients()
         model.set_requires_all_reduce(True)
         model.set_requires_gradient_sync(True)
@@ -407,7 +443,7 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
             torch.ones(1, in_features, device=device, dtype=torch.bfloat16)
         ).sum().backward()
         model.first.reshard()
-        for param in model.parameters():
+        for param, expected in zip(model.parameters(), expected_values):
             self.assertEqual(
                 param.grad.to(device).full_tensor(),
                 torch.full(

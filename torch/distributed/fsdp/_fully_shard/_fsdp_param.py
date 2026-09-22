@@ -1321,7 +1321,8 @@ class FSDPParam:
         ):
             raise RuntimeError(
                 "FSDP module conversion is incompatible with a pending gradient. "
-                "Call model.zero_grad(set_to_none=True) before converting the module."
+                "Complete gradient reduction, reshard, and call "
+                "model.zero_grad(set_to_none=True) before converting the module."
             )
         if param.grad is not None:
             target_dtype = converted_dtype(param)
@@ -1335,7 +1336,8 @@ class FSDPParam:
             if incompatible or target_grad_dtype != target_dtype:
                 raise RuntimeError(
                     "FSDP module conversion is incompatible with an existing gradient. "
-                    "Call model.zero_grad(set_to_none=True) before converting the module."
+                    "Reshard and call model.zero_grad(set_to_none=True) "
+                    "before converting the module."
                 )
 
     def reset_sharded_param(self):

@@ -296,6 +296,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         self.assertEqual(fsdp_param_group._orig_dtype, torch.float32)
         self.assertEqual(fsdp_param_group._reduce_dtype, torch.float32)
 
+        model.reshard()
         model.layers.requires_grad_(True)
         orig_reduce_scatter = dist.reduce_scatter_single
 
@@ -309,6 +310,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             model.zero_grad(set_to_none=True)
             with patch_reduce_scatter(reduce_scatter):
                 model(inp).sum().backward()
+            model.reshard()
             for param in model.layers.parameters():
                 self.assertTrue(param.requires_grad)
                 self.assertIsNotNone(param.grad)
@@ -643,22 +645,30 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                             self.assertEqual(param.grad, ref_param.grad)
                     if not sync and reshard_after_backward:
                         model.reshard()
+                model.reshard()
+                reduced_grads = [
+                    None if param.grad is None else param.grad.clone()
+                    for param in model.parameters()
+                ]
+                model.unshard()
                 model.zero_grad(set_to_none=set_to_none)
                 ref_model.zero_grad(set_to_none=set_to_none)
+                for param in model.parameters():
+                    if set_to_none:
+                        self.assertIsNone(param.grad)
+                    elif param.grad is not None:
+                        self.assertEqual(param.grad, torch.zeros_like(param.grad))
                 model.reshard()
+                for param, reduced_grad in zip(model.parameters(), reduced_grads):
+                    self.assertEqual(param.grad, reduced_grad)
+                model.zero_grad(set_to_none=set_to_none)
                 for param in model.parameters():
                     if set_to_none:
                         self.assertIsNone(param.grad)
                     elif param.grad is not None:
                         self.assertEqual(param.grad, torch.zeros_like(param.grad))
-                model.unshard()
-                for param in model.parameters():
-                    if set_to_none:
-                        self.assertIsNone(param.grad)
-                    elif param.grad is not None:
-                        self.assertEqual(param.grad, torch.zeros_like(param.grad))
-                if reshard_after_backward:
-                    model.reshard()
+                if not reshard_after_backward:
+                    model.unshard()
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_hsdp", [False, True])
@@ -843,6 +853,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 model(inp).sum().backward()
 
             loss = model(inp).sum()
+            model.unshard()
             model.zero_grad(set_to_none=set_to_none)
             loss.backward()
             expected_grads = (

@@ -215,6 +215,12 @@ class TestFullyShardConversion(TestCase):
         self.assertIs(model.weight.grad, pending)
         self.assertEqual(pending, pending_value)
 
+        model.reshard()
+        model.zero_grad(set_to_none=True)
+        self._assert_conversion_requires_clear(model, torch.bfloat16)
+        model.unshard()
+        self.assertIs(model.weight.grad, pending)
+        self.assertEqual(pending, pending_value)
         model.zero_grad(set_to_none=True)
         model.to(torch.bfloat16)
         model.set_requires_gradient_sync(True)

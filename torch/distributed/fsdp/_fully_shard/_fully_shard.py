@@ -130,12 +130,12 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
-    Configure parameter dtypes before the first forward. For module conversions,
-    clear existing gradients with ``module.zero_grad(set_to_none=True)`` if the
-    conversion would conflict with an explicit ``grad_dtype`` or change the dtype
-    of pending gradients.
-    Device conversions also require clearing gradients whose dtype differs from
-    the converted parameter dtype.
+    Configure parameter dtypes before the first forward. A module conversion
+    that conflicts with existing gradients requires clearing those gradients
+    first. Complete pending reductions, reshard each FSDP module, and call
+    ``module.zero_grad(set_to_none=True)`` before such a conversion. Device
+    conversions also require clearing gradients whose dtype differs from the
+    converted parameter dtype.
 
     Since grouping multiple tensors together for one collective is critical for
     communication efficiency, this implementation makes this grouping first
@@ -441,11 +441,14 @@ class FSDPModule:
         shards have no gradient; unsharding or fully resharding restores the
         corresponding parameter owners.
 
-        Assigning ``param.grad`` or calling ``optimizer.zero_grad()`` affects
-        only the addressed parameters. Use :meth:`zero_grad` on the FSDP module
-        to clear all contributions. Synchronize pending gradients before global
-        gradient clipping or an optimizer step, and reshard parameters before
-        updating them.
+        Ordinary ``nn.Module.zero_grad()`` clears only the currently registered
+        parameters: sharded gradients while sharded, or unsharded gradients while
+        unsharded. Gradients on other parameter owners and HSDP partial buffers
+        are unchanged.
+        Reduction consumes the unsharded ``grad`` and sets it to ``None``; HSDP
+        partial buffers are consumed when all-reduce completes. Synchronize
+        pending gradients before global gradient clipping or an optimizer step,
+        and reshard parameters before updating them.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
@@ -477,65 +480,6 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
-
-    def zero_grad(self, set_to_none: bool = True) -> None:
-        """Reset reduced and pending gradients of this module's parameters.
-
-        This includes gradients on hidden sharded or unsharded parameters and
-        HSDP contributions awaiting all-reduce. Assigning ``param.grad`` or
-        calling ``optimizer.zero_grad()`` affects only the addressed parameters.
-        No gradient reductions are performed.
-
-        Args:
-            set_to_none (bool): Whether to discard gradients or zero their
-                existing buffers, as in :meth:`nn.Module.zero_grad`.
-        """
-        self_module = cast(nn.Module, self)
-        modules = set(self_module.modules())
-        groups: set[FSDPParamGroup] = set()
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                groups.update(module._get_fsdp_state()._fsdp_param_groups)
-        for group in groups:
-            group._wait_for_post_backward()
-            for param in group.fsdp_params:
-                if param.grad_offload_event is not None:
-                    param.grad_offload_event.synchronize()
-                    param.grad_offload_event = None
-        seen_params = set(self_module.parameters())
-        super().zero_grad(set_to_none=set_to_none)  # type: ignore[misc]
-        for group in groups:
-            for param in group.fsdp_params:
-                if param._module_info.module not in modules and not any(
-                    module in modules for module in param._module_info.shared_modules
-                ):
-                    continue
-                owners = (param.sharded_param, getattr(param, "_unsharded_param", None))
-                for owner in owners:
-                    if owner is None or owner in seen_params:
-                        continue
-                    seen_params.add(owner)
-                    grad = owner.grad
-                    if grad is None:
-                        continue
-                    if set_to_none:
-                        owner.grad = None
-                    else:
-                        if grad.grad_fn is not None:
-                            grad.detach_()
-                        else:
-                            grad.requires_grad_(False)
-                        grad.zero_()
-                partial = param._partial_grad
-                if partial is not None:
-                    if set_to_none:
-                        param._partial_grad = None
-                    else:
-                        if partial.grad_fn is not None:
-                            partial.detach_()
-                        else:
-                            partial.requires_grad_(False)
-                        partial.zero_()
 
     def synchronize_gradients(self, *, recurse: bool = True) -> None:
         """Complete pending gradient reductions without running another backward.
@@ -693,8 +637,7 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
-        Synchronize pending gradients or discard them with
-        ``zero_grad(set_to_none=True)`` before changing the communication.
+        Complete pending gradient reductions before changing the communication.
 
         Args:
             comm (ReduceScatter): Custom reduce_scatter communication.
@@ -719,8 +662,7 @@ class FSDPModule:
         stream: torch.cuda.Stream | None = None,
     ):
         """
-        Synchronize pending gradients or discard them with
-        ``zero_grad(set_to_none=True)`` before changing the hook or stream.
+        Complete pending gradient reductions before changing the hook or stream.
 
         Args:
             hook (Callable[[torch.Tensor], None]): User-defined all-reduce hook
@@ -782,8 +724,7 @@ class FSDPModule:
         a custom reduce op using NCCL's PreMulSum, which allows multiplying by
         the factor before reduction.
 
-        Synchronize pending gradients or discard them with
-        ``zero_grad(set_to_none=True)`` before changing the factor.
+        Complete pending gradient reductions before changing the factor.
 
         Args:
             factor (float): Custom divide factor.
@@ -809,8 +750,7 @@ class FSDPModule:
         to ensure the custom all-reduce across FSDP units follow this strategy
         as well, as FSDP can no longer automatically handle that.
 
-        Synchronize pending gradients or discard them with
-        ``zero_grad(set_to_none=True)`` before changing this setting.
+        Complete pending gradient reductions before changing this setting.
 
         Args:
             enable (bool): Whether to only ever use ReduceOp.SUM for comms.
