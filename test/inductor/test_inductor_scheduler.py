@@ -393,6 +393,34 @@ class TestScheduler(TestCase):
             pending_node1, pending_node2, fused_nodes
         )
 
+    @parametrize("memory_guard_enabled", (False, True))
+    def test_pending_template_fusion_resolves_retired_operand(
+        self, memory_guard_enabled
+    ):
+        scheduler = object.__new__(Scheduler)
+        template = self._mock_base_snode("template")
+        retired = self._mock_base_snode("retired")
+        current = self._mock_base_snode("current")
+        template.is_template.return_value = True
+        template.get_template_node.return_value = None
+        scheduler.name_to_fused_node = {
+            "template": template,
+            "retired": current,
+            "current": current,
+        }
+        scheduler._fusion_memory_state = Mock() if memory_guard_enabled else None
+        scheduler.fuse_if_speedup = Mock(return_value=False)
+        speedup = Mock(return_value=True)
+        pending = PendingFusion(speedup, template, retired)
+        fused_nodes = OrderedSet([template, current])
+
+        scheduler._evaluate_pending_template_fusions({retired: [pending]}, fused_nodes)
+
+        expected = current if memory_guard_enabled else retired
+        scheduler.fuse_if_speedup.assert_called_once_with(
+            template, expected, speedup, fused_nodes
+        )
+
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
         node1 = self._mock_base_snode("node1")
@@ -678,6 +706,15 @@ class TestScheduler(TestCase):
 
         self.assertEqual(possible, [(node1, node2)])
         scheduler.will_fusion_create_cycle.assert_not_called()
+        speedup = Mock(return_value=True)
+        self.assertFalse(
+            scheduler.fuse_if_speedup(node1, node2, speedup, OrderedSet([node1, node2]))
+        )
+        scheduler.will_fusion_create_cycle.assert_called_once_with(node1, node2)
+        speedup.assert_not_called()
+
+        scheduler._fusion_memory_state = Mock()
+        scheduler.will_fusion_create_cycle.reset_mock()
         self.assertFalse(scheduler.can_fuse(node1, node2))
         scheduler.will_fusion_create_cycle.assert_called_once_with(node1, node2)
 

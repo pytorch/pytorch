@@ -7963,10 +7963,18 @@ class Scheduler:
         speedup_fn: Callable[[], bool],
         fused_nodes: OrderedSet[BaseSchedulerNode],
     ):
+        memory_state = self._fusion_memory_state
         can_fuse = self.can_fuse(node1, node2)
         state = self._fusion_memory_state
         memory_update = state.pending_update if state is not None else None
-        if can_fuse and speedup_fn():
+        if (
+            can_fuse
+            and (
+                memory_state is not None
+                or not self.will_fusion_create_cycle(node1, node2)
+            )
+            and speedup_fn()
+        ):
             fused = self.fuse_two_nodes(node1, node2, fused_nodes)
             self._apply_fusion_memory_update(fused, memory_update)
             return True
@@ -8035,6 +8043,9 @@ class Scheduler:
                     future_to_pending_fusion[f] = (pending_fusion, candidate)
                 else:
                     # Non AsyncCompile path, perform fusion
+                    if self._fusion_memory_state is not None:
+                        node1 = self.get_fused_node(node1)
+                        node2 = self.get_fused_node(node2)
                     if self.fuse_if_speedup(
                         node1, node2, pending_fusion.callable_fn, fused_nodes
                     ):
@@ -8117,10 +8128,14 @@ class Scheduler:
             ):
                 continue
 
+            memory_state = self._fusion_memory_state
             can_fuse = self.can_fuse(node1, node2, can_reorder=is_reorder_round)
             state = self._fusion_memory_state
             memory_update = state.pending_update if state is not None else None
-            if can_fuse:
+            if can_fuse and (
+                memory_state is not None
+                or not self.will_fusion_create_cycle(node1, node2)
+            ):
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
                     pending_fusion = PendingFusion(
@@ -10312,13 +10327,16 @@ class Scheduler:
         Speculative loop mutations (reordering, reindexing) are automatically
         rolled back if the fusion decision ultimately fails.
         """
-        # Foreach and FusedMixOrderReductions recursively check whether their
-        # constituent nodes can fuse.
-        # Graph level checks are only performed on outer fusion.
-        is_nested_fusion = (
-            self.get_fused_node(node1) is not node1
-            or self.get_fused_node(node2) is not node2
-        )
+        memory_state = self._fusion_memory_state
+        is_nested_fusion = False
+        if memory_state is not None:
+            # Foreach and FusedMixOrderReductions recursively check whether their
+            # constituent nodes can fuse.
+            # Graph-level checks only apply to outer fusions.
+            is_nested_fusion = (
+                self.get_fused_node(node1) is not node1
+                or self.get_fused_node(node2) is not node2
+            )
         tracker = _LoopMutationTracker.create((node1, node2))
         can_fuse = self._can_fuse_impl(
             node1,
@@ -10329,18 +10347,18 @@ class Scheduler:
         if (
             can_fuse
             and check_cycle
+            and memory_state is not None
             and not is_nested_fusion
             and self.will_fusion_create_cycle(node1, node2)
         ):
             can_fuse = False
-        state = self._fusion_memory_state
         memory_update = None
-        if can_fuse and state is not None and not is_nested_fusion:
+        if can_fuse and memory_state is not None and not is_nested_fusion:
             can_fuse, memory_update = self._can_fuse_peak_memory_check(
-                state, node1, node2
+                memory_state, node1, node2
             )
-        if state is not None and not is_nested_fusion:
-            state.pending_update = memory_update
+        if memory_state is not None and not is_nested_fusion:
+            memory_state.pending_update = memory_update
         tracker.finish(rollback=not can_fuse)
         return can_fuse
 
