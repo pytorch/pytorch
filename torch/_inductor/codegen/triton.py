@@ -7018,7 +7018,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 raise AssertionError(
                     "Mix order reduction requires persistent reduction"
                 )
-            accumulators = {}
+            accumulators = []
             for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                 reduction_type = partial_accum.reduction_type
                 default = ir.Reduction.default_accumulator(reduction_type, torch.float)
@@ -7027,9 +7027,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.writeline(
                     f"{name} = tl.full([R0_BLOCK], {default}, tl.float32)[None, :]"
                 )
-                accumulators[name] = (
-                    self.cse.namedvar(name, dtype=torch.float, shape=("1", "R0_BLOCK")),
-                    default,
+                accumulators.append(
+                    (
+                        self.cse.namedvar(
+                            name, dtype=torch.float, shape=("1", "R0_BLOCK")
+                        ),
+                        default,
+                    )
                 )
             has_constant_xmask = self._has_constant_xmask()
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
@@ -7059,7 +7063,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                     var = partial_accum.value
                     name = f"accum{idx}"
-                    accumulator, default = accumulators[name]
+                    accumulator, default = accumulators[idx]
                     if not has_constant_xmask:
                         # Pointwise compute can transform masked load values.
                         var = self.cse.generate(
