@@ -305,6 +305,14 @@ inline sycl::kernel* _createKernel(
 }
 
 sycl::kernel* loadKernel(
+    const uint8_t* binary,
+    size_t binarySize,
+    const char* funcName,
+    uint32_t sharedMemBytes,
+    uint32_t* nSpillsPtr,
+    int device_idx);
+
+sycl::kernel* loadKernel(
     const char* filePath,
     const char* funcName,
     uint32_t sharedMemBytes,
@@ -314,8 +322,23 @@ sycl::kernel* loadKernel(
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
   std::string data(std::move(OSS).str());
-  auto mod = _createModule(
-      reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
+  return loadKernel(
+      reinterpret_cast<const uint8_t*>(data.data()),
+      data.size(),
+      funcName,
+      sharedMemBytes,
+      nSpillsPtr,
+      device_idx);
+}
+
+sycl::kernel* loadKernel(
+    const uint8_t* binary,
+    size_t binarySize,
+    const char* funcName,
+    uint32_t sharedMemBytes,
+    uint32_t* nSpillsPtr,
+    int device_idx) {
+  auto mod = _createModule(binary, binarySize, device_idx);
 
   return _createKernel(mod, funcName, nSpillsPtr);
 }
@@ -429,22 +452,10 @@ void launchKernel(
   (function, n_regs, n_spills) = load_kernel(cubin_path, func_name,
   sharedMemBytes)
 */
-PyObject* load_kernel(PyObject* self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  const char* filePath = nullptr;
-  const char* funcName = nullptr;
-  int sharedMemBytes = 0;
-  int device = 0;
-  if (!PyArg_ParseTuple(
-          args, "ssii", &filePath, &funcName, &sharedMemBytes, &device)) {
-    return nullptr;
-  }
-  // Level-zero does not support get n_regs, so we return 0 here.
-  uint32_t n_regs = 0;
-  uint32_t n_spills = 0;
-  sycl::kernel* func =
-      loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
-
+PyObject* buildKernelResult(
+    sycl::kernel* func,
+    uint32_t n_regs,
+    uint32_t n_spills) {
   auto kernel_py = THPObjectPtr(PyCapsule_New(
       reinterpret_cast<void*>(func), "sycl_kernel", [](PyObject* cap) {
         void* ptr = PyCapsule_GetPointer(cap, "sycl_kernel");
@@ -456,6 +467,50 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   }
 
   return Py_BuildValue("(Oii)", kernel_py.get(), n_regs, n_spills);
+}
+
+PyObject* load_kernel(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const char* filePath = nullptr;
+  const char* funcName = nullptr;
+  int sharedMemBytes = 0;
+  int device = 0;
+  if (!PyArg_ParseTuple(
+          args, "ssii", &filePath, &funcName, &sharedMemBytes, &device)) {
+    return nullptr;
+  }
+  // Level-zero does not support get n_regs, so we return 0 here.
+  uint32_t n_spills = 0;
+  sycl::kernel* func =
+      loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
+  return buildKernelResult(func, 0, n_spills);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* load_kernel_from_binary(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* binaryObject = nullptr;
+  const char* funcName = nullptr;
+  int sharedMemBytes = 0;
+  int device = 0;
+  if (!PyArg_ParseTuple(
+          args, "Osii", &binaryObject, &funcName, &sharedMemBytes, &device)) {
+    return nullptr;
+  }
+  char* binary = nullptr;
+  Py_ssize_t binarySize = 0;
+  if (PyBytes_AsStringAndSize(binaryObject, &binary, &binarySize) < 0) {
+    return nullptr;
+  }
+  uint32_t n_spills = 0;
+  sycl::kernel* func = loadKernel(
+      reinterpret_cast<const uint8_t*>(binary),
+      static_cast<size_t>(binarySize),
+      funcName,
+      sharedMemBytes,
+      &n_spills,
+      device);
+  return buildKernelResult(func, 0, n_spills);
   END_HANDLE_TH_ERRORS
 }
 
@@ -610,7 +665,7 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-std::array<PyMethodDef, 2> StaticXpuLauncherMethods = {
+std::array<PyMethodDef, 3> StaticXpuLauncherMethods = {
     PyMethodDef{
         "_launch_kernel",
         launch_kernel,
@@ -620,7 +675,12 @@ std::array<PyMethodDef, 2> StaticXpuLauncherMethods = {
         "_load_kernel",
         load_kernel,
         METH_VARARGS,
-        "Load XPU kernel from zebin file"}};
+        "Load XPU kernel from zebin file"},
+    PyMethodDef{
+        "_load_kernel_from_binary",
+        load_kernel_from_binary,
+        METH_VARARGS,
+        "Load XPU kernel from retained zebin bytes"}};
 
 // Define a minimal type for StaticXpuLauncher.
 // We don't implement __new__ or __init__ because we're using it only as a
