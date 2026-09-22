@@ -325,7 +325,7 @@ class TritonBundler:
     def load_autotuners(
         cls,
         static_autotuners: list[StaticallyLaunchedAutotuner] | None,
-        binary_resolutions: _BundledBinaryResolutions | None = None,
+        binary_resolutions: _BundledBinaryResolutions,
     ) -> list[str]:
         """
         Load statically launchable CachingAutotuners into async_compile.CompiledTritonKernels
@@ -363,17 +363,14 @@ class TritonBundler:
                             compile_result.set_cubin_path()
                             continue
 
-                        bundled_cubin = None
-                        reject_bundled_cubin = False
-                        if binary_resolutions is not None:
-                            resolution = binary_resolutions.get(compile_result)
-                            bundled_cubin = resolution.payload
-                            reject_bundled_cubin = resolution.rejected
-                            if reject_bundled_cubin:
-                                log.warning(
-                                    "Ignoring untrusted bundled binary for %s",
-                                    result.kernel_name,
-                                )
+                        resolution = binary_resolutions.get(compile_result)
+                        bundled_cubin = resolution.payload
+                        reject_bundled_cubin = resolution.rejected
+                        if reject_bundled_cubin:
+                            log.warning(
+                                "Ignoring untrusted bundled binary for %s",
+                                result.kernel_name,
+                            )
 
                         if reject_bundled_cubin:
                             force_recompile = True
@@ -506,8 +503,8 @@ class TritonBundler:
                 )
             return TritonBundle([], []), None
 
-    @classmethod
-    def read_and_emit(cls, bundle: TritonBundle) -> TritonBundlerMetadata | None:
+    @staticmethod
+    def read_and_emit(bundle: TritonBundle) -> TritonBundlerMetadata | None:
         """
         This is the main function called when a cache read happens. This function
         converts the bundled format back into individual files and writes them
@@ -529,7 +526,6 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
-            binary_resolutions = None
             untrusted_artifact_groups: OrderedSet[_BinaryArtifactGroup] = OrderedSet()
             if config.use_static_triton_launcher and bundle.static_autotuners:
                 binary_index = _BundledBinaryIndex.from_bundle(bundle)
@@ -602,7 +598,7 @@ class TritonBundler:
                     if tmp_dir is not None:
                         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-            if config.use_static_triton_launcher:
+            if config.use_static_triton_launcher and bundle.static_autotuners:
                 static_kernel_names = TritonBundler.load_autotuners(
                     bundle.static_autotuners, binary_resolutions
                 )
