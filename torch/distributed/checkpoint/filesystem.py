@@ -472,7 +472,7 @@ def _write_files_from_queue(
                     stream.flush()
                     try:
                         os.fsync(stream.fileno())
-                    except (AttributeError, UnsupportedOperation) as e:
+                    except (AttributeError, UnsupportedOperation, OSError) as e:
                         warnings.warn(
                             f"fsync not supported for this stream, relying on flush(): {e}"
                         )
@@ -781,7 +781,7 @@ class _FileSystemWriter(StorageWriter):
                 metadata_file.flush()
                 try:
                     os.fsync(metadata_file.fileno())
-                except (AttributeError, UnsupportedOperation) as e:
+                except (AttributeError, UnsupportedOperation, OSError) as e:
                     warnings.warn(
                         f"fsync not supported for this stream, relying on flush(): {e}"
                     )
