@@ -9,8 +9,6 @@ import textwrap
 import unittest
 from unittest.mock import patch
 
-import pytest
-
 import torch
 import torch.compiler.config as compiler_config
 import torch.distributed as dist
@@ -23,6 +21,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_multigpu,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -304,8 +303,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             lambda msg: f"{msg}\nno node should bake a concrete indexed cuda device; found: {baked}",
         )
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_runtime_follows_current_device_not_input(self):
         # The runtime device follows the process's current device, not the input's.
@@ -453,8 +451,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             ):
                 make_fx(f, tracing_mode="fake")(torch.randn(2, device="cuda:0"))
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_noncurrent_device_tensor_rejected(self):
         # CooR rejects a device *operand* that isn't the current accelerator (see
@@ -470,8 +467,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             with self.assertRaisesRegex(RuntimeError, "device-agnostic"):
                 make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda:1"))
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_graph_code_identical_across_devices(self):
         # The functional FX graph text (.code) must be byte-identical across ranks: the
@@ -636,8 +632,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             _, codes = run_and_get_code(compiled, *inputs)
         return "\n".join(codes)
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     @parametrize(
         "path",
@@ -868,8 +863,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self._assert_no_baked_device(code)
         self.assertEqual(sorted(out.tolist()), list(range(8)))
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch({"triton.cudagraphs": True})
     def test_cudagraphs_under_coor_runs_on_nonzero_device(self):
@@ -888,8 +882,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out.device, torch.device("cuda:1"))
         self.assertEqual(out, ref)
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_runs_on_nonzero_device(self):
         # Problem 2 (runtime): a graph compiled under CooR must run on a rank's own
@@ -903,8 +896,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             out = compiled(torch.randn(2, 8, device="cuda:1"))
         self.assertEqual(out.device, torch.device("cuda:1"))
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_compiled_on_one_device_runs_on_another(self):
         # Problem 3 (shareable artifact): a graph first compiled on cuda:0 must produce a
@@ -946,8 +938,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out.device, torch.device("cuda:1"))
         self.assertEqual(out, ref)
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_shared_kernel_reused_in_process_across_devices(self):
         # A rank only ever drives one device, but CooR's kernel cache key is
@@ -980,8 +971,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out0, ref0)
         self.assertEqual(out1, ref1)
 
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_user_defined_triton_kernel_reused_in_process_across_devices(self):
         # Same cross-device reuse as the test above, for a user-defined triton.jit
