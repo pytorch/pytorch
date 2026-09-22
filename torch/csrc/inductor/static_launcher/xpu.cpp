@@ -308,14 +308,12 @@ sycl::kernel* loadKernel(
     const uint8_t* binary,
     size_t binarySize,
     const char* funcName,
-    uint32_t sharedMemBytes,
     uint32_t* nSpillsPtr,
     int device_idx);
 
 sycl::kernel* loadKernel(
     const char* filePath,
     const char* funcName,
-    uint32_t sharedMemBytes,
     uint32_t* nSpillsPtr,
     int device_idx) {
   std::ifstream IFS(filePath, std::ios::binary);
@@ -326,7 +324,6 @@ sycl::kernel* loadKernel(
       reinterpret_cast<const uint8_t*>(data.data()),
       data.size(),
       funcName,
-      sharedMemBytes,
       nSpillsPtr,
       device_idx);
 }
@@ -335,7 +332,6 @@ sycl::kernel* loadKernel(
     const uint8_t* binary,
     size_t binarySize,
     const char* funcName,
-    uint32_t sharedMemBytes,
     uint32_t* nSpillsPtr,
     int device_idx) {
   auto mod = _createModule(binary, binarySize, device_idx);
@@ -452,10 +448,7 @@ void launchKernel(
   (function, n_regs, n_spills) = load_kernel(cubin_path, func_name,
   sharedMemBytes)
 */
-PyObject* buildKernelResult(
-    sycl::kernel* func,
-    uint32_t n_regs,
-    uint32_t n_spills) {
+PyObject* buildKernelResult(sycl::kernel* func, uint32_t n_spills) {
   auto kernel_py = THPObjectPtr(PyCapsule_New(
       reinterpret_cast<void*>(func), "sycl_kernel", [](PyObject* cap) {
         void* ptr = PyCapsule_GetPointer(cap, "sycl_kernel");
@@ -466,7 +459,7 @@ PyObject* buildKernelResult(
     return nullptr;
   }
 
-  return Py_BuildValue("(Oii)", kernel_py.get(), n_regs, n_spills);
+  return Py_BuildValue("(Oii)", kernel_py.get(), 0, n_spills);
 }
 
 PyObject* load_kernel(PyObject* self, PyObject* args) {
@@ -481,9 +474,8 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   }
   // Level-zero does not support get n_regs, so we return 0 here.
   uint32_t n_spills = 0;
-  sycl::kernel* func =
-      loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
-  return buildKernelResult(func, 0, n_spills);
+  sycl::kernel* func = loadKernel(filePath, funcName, &n_spills, device);
+  return buildKernelResult(func, n_spills);
   END_HANDLE_TH_ERRORS
 }
 
@@ -507,10 +499,9 @@ PyObject* load_kernel_from_binary(PyObject* self, PyObject* args) {
       reinterpret_cast<const uint8_t*>(binary),
       static_cast<size_t>(binarySize),
       funcName,
-      sharedMemBytes,
       &n_spills,
       device);
-  return buildKernelResult(func, 0, n_spills);
+  return buildKernelResult(func, n_spills);
   END_HANDLE_TH_ERRORS
 }
 

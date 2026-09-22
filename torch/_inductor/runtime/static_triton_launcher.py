@@ -300,49 +300,54 @@ class StaticallyLaunchedTritonKernel:
             )
         self.cubin_raw = snapshot
 
-    def _agnostic_cubin_path(self) -> str:
-        # The cubin bytes are device-agnostic, so the same file loads onto any device.
-        # Keep it available (the single-device path frees it after one load) and rewrite
-        # from the retained raw bytes if the file was removed under us.
-        if self.cubin_path is None:
-            raise AssertionError(
-                "device-agnostic kernel cannot reload its cubin for a new device"
-            )
-        if self.cubin_raw is None and not os.path.exists(self.cubin_path):
-            raise MissingTritonKernelError(
-                f"Triton kernel binary not found at {self.cubin_path}"
-            )
-        return self.cubin_path
-
     def _load_kernel_from_path(self, cubin_path: str, device: int):
-        load_from_binary = self.cubin_raw is not None
         try:
-            if load_from_binary:
-                return self.C_impl._load_kernel_from_binary(
-                    self.cubin_raw, self.name, self.shared, device
-                )
             return self.C_impl._load_kernel(cubin_path, self.name, self.shared, device)
         except RuntimeError as error:
             if _is_invalid_kernel_image_error(error):
                 raise InvalidTritonKernelArtifactError(
                     f"Triton kernel binary is unusable at {cubin_path}"
                 ) from error
-            if _is_missing_kernel_file_error(error) or (
-                not load_from_binary and not os.path.exists(cubin_path)
-            ):
+            if _is_missing_kernel_file_error(error) or not os.path.exists(cubin_path):
                 raise MissingTritonKernelError(
                     f"Triton kernel binary is unavailable at {cubin_path}"
                 ) from error
             raise
+
+    def _load_kernel_from_binary(self, device: int):
+        if self.cubin_raw is None:
+            raise AssertionError("retained Triton kernel binary is not set")
+        try:
+            return self.C_impl._load_kernel_from_binary(
+                self.cubin_raw, self.name, self.shared, device
+            )
+        except RuntimeError as error:
+            if _is_invalid_kernel_image_error(error):
+                raise InvalidTritonKernelArtifactError(
+                    "Retained Triton kernel binary is unusable"
+                ) from error
+            if _is_missing_kernel_file_error(error):
+                raise MissingTritonKernelError(
+                    "Retained Triton kernel binary is unavailable"
+                ) from error
+            raise
+
+    def _load_kernel_for_device(self, device: int):
+        if self.cubin_raw is not None:
+            return self._load_kernel_from_binary(device)
+        if not hasattr(self, "cubin_path"):
+            raise AssertionError("cubin_path attribute not set before load_kernel")
+        if self.cubin_path is None:
+            raise AssertionError("cubin_path must not be None before load_kernel")
+        return self._load_kernel_from_path(self.cubin_path, device)
 
     def load_kernel(self, device: int) -> None:
         with self._load_lock:
             if self.device_agnostic:
                 if device in self.functions:
                     return
-                (module, function, self.n_regs, self.n_spills) = (
-                    self._load_kernel_from_path(self._agnostic_cubin_path(), device)
-                )
+                loaded_kernel = self._load_kernel_for_device(device)
+                (module, function, self.n_regs, self.n_spills) = loaded_kernel
                 self.modules[device] = module
                 self.functions[device] = function
                 return
@@ -350,13 +355,8 @@ class StaticallyLaunchedTritonKernel:
             if self.function is not None:
                 return
 
-            if not hasattr(self, "cubin_path"):
-                raise AssertionError("cubin_path attribute not set before load_kernel")
-            if self.cubin_path is None:
-                raise AssertionError("cubin_path must not be None before load_kernel")
-            (self.module, self.function, self.n_regs, self.n_spills) = (
-                self._load_kernel_from_path(self.cubin_path, device)
-            )
+            loaded_kernel = self._load_kernel_for_device(device)
+            (self.module, self.function, self.n_regs, self.n_spills) = loaded_kernel
             # Don't need the cubin path anymore now that we've loaded
             self.cubin_path = None
             self.cubin_raw = None
@@ -665,9 +665,8 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
             if self.device_agnostic:
                 if device in self.functions:
                     return
-                (function, self.n_regs, self.n_spills) = self._load_kernel_from_path(
-                    self._agnostic_cubin_path(), device
-                )
+                loaded_kernel = self._load_kernel_for_device(device)
+                (function, self.n_regs, self.n_spills) = loaded_kernel
                 # XPU has no separate module handle (only the function capsule).
                 self.functions[device] = function
                 return
@@ -675,13 +674,8 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
             if self.function is not None:
                 return
 
-            if not hasattr(self, "cubin_path"):
-                raise AssertionError("expected cubin_path attribute to be set")
-            if self.cubin_path is None:
-                raise AssertionError("expected cubin_path to not be None")
-            (self.function, self.n_regs, self.n_spills) = self._load_kernel_from_path(
-                self.cubin_path, device
-            )
+            loaded_kernel = self._load_kernel_for_device(device)
+            (self.function, self.n_regs, self.n_spills) = loaded_kernel
             self.module = None
             self.cubin_path = None
             self.cubin_raw = None
