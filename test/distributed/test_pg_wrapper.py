@@ -213,8 +213,6 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             tensor=outputs[self.rank],
         )
 
-
-
     def _test_allgather_into_tensor_coalesced_op_mismatch(
         self, wrapper_pg, use_accel=False
     ):
@@ -249,6 +247,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         self.assertTrue(
             "Collectives differ in the following" in err, f"Got error {err}"
         )
+
 
 # Shared accelerator (NCCL/XCCL) wrapper tests. Method bag (not a TestCase /
 # not inherited) so unittest does not collect it. Concrete classes attach these
@@ -378,7 +377,6 @@ class _ProcessGroupAcceleratorWrapperTestBase:
                 range(1, self.world_size + 1)
             )
             self.assertEqual(output, expected)
-
 
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["DETAIL"])
@@ -569,7 +567,6 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 )
                 self.assertEqual(tensor.shape, torch.Size([1024]))
 
-
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
@@ -601,7 +598,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
     _attach_accelerator_wrapper_tests(ProcessGroupNCCLWrapperTest)
     instantiate_device_type_tests(
-        ProcessGroupNCCLWrapperTest, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+        ProcessGroupNCCLWrapperTest, globals(), allow_xpu=True
     )
 
 
@@ -750,27 +747,32 @@ class ProcessGroupGlooWrapperCUDATest(AbstractProcessGroupWrapperTest):
 
     @skip_if_lt_x_gpu(4)
     @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collectives_op_mismatch_cuda_debug_mode(self):
+    def test_collectives_op_mismatch_cuda_debug_mode(self, device):
         pg = self._create_wrapper_pg(with_new_group=True)
         self._test_collectives_op_mismatch(pg, use_accel=True)
 
     @skip_if_lt_x_gpu(4)
     @with_dist_debug_levels(levels=["OFF"])
-    def test_collectives_op_mismatch_cuda(self):
+    def test_collectives_op_mismatch_cuda(self, device):
         pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collectives_op_mismatch(pg, use_accel=True)
 
     @skip_if_lt_x_gpu(4)
     @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collective_shape_mismatch_cuda_debug_mode(self):
+    def test_collective_shape_mismatch_cuda_debug_mode(self, device):
         pg = self._create_wrapper_pg(with_new_group=True)
         self._test_collective_shape_mismatch(pg, use_accel=True)
 
     @skip_if_lt_x_gpu(4)
     @with_dist_debug_levels(levels=["OFF"])
-    def test_collective_shape_mismatch_cuda(self):
+    def test_collective_shape_mismatch_cuda(self, device):
         pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg, use_accel=True)
+
+
+instantiate_device_type_tests(
+    ProcessGroupGlooWrapperCUDATest, globals(), only_for="cuda"
+)
 
 
 if __name__ == "__main__":
