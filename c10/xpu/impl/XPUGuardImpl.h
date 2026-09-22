@@ -162,7 +162,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const Stream& stream,
       const DeviceIndex device_index,
       const EventFlag flag) const override {
-    namespace syclex = sycl::ext::oneapi::experimental;
     TORCH_CHECK(
         device_index == -1 || device_index == stream.device_index(),
         "Event device index ",
@@ -220,6 +219,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return;
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
+    std::vector<sycl::event> event_list{*xpu_event};
     const XPUStream xpu_stream(stream);
 
     bool reusable = false;

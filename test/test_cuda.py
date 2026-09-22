@@ -49,6 +49,9 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
+    tf32_enabled,
+    tf32_off,
+    tf32_on,
     tf32_on_and_off,
     xfailCUDAIfSM89OrLaterOnWindows,
 )
@@ -68,6 +71,8 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     cuda_python_error_check,
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
@@ -95,6 +100,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     skipIfRocmVersionAtLeast,
+    skipIfRocmVersionInRange,
     skipIfRocmVersionLessThan,
     slowTest,
     subtest,
@@ -1611,6 +1617,65 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         if not TEST_WITH_ROCM:
             with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
                 print(torch.backends.cuda.matmul.allow_tf32)
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_new_api_internal_readers(self):
+        # Framework-internal readers must use the per-backend getters and stay
+        # usable after new-style writes put the legacy enum out of sync (the
+        # state test_invalid_status_for_legacy_api asserts throws above).
+        from torch._dynamo.graph_region_tracker import get_global_state_key
+        from torch._inductor.kernel.flex.flex_attention import set_float32_precision
+        from torch._inductor.utils import fp32_matmul_precision_key
+
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch.backends.mkldnn.matmul.fp32_precision = "bf16"
+        self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:bf16")
+        expected = "'ieee'" if torch.version.hip else "'tf32'"
+        kernel_options = {}
+        set_float32_precision(kernel_options, torch.float32)
+        self.assertEqual(kernel_options["FLOAT32_PRECISION"], expected)
+        self.assertEqual(get_global_state_key()[7], "tf32")
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_tf32_context_managers_restore_matmul_precision(self):
+        # The tf32 helpers switch TF32 through the allow_tf32 setter, which
+        # writes both the legacy Float32MatmulPrecision enum and the new
+        # fp32_precision. Restoring only one of them leaves the two
+        # disagreeing, and every later allow_tf32 read in the process raises.
+        starts = (("highest", "none"), ("high", "tf32"), ("medium", "tf32"))
+        ctxs = (
+            ("tf32_off", tf32_off),
+            ("tf32_on", lambda: tf32_on(self)),
+            ("tf32_enabled", tf32_enabled),
+        )
+        for (legacy, cuda_precision), (name, make_ctx) in product(starts, ctxs):
+            with self.subTest(legacy=legacy, cuda_precision=cuda_precision, ctx=name):
+                torch.set_float32_matmul_precision(legacy)
+                torch.backends.cuda.matmul.fp32_precision = cuda_precision
+                before = _snapshot_fp32_precision()
+                with make_ctx():
+                    pass
+                self.assertEqual(_snapshot_fp32_precision(), before)
+                # Reading allow_tf32 raises if the two representations disagree.
+                allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+                self.assertEqual(allow_tf32, legacy != "highest")
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_snapshot_tracks_legacy_matmul_precision(self):
+        torch.set_float32_matmul_precision("highest")
+        before = _snapshot_fp32_precision()
+        # The leak the tf32 helpers used to leave behind: allow_tf32 moves the
+        # legacy enum to "high" and only fp32_precision is put back.
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        self.assertEqual(torch.get_float32_matmul_precision(), "high")
+        self.assertNotEqual(_snapshot_fp32_precision(), before)
+        _restore_fp32_precision(before)
+        self.assertEqual(_snapshot_fp32_precision(), before)
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
@@ -6168,7 +6233,7 @@ with torch.cuda.graph(g):
             self.assertEqual(rc, "3")
 
     @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
-    @skipIfRocmVersionAtLeast([7, 14])
+    @skipIfRocmVersionInRange([7, 14], [10, 2], "rocprofiler-sdk visibility conflict")
     def test_hip_device_count(self):
         """Validate device_count works with both CUDA/HIP visible devices"""
         test_script = """\
@@ -6665,6 +6730,58 @@ class TestCudaAllocator(TestCase):
     def tearDown(self):
         super().tearDown()
         _check_allocator_settings_on_tear_down(self)
+
+    @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    @unittest.skipIf(not SM70OrLater, "requires system-scope PTX loads")
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    def test_expandable_segments_empty_cache_wrong_device(self):
+        flag_cpu = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
+        empty_cache_started = threading.Event()
+        empty_cache_done = threading.Event()
+        empty_cache_errors = []
+
+        torch.cuda.synchronize(0)
+        with torch.cuda.device(1):
+            spin_wait_kernel = get_wait_for_cpu_kernel()
+            src = torch.ones(48 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+            spin_wait_kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag_cpu])
+            dst = torch.empty_like(src)
+            dst.copy_(src)
+            del dst
+
+        def empty_cache_from_device_zero():
+            try:
+                with torch.cuda.device(0):
+                    empty_cache_started.set()
+                    torch.cuda.empty_cache()
+            except Exception as error:
+                empty_cache_errors.append(error)
+            finally:
+                empty_cache_done.set()
+
+        thread = threading.Thread(target=empty_cache_from_device_zero)
+        thread.start()
+        completed_before_release = None
+        try:
+            self.assertTrue(empty_cache_started.wait(timeout=10))
+            completed_before_release = empty_cache_done.wait(timeout=1)
+        finally:
+            flag_cpu[0] = 1
+            thread.join(timeout=10)
+
+        self.assertFalse(thread.is_alive())
+        if empty_cache_errors:
+            raise empty_cache_errors[0]
+        torch.cuda.synchronize(1)
+        self.assertFalse(
+            completed_before_release,
+            "empty_cache() did not wait for work on the segment's device",
+        )
+        del src
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
@@ -11436,7 +11553,6 @@ class TestCudaAutocast(TestAutocast):
                 _ = torch.ones(10)
 
 
-@unittest.skipIf(torch.version.rocm == "10.1.0", "HIPRTC issue (AIRUNTIME-2707)")
 class TestCompileKernel(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
@@ -11968,7 +12084,6 @@ class TestCompileKernel(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
-    @unittest.skipIf(torch.version.rocm == "10.1.0", "HIPRTC issue (AIRUNTIME-2707)")
     @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
