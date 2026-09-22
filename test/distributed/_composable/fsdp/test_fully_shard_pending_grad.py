@@ -47,7 +47,9 @@ class TestFullyShardPendingGrad(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_grad_dtype_unused_parameters(self, device):
+    @parametrize("grad_dtype", [torch.bfloat16, None])
+    @parametrize("reduce_dtype", [None, torch.float32])
+    def test_grad_dtype_unused_parameters(self, device, grad_dtype, reduce_dtype):
         class Model(TwoLinear):
             def forward(self, inp, use_second):
                 return self.second(inp) if use_second else self.first(inp)
@@ -55,8 +57,12 @@ class TestFullyShardPendingGrad(FSDPTest):
         device = torch.device(device).type
         model = Model(device, in_features=1, out_features=3).to(torch.bfloat16)
         model.first.weight.grad_dtype = torch.float32
-        model.second.weight.grad_dtype = torch.bfloat16
-        fully_shard(model, mesh=init_device_mesh(device, (self.world_size,)))
+        model.second.weight.grad_dtype = grad_dtype
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device, (self.world_size,)),
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
+        )
         model.set_reduce_scatter_unused_params(True)
         inp = torch.full((1, 1), self.rank + 1, device=device, dtype=torch.bfloat16)
         for first_rank in (0, 1):
@@ -65,7 +71,10 @@ class TestFullyShardPendingGrad(FSDPTest):
             for param, expected in zip(
                 model.parameters(), ((first_rank + 1) / 2, (2 - first_rank) / 2)
             ):
-                self.assertEqual(param.grad.dtype, param.grad_dtype)
+                self.assertEqual(
+                    param.grad.dtype,
+                    param.grad_dtype or reduce_dtype or torch.bfloat16,
+                )
                 actual = param.grad.full_tensor()
                 self.assertEqual(actual, torch.full_like(actual, expected))
 
@@ -404,9 +413,8 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
                 torch.full((1, 1), value, device=device, dtype=torch.bfloat16)
             ).sum().backward()
         model.synchronize_gradients()
-        for param, expected in zip(
-            model.parameters(), (1, 0 if reduce_dtype is None else 1)
-        ):
+        expected = 0 if reduce_dtype is None else 1
+        for param in model.parameters():
             self.assertEqual(param.grad.dtype, param.grad_dtype)
             actual = param.grad.to(device).full_tensor()
             self.assertEqual(actual, torch.full_like(actual, expected))
