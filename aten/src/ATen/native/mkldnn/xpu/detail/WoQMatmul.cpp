@@ -14,7 +14,7 @@ void woq_matmul_int4_impl(
     const Tensor& mat1_,
     const Tensor& mat2_,
     const Tensor& scale,
-    const std::optional<Tensor>& zp,
+    const Tensor& zp,
     int64_t group_size) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
@@ -120,14 +120,12 @@ void woq_matmul_int4_impl(
       /* mask */ (1 << 0) + (1 << 1),
       {group_size, 1},
       scale_dt);
-  // Set a single zero point with s8 data type for asymmetric.
-  if (zp.has_value()) {
-    pattr.set_zero_points(
-        DNNL_ARG_WEIGHTS,
-        (1 << 0) + (1 << 1),
-        {group_size, 1},
-        dnnl::memory::data_type::s8);
-  }
+  // Set a single zero point with s8 data type.
+  pattr.set_zero_points(
+      DNNL_ARG_WEIGHTS,
+      (1 << 0) + (1 << 1),
+      {group_size, 1},
+      dnnl::memory::data_type::s8);
 
   if (m1_dt == dnnl::memory::data_type::f16)
     pattr.set_fpmath_mode(dnnl::fpmath_mode::f16, true);
@@ -153,21 +151,19 @@ void woq_matmul_int4_impl(
   args.insert({DNNL_ARG_WEIGHTS, m2_u4_m});
   args.insert({DNNL_ARG_DST, dst_m});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, scale_m});
-  if (zp.has_value()) {
-    dnnl::memory::dims zp_usr_dims = {num_groups, n};
-    dnnl::memory::dims zp_usr_strides = {n, 1};
-    auto zp_usr_dt = get_onednn_dtype(*zp);
-    auto zp_usr_md = dnnl::memory::desc(zp_usr_dims, zp_usr_dt, zp_usr_strides);
-    auto zp_usr_m = make_onednn_memory(zp_usr_md, engine, zp->data_ptr());
-    args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp_usr_m});
-  }
+  dnnl::memory::dims zp_usr_dims = {num_groups, n};
+  dnnl::memory::dims zp_usr_strides = {n, 1};
+  auto zp_usr_dt = get_onednn_dtype(zp);
+  auto zp_usr_md = dnnl::memory::desc(zp_usr_dims, zp_usr_dt, zp_usr_strides);
+  auto zp_usr_m = make_onednn_memory(zp_usr_md, engine, zp.data_ptr());
+  args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp_usr_m});
   dnnl::sycl_interop::execute(matmul_p, stream, args);
 }
 
 static inline void set_quant_primitive_attr(
     primitive_attr& pattr,
     const Tensor& scale,
-    const std::optional<Tensor>& zp,
+    const Tensor& zp,
     const int64_t group_size) {
   // set scale and zero point for matmul args
   pattr.set_scales(
@@ -175,14 +171,11 @@ static inline void set_quant_primitive_attr(
       /* mask */ (1 << 0) + (1 << 1),
       {group_size, 1},
       get_onednn_dtype(scale));
-  // set zero points only for asymmetric quantization
-  if (zp.has_value()) {
-    pattr.set_zero_points(
-        DNNL_ARG_WEIGHTS,
-        /* mask */ (1 << 0) + (1 << 1),
-        {group_size, 1},
-        memory::data_type::s8);
-  }
+  pattr.set_zero_points(
+      DNNL_ARG_WEIGHTS,
+      /* mask */ (1 << 0) + (1 << 1),
+      {group_size, 1},
+      memory::data_type::s8);
 }
 
 void woq_matmul_int4_impl_cache(
@@ -190,7 +183,7 @@ void woq_matmul_int4_impl_cache(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& scale,
-    const std::optional<Tensor>& zp,
+    const Tensor& zp,
     int64_t group_size) {
   auto a_sz = mat1.sizes();
   auto c_sz = result.sizes();
@@ -236,8 +229,7 @@ void woq_matmul_int4_impl_cache(
 #endif
   };
 
-  // zp_group_size is 0 when zero points are not used (symmetric quantization)
-  int64_t zp_group_size = zp.has_value() ? group_size : 0;
+  int64_t zp_group_size = group_size;
   auto device_id = c10::xpu::current_device();
   auto& matmul_ext = matmul_primitive_create_and_cache(
       jd,
@@ -264,18 +256,16 @@ void woq_matmul_int4_impl_cache(
             get_onednn_md(scale), engine, scale.data_ptr());
       });
 
-  // set zp_md for asymmetric quantization
-  if (zp.has_value()) {
-    matmul_ext.set_attribute(
-        DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp->data_ptr(), [&]() {
-          int num_groups = k / group_size;
-          memory zp_usr_m(
-              {{num_groups, n}, memory::data_type::s8, {n, 1}},
-              engine,
-              zp->data_ptr());
-          return zp_usr_m;
-        });
-  }
+  // set zp_md for weight zero points
+  matmul_ext.set_attribute(
+      DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp.data_ptr(), [&]() {
+        int num_groups = k / group_size;
+        memory zp_usr_m(
+            {{num_groups, n}, memory::data_type::s8, {n, 1}},
+            engine,
+            zp.data_ptr());
+        return zp_usr_m;
+      });
 
   // set general args
   std::vector<std::pair<int, void*>> arg_handles;
@@ -300,7 +290,7 @@ void woq_matmul_int4(
     const Tensor& mat1_, // torchao: [M, K], dtype: fp16,bf16
     const Tensor& mat2_, // torchao quantized weight, [K/8, N], dtype: uint4x8
     const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16,fp32
-    const std::optional<Tensor>& zp, // torchao: [K/group_size, N], dtype: int8
+    const Tensor& zp, // torchao: [K/group_size, N], dtype: int8
     int64_t group_size,
     bool pri_cache) {
   size_t dims = result.dim();
