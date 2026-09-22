@@ -57,13 +57,13 @@ class PrecompileSummary:
     frame list is a lower bound: from a limit hit on, that frame and everything
     it called ran untraced, so a frame first reached there is in no list here.
 
-    The guard fields hold ``(guard_type, source)`` slots, the source spelled as
-    ``GuardFilterEntry.name``, i.e. the ``Guard.name`` with local scope stripped
-    (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged). Each list
-    holds a slot once, however many frames or variants carried it, so
-    ``dropped_guard_types`` counts distinct slots, not occurrences. The relations
-    between the lists hold within one frame variant, where the producer applies
-    them, and are stated here rather than checked:
+    The guard fields hold ``(guard_type, source)`` slots, the source spelled
+    with the local scope stripped (``L['self'].act`` -> ``self.act``;
+    ``G['CFG'].width`` unchanged). Each list holds a slot once, however many
+    frames or variants carried it, so ``dropped_guard_types`` counts distinct
+    slots, not occurrences. The relations between the lists hold within one
+    frame variant, where the producer applies them, and are stated here rather
+    than checked:
 
     * ``kept_guards`` and ``dropped_guards`` are disjoint: the filter gives a
       slot one verdict, keep or reject.
@@ -94,10 +94,6 @@ class PrecompileSummary:
     so its entries do identify a frame. A bare name identifies none, so the two
     bare lists cannot be checked disjoint.
 
-    Three entries below name the rule they follow in
-    ``torch._dynamo.precompile_package``; that module and its filter are added
-    by this stack alongside this type, the other two rules later in the stack.
-
     Attributes:
         frames: Captured frames: every frame the package holds an entry for, the
             ``bypassed``, ``truncated`` and ``uncovered_frames`` ones included,
@@ -106,10 +102,10 @@ class PrecompileSummary:
         resume_functions: Of those, the graph-break continuations.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
-        bypassed: ``co_name``s of frames the package holds nothing installable
+        bypassed: ``co_name`` of the frames the package holds nothing installable
             for: no compile of the frame recorded a guarded code and one was
-            bypassed (``OutputGraph.bypass_package``: its guards could not be
-            serialized, or its graph held parameters by static address), or a
+            bypassed (its guards could not be serialized, or its graph held
+            parameters by static address), or a
             backend artifact was missing when the package was saved. Not an
             eager fallback: the frame ran compiled during capture, the package
             kept no variant of it a load can serve, and an install re-traces it
@@ -117,17 +113,16 @@ class PrecompileSummary:
         truncated: ``co_name (filename:firstlineno)`` of each frame that hit the
             recompile limit. A lower bound, which is why the digest prints it
             as ``>=``: from a limit hit on, that frame and the frames it calls
-            run without tracing (its ``FrameExecStrategy`` is ``RUN_ONLY`` for
-            the frame and its callees alike), so a limit hit that would follow
-            it there is never recorded.
-        uncovered_frames: ``co_name``s of frames the capture ran that ended with no
-            guarded code and were not bypassed, so the artifact cannot serve
+            run without tracing, so a limit hit that would follow it there is
+            never recorded.
+        uncovered_frames: ``co_name`` of the frames the capture ran that ended with
+            no guarded code and were not bypassed, so the artifact cannot serve
             them: a thin wrapper whose graphs all landed in an inner frame, a
             frame Dynamo gave up on, or a frame whose compile raised (its
             message is in ``capture_errors``, so one failure shows in both
             digest clauses). A different cause and remedy from ``bypassed``
-            (an install ``skip_code``s an uncovered frame, so only a re-capture
-            recovers it, where it re-traces a bypassed one), never the same
+            (an install leaves an uncovered frame to run eagerly, so only a
+            re-capture recovers it, where it re-traces a bypassed one), never the same
             frame; a frame that hit the recompile limit before it recorded a
             guarded code is in ``truncated`` too. Not a remainder: which frames
             count as a gap is the producer's decision, and a frame the package
@@ -135,8 +130,7 @@ class PrecompileSummary:
             ``frames`` minus ``bypassed`` minus the frames that hold guarded
             code.
         wont_generalize: Guard *sources* (not frame names) a kept value-equality
-            guard on a bare argument name pins in some variant (``_pins_a_value``
-            in ``torch._dynamo.precompile_package`` is the rule; ``self.eps`` is
+            guard on a bare argument name pins in some variant (``self.eps`` is
             not a bare name) while no other variant of the same frame guards the
             source without pinning it, so as captured no variant served another
             value. Observed, not proven: a variant that never guarded the source
@@ -144,11 +138,9 @@ class PrecompileSummary:
         dropped_guards: Slots the serialized copy's guard filter rejected; a
             variant that dropped a slot does not check it, so a load through that
             variant cannot notice whatever it checked. Which guards a filter
-            rejects is that filter's own
-            contract, stated in its docstring and not repeated here: the default
-            is ``default_guard_filter_fn`` in
-            ``torch._dynamo.precompile_package``, and a caller-supplied filter
-            decides its own set. A slot is listed under the guard's own type
+            rejects is that filter's own contract and not repeated here; a
+            caller-supplied filter decides its own set. A slot is listed under
+            the guard's own type
             whatever the reason for the drop, so a ``TENSOR_MATCH`` rejected for
             what its check derives is a dropped ``TENSOR_MATCH``.
         kept_guards: Slots the serialized copy's guard filter kept and the
@@ -158,16 +150,15 @@ class PrecompileSummary:
             configuration-chosen binding.
         policy_dropped_guards: Slots the filter kept that the invariance policy
             then dropped because they held identically across every captured
-            variant (``_INVARIANT_DROPPABLE_GUARD_TYPES`` in
-            ``torch._dynamo.precompile_package`` bounds what it may drop).
+            variant (only guard types from a fixed set are eligible).
             Reported apart from ``dropped_guards`` because the remedy differs,
             and reported at all because a capture that discards a precondition
             should not look like one that had none.
         dropped_guard_code: ``(guard_type, source, rendered_check)``, one per slot
             of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
-            rendered a check (its ``GuardBuilder`` method set ``Guard.code_list``;
-            how the check is installed does not predict that, and a slot whose
-            guard rendered none has no entry). One rendering however many
+            rendered a check (how the check is installed does not predict that,
+            and a slot whose guard rendered none has no entry). One rendering
+            however many
             variants dropped the slot: where the check embeds the guarded value
             (``EQUALS_MATCH`` renders ``L['n'] == 3``) it is one variant's, the
             producer's pick rather than a merge, so it tells the form of the
@@ -185,6 +176,11 @@ class PrecompileSummary:
             never empty however the exception was raised.
     """
 
+    # The producer's rules live in torch._dynamo.precompile_package:
+    # default_guard_filter_fn (dropped_guards), _pins_a_value (wont_generalize),
+    # _INVARIANT_DROPPABLE_GUARD_TYPES (policy_dropped_guards); a bypassed frame is
+    # one OutputGraph.bypass_package flagged; dropped_guard_code holds the
+    # Guard.code_list a GuardBuilder method rendered.
     frames: int
     resume_functions: int
     guarded_codes: int
@@ -208,14 +204,15 @@ class PrecompileSummary:
         limit (``truncated``) or ended with no guarded code
         (``uncovered_frames``), if a capture call raised (``capture_errors``),
         or if nothing was compiled. Both ``guarded_codes`` and ``backend_graphs``
-        must be non-zero for the last check, because ``allow_empty_graphs`` lets
-        a frame that compiled nothing still count as one guarded code, so
-        ``guarded_codes`` alone cannot tell a real capture from an empty one.
+        must be non-zero for the last check, because a frame that compiled
+        nothing can still count as one guarded code, so ``guarded_codes`` alone
+        cannot tell a real capture from an empty one.
         The guard fields never enter: ``risky_dropped_guards`` is a lint
         finding, not a proof, and ``wont_generalize`` follows from any value the
         capture pinned, so both describe how far a complete capture generalizes
         and the digest reports them on their own.
         """
+        # torch._dynamo.config.allow_empty_graphs is what lets an empty frame count.
         return (
             not self.bypassed
             and not self.truncated
