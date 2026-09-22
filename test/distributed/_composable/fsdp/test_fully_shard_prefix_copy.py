@@ -228,10 +228,7 @@ class TestPrefixCopy(TestCase):
         )
         prepared = prepare(params, grads, world_size)
         sizes = prepared.padded_unsharded_sizes
-        use_direct_copy = not intermediate_copy and nonzero_shards and world_size > 1
-        if use_direct_copy:
-            self.assertIsNot(prepared.copy_in, foreach_reduce_scatter_copy_in)
-        else:
+        if intermediate_copy:
             self.assertIs(prepared.copy_in, foreach_reduce_scatter_copy_in)
         self.assertEqual(len(sizes), len(params))
         self.assertEqual(sum(size.numel() for size in sizes), expected.numel())
@@ -241,10 +238,10 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(output, expected, atol=0, rtol=0)
         self.assertEqual(
             counter.counts[torch.ops.fsdp._reduce_scatter_copy_in_.default],
-            int(use_direct_copy),
+            int(not intermediate_copy),
         )
         self.assertEqual(
-            counter.counts[torch.ops.fsdp.chunk_cat.default], int(not use_direct_copy)
+            counter.counts[torch.ops.fsdp.chunk_cat.default], int(intermediate_copy)
         )
 
     @parametrize("intermediate_copy", [False, True])
@@ -561,6 +558,7 @@ class TestPrefixCopy(TestCase):
     @parametrize("num_chunks", [1, 4])
     @parametrize("outer_size", [1, 128])
     @parametrize("noncontiguous", [False, True])
+    @parametrize("nonzero_shards", [False, True])
     @parametrize(
         "in_dtype,out_dtype",
         [
@@ -571,7 +569,14 @@ class TestPrefixCopy(TestCase):
         ],
     )
     def test_chunk_cat(
-        self, device, num_chunks, outer_size, noncontiguous, in_dtype, out_dtype
+        self,
+        device,
+        num_chunks,
+        outer_size,
+        noncontiguous,
+        nonzero_shards,
+        in_dtype,
+        out_dtype,
     ):
         shapes = [
             (num_chunks + 1, 5),
@@ -581,10 +586,11 @@ class TestPrefixCopy(TestCase):
         tensors = [make_tensor(s, device=device, dtype=in_dtype) for s in shapes]
         if noncontiguous:
             tensors[0] = tensors[0].t().contiguous().t()
+        dims = [0, 1, 2] if nonzero_shards else [0, 0, 0]
         rank_outputs = []
         for rank in range(num_chunks):
             rank_shards = []
-            for dim, tensor in enumerate(tensors):
+            for dim, tensor in zip(dims, tensors):
                 shard_size = (tensor.size(dim) + num_chunks - 1) // num_chunks
                 start = min(rank * shard_size, tensor.size(dim))
                 length = min(shard_size, tensor.size(dim) - start)
@@ -600,7 +606,7 @@ class TestPrefixCopy(TestCase):
         version = output._version
 
         result = torch.ops.fsdp._reduce_scatter_copy_in_(
-            output, tensors, [0, 1, 2], num_chunks
+            output, tensors, dims, num_chunks
         )
 
         self.assertIs(result, output)
