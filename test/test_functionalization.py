@@ -207,6 +207,25 @@ class TestFunctionalization(TestCase):
         r = _functionalize(f, reapply_views=True, crossref=False)(torch.ones(2))
         self.assertEqual(str(r.device), "cpu")
 
+    def test_unfold_with_gaps_inplace_keeps_uncovered_elements(self):
+        # unfold(1, 1, 5) covers columns 0 and 5 only (size=1, step=5). Mutating the
+        # base through that view must leave the other columns alone. The inverse
+        # used to be unfold_backward, which zero-fills every uncovered element.
+        def f(x):
+            v = x.unfold(1, 1, 5)
+            v.add_(v)
+            return x
+
+        self.assert_functionalization(f, torch.arange(1.0, 25.0).reshape(4, 6))
+
+    def test_unfold_single_window_index_fill_keeps_rest(self):
+        def f(x):
+            v = x.view(24).unfold(0, 8, 24)  # one window over elements 0..7
+            v.index_fill_(1, torch.tensor([0, 4]), -5.0)
+            return x
+
+        self.assert_functionalization(f, torch.arange(1.0, 25.0).reshape(4, 6))
+
     def test_advanced_indexing(self):
         def f():
             x = torch.zeros(3, 3)

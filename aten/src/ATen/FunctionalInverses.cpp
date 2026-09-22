@@ -420,6 +420,28 @@ When using torch.compile (or running functionalization directly), this is banned
 as the behavior is not well defined. Consider cloning the tensor before mutating it, \
 or removing the mutation from your model."
           );
+      // unfold_backward() is a *gradient* formula, not a view inverse: every base
+      // element that no window covers becomes 0 (and overlapping windows are summed).
+      // It is only a correct inverse when the windows tile the base exactly
+      // (size == step and size divides the dim). For non-overlapping windows with
+      // gaps (size < step) it silently zeroes the uncovered elements of base.
+      //
+      // For size <= step the unfold view is an ordinary strided view of base, so
+      // scatter the mutated windows back into a copy of base with as_strided_scatter,
+      // which keeps every element that no window covers.
+      if (base.dim() > 0 && size <= step) {
+        int64_t dim = at::maybe_wrap_dim(dimension, base.dim());
+        auto sizes = base.sym_sizes().vec();
+        auto strides = base.sym_strides().vec();
+        c10::SymInt n = sizes[dim];
+        sizes[dim] = (n - size) / step + 1;
+        sizes.push_back(size);
+        strides[dim] = strides[dim] * step;
+        strides.push_back(base.sym_strides()[dim]);
+        return base.as_strided_scatter_symint(
+            mutated_view, sizes, strides, base.sym_storage_offset());
+      }
+      // 0-dim base (unfold treats it as a 1-element vector) keeps the previous behavior.
       return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
     }
 }
