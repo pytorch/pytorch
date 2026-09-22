@@ -11,6 +11,8 @@ from model_registry import MultiMLP
 import torch
 from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
+    analyze_pipeline_activation_liveness,
+    PipelineActivationLiveness,
     Schedule1F1B,
     ScheduleDualPipeV,
     ScheduleGPipe,
@@ -44,6 +46,7 @@ from torch.distributed.pipelining.schedules import (
     F,
     get_schedule_class,
     I,
+    OVERLAP_F_B,
     PipelineScheduleMulti,
     PipelineScheduleSingle,
     RECV_B,
@@ -61,6 +64,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    subtest,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -140,6 +144,48 @@ def _run_adjacency_validation(stage, num_stages):
     schedule = PipelineScheduleMulti([stage], n_microbatches=1)
     schedule.pipeline_order = {i: [None] for i in range(num_stages)}
     schedule.step()
+
+
+def _max_live_closed_intervals(intervals: list[tuple[int, int]]) -> int:
+    """Return peak overlap for inclusive integer intervals."""
+    events: list[tuple[int, int]] = []
+    for start, release in intervals:
+        events.extend(((start, 1), (release + 1, -1)))
+    live = peak = 0
+    for _, delta in sorted(events):
+        live += delta
+        peak = max(peak, live)
+    return peak
+
+
+def _activation_intervals(
+    actions: list[_Action], stage_indices: tuple[int, ...]
+) -> dict[tuple[int, int], tuple[int, int]]:
+    """Derive activation lifetimes without using the production analyzer.
+
+    This oracle independently checks the minimum slot count. It intentionally
+    shares only the contract that forward starts an activation lifetime and
+    full- or weight-backward releases it.
+    """
+    starts: dict[tuple[int, int], int] = {}
+    releases: dict[tuple[int, int], int] = {}
+
+    def visit(action: _Action, position: int) -> None:
+        if action.sub_actions is not None:
+            for sub_action in action.sub_actions:
+                visit(sub_action, position)
+            return
+        if action.stage_index not in stage_indices or action.microbatch_index is None:
+            return
+        key = (action.stage_index, action.microbatch_index)
+        if action.computation_type == F:
+            starts[key] = position
+        elif action.computation_type in (B, W):
+            releases[key] = position
+
+    for position, action in enumerate(actions):
+        visit(action, position)
+    return {key: (starts[key], releases[key]) for key in starts}
 
 
 class ScheduleTest(TestCase):
@@ -297,6 +343,354 @@ class ScheduleTest(TestCase):
 
         self.assertIsNone(valid_info.buffer)
         self.assertIsNone(invalid_info.buffer)
+
+    def test_pipeline_activation_liveness_reuses_completed_slots(self):
+        stage = MockPipelineStage(group_size=1, num_stages=1)
+        stage.stage_index = 0
+        schedule = PipelineScheduleMulti([stage], n_microbatches=4)
+        # Input backward does not release microbatch 0's activation, while its
+        # following weight backward does.
+        schedule.pipeline_order = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, F, 1),
+                _Action(0, I, 0),
+                _Action(0, F, 2),
+                _Action(0, W, 0),
+                _Action(0, F, 3),
+                _Action(0, I, 1),
+                _Action(0, W, 1),
+                _Action(0, I, 2),
+                _Action(0, W, 2),
+                _Action(0, I, 3),
+                _Action(0, W, 3),
+            ]
+        }
+
+        plan = analyze_pipeline_activation_liveness(
+            schedule,
+            pp_rank=0,
+            stage_indices=(0,),
+            granularity="stage_microbatch",
+        )
+
+        self.assertIsInstance(plan, PipelineActivationLiveness)
+        self.assertEqual(plan.pp_rank, 0)
+        self.assertEqual(plan.num_slots, 3)
+        self.assertEqual(
+            plan.slot_by_stage_and_microbatch,
+            {(0, 0): 0, (0, 1): 1, (0, 2): 2, (0, 3): 0},
+        )
+        self.assertEqual(plan.get_activation_lifetime(0, 0), (0, 4))
+        self.assertEqual(plan.get_activation_lifetime(0, 2), (3, 9))
+        with self.assertRaisesRegex(ValueError, "No activation slot exists"):
+            plan.slot_for(1, 0)
+        with self.assertRaisesRegex(ValueError, "No activation lifetime exists"):
+            plan.get_activation_lifetime(1, 0)
+        self.assertEqual(
+            plan.num_slots,
+            _max_live_closed_intervals([(0, 4), (1, 7), (3, 9), (5, 11)]),
+        )
+        self.assertEqual(
+            plan,
+            analyze_pipeline_activation_liveness(
+                schedule,
+                pp_rank=0,
+                stage_indices=(0,),
+                granularity="stage_microbatch",
+            ),
+        )
+
+    def test_pipeline_activation_liveness_granularity(self):
+        stages = [MockPipelineStage(group_size=1, num_stages=3) for _ in range(2)]
+        stages[0].stage_index = 0
+        stages[1].stage_index = 2
+        schedule = PipelineScheduleMulti(stages, n_microbatches=3)
+        schedule.pipeline_order = {
+            0: [
+                _Action(0, F, 0),
+                _Action(2, F, 0),
+                _Action(0, F, 1),
+                _Action(2, B, 0),
+                _Action(0, B, 0),
+                _Action(2, F, 1),
+                _Action(2, B, 1),
+                _Action(0, B, 1),
+                _Action(0, F, 2),
+                _Action(2, F, 2),
+                _Action(2, B, 2),
+                _Action(0, B, 2),
+            ]
+        }
+
+        stage_plan = analyze_pipeline_activation_liveness(
+            schedule,
+            pp_rank=0,
+            stage_indices=(0, 2),
+            granularity="stage_microbatch",
+        )
+        microbatch_plan = analyze_pipeline_activation_liveness(
+            schedule,
+            pp_rank=0,
+            stage_indices=(0, 2),
+            granularity="microbatch",
+        )
+
+        self.assertEqual(stage_plan.num_slots, 3)
+        self.assertEqual(
+            stage_plan.num_slots,
+            _max_live_closed_intervals(
+                [(0, 4), (1, 3), (2, 7), (5, 6), (8, 11), (9, 10)]
+            ),
+        )
+        self.assertEqual(
+            [
+                stage_plan.slot_for(0, 0),
+                stage_plan.slot_for(2, 0),
+                stage_plan.slot_for(0, 1),
+                stage_plan.slot_for(2, 1),
+                stage_plan.slot_for(0, 2),
+                stage_plan.slot_for(2, 2),
+            ],
+            [0, 1, 2, 0, 0, 1],
+        )
+        self.assertEqual(stage_plan.get_activation_lifetime(0, 0), (0, 4))
+        self.assertEqual(stage_plan.get_activation_lifetime(2, 0), (1, 3))
+        self.assertEqual(stage_plan.get_activation_lifetime(0, 1), (2, 7))
+        self.assertEqual(stage_plan.get_activation_lifetime(2, 1), (5, 6))
+        self.assertEqual(microbatch_plan.num_slots, 2)
+        actions = schedule.pipeline_order[0]
+        intervals_by_stage = {
+            stage_index: _activation_intervals(actions, (stage_index,))
+            for stage_index in (0, 2)
+        }
+        merged_intervals = [
+            (
+                min(
+                    intervals_by_stage[stage][(stage, microbatch)][0]
+                    for stage in (0, 2)
+                ),
+                max(
+                    intervals_by_stage[stage][(stage, microbatch)][1]
+                    for stage in (0, 2)
+                ),
+            )
+            for microbatch in range(3)
+        ]
+        self.assertEqual(
+            microbatch_plan.num_slots,
+            _max_live_closed_intervals(merged_intervals),
+        )
+        self.assertEqual(microbatch_plan.slot_for(0, 0), 0)
+        self.assertEqual(microbatch_plan.slot_for(2, 0), 0)
+        self.assertEqual(microbatch_plan.slot_for(0, 1), 1)
+        self.assertEqual(microbatch_plan.slot_for(2, 1), 1)
+        self.assertEqual(microbatch_plan.slot_for(0, 2), 0)
+        self.assertEqual(microbatch_plan.slot_for(2, 2), 0)
+        self.assertEqual(microbatch_plan.get_activation_lifetime(0, 0), (0, 4))
+        self.assertEqual(microbatch_plan.get_activation_lifetime(2, 0), (0, 4))
+        self.assertEqual(microbatch_plan.get_activation_lifetime(0, 1), (2, 7))
+        self.assertEqual(microbatch_plan.get_activation_lifetime(2, 1), (2, 7))
+
+    def test_pipeline_activation_liveness_overlap_is_order_independent(self):
+        stage = MockPipelineStage(group_size=1, num_stages=1)
+        stage.stage_index = 0
+        for sub_actions in (
+            (_Action(0, I, 0), _Action(0, W, 0)),
+            (_Action(0, W, 0), _Action(0, I, 0)),
+        ):
+            schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+            schedule.pipeline_order = {
+                0: [
+                    _Action(0, F, 0),
+                    _Action(-1, OVERLAP_F_B, None, sub_actions),
+                ]
+            }
+
+            plan = analyze_pipeline_activation_liveness(
+                schedule,
+                pp_rank=0,
+                stage_indices=(0,),
+                granularity="stage_microbatch",
+            )
+            self.assertEqual(plan.num_slots, 1)
+            self.assertEqual(plan.slot_for(0, 0), 0)
+
+        point_schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+        point_schedule.pipeline_order = {
+            0: [
+                _Action(
+                    -1,
+                    OVERLAP_F_B,
+                    None,
+                    (_Action(0, F, 0), _Action(0, B, 0)),
+                )
+            ]
+        }
+        point_plan = analyze_pipeline_activation_liveness(
+            point_schedule,
+            pp_rank=0,
+            stage_indices=(0,),
+            granularity="stage_microbatch",
+        )
+        self.assertEqual(point_plan.num_slots, 1)
+
+    def test_pipeline_activation_liveness_with_dual_pipe_v(self):
+        group_size, num_stages, num_microbatches = 2, 4, 4
+        stages = [
+            MockPipelineStage(group_size=group_size, num_stages=num_stages)
+            for _ in range(2)
+        ]
+        stages[0].stage_index = 0
+        stages[1].stage_index = 3
+        schedule = ScheduleDualPipeV(stages, num_microbatches)
+        for rank in range(group_size):
+            stage_indices = tuple(
+                stage_index
+                for stage_index, stage_rank in schedule.stage_index_to_group_rank.items()
+                if stage_rank == rank
+            )
+            plan = analyze_pipeline_activation_liveness(
+                schedule,
+                pp_rank=rank,
+                stage_indices=stage_indices,
+                granularity="stage_microbatch",
+            )
+            intervals = _activation_intervals(
+                schedule.pipeline_order_with_comms[rank], stage_indices
+            )
+            self.assertEqual(
+                plan.num_slots,
+                _max_live_closed_intervals(list(intervals.values())),
+            )
+            self.assertEqual(
+                set(plan.slot_by_stage_and_microbatch),
+                {
+                    (stage_index, microbatch_index)
+                    for stage_index in stage_indices
+                    for microbatch_index in range(num_microbatches)
+                },
+            )
+            for key, lifetime in intervals.items():
+                self.assertEqual(plan.get_activation_lifetime(*key), lifetime)
+            interval_items = list(intervals.items())
+            for index, (left_key, (left_start, left_release)) in enumerate(
+                interval_items
+            ):
+                for right_key, (right_start, right_release) in interval_items[
+                    index + 1 :
+                ]:
+                    if left_start <= right_release and right_start <= left_release:
+                        self.assertNotEqual(
+                            plan.slot_for(*left_key),
+                            plan.slot_for(*right_key),
+                        )
+
+    @parametrize(
+        "granularity,stage_indices,pp_rank,actions,error",
+        [
+            subtest(("layer", (0,), 0, (), "Unsupported"), name="granularity"),
+            subtest(
+                ("stage_microbatch", (), 0, (), "must not be empty"),
+                name="empty_stages",
+            ),
+            subtest(
+                ("stage_microbatch", (0, 0), 0, (), "must be unique"),
+                name="duplicate_stages",
+            ),
+            subtest(
+                ("stage_microbatch", (0,), 1, (), "not present"),
+                name="missing_rank",
+            ),
+            subtest(
+                ("stage_microbatch", (0,), 0, (_Action(0, F, None),), "no microbatch"),
+                name="missing_microbatch",
+            ),
+            subtest(
+                ("stage_microbatch", (0,), 0, (_Action(0, F, 1),), "outside"),
+                name="out_of_range_microbatch",
+            ),
+            subtest(
+                (
+                    "stage_microbatch",
+                    (0,),
+                    0,
+                    (_Action(0, F, 0), _Action(0, F, 0)),
+                    "multiple forwards",
+                ),
+                name="duplicate_forward",
+            ),
+            subtest(
+                (
+                    "stage_microbatch",
+                    (0,),
+                    0,
+                    (_Action(0, F, 0), _Action(0, I, 0), _Action(0, I, 0)),
+                    "multiple input backwards",
+                ),
+                name="duplicate_input_backward",
+            ),
+            subtest(
+                (
+                    "stage_microbatch",
+                    (0,),
+                    0,
+                    (_Action(0, F, 0), _Action(0, B, 0), _Action(0, W, 0)),
+                    "multiple release actions",
+                ),
+                name="duplicate_release",
+            ),
+            subtest(
+                ("stage_microbatch", (0,), 0, (_Action(0, B, 0),), "Forward actions"),
+                name="missing_forward",
+            ),
+            subtest(
+                (
+                    "stage_microbatch",
+                    (0,),
+                    0,
+                    (_Action(0, F, 0),),
+                    "Backward release actions",
+                ),
+                name="missing_release",
+            ),
+            subtest(
+                (
+                    "stage_microbatch",
+                    (0,),
+                    0,
+                    (_Action(0, F, 0), _Action(0, W, 0)),
+                    "without input backward",
+                ),
+                name="weight_without_input_backward",
+            ),
+            subtest(
+                (
+                    "stage_microbatch",
+                    (0,),
+                    0,
+                    (_Action(0, B, 0), _Action(0, F, 0)),
+                    "ends before its forward",
+                ),
+                name="release_before_forward",
+            ),
+        ],
+    )
+    def test_pipeline_activation_liveness_validation(
+        self, granularity, stage_indices, pp_rank, actions, error
+    ):
+        stage = MockPipelineStage(group_size=1, num_stages=1)
+        stage.stage_index = 0
+        schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+        schedule.pipeline_order = {0: list(actions)}
+
+        with self.assertRaisesRegex(ValueError, error):
+            analyze_pipeline_activation_liveness(
+                schedule,
+                pp_rank=pp_rank,
+                stage_indices=stage_indices,
+                granularity=granularity,
+            )
 
     def test_get_schedule_class(self):
         # List of all expected schedule names

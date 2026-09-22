@@ -542,6 +542,51 @@ The following set of APIs transform your model into a pipeline representation.
 
 ### Pipeline Schedules
 
+#### Activation-liveness analysis
+
+Pipeline runtimes and memory planners can use
+`analyze_pipeline_activation_liveness` to determine how many reusable logical
+slots are needed for activations retained from forward through backward. The
+analysis does not allocate tensors. It returns a
+`PipelineActivationLiveness` plan whose
+`slot_by_stage_and_microbatch[(stage_index, microbatch_index)]` values are slot
+IDs that a caller may map to buffers or arena regions.
+
+An activation becomes live at its forward (`F`) action. Full backward (`B`)
+releases it. For schedules that separate input backward (`I`) from weight
+backward (`W`), `I` does not release the activation because `W` may still need
+the saved forward state; `W` releases it. Lifetimes include both endpoint
+positions, so actions grouped into the same compound schedule position overlap.
+
+For example, consider two stages and two microbatches on one pipeline rank:
+
+```text
+position:  0     1     2     3     4     5     6     7
+action:   F0,0  F1,0  F0,1  B1,0  B0,0  F1,1  B1,1  B0,1
+```
+
+With `granularity="stage_microbatch"`, the four activation lifetimes are
+`(0, 4)`, `(1, 3)`, `(2, 7)`, and `(5, 6)`; the final lifetime may reuse the
+first slot. With `granularity="microbatch"`, the selected stages for each
+microbatch share one conservative lifetime: `(0, 4)` for microbatch 0 and
+`(2, 7)` for microbatch 1. The latter mode is useful when a consumer manages
+all selected stages for one microbatch as one storage unit. Stage indices are
+global logical indices and commonly identify virtual stages hosted by the same
+pipeline rank.
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.pipelining
+```
+
+```{eval-rst}
+.. autofunction:: torch.distributed.pipelining.schedules.analyze_pipeline_activation_liveness
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.pipelining.schedules.PipelineActivationLiveness
+  :members:
+```
+
 ```{eval-rst}
 .. automodule:: torch.distributed.pipelining.schedules
 ```
