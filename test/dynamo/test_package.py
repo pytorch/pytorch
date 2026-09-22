@@ -318,6 +318,41 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.backend_ids, [backend_id])
         self.assertTrue(package.cache_entry().source_info.inlined_sources)
 
+    def test_bypass_reason_is_recorded_only_while_the_entry_is_bypassed(self):
+        def fn(x):
+            return x + 1
+
+        code = compiled_region_with_backend_id_for_package_test.__code__
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.bypass_current_compile("x" * 3000)
+        entry = package.cache_entry().codes[0]
+        self.assertTrue(entry.bypassed)
+        self.assertEqual(len(entry.bypass_reason), 2048 + len(" ... (truncated)"))
+        self.assertTrue(entry.bypass_reason.endswith(" ... (truncated)"))
+        # A recorded variant clears the reason with the flag.
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(b"", code)
+        self.assertFalse(entry.bypassed)
+        self.assertIsNone(entry.bypass_reason)
+        # A bypass that leaves that variant installable records no reason.
+        with package.code_context(fn.__code__):
+            package.bypass_current_compile("config cannot pickle")
+        self.assertFalse(entry.bypassed)
+        self.assertIsNone(entry.bypass_reason)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_bypass_reason_names_the_guard_that_could_not_serialize(self):
+        def fn(x, cfg=UnpicklableConfig()):
+            return x.sin() * cfg.scale
+
+        x = torch.randn(3)
+        with self.assertLogs("torch._dynamo", level="WARNING"):
+            self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertTrue(entry.codes[0].bypassed)
+        self.assertIn("config cannot pickle", entry.codes[0].bypass_reason)
+
     @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_bypassed_guards_keep_the_frames_earlier_variant(self, config_cls):
@@ -391,6 +426,25 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), mod(x))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_saving_does_not_bypass_the_live_entry(self):
+        # from_cache_entry marks a code whose backend it cannot find as bypassed
+        # on the entry it is handed. Saving must work on a copy: the live entry
+        # keeps serving this process, and a save that came up short on a
+        # backend must not flip it to bypassed.
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
+        self.assertTrue(live.codes[0].backend_ids)
+        PrecompileContext._backend_artifacts_by_key.clear()
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertIsNot(saved[key].dynamo, live)
+        self.assertTrue(saved[key].dynamo.codes[0].bypassed)
+        self.assertFalse(live.codes[0].bypassed)
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -1506,6 +1560,28 @@ def add(x, y):
             x += y.sum()
             x = self.instance_method_with_args(x)
             return x
+
+    def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
+        # The serialization filter and the capture mode are independent: a
+        # package can carry a filter without being an explicit capture, and be
+        # an explicit capture without one. Neither is on by default.
+        def fn(x):
+            return x + 1
+
+        def keep_all(entries):
+            return [True] * len(entries)
+
+        ambient = CompilePackage(fn)
+        self.assertFalse(ambient.explicit_capture)
+        self.assertFalse(ambient.serving)
+        self.assertIsNone(ambient.serialization_guard_filter_fn)
+        filtered = CompilePackage(fn, serialization_guard_filter_fn=keep_all)
+        self.assertFalse(filtered.explicit_capture)
+        self.assertIs(filtered.serialization_guard_filter_fn, keep_all)
+        explicit = CompilePackage(fn, explicit_capture=True)
+        self.assertTrue(explicit.explicit_capture)
+        self.assertIsNone(explicit.serialization_guard_filter_fn)
+        self.assertTrue(CompilePackage(fn, serving=True).serving)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
