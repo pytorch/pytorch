@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import math
 import os
 import sys
 import tempfile
@@ -22,6 +23,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     runOnRocm,
@@ -51,6 +53,7 @@ from torch._inductor.runtime.hints import (
     HeuristicType,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
@@ -119,7 +122,12 @@ def _get_cos_kernel_caching_autotuner_args(device):
         tl.store(out_ptr0 + (x0), tmp1, xmask)
 
     triton_meta = {
-        "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
+        "signature": {
+            "in_ptr0": "*fp32",
+            "out_ptr0": "*fp32",
+            "xnumel": "i32",
+            "XBLOCK": "constexpr",
+        },
         "device": DeviceProperties.create(torch.device(device)),
         "constants": {},
         "configs": [AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())],
@@ -143,6 +151,7 @@ def _get_cos_kernel_caching_autotuner_args(device):
     }
 
 
+@instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -269,6 +278,92 @@ class TestTritonHeuristics(TestCase):
         )[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 512)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
+
+    @parametrize(
+        "major,cc,expected_baseline_configs,expected_scalar_configs",
+        [
+            (
+                8,
+                80,
+                [(1, 2048, 16, 1)],
+                [(1, 4096, 16, 1), (1, 8192, 4, 1), (1, 16384, 8, 1)],
+            ),
+            (
+                10,
+                100,
+                [(1, 1024, 8, 1)],
+                [(1, 4096, 16, 1), (1, 8192, 4, 1), (1, 16384, 8, 1)],
+            ),
+            (
+                10,
+                103,
+                [(1, 1024, 8, 1), (1, 4096, 8, 1)],
+                [
+                    (1, 4096, 16, 1),
+                    (1, 8192, 4, 1),
+                    (1, 16384, 8, 1),
+                    (1, 4096, 8, 1),
+                ],
+            ),
+        ],
+    )
+    def test_scalar_accumulator_reduction_configs(
+        self, major, cc, expected_baseline_configs, expected_scalar_configs
+    ):
+        device = self._fake_cuda_device_properties()._replace(major=major, cc=cc)
+        size_hints = {"x": 128, "r0_": 32768}
+        triton_meta = {"device": device}
+
+        def config_values(autotune_hints):
+            configs = _reduction_configs(
+                size_hints=size_hints,
+                inductor_meta={
+                    "autotune_hints": autotune_hints,
+                    "reduction_hint": ReductionHint.INNER,
+                },
+                triton_meta=triton_meta,
+            )
+            return [
+                (
+                    config.kwargs["XBLOCK"],
+                    config.kwargs["R0_BLOCK"],
+                    config.num_warps,
+                    config.num_stages,
+                )
+                for config in configs
+            ]
+
+        def tiled_block_products(autotune_hints):
+            configs = _reduction_configs(
+                size_hints={"x": 128, "y": 8, "r0_": 32768},
+                inductor_meta={
+                    "autotune_hints": autotune_hints,
+                    "reduction_hint": ReductionHint.INNER,
+                },
+                triton_meta=triton_meta,
+            )
+            return [
+                math.prod(
+                    value
+                    for name, value in config.kwargs.items()
+                    if name.endswith("BLOCK")
+                )
+                for config in configs
+            ]
+
+        self.assertEqual(
+            config_values(set()),
+            expected_baseline_configs,
+        )
+        self.assertEqual(
+            config_values({AutotuneHint.SCALAR_ACCUMULATORS}),
+            expected_scalar_configs,
+        )
+        baseline_rblock = expected_baseline_configs[0][1]
+        self.assertEqual(tiled_block_products(set())[0], baseline_rblock)
+        scalar_tiled_products = tiled_block_products({AutotuneHint.SCALAR_ACCUMULATORS})
+        self.assertEqual(scalar_tiled_products[0], 4096)
+        self.assertIn(baseline_rblock, scalar_tiled_products)
 
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
@@ -413,6 +508,58 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
+    @parametrize(
+        "hip_version, tlx_options, expected_kwargs",
+        [
+            (
+                "7.2",
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                },
+            ),
+            ("7.2", (), {}),
+            (
+                None,
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                {},
+            ),
+        ],
+    )
+    def test_template_function_preserves_tlx_hip_options(
+        self, hip_version, tlx_options, expected_kwargs
+    ):
+        triton_meta = {
+            "device": MagicMock(),
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 0,
+            "kpack": 1,
+        }
+
+        def capture_configs(_size_hints, configs, **_kwargs):
+            return configs
+
+        with (
+            patch.object(torch.version, "hip", hip_version),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.tlx_only_hip_options",
+                return_value=tlx_options,
+            ),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.cached_autotune",
+                side_effect=capture_configs,
+            ),
+        ):
+            configs = template(
+                num_stages=1,
+                num_warps=4,
+                triton_meta=triton_meta,
+            )
+
+        self.assertEqual(configs[0].kwargs, expected_kwargs)
+
 
 class _TritonDeviceTestCase(TestCase):
     def setUp(self):
@@ -529,6 +676,15 @@ class TestTritonHeuristicsRuntime(_TritonDeviceTestCase):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
 
         self.assertTrue(8 in seen_num_elements_per_warp)
+        self.assertEqual(
+            autotune_hints_to_configs(
+                {AutotuneHint.SCALAR_ACCUMULATORS},
+                size_hints,
+                block_size,
+                device_props,
+            ),
+            [],
+        )
 
     @onlyAccelerator
     def test_compile_time_autotune_not_repeated_at_runtime(self, device):
@@ -767,10 +923,6 @@ class TestCachingAutotunerPrecompileDriverSetup(_TritonDeviceTestCase):
         self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
-# Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
-# attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
-# used by these tests. CUDA paths are unaffected.
-@skipIfRocm
 @requires_triton()
 class TestCachingAutotunerPlugin(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1882,7 +2034,7 @@ class TestMakeLaunchersMemory(TestCase):
             launchers=[],
             compile_results=results,
             triton_meta={"device": 0},
-            device_props=types.SimpleNamespace(type="cuda"),
+            device_props=types.SimpleNamespace(type="cuda", index=0),
             inductor_meta={},
             get_device_interface=lambda: None,
             _make_launcher=fake_make_launcher,
