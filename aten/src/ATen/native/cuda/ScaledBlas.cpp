@@ -246,6 +246,27 @@ bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) 
           scale, 1, ceil_div<int64_t>(t.size(1), 128), 1));
 }
 
+#ifndef USE_ROCM
+// Narrow-precision block scaling (MX, NVFP4), as opposed to the DeepSeek-style
+// 1x128 and 128x128 fp32 block scaling: cuBLAS serves the two families with
+// different kernels, under different layout restrictions.
+bool is_narrow_precision_block_scaling(ScalingType scaling_type) {
+  return scaling_type == ScalingType::BlockWise1x16 ||
+      scaling_type == ScalingType::BlockWise1x32;
+}
+
+// How an operand reads to cuBLAS. Only used to make layout errors legible.
+const char* mm_operand_layout(const at::Tensor& mat) {
+  if (mat.stride(1) == 1) {
+    return "row-major";
+  }
+  if (mat.stride(0) == 1) {
+    return "column-major";
+  }
+  return "neither row- nor column-major";
+}
+#endif
+
 bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingType desired_scaling) {
   switch (desired_scaling) {
     case ScalingType::TensorWise:
@@ -501,6 +522,26 @@ _scaled_gemm(
   if (tn_only) {
     TORCH_CHECK(args.transa == 't' && args.transb == 'n', tn_only_msg);
   }
+#ifndef USE_ROCM
+  // cuBLAS only grew non-TN kernels for narrow-precision block scaling on
+  // GeForce Blackwell (compute capability 12.x) in 13.6.0, the cuBLAS shipped
+  // with CUDA 13.3 Update 1. Older cuBLAS rejects every other layout from
+  // inside cublasLtMatmulAlgoGetHeuristic, as a bare CUBLAS_STATUS_NOT_SUPPORTED
+  // that says nothing about the layout. See the TN-format requirement under
+  // "Narrow Precision Data Types Usage" in the cuBLAS documentation.
+  if (is_narrow_precision_block_scaling(scaling_choice_a) ||
+      is_narrow_precision_block_scaling(scaling_choice_b)) {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    const bool block_scaled_tn_only = dprops->major == 12 &&
+        (CUBLAS_VERSION < 130600 || cublasLtGetVersion() < 130600);
+    TORCH_CHECK(!block_scaled_tn_only || (args.transa == 't' && args.transb == 'n'),
+        "Block-scaled scaled_mm requires a row-major mat_a and a column-major mat_b "
+        "(the TN layout) on compute capability ", dprops->major, ".", dprops->minor,
+        " with cuBLAS ", cublasLtGetVersion(), ": the other layouts need cuBLAS "
+        "13.6.0 (CUDA 13.3 Update 1) or newer. Got mat_a ", mm_operand_layout(mat1),
+        " and mat_b ", mm_operand_layout(mat2), ".");
+  }
+#endif
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
   // Some cuBLASLt algorithms skip the D write for distinct C/D when M=1.
   if (effective_accumulator && mat1.size(0) == 1 &&
@@ -608,8 +649,9 @@ _scaled_rowwise_rowwise(
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
-//  - Only row-major mat1 x column-major mat2 is supported on CUDA SM90, and on ROCm for
-//    every scaling recipe other than tensorwise
+//  - Only row-major mat1 x column-major mat2 is supported on CUDA SM90, on CUDA SM120
+//    for the MX and NVFP4 block-scaled recipes with cuBLAS older than 13.6.0, and on
+//    ROCm for every scaling recipe other than tensorwise
 //  - Only works if matrices sizes are divisible by 32
 //  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
 //    and scale_b should have size = to mat2.size(1)
