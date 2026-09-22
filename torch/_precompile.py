@@ -2483,9 +2483,6 @@ class _PrecompileApi:
         contract; read Note [precompile programming model] before using it. The artifact
         faithfully reproduces ``fn`` only for callers that uphold that contract.
 
-        Concurrent ``backend="inductor"`` calls lower one at a time (THREADING in the
-        Note).
-
         ``backend`` selects how the captured graph is realized:
 
         - ``"inductor"`` (default): lower the graph through
@@ -2501,6 +2498,9 @@ class _PrecompileApi:
           kernels there is nothing to accelerate, so ``load`` runs the inlined graph.
           Useful for
           inspecting/debugging exactly what was traced without an Inductor dependency.
+
+        Concurrent ``backend="inductor"`` calls lower one at a time (THREADING in the
+        Note).
 
         ``tracer`` selects the capture front-end:
 
@@ -2524,9 +2524,9 @@ class _PrecompileApi:
         on, so one artifact serves any runtime size of them (invariant 3); a graph that
         needs to guard on / specialize a marked dim fails at capture with a
         ``PrecompileError``. Dims sharing a ``shape_id`` reuse one symbol (equal by
-        construction); ``min``/``max`` become runtime asserts. Other dims stay static.
-        Dims that must be equal at runtime need a shared ``shape_id``: marking them
-        independently bakes a silent equal-size assumption (invariant 3).
+        construction), so dims that must be equal at runtime need one: marking them
+        independently bakes a silent equal-size assumption. ``min``/``max`` become
+        runtime asserts. Other dims stay static.
 
         Returns ``(python_code, cache)`` -- a self-contained, executable Python
         source string (the single source of truth for the calling convention) and a
