@@ -119,6 +119,7 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .simd import (
+    _DerivedIterationFamily,
     constant_repr,
     DerivedIterationRangesRoot,
     IterationRanges,
@@ -3353,6 +3354,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
+        self.reduction_result_families: dict[int, _DerivedIterationFamily] = {}
         # TensorDescriptorOptions for pointwise/reduction kernels; template
         # kernels set a resolved {block_shape, shape, strides} dict directly
         # (see TritonTemplateKernel.tma_descriptor).
@@ -6417,7 +6419,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         name: str,
         index: sympy.Expr,
         value: CSEVariable,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
     ):
+        if result_range is not None:
+            rank, rank_size = result_range
+            family = self.reduction_result_family(rank_size)
+            output_rank = family.range_trees[-1].full_range().symbol()
+            result_index = index.subs(rank, output_rank)
+            if output_rank not in result_index.free_symbols:
+                raise AssertionError(
+                    f"expected result rank {rank} in store index {index}"
+                )
+            with family.ensure_active(self):
+                self.store(name, result_index, value)
+            return
         if not self.inside_reduction:
             raise AssertionError("expected inside_reduction")
         self.inside_reduction = False
@@ -6813,6 +6829,33 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             result_var.mask_vars = OrderedSet(masks)
 
         return tuple(result_vars)
+
+    @contextlib.contextmanager
+    def disable_reduction(self, result_size: int = 1):
+        if result_size == 1:
+            with super().disable_reduction():
+                yield
+        else:
+            self.codegen_body()
+            with self.reduction_result_family(result_size).activate(self):
+                yield
+                self.codegen_body()
+
+    def reduction_result_family(self, rank_size: int) -> _DerivedIterationFamily:
+        if rank_size not in self.reduction_result_families:
+            if not self.persistent_reduction or self.num_reduction_dims != 1:
+                raise AssertionError("reduction results require one persistent axis")
+            rank_tree = DerivedIterationRangesRoot(
+                self.range_trees[-1],
+                numel=sympy.Integer(rank_size),
+                block_size=sympy.Integer(next_power_of_2(rank_size)),
+                block_offset=sympy.S.Zero,
+                name_suffix=f"result{rank_size}",
+            )
+            self.reduction_result_families[rank_size] = _DerivedIterationFamily(
+                range_trees=(*self.range_trees[:-1], rank_tree),
+            )
+        return self.reduction_result_families[rank_size]
 
     def sort(
         self,
@@ -8465,6 +8508,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
             BackendFeature.SORT,
+            BackendFeature.REDUCTION_RESULT,
             BackendFeature.TRITON_TEMPLATES,
             BackendFeature.TUPLE_REDUCTION,
         ]

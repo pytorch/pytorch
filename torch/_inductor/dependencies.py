@@ -621,11 +621,13 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
 
     def canonicalize(
-        self, index: sympy.Expr
+        self, index: sympy.Expr, var_ranges: VarRanges | None = None
     ) -> tuple[sympy.Expr, tuple[sympy.Symbol, ...], tuple[sympy.Expr, ...]]:
+        if var_ranges is None:
+            var_ranges = self._var_ranges
         if not self._should_normalize:
-            sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
-            var_names = [k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1]
+            sizes = [V.graph.sizevars.simplify(x) for x in var_ranges.values()]
+            var_names = [k for k, v in zip(var_ranges.keys(), sizes) if v != 1]
             sizes = [v for v in sizes if v != 1]
 
             self.drop_unused_symbols(index, var_names, sizes)
@@ -633,7 +635,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
         var_ranges = {
             k: V.graph.sizevars.simplify(v)
-            for k, v in self._var_ranges.items()
+            for k, v in var_ranges.items()
             # TODO(jansel): explore this further normalization
             # if k in free_symbols
         }
@@ -652,8 +654,31 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     ) -> None:
         self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: str) -> None:
-        self.store(name, index, f"store_reduction({value})")
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: str,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
+        if result_range is None:
+            self.store(name, index, value)
+            return
+        rank, rank_size = result_range
+        if rank == 0:
+            # SchedulerNode.pointwise_or_reduction_read_writes projects the
+            # reduction coordinate to zero; treat the store as scalar there. A
+            # real ranked store always passes its rank loop variable.
+            self.store(name, index, value)
+            return
+        if not isinstance(rank, sympy.Symbol) or rank not in self._var_ranges:
+            raise AssertionError(f"expected a result-rank loop variable, got {rank}")
+        result_ranges = {**self._var_ranges, rank: sympy.Integer(rank_size)}
+        if rank_size == 1:
+            index = sympy_subs(index, {rank: sympy.S.Zero})
+        index = V.graph.sizevars.simplify_with_ranges(index, result_ranges)
+        self._writes.add(MemoryDep(name, *self.canonicalize(index, result_ranges)))
 
     def index_expr(self, index: sympy.Expr, dtype: torch.dtype | None) -> None:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
@@ -788,10 +813,15 @@ def extract_loop_body_with_args(
             entry.mode,
         )
     for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
+        result_range = None
+        if entry.result_range is not None:
+            rank_name, rank_size = entry.result_range
+            result_range = (name_to_index[rank_name], rank_size)
         inner.store_reduction(
             entry.buffer_name,
             name_to_index[entry.index_name],
             None,  # type: ignore[arg-type]
+            result_range=result_range,
         )
     for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
         inner.index_expr(name_to_index[entry.index_name], None)

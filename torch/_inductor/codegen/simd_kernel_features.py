@@ -61,25 +61,28 @@ class NodeScheduleMarker:
     @staticmethod
     def only_nodes(it: Iterable[NodeScheduleEntry]) -> Iterable[SchedulerNode]:
         for item in it:
-            if not (item is DisableReduction or item is EnableReduction):
-                yield item  # type: ignore[misc]
+            if not isinstance(item, NodeScheduleMarker):
+                yield item
 
     @staticmethod
     def is_reduction() -> bool:
         return False
 
 
-NodeScheduleEntry = SchedulerNode | type[NodeScheduleMarker]
+NodeScheduleEntry = SchedulerNode | NodeScheduleMarker
 
 
+@dataclasses.dataclass(frozen=True)
 class DisableReduction(NodeScheduleMarker):
     """
-    Marker to invoke `kernel.disable_reduction()`.  This closes a
-    reduction loop and allows for pointwise ops to occur on the output
-    of a reduction.
+    Close a reduction loop and run pointwise operations over its output.
+    Scalar reductions have result_size=1; compact outputs retain that extent.
     """
 
+    result_size: int = 1
 
+
+@dataclasses.dataclass(frozen=True)
 class EnableReduction(NodeScheduleMarker):
     """
     Marker to end a DisableReduction block.
@@ -93,13 +96,11 @@ class EnableReduction(NodeScheduleMarker):
         """
         disabled = False
         for node in node_schedule:
-            if node in (EnableReduction, DisableReduction):
+            if isinstance(node, NodeScheduleMarker):
                 # Don't tile stuff outside the main reduction loop
-                disabled = node is DisableReduction
-            elif disabled:
-                pass
-            else:
-                yield node  # type: ignore[misc]
+                disabled = isinstance(node, DisableReduction)
+            elif not disabled:
+                yield node
 
 
 class SIMDKernelFeatures:
@@ -433,16 +434,15 @@ class MemoryEstimator:
     def simulate_codegen(self) -> None:
         from .simd import SIMDKernel
 
-        kernel_size_outside_loop = (*self.groups[:-1], sympy.S.One)
         kernel_size_inside_loop = tuple(self.groups)
         self.kernel_sizes = kernel_size_inside_loop
 
         for node in self.features.node_schedule:
-            if node is DisableReduction:
+            if isinstance(node, DisableReduction):
                 self.inside_reduction = False
-                self.kernel_sizes = kernel_size_outside_loop
+                self.kernel_sizes = (*self.groups[:-1], sympy.Integer(node.result_size))
                 continue
-            elif node is EnableReduction:
+            elif isinstance(node, EnableReduction):
                 self.inside_reduction = True
                 self.kernel_sizes = kernel_size_inside_loop
                 self.loops.append(MemoryEstimate())
