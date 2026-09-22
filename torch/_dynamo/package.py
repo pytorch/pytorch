@@ -633,8 +633,8 @@ class _DynamoCodeCacheEntry:
          missing backend at write time, so the other variants stay installable.
       11. Why the entry is bypassed, while it is: the reason the last compile
          gave up, known at the bypass site and otherwise only reachable via
-         tlparse. None whenever the entry is not bypassed, and None for the
-         save-time bypass above, which records its cause in the trace instead.
+         tlparse. None whenever the entry is not bypassed; the save-time
+         bypass above names the backend artifact that was missing.
     """
 
     python_code: SerializedCode
@@ -964,6 +964,10 @@ class PrecompileCacheEntry:
         backend_content: dict[_BackendId, Any] = {}
         # Non-mutating: the entry handed in may be the live one still serving
         # this process, so a code whose backend is missing is bypassed on a copy.
+        # The copy is shallow: the returned entry shares the live containers
+        # (guarded_codes, backend_ids, import_sources, function_names), which
+        # suits the one caller, which pickles it at once. Detaching them is the
+        # load path's job (CompilePackage.initialize).
         codes: list[_DynamoCodeCacheEntry] = []
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
@@ -984,7 +988,11 @@ class PrecompileCacheEntry:
                         payload_fn=lambda: debug_str,
                         expect_trace_id=False,
                     )
-                    code = dataclasses.replace(code, bypassed=True)
+                    code = dataclasses.replace(
+                        code,
+                        bypassed=True,
+                        bypass_reason=f"backend artifact {backend_id} missing at save time",
+                    )
                     break
                 backend_content[backend_id] = backends[backend_id]
             codes.append(code)
@@ -1352,9 +1360,10 @@ class CompilePackage:
         self._current_backend_ids = []
         self._current_entry.bypassed = not self._current_entry.guarded_codes
         if reason is not None and len(reason) > _BYPASS_REASON_MAX_CHARS:
-            reason = reason[:_BYPASS_REASON_MAX_CHARS] + " ... (truncated)"
+            suffix = " ... (truncated)"
+            reason = reason[: _BYPASS_REASON_MAX_CHARS - len(suffix)] + suffix
         self._current_entry.bypass_reason = (
-            reason if self._current_entry.bypassed else None
+            (reason or None) if self._current_entry.bypassed else None
         )
 
     def add_resume_function(
