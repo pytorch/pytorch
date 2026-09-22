@@ -487,6 +487,9 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             dist.barrier()
             _pg_mod.foreach_reduce = orig
 
+    # ROCm 10.1 removes high priority queue, which reduces the total number of queues
+    # from 8 (4 high + 4 normal) to 4 (4 normal), causing some streams can't overlap
+    @skipIfRocmVersionAtLeast((10, 1))
     # Hangs on MI200: RCCL deadlocks when three communicators make
     # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
     # ROCm 10.1 removes high priority queue, which reduces the total number of queues
@@ -501,6 +504,9 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
     def test_fully_shard_per_param_mesh_training_overlap(self):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=False)
 
+    # ROCm 10.1 removes high priority queue, which reduces the total number of queues
+    # from 8 (4 high + 4 normal) to 4 (4 normal), causing some streams can't overlap
+    @skipIfRocmVersionAtLeast((10, 1))
     # Hangs on MI200: RCCL deadlocks when three communicators make
     # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
     # ROCm 10.1 removes high priority queue, which reduces the total number of queues
