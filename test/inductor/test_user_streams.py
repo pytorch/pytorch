@@ -1261,6 +1261,7 @@ class TestUserStreamCompile(InductorTestCase):
             s1 = torch.Stream(device=device)
             s2 = torch.Stream(device=device)
 
+            s1.wait_stream(torch.accelerator.current_stream(device))
             with s1:
                 a = x + 1
                 b = a[:, ::2]  # non-contiguous slice
@@ -1968,6 +1969,7 @@ class GraphModule(torch.nn.Module):
         w1 = torch.randn(32, 32, device=device)
         w2 = torch.randn(32, 32, device=device)
         w3 = torch.randn(32, 32, device=device)
+        torch.accelerator.synchronize(device)
         expected = fn(x, w1, w2, w3)
         compiled_fn = torch.compile(fn)
         result, (code,) = run_and_get_code(compiled_fn, x, w1, w2, w3)
@@ -2464,6 +2466,7 @@ class TestGenericStreamCompile(InductorTestCase):
         stream = torch.Stream(device=device)
 
         def fn(x):
+            stream.wait_stream(torch.accelerator.current_stream(device))
             with stream:
                 a = x * 2
                 b = a + 1
@@ -2583,6 +2586,7 @@ class TestGenericStreamCompile(InductorTestCase):
         )
 
         def fn(x):
+            device_stream.wait_stream(torch.accelerator.current_stream(device))
             with device_stream:
                 a = x * 2
                 # Record event with explicit stream (using device_stream)

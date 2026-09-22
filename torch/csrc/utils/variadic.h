@@ -45,54 +45,12 @@ inline size_t count_variables(Args&&... args) {
 }
 
 //===----------------------------------------------------------------------===//
-//                std::index_sequence shim for C++11
-//===----------------------------------------------------------------------===//
-
-// A container of type-template parameter indices.
-template <size_t... Is>
-struct Indices {};
-
-// Decrements the index N, adds N-1 to the list of indices and forwards
-// whatever we already have.
-template <size_t N, size_t... Is>
-struct MakeIndices : MakeIndices<N - 1, N - 1, Is...> {};
-
-// Partial specialization that forms our base case. When N is zero, we stop
-// and define a typedef that will be visible to earlier classes due to
-// inheritance. The typedef we define is an index list containing the numbers
-// 0 through N-1.
-template <size_t... Is>
-struct MakeIndices<0, Is...> {
-  using indices = Indices<Is...>;
-};
-
-//===----------------------------------------------------------------------===//
 //                                 Utilities
 //===----------------------------------------------------------------------===//
 
 template <typename Function, typename... Ts>
 void apply(Function function, Ts&&... ts) {
-  // https://stackoverflow.com/questions/13978916/inserting-a-variadic-argument-list-into-a-vector
-  // Creates a dummy array, so that each function call is evaluated in order.
-  // `(function(), 0)` is because `function` should (!) return `void`, so
-  // according to the comma operator, it is evaluated and its result (`void`)
-  // is discarded. Then the zero is evaluated and used as an element in the
-  // array. The first zero ensures the array is not empty.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  int _[]{0, (function(std::forward<Ts>(ts)), 0)...};
-  (void)_;
-}
-
-template <
-    typename ReturnType,
-    typename... Ts,
-    typename Function,
-    typename Accessor>
-ReturnType unpack(Function function, Accessor accessor) {
-  return ReturnType(unpack<ReturnType, Ts...>(
-      std::move(function),
-      std::move(accessor),
-      typename MakeIndices<sizeof...(Ts)>::indices()));
+  ((void)function(std::forward<Ts>(ts)), ...);
 }
 
 template <
@@ -104,7 +62,30 @@ template <
 ReturnType unpack(
     Function function,
     Accessor accessor,
-    Indices<Is...> /*unused*/) {
+    std::index_sequence<Is...> /*unused*/);
+
+template <
+    typename ReturnType,
+    typename... Ts,
+    typename Function,
+    typename Accessor>
+ReturnType unpack(Function function, Accessor accessor) {
+  return ReturnType(unpack<ReturnType, Ts...>(
+      std::move(function),
+      std::move(accessor),
+      std::make_index_sequence<sizeof...(Ts)>()));
+}
+
+template <
+    typename ReturnType,
+    typename... Ts,
+    typename Function,
+    typename Accessor,
+    size_t... Is>
+ReturnType unpack(
+    Function function,
+    Accessor accessor,
+    std::index_sequence<Is...> /*unused*/) {
   return ReturnType(function(accessor.template operator()<Ts>(Is)...));
 }
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import dataclasses
 import functools
 import itertools
@@ -29,6 +28,15 @@ from cutlass.operators.utils.common import tuple_to_string
 from cutlass.operators.utils.device import to_cuda_stream
 from cutlass.operators.utils.tensor import strides_to_layout_string
 
+from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
+    BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
+)
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    GemmReductionCompileConfig,
+    get_cutedsl_epilogue_schema,
+    materialize_epilogue_function,
+)
+
 
 log = logging.getLogger(__name__)
 
@@ -36,30 +44,32 @@ log = logging.getLogger(__name__)
 _ONES_ALPHA: dict = {}
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class _EpilogueABI:
     """Runtime tensors and metadata derived from a traced epilogue signature."""
 
-    inputs: tuple
-    input_kinds: tuple[int, ...]
-    outputs: tuple
-    output_count: int
+    input_pack: EpilogueInputPack
+    outputs: EpilogueOutputPack
     primary_output: int
 
     @classmethod
     def from_args(cls, args, tensor_attr: str) -> _EpilogueABI:
-        outputs, output_count, primary_output = _epilogue_outputs(args, tensor_attr)
+        outputs, primary_output = _epilogue_outputs(args, tensor_attr)
         return cls(
-            _epilogue_tensors(args, tensor_attr),
-            _epilogue_tensor_kinds(args),
-            outputs,
-            output_count,
-            primary_output,
+            input_pack=_epilogue_input_pack(args, tensor_attr),
+            outputs=outputs,
+            primary_output=primary_output,
         )
 
 
 @functools.lru_cache(maxsize=256)
 def _epilogue_signature(epilogue_fn) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    schema = get_cutedsl_epilogue_schema(epilogue_fn)
+    if schema is not None:
+        return (
+            tuple(name for name in schema.inputs if name != "accum"),
+            schema.outputs,
+        )
     from cutlass.operators.fusion import trace_in_out
 
     inputs, outputs = trace_in_out(epilogue_fn)
@@ -69,19 +79,27 @@ def _epilogue_signature(epilogue_fn) -> tuple[tuple[str, ...], tuple[str, ...]]:
     )
 
 
-def _epilogue_tensors(args, attr: str) -> tuple:
+def _epilogue_input_pack(args, attr: str) -> EpilogueInputPack:
     epilogue = getattr(args, "epilogue", None)
-    tensors = (
-        ()
-        if epilogue is None
-        else tuple(
-            getattr(_epilogue_abi_tensor(epilogue.tensors[name]), attr)
-            for name in _epilogue_signature(epilogue.epilogue_fn)[0]
-        )
-    )
-    if len(tensors) > 4:
-        raise NotImplementedError("NVGEMM scaled epilogues support up to four inputs")
-    return tensors + (None,) * (4 - len(tensors))
+    if epilogue is None:
+        return EpilogueInputPack(())
+    schema = get_cutedsl_epilogue_schema(epilogue.epilogue_fn)
+    scalar_names = () if schema is None else schema.scalar_broadcast_names
+    inputs = []
+    for name in _epilogue_signature(epilogue.epilogue_fn)[0]:
+        tensor = epilogue.tensors[name]
+        shape = tensor.shape
+        if name in scalar_names or all(size == 1 for size in shape):
+            kind = 4
+        elif len(shape) == 1 or shape[-2] == 1:
+            kind = 2
+        elif shape[-1] == 1:
+            kind = 3
+        else:
+            kind = 1
+        abi_tensor = getattr(_epilogue_abi_tensor(tensor), attr)
+        inputs.append(EpilogueInput(abi_tensor, kind))
+    return EpilogueInputPack(tuple(inputs))
 
 
 def _epilogue_abi_tensor(tensor):
@@ -103,48 +121,24 @@ def _epilogue_abi_tensor(tensor):
     return TensorWrapper(padded)
 
 
-def _epilogue_tensor_kinds(args) -> tuple[int, ...]:
+def _epilogue_outputs(args, attr: str) -> tuple[EpilogueOutputPack, int]:
     epilogue = getattr(args, "epilogue", None)
     if epilogue is None:
-        return (0, 0, 0, 0)
-    kinds = []
-    output_m, output_n = args.out.shape[-2:]
-    for name in _epilogue_signature(epilogue.epilogue_fn)[0]:
-        shape = epilogue.tensors[name].shape
-        if shape[-1] == 1 and (len(shape) == 1 or shape[-2] == 1):
-            if output_n == 1:
-                kinds.append(2)
-            elif output_m == 1:
-                kinds.append(3)
-            else:
-                raise NotImplementedError(
-                    "NVGEMM scaled epilogues do not support scalar tensor inputs"
-                )
-        elif len(shape) == 1 or shape[-2] == 1:
-            kinds.append(2)
-        elif shape[-1] == 1:
-            kinds.append(3)
-        else:
-            kinds.append(1)
-    return tuple(kinds) + (0,) * (4 - len(kinds))
-
-
-def _epilogue_outputs(args, attr: str) -> tuple[tuple, int, int]:
-    epilogue = getattr(args, "epilogue", None)
-    if epilogue is None:
-        return (None, None, None), 1, 0
+        return EpilogueOutputPack(()), 0
     output_names = _epilogue_signature(epilogue.epilogue_fn)[1]
-    if not output_names or len(output_names) > 4:
-        raise NotImplementedError("NVGEMM scaled epilogues support 1-4 outputs")
+    if not output_names:
+        raise NotImplementedError("NVGEMM scaled epilogues require an output")
     if len(output_names) > 1 and "D" not in output_names:
         raise NotImplementedError("NVGEMM scaled multi-store requires a D output")
     primary_index = output_names.index("D") if "D" in output_names else 0
-    tensors = tuple(
-        getattr(epilogue.tensors[name], attr)
-        for index, name in enumerate(output_names)
-        if index != primary_index
+    tensors = EpilogueOutputPack(
+        tuple(
+            getattr(epilogue.tensors[name], attr)
+            for index, name in enumerate(output_names)
+            if index != primary_index
+        )
     )
-    return tensors + (None,) * (3 - len(tensors)), len(output_names), primary_index
+    return tensors, primary_index
 
 
 def _ones_alpha():
@@ -166,29 +160,38 @@ def _ones_alpha():
     return tw
 
 
-def _epilogue_op_scope(cute):
-    def relu(x):
-        return cute.math.max(x, cute.full_like(x, 0.0))
+def _local_reduce_abi_tensor(args):
+    reduction = args.local_reduce
+    tensor = reduction.output
+    if (
+        tensor is None
+        or reduction.axis != 1
+        or (len(tensor.shape) != 1 and tensor.shape[-1] >= 4)
+    ):
+        return tensor
+    from cutlass.operators.utils.tensor import TensorWrapper
 
-    def sigmoid(x):
-        return 1.0 / (1.0 + cute.math.exp(-x))
+    runtime_tensor = tensor.runtime_tensor
+    padded_shape = (
+        (runtime_tensor.shape[0], 4)
+        if runtime_tensor.ndim == 1
+        else (*runtime_tensor.shape[:-1], 4)
+    )
+    import torch
 
-    def gelu(x):
-        return 0.5 * x * (1.0 + cute.math.erf(x * 0.7071067811865476))
-
-    return {
-        "erf": cute.math.erf,
-        "exp": cute.math.exp,
-        "gelu": gelu,
-        "relu": relu,
-        "sigmoid": sigmoid,
-        "silu": lambda x: x * sigmoid(x),
-        "tanh": cute.math.tanh,
-    }
+    padded = torch.empty(
+        padded_shape,
+        dtype=runtime_tensor.dtype,
+        device=runtime_tensor.device,
+    )
+    return TensorWrapper(padded)
 
 
 try:
     from ..dense_blockscaled_gemm_persistent import (  # pyrefly: ignore[missing-import]
+        EpilogueInput,
+        EpilogueInputPack,
+        EpilogueOutputPack,
         Sm100BlockScaledPersistentDenseGemmKernel as BlockScaledGemmKernelImpl,
     )
 except ImportError:
@@ -263,7 +266,9 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         # runtime tensor there.
         alpha = getattr(args, "alpha", None)
         if alpha is None:
-            alpha = _ones_alpha()
+            alpha = cute.runtime.make_fake_compact_tensor(
+                cutlass.Float32, (4,), assumed_align=16
+            )
 
         def epilogue_op(v):
             return v
@@ -271,18 +276,18 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if getattr(args, "epilogue", None) is not None:
             epilogue_op = args.epilogue.epilogue_fn
             if isinstance(epilogue_op, str):
-                fn_name = next(
-                    node.name
-                    for node in ast.parse(epilogue_op).body
-                    if isinstance(node, ast.FunctionDef)
-                )
-                scope = _epilogue_op_scope(cute)
-                exec(epilogue_op, scope)
-                epilogue_op = scope[fn_name]
+                epilogue_op = materialize_epilogue_function(epilogue_op, cute)
         epilogue = _EpilogueABI.from_args(args, "compile_time_tensor")
-        local_reduce_out = getattr(args, "local_reduce_out", None)
-        local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
-        if local_reduce_out is not None or local_reduce_feeds_main:
+        epilogue_inputs = epilogue.input_pack
+        reduction_args = args.local_reduce
+        reduction_tensors = reduction_args.map_tensors(
+            lambda value: value.compile_time_tensor
+        )
+        local_reduce_out = _local_reduce_abi_tensor(args)
+        if reduction_args.primary_enabled:
+            reduction_config = GemmReductionCompileConfig.from_args(
+                reduction_args, cute
+            )
             return self.cute_compile(
                 self.impl,
                 args.A.tensor,
@@ -295,21 +300,16 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 epilogue_op,
                 self.metadata.operands.out.dtype,
                 alpha,
-                *epilogue.inputs,
-                *epilogue.input_kinds,
-                *epilogue.outputs,
-                epilogue.output_count,
+                epilogue_inputs,
+                epilogue.outputs,
                 epilogue.primary_output,
                 (
                     local_reduce_out.compile_time_tensor
                     if local_reduce_out is not None
                     else None
                 ),
-                args.local_reduce_group,
-                args.local_reduce_axis,
-                args.local_reduce_type,
-                args.local_reduce_source,
-                local_reduce_feeds_main,
+                reduction_tensors.feed_output,
+                reduction_config.blockscaled_primary_constexprs(),
                 target_sm=target_sm,
             )
         return self.cute_compile(
@@ -324,10 +324,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             epilogue_op,
             self.metadata.operands.out.dtype,
             alpha,
-            *epilogue.inputs,
-            *epilogue.input_kinds,
-            *epilogue.outputs,
-            epilogue.output_count,
+            epilogue_inputs,
+            epilogue.outputs,
             epilogue.primary_output,
             target_sm=target_sm,
         )
@@ -339,14 +337,14 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         stream,
         workspace=None,
     ) -> None:
+        import tvm_ffi  # pyrefly: ignore [missing-import]
+
         import torch
 
         stream = to_cuda_stream(stream)
         compiled_gemm = compiled_artifact.compiled_obj
 
-        # TVM FFI needs a torch.cuda.Stream, not a raw int handle.
-        # to_cuda_stream() returns cuda.bindings.driver.CUstream, which is not
-        # an int and has no .device; torch.cuda.stream() requires that.
+        # TVM FFI needs a torch.cuda.Stream, not a raw stream handle.
         if not isinstance(stream, torch.cuda.Stream):
             stream = torch.cuda.ExternalStream(int(stream))
 
@@ -356,10 +354,18 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             alpha = _ones_alpha()
         with torch.cuda.stream(stream):
             epilogue = _EpilogueABI.from_args(args, "runtime_tensor")
+            input_values = tuple(
+                (value.tensor, value.kind) for value in epilogue.input_pack.values
+            )
+            epilogue_inputs = tvm_ffi.convert((input_values,))
+            epilogue_outputs = tvm_ffi.convert((epilogue.outputs.values,))
 
-        local_reduce_out = getattr(args, "local_reduce_out", None)
-        local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
-        if local_reduce_out is not None or local_reduce_feeds_main:
+        reduction = args.local_reduce
+        reduction_tensors = reduction.map_tensors(lambda value: value.runtime_tensor)
+        logical_reduce_out = reduction.output
+        with torch.cuda.stream(stream):
+            local_reduce_out = _local_reduce_abi_tensor(args)
+        if reduction.primary_enabled:
             self.cute_run(  # pyrefly: ignore[missing-attribute]
                 compiled_gemm,
                 args.A.tensor,
@@ -369,12 +375,27 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 args.out.tensor,
                 stream,
                 alpha,
-                *epilogue.inputs,
-                *epilogue.outputs,
+                epilogue_inputs,
+                epilogue_outputs,
                 local_reduce_out.runtime_tensor
                 if local_reduce_out is not None
                 else None,
+                reduction_tensors.feed_output,
             )
+            if local_reduce_out is not logical_reduce_out:
+                if local_reduce_out is None:
+                    raise AssertionError("expected padded local-reduction output")
+                if logical_reduce_out is None:
+                    raise AssertionError("expected logical local-reduction output")
+                with torch.cuda.stream(stream):
+                    compact = (
+                        local_reduce_out.runtime_tensor[..., 0]
+                        if logical_reduce_out.runtime_tensor.ndim == 1
+                        else local_reduce_out.runtime_tensor[
+                            ..., : logical_reduce_out.runtime_tensor.shape[-1]
+                        ]
+                    )
+                    logical_reduce_out.runtime_tensor.copy_(compact)
             return
 
         self.cute_run(  # pyrefly: ignore[missing-attribute]
@@ -386,8 +407,9 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             args.out.tensor,
             stream,
             alpha,
-            *epilogue.inputs,
-            *epilogue.outputs,
+            epilogue_inputs,
+            epilogue_outputs,
+            None,
             None,
         )
 
@@ -400,15 +422,40 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         # check wrongly rejected valid NVFP4 args on the transposed B operand).
         from cutlass.operators.arguments import ScaledOperand
 
-        local_reduce_out = getattr(args, "local_reduce_out", None)
-        if local_reduce_out is not None or getattr(
-            args, "local_reduce_feeds_main", False
+        reduction = getattr(args, "local_reduce", None)
+        epilogue = getattr(args, "epilogue", None)
+        schema = (
+            None
+            if epilogue is None
+            else get_cutedsl_epilogue_schema(epilogue.epilogue_fn)
+        )
+        if (
+            reduction is not None
+            and reduction.enabled
+            and reduction.tensor_epilogue_returns_local_reduce
+            != (schema is not None and schema.returns_local_reduce)
         ):
-            group = args.local_reduce_group
-            axis = args.local_reduce_axis
+            return Status.fail(
+                "Block-scaled local reduction contract must match the tensor epilogue return"
+            )
+        if (
+            reduction is not None
+            and reduction.enabled
+            and not BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(
+                reduction
+            )
+        ):
+            return Status.fail("Unsupported block-scaled local reduction contract")
+        if reduction is not None and reduction.primary_enabled:
+            local_reduce_out = reduction.output
+            local_reduce_feed_out = reduction.feed_output
+            group = reduction.group
+            axis = reduction.axis
             m, n = args.out.shape[-2:]
             selected_size = n if axis == 1 else m
-            max_group = self.mma_tiler_mn[axis] if axis == 1 else 16
+            max_group = (
+                self.mma_tiler_mn[axis] if axis == 1 else min(64, self.mma_tiler_mn[0])
+            )
             if (
                 axis not in (0, 1)
                 or group <= 1
@@ -431,6 +478,15 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 ) != (expected_shape[1], 1):
                     return Status.fail(
                         "Grouped reduction output must be contiguous Float32."
+                    )
+            if local_reduce_feed_out is not None:
+                if local_reduce_feed_out.shape != args.out.shape:
+                    return Status.fail(
+                        "Grouped reduction feed output must match the GEMM output shape."
+                    )
+                if tuple(local_reduce_feed_out.stride) != (n, 1):
+                    return Status.fail(
+                        "Grouped reduction feed output must be row-major contiguous."
                     )
 
         m, n = args.out.shape[-2:]
@@ -686,7 +742,6 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         operator_list = []
 
         for operands in cls._metadata_operand_combinations():
-            # pyrefly: ignore[no-matching-overload]
             for values in itertools.product(*param_values):
                 design = Sm100DesignMetadata(**dict(zip(param_names, values)))
 
