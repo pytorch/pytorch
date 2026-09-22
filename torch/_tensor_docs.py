@@ -4528,7 +4528,10 @@ Args:
     index (LongTensor): the indices of elements to scatter and reduce.
     src (Tensor): the source elements to scatter and reduce
     reduce (str): the reduction operation to apply for non-unique indices
-        (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
+        (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`,
+        :obj:`"none"`). Use :obj:`"none"` (or its alias :obj:`"last"`) for a
+        non-reducing scatter that simply overwrites; indices must be distinct
+        (duplicate index behavior is undefined).
     include_self (bool): whether elements from the :attr:`self` tensor are
         included in the reduction
 

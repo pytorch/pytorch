@@ -201,7 +201,8 @@ static void scatter_meta_impl(
   meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
-    at::native::get_operator_enum(reduce.value(), use_new_options);
+    at::native::get_operator_enum(
+        reduce.value(), use_new_options, /*allow_none=*/use_new_options);
   }
 }
 
@@ -2162,6 +2163,9 @@ static void scatter_reduce_exclude_self_helper(
           case ReductionType::MEAN:
             init_val = (scalar_t)0;
             break;
+          case ReductionType::NONE:
+            init_val = (scalar_t)0;
+            break;
         }
         self.scatter_(dim, index, init_val);
       });
@@ -2254,7 +2258,8 @@ static void scatter_impl(
        self.device().type() == DeviceType::XPU);
 
   if (reduce.has_value()) {
-    op = get_operator_enum(reduce.value(), use_new_options);
+    op = get_operator_enum(
+        reduce.value(), use_new_options, /*allow_none=*/use_new_options);
     if (!reduce_includes_self) {
       // scatter inits for reduction to appropriate indices (used by
       // scatter_reduce.two)
@@ -2391,7 +2396,16 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
     out.copy_(self);
   }
 
-  const auto op = get_operator_enum(reduce, true);
+  const auto op = get_operator_enum(reduce, true, /*allow_none=*/true);
+
+  // "none"/"last": no reduction, just overwrite; avoids atomic ops entirely
+  if (op == ReductionType::NONE) {
+    if (index.numel() > 0) {
+      scatter_stub(
+          self.device().type(), const_cast<Tensor&>(out), dim, index, src);
+    }
+    return;
+  }
 
   if (can_use_expanded_index_path(
           out, dim, index, src, /*is_scatter_like*/ true)) {
