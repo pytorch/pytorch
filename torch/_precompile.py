@@ -2207,14 +2207,14 @@ class PrecompiledModule(PrecompiledRunnable):
             ) from e
         except InductorError as e:
             # Inductor codegen asserts on certain non-tensor Python values in the output
-            # structure ("Unexpected output types: [<class 'float'>]" -- also complex,
-            # str, ...); int/bool/None outputs lower fine, and the eager backend handles
-            # them too. Surface a clear PrecompileError instead of the raw assertion.
+            # structure ("Unexpected output types: [<class 'complex'>]" -- also str, ...);
+            # int/float/bool/None outputs lower fine, and the eager backend handles them
+            # too. Surface a clear PrecompileError instead of the raw assertion.
             if "Unexpected output types" in str(e):
                 raise PrecompileError(
                     "the inductor backend cannot lower a graph whose output mixes a "
-                    "non-tensor Python value (e.g. float / complex / str) with computed "
-                    "tensors (int / bool / None outputs are fine). Return only tensors, "
+                    "non-tensor Python value (e.g. complex / str) with computed tensors "
+                    "(int / float / bool / None outputs are fine). Return only tensors, "
                     "or use backend='eager'."
                 ) from e
             raise
