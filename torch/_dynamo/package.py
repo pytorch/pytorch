@@ -1339,6 +1339,20 @@ class CompilePackage:
     def truncated_frames(self) -> frozenset[str]:
         return frozenset(self._truncated_frames)
 
+    @property
+    def uncovered_frames(self) -> frozenset[str]:
+        # Entered Dynamo yet holds no guarded code, which is exactly what
+        # install() skip_code()s. Resume code that was generated but never
+        # executed has no compile id and is not a gap; a frame that hit the
+        # recompile limit has working variants and is reported as truncated.
+        # Derived from the entries, so a later variant that compiles closes
+        # the gap.
+        return frozenset(
+            f"{code.co_name} ({code.co_filename}:{code.co_firstlineno})"
+            for code, entry in self._codes.items()
+            if entry.has_compile_id and not entry.guarded_codes and not entry.bypassed
+        )
+
     def bypass_current_compile(self, reason: str | None = None) -> None:
         """Drop the backend ids the current compile registered on its entry.
 
