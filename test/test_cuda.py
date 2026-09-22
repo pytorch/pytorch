@@ -1941,6 +1941,7 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         ):
             event1.elapsed_time(event2)
 
+    @skipIfRocm(msg="Does not actually block the host thread on ROCm.")
     def test_events_blocking_synchronize(self):
         # blocking=False busy-spins in synchronize() (CPU time ~= wall time);
         # blocking=True (cudaEventBlockingSync) sleeps instead (CPU time ~= 0).
