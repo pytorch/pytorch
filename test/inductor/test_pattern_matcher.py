@@ -2291,6 +2291,12 @@ class TestPatternMatcher(TestCase):
         inv_scale = 1 / scale
         self.common(mul_softmax, (x, scale), 1, 3)
         self.common(mul_softmax, (scale, x), 1, 3)
+
+        # 0-D tensor case (regression for #190418)
+        x_0d = torch.randn(())
+        scale_0d = 1e6
+        self.common(mul_softmax, (x_0d, scale_0d), 1, 3)
+        self.common(mul_softmax, (scale_0d, x_0d), 1, 3)
         self.common(div_softmax, (x, inv_scale), 1, 3)
 
         # Test matching with type promotion
