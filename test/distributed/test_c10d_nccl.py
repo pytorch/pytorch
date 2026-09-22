@@ -369,8 +369,6 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
 
 
 class ProcessGroupNCCLInitTest(MultiProcessTestCase):
-    device_type = device_type
-
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -384,12 +382,12 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
 
     @property
     def world_size(self):
-        dm = torch.get_device_module(self.device_type)
+        dm = torch.get_device_module(device_type)
         return dm.device_count()
 
     @property
     def device(self):
-        return torch.device(self.device_type, self.rank % self.world_size)
+        return torch.device(device_type, self.rank % self.world_size)
 
     # A helper with the must-needed init args for test infra.
     # kwargs can be filled in by individual init tests.
@@ -493,14 +491,14 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 1 GPU"
+        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 1 accelerator"
     )
     @skip_if_lt_x_gpu(1)
     def test_nccl_dist_backend_error(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         self._create_process_group_nccl(store, self.opts())
 
-        # Both rank 0 and 1 will use the same CUDA device resulting in ncclInvalidUsage
+        # Both rank 0 and 1 will use the same CUDA/XPU device resulting in ncclInvalidUsage
         with self.assertRaises(dist.DistBackendError) as cm:
             dist.broadcast(torch.tensor([1, 2, 3]).to(device_type), 0)
         self.assertTrue(isinstance(cm.exception, dist.DistError))
@@ -874,7 +872,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         work = c10d.all_reduce(x, async_op=True)
 
         del work
-        # Wait for every rank to delete Work without touching another CUDA context.
+        # Wait for every rank to delete Work without touching another CUDA/XPU context.
         store = c10d.distributed_c10d._get_default_store()
         store.barrier("work_deleted", self.world_size)
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
@@ -907,7 +905,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         work = c10d.all_reduce(x, async_op=True)
 
         # Wait for non-0 ranks to garbage collect Work -- this is the latest
-        # point where extra CUDA context can be created
+        # point where extra CUDA/XPU context can be created
         if self.rank == 0:
             time.sleep(5)
             free, total = device_module.mem_get_info(device)
@@ -934,7 +932,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_extra_cuda_context(self):
-        # Check if non-0 ranks would create extra CUDA context on device 0
+        # Check if non-0 ranks would create extra CUDA/XPU context on device 0
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank:d}")
         c10d.init_process_group(
@@ -961,7 +959,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         except Exception:
             self.skipTest("pynvml not available")
 
-        # Check if non-0 ranks would create extra CUDA context on device 0
+        # Check if non-0 ranks would create extra CUDA/XPU context on device 0
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank:d}")
         c10d.init_process_group(
@@ -982,7 +980,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.reduce_scatter_single(x, y)
         c10d.barrier()
 
-        # Wait for every rank to finish the operations without touching CUDA.
+        # Wait for every rank to finish the operations without touching CUDA/XPU.
         store.barrier("sync_ops_done", self.world_size)
 
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
@@ -1642,7 +1640,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 0)
         reduce_tensor = torch.rand(10, 10, device=device)
         # Run an allreduce, comm should have already started initilizaing,
-        # but allreduce is issued to CUDA STREAM only after the initialization is a success
+        # but allreduce is issued to CUDA/XPU STREAM only after the initialization is a success
         pg.allreduce(reduce_tensor).wait()
         new_pg = c10d.new_group()
         # new pg's comm is initialized eagerly
@@ -3765,7 +3763,7 @@ class DistributedDataParallelTest(
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,
-        "BFloat16 is only supported by CUDA 11+",
+        "BFloat16 is only supported by CUDA 11+/XPU",
     )
     @skip_if_lt_x_gpu(2)
     def test_bf16_compress_wrapper_nccl(self):
@@ -3805,7 +3803,7 @@ class DistributedDataParallelTest(
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,
-        "BFloat16 is only supported by CUDA 11+",
+        "BFloat16 is only supported by CUDA 11+/XPU",
     )
     @skip_if_lt_x_gpu(2)
     def test_bf16_compress_wrapper_is_view(self):
@@ -7885,7 +7883,6 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        # self.num_gpus = device_module.device_count()
         self._spawn_processes()
 
     def tearDown(self):
@@ -8039,7 +8036,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
 if __name__ == "__main__":
     if device_module._initialized:
         raise AssertionError(
-            "test_distributed must not have initialized CUDA context on main process"
+            "test_distributed must not have initialized CUDA/XPU context on main process"
         )
 
     run_tests()
