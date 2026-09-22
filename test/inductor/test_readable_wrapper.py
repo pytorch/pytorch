@@ -101,11 +101,9 @@ class TestReadableWrapperCodegen(TestCase):
         cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
         expected, code = _code_for(fn, x, readable_wrapper=True, **cfg)
         self.assertEqual(expected, fn(x))
-        # Only the compile-time autotune script, which execs its kernels, keeps the
-        # AsyncCompile string form; the wrapper itself defines the kernel as code.
-        self.assertEqual(
-            code.count("= async_compile.triton("), 1 if autotune_at_compile_time else 0
-        )
+        # The compile-time autotune script is dropped from the module, and the wrapper
+        # itself defines the kernel as code.
+        self.assertNotIn("async_compile.triton", code)
         self.assertEqual(self._run_standalone(code, [x])[0], expected)
 
     def _run_standalone(self, code, args):
@@ -168,6 +166,52 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertIn("empty_strided_cpu", code)
         self.assertNotIn("empty_strided_cuda", code)
         self.assertNotIn("empty_strided_xpu", code)
+
+    @requires_cuda_and_triton
+    def test_async_compile_is_dropped_when_no_backend_needs_it(self):
+        def fn(x):
+            return (x * 2).relu()
+
+        x = torch.randn(256, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertNotIn("AsyncCompile", code)
+        self.assertNotIn("async_compile", code)
+
+    def test_async_compile_survives_when_a_backend_needs_it(self):
+        # C++ kernels cannot be hoisted -- the text is C++ and producing the value
+        # needs a compiler invocation -- so the lifecycle has to stay for them. The
+        # decision is per-graph, not per-mode.
+        def fn(x):
+            return (x + 1).relu().sum(0)
+
+        x = torch.randn(1024)
+        _, code = _code_for(fn, x, readable_wrapper=True, cpu_backend="cpp")
+        self.assertIn("async_compile.cpp_pybinding(", code)
+        for line in (
+            "from torch._inductor.async_compile import AsyncCompile",
+            "async_compile = AsyncCompile()",
+            "async_compile.wait(globals())",
+            "del async_compile",
+        ):
+            self.assertEqual(code.count(line), 1, line)
+
+    def test_cpp_kernels_in_root_and_subgraphs_run_standalone(self):
+        # A subgraph's C++ kernel binds through the root's async_compile, and only the
+        # root waits on it, so the lifecycle is decided once for the whole module.
+        def fn(x):
+            y = (x + 1).relu()
+            pred = y.sum() > 0
+            return torch.cond(pred, lambda t: (t * 2).sin(), lambda t: t.cos(), (y,))
+
+        x = torch.randn(64, 128)
+        expected, code = _code_for(fn, x, readable_wrapper=True, cpu_backend="cpp")
+        # one kernel in the root and one per branch
+        self.assertGreaterEqual(code.count("= async_compile.cpp_pybinding("), 3)
+        self.assertEqual(code.count("async_compile.wait(globals())"), 1)
+        ns: dict[str, object] = {"__name__": "_readable_artifact"}
+        exec(compile(code, "<readable_artifact>", "exec"), ns)
+        got = ns["call"]([x])  # type: ignore[operator]
+        self.assertEqual(got[0], expected)
 
     @requires_cuda_and_triton
     def test_a_binding_is_not_kept_alive_by_its_own_definition(self):
