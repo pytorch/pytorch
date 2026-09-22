@@ -62,7 +62,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
-from torch._guards import TracingContext
+from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import (
@@ -162,6 +162,7 @@ from ..source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeMROSource,
+    TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
@@ -1539,17 +1540,18 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.MethodType)
-            and value.__name__ in ("shuffle", "sample", "seed")
+            and value.__name__ in RandomVariable._stateful_fn_names
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
         ):
-            # Module-level random.shuffle/random.sample/random.seed are methods
-            # bound to the module-global random.Random instance. The
-            # scalar-returning helpers (random.random/randint/randrange/uniform)
-            # already have a dedicated RandomValueSource path in
-            # UserDefinedObjectVariable; these return sequences or mutate the RNG
-            # state instead, so route them through RandomVariable to model the
-            # RNG state rather than skipping into the random module.
+            # Module-level random methods are bound to the module-global
+            # random.Random instance. Route them through RandomVariable so all
+            # state changes use the same ordered live replay.
+            install_guard(
+                AttrSource(self.source, "__func__").make_guard(
+                    GuardBuilder.FUNCTION_MATCH
+                )
+            )
             random_self = value.__self__
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
@@ -1558,15 +1560,17 @@ class VariableBuilder:
             isinstance(value, types.BuiltinMethodType)
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
-            and value in UserDefinedObjectVariable._supported_random_functions()
+            and value.__name__ in RandomVariable._supported_fn_names
         ):
-            # Module-level random.random is a C builtin method bound to the
-            # module-global random.Random instance (unlike randint/randrange/
-            # uniform, which are Python-level methods). Route it through
-            # UserDefinedObjectVariable so its call_random_fn / RandomValueSource
-            # path models the RNG value instead of skipping into the C builtin.
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return UserDefinedObjectVariable(value, source=self.source)
+            install_guard(
+                AttrSource(self.source, "__name__").make_guard(
+                    GuardBuilder.CONSTANT_MATCH
+                )
+            )
+            random_self = value.__self__
+            obj_source = self.source and AttrSource(self.source, "__self__")
+            obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
+            return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutogradEngineVariable(value, source=self.source)
@@ -1923,7 +1927,32 @@ class VariableBuilder:
         elif istype(value, random.Random) and RandomVariable.is_supported_random_obj(
             value
         ):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(
+                GuardBuilder.TYPE_MATCH,
+                *(
+                    functools.partial(
+                        GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name
+                    )
+                    for name in sorted(
+                        RandomVariable._replay_method_names
+                        | RandomVariable._replay_attribute_names
+                    )
+                ),
+            )
+            install_guard(
+                *(
+                    AttrSource(TypeSource(self.source), name).make_guard(
+                        GuardBuilder.FUNCTION_MATCH
+                    )
+                    for name in sorted(RandomVariable._replay_method_names)
+                ),
+                *(
+                    AttrSource(TypeSource(self.source), name).make_guard(
+                        GuardBuilder.CONSTANT_MATCH
+                    )
+                    for name in sorted(RandomVariable._replay_attribute_names)
+                ),
+            )
             result = RandomVariable(value, source=self.source)
             self.tx.output.side_effects.track_mutable(value, result)
             return result
@@ -3741,8 +3770,8 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
-        wrapped_value = torch.tensor(value)
-        if not isinstance(self.get_source(), RandomValueSource):
+        wrapped_value = torch._as_tensor_fullprec(value)
+        if self.get_source().guard_source is not GuardSource.RANDOM_VALUE:
             install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         options = {"source": self.get_source()}
