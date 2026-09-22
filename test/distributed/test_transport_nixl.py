@@ -41,14 +41,12 @@ class _Transfer:
     remote_agent: str
 
 
+@dataclass
 class _AgentConfig:
-    def __init__(
-        self, *, backends, num_threads, enable_prog_thread, capture_telemetry=False
-    ):
-        self.backends = backends
-        self.num_threads = num_threads
-        self.enable_prog_thread = enable_prog_thread
-        self.capture_telemetry = capture_telemetry
+    backends: list[str]
+    num_threads: int
+    enable_prog_thread: bool
+    capture_telemetry: bool = False
 
 
 class _Agent:
@@ -174,10 +172,19 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         with patch.object(_nixl, "_load_backend", return_value=self.backend()):
             first = new_transport("nixl", agent_name="first", plugin=self.plugin)
             second = new_transport("nixl", agent_name="second", plugin=self.plugin)
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
         self.assertEqual(first.connect(second.bind()), 0)
         self.assertEqual(second.connect(first.bind()), 0)
         self.assertTrue(first._agent.config.enable_prog_thread)
         return first, second
+
+    def registered_pair(self, tensor=None):
+        first, second = self.make_transport_pair()
+        tensor = torch.ones(8) if tensor is None else tensor
+        source = first.register_memory(tensor)
+        target = second.register_memory(torch.zeros_like(tensor))
+        return first, second, source, target.to_remote_buffer()
 
     def test_supported(self):
         with patch.object(_nixl, "_load_backend", return_value=self.backend()):
@@ -240,16 +247,14 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first_agent.registrations, [])
 
     def test_timeout_retains_pending_transfer(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
-        target = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        first, second, source, remote = self.registered_pair(
+            torch.arange(8, dtype=torch.uint8)
+        )
         agent = first._agent
         with patch.object(agent, "transfer_state", "PROC"):
             work = first.write(
                 source.to_view(),
-                target.to_remote_buffer(),
+                remote,
                 async_op=True,
                 timeout=0.001,
             )
@@ -271,12 +276,9 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
 
     @parametrize("operation", ["read", "write", "read_async", "write_async"])
     def test_operation_timeout(self, operation):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
-        target = second.register_memory(torch.zeros(8, dtype=torch.uint8))
-        remote = target.to_remote_buffer()
+        first, second, source, remote = self.registered_pair(
+            torch.arange(8, dtype=torch.uint8)
+        )
         view = (
             source.to_mutable_view()
             if operation.startswith("read")
@@ -293,8 +295,6 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
 
     def test_native_setup_runs_on_calling_thread(self):
         first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
         self.assertFalse(hasattr(first, "_work_queue"))
         caller = threading.get_ident()
         original = first._agent.register_memory
@@ -307,12 +307,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             first.register_memory(torch.ones(8))
 
     def test_distinct_handles_for_overlapping_requests(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
-        remote = target.to_remote_buffer()
+        first, second, source, remote = self.registered_pair()
         with patch.object(first._agent, "transfer_state", "PROC"):
             one = first.write(source.to_view(), remote, async_op=True)
             two = first.write(source.to_view(), remote, async_op=True)
@@ -326,12 +321,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertFalse(first._pending)
 
     def test_asyncio_polling_and_future(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
-        remote = target.to_remote_buffer()
+        first, second, source, remote = self.registered_pair()
 
         async def run():
             first._agent.transfer_state = "PROC"
@@ -353,18 +343,12 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         asyncio.run(run())
 
     def test_async_close_timeout_and_retry(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
+        first, second, source, remote = self.registered_pair()
         agent = first._agent
 
         async def run():
             with patch.object(agent, "transfer_state", "PROC"):
-                work = first.write(
-                    source.to_view(), target.to_remote_buffer(), async_op=True
-                )
+                work = first.write(source.to_view(), remote, async_op=True)
                 with self.assertRaises(TimeoutError):
                     await first.close_async(timeout=0.001)
                 self.assertTrue(agent.registrations)
@@ -376,14 +360,9 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         asyncio.run(run())
 
     def test_cancellation_retains_buffers(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
         tensor = torch.ones(8)
         ref = weakref.ref(tensor)
-        source = first.register_memory(tensor)
-        target = second.register_memory(torch.zeros(8))
-        remote = target.to_remote_buffer()
+        first, second, source, remote = self.registered_pair(tensor)
 
         async def run(memory):
             with patch.object(first._agent, "transfer_state", "PROC"):
@@ -404,15 +383,9 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertIsNone(ref())
 
     def test_dropped_work_and_transport_retained_until_dma_completion(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
+        first, second, source, remote = self.registered_pair()
         with patch.object(first._agent, "transfer_state", "PROC"):
-            work = first.write(
-                source.to_view(), target.to_remote_buffer(), async_op=True
-            )
+            work = first.write(source.to_view(), remote, async_op=True)
             ref = weakref.ref(work)
             del work
             gc.collect()
@@ -423,12 +396,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertIsNone(ref())
 
     def test_concurrent_waiters_release_handle_once(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
-        work = first.write(source.to_view(), target.to_remote_buffer(), async_op=True)
+        first, second, source, remote = self.registered_pair()
+        work = first.write(source.to_view(), remote, async_op=True)
         errors = []
 
         def wait():
@@ -447,15 +416,9 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first._agent.released, 1)
 
     def test_native_terminal_failure_is_released(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
+        first, second, source, remote = self.registered_pair()
         with patch.object(first._agent, "transfer_state", "ERR"):
-            work = first.write(
-                source.to_view(), target.to_remote_buffer(), async_op=True
-            )
+            work = first.write(source.to_view(), remote, async_op=True)
             with self.assertRaisesRegex(RuntimeError, "NIXL transfer failed"):
                 work.wait()
         self.assertTrue(work.is_completed())
@@ -463,17 +426,11 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first._agent.released, 1)
 
     def test_cancelled_async_close_can_be_retried(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
+        first, second, source, remote = self.registered_pair()
 
         async def run():
             with patch.object(first._agent, "transfer_state", "PROC"):
-                work = first.write(
-                    source.to_view(), target.to_remote_buffer(), async_op=True
-                )
+                work = first.write(source.to_view(), remote, async_op=True)
                 task = asyncio.create_task(first.close_async())
                 await asyncio.sleep(0)
                 task.cancel()
@@ -489,12 +446,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         asyncio.run(run())
 
     def test_handle_release_failure_rejects_new_work_until_close(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
-        remote = target.to_remote_buffer()
+        first, second, source, remote = self.registered_pair()
         agent = first._agent
         work = first.write(source.to_view(), remote, async_op=True)
         with patch.object(
@@ -513,8 +465,6 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
 
     def test_native_cleanup_failure_can_be_retried(self):
         first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
         first.register_memory(torch.ones(8))
         first.register_memory(torch.ones(16))
         agent = first._agent
@@ -537,12 +487,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(calls, 3)
 
     def test_async_poll_does_not_block_on_native_lock(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
-        work = first.write(source.to_view(), target.to_remote_buffer(), async_op=True)
+        first, second, source, remote = self.registered_pair()
+        work = first.write(source.to_view(), remote, async_op=True)
         locked, release = threading.Event(), threading.Event()
 
         def hold_lock():
@@ -570,12 +516,12 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
 
     @parametrize("timeout", [-1, float("nan"), float("inf")])
     def test_invalid_timeout(self, timeout):
-        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
-            with self.assertRaises(ValueError):
-                _nixl.NIXLTransport(timeout=timeout)
+        with (
+            patch.object(_nixl, "_load_backend", return_value=self.backend()),
+            self.assertRaises(ValueError),
+        ):
+            _nixl.NIXLTransport(timeout=timeout)
         first, second = self.make_transport_pair()
-        self.addCleanup(first.close)
-        self.addCleanup(second.close)
         with self.assertRaises(ValueError):
             first.bind(timeout=timeout)
         with self.assertRaises(ValueError):
@@ -595,13 +541,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
                 )
 
     def test_empty_view_and_replaced_storage(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(first.close)
-        self.addCleanup(second.close)
         tensor = torch.ones(8)
-        source = first.register_memory(tensor)
-        target = second.register_memory(torch.zeros(8))
-        remote = target.to_remote_buffer()
+        first, second, source, remote = self.registered_pair(tensor)
         self.assertEqual(first.write(source.to_view(0, 0), remote), 0)
         self.assertEqual(first._transfers, {})
         with self.assertRaises(TypeError):
@@ -611,12 +552,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             first.write(source.to_view(), remote)
 
     def test_changed_remote_metadata_rebuilds_handle(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(first.close)
-        self.addCleanup(second.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
-        remote = target.to_remote_buffer()
+        first, second, source, remote = self.registered_pair()
         first.write(source.to_view(), remote)
         name, entries = pickle.loads(remote.metadata)
         updated = replace(remote, metadata=pickle.dumps((name, entries + entries)))
@@ -625,12 +561,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertFalse(first._transfers)
 
     def test_peer_validation(self):
-        first, second = self.make_transport_pair()
-        self.addCleanup(first.close)
-        self.addCleanup(second.close)
-        source = first.register_memory(torch.ones(8))
-        target = second.register_memory(torch.zeros(8))
-        remote = target.to_remote_buffer()
+        first, second, source, remote = self.registered_pair()
         with self.assertRaisesRegex(RuntimeError, "already connected"):
             first.connect(second.bind())
         with self.assertRaisesRegex(ValueError, "connected peer"):
@@ -643,11 +574,9 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
 
     @parametrize("failure", ["dispatch", "query"])
     def test_error_drains_before_releasing_transfer(self, failure):
-        first, second = self.make_transport_pair()
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
-        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
-        target = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        first, second, source, remote = self.registered_pair(
+            torch.arange(8, dtype=torch.uint8)
+        )
         error = RuntimeError(f"{failure} failed")
         states = ["PROC", "DONE"] if failure == "dispatch" else [error, "PROC", "DONE"]
         with (
@@ -660,9 +589,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             patch.object(first._agent, "check_xfer_state", side_effect=states) as check,
             self.assertRaisesRegex(RuntimeError, f"{failure} failed"),
         ):
-            first.write(
-                source.to_view(), target.to_remote_buffer(), async_op=True
-            ).wait()
+            first.write(source.to_view(), remote, async_op=True).wait()
         self.assertEqual(check.call_count, len(states))
         self.assertEqual(first._agent.released, 1)
         self.assertEqual(first._transfers, {})
