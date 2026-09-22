@@ -4484,7 +4484,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(self.model.lin.weight.grad, expected.lin.weight.grad)
         self.assertEqual(self.model.lin.bias.grad, expected.lin.bias.grad)
 
-    def test_save_checkpoints_and_a_gate_refusal_writes_nothing(self):
+    def test_save_checkpoints_mid_block(self):
         step = self.mod.step
         with self._capture(step, backend="eager") as cap:
             with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
@@ -4496,12 +4496,13 @@ class TestPrecompileDynamoCapture(TestCase):
             cap(self.model, self.x3)
         with open(self.artifact, "rb") as f:
             self.assertNotEqual(f.read(), checkpoint)
+
+    def test_a_raised_call_is_refused_at_exit_and_writes_nothing(self):
         # A call that raised inside the block is a coverage gap: the default gate
-        # refuses at exit, after the block ran to completion, and writes nothing.
-        for path in (self.artifact, self.cache):
-            os.unlink(path)
+        # refuses at exit, after the block ran to completion, and writes nothing;
+        # the summary stays readable and says why.
         with self.assertRaisesRegex(PrecompileError, "captured call raised"):
-            with self._capture(step, backend="eager") as cap:
+            with self._capture(self.mod.step, backend="eager") as cap:
                 cap(self.model, self.x2)
                 with self.assertRaises(RuntimeError):
                     cap(self.model, torch.randn(2, 5))
@@ -4509,10 +4510,10 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertFalse(os.path.exists(self.artifact))
         self.assertFalse(os.path.exists(self.cache))
 
-    def test_dropped_guards_are_reported_and_the_strict_gate_refuses_them(self):
+    def test_dropped_guards_are_reported_in_the_summary_and_the_artifact(self):
         # The default filter drops the identity guards that cannot be
         # serialized (the MODULE_MATCH on the model here); the summary reports
-        # them, the artifact lists them, and the strict gate refuses them.
+        # them and the artifact lists the same slots.
         with self._capture(self.mod.single, backend="eager") as cap:
             cap(self.model, self.x2)
             summary = cap.summary()
@@ -4524,6 +4525,8 @@ class TestPrecompileDynamoCapture(TestCase):
             python_code = f.read()
         for guard_type, source in summary.dropped_guards:
             self.assertIn(f"[{guard_type!r}, {source!r}]", python_code)
+
+    def test_the_strict_gate_refuses_dropped_guards(self):
         strict = DynamoTracer(require_no_dropped_guards=True)
         with self.assertRaisesRegex(PrecompileError, "dropped .* guard"):
             with self._capture(self.mod.single, backend="eager", tracer=strict) as cap:
