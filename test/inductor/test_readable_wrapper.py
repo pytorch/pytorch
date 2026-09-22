@@ -3,10 +3,12 @@
 import os
 import re
 import tempfile
+from unittest import mock
 
 import torch
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor import config
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
@@ -119,6 +121,32 @@ class TestReadableWrapperCodegen(TestCase):
             return ns["call"](args)  # type: ignore[operator]
 
     @requires_cuda_and_triton
+    @parametrize(
+        "cfg",
+        [
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"},
+            {"combo_kernels": True},
+        ],
+        name_fn=lambda cfg: next(iter(cfg)),
+    )
+    def test_template_and_combo_kernels_run_standalone(self, cfg):
+        # Both reach emit_triton_kernel_definition by their own route, with source of a
+        # different shape from a pointwise kernel's: a Triton matmul template, and a
+        # combo kernel with its module-level device functions.
+        def fn(a, b, x, y):
+            return a @ b, x.sin(), y.cos()
+
+        a, b = torch.randn(64, 64, device="cuda"), torch.randn(64, 64, device="cuda")
+        x, y = torch.randn(128, device="cuda"), torch.randn(96, device="cuda")
+        result, code = _code_for(fn, a, b, x, y, readable_wrapper=True, **cfg)
+        self.assertNotIn("async_compile.triton", code)
+        marker = "triton_tem_" if "max_autotune" in cfg else "pid_offset"
+        self.assertIn(marker, code)
+        expected = fn(a, b, x, y)
+        self.assertEqual(result, expected)
+        self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
+
+    @requires_cuda_and_triton
     def test_same_named_helpers_do_not_shadow(self):
         # Scan helpers are named by op sequence and numbered per kernel, so these two
         # combine_fns emit the same helper name with different constants.
@@ -158,6 +186,21 @@ class TestReadableWrapperCodegen(TestCase):
             "from ctypes import",
         ):
             self.assertNotIn(unused, preamble, f"{unused!r} kept but unused")
+
+    def test_default_wrapper_emits_the_whole_preamble(self):
+        # The preamble tables replaced two blobs for every python wrapper, not just the
+        # readable one; the default wrapper must still write every entry.
+        real = PythonWrapperCodegen.write_preamble_line
+        with mock.patch.object(
+            PythonWrapperCodegen, "write_preamble_line", autospec=True, side_effect=real
+        ) as spy:
+            _, code = _code_for(torch.relu, torch.randn(8), cpu_backend="cpp")
+        wrapper = spy.call_args_list[0].args[0]
+        table = wrapper._preamble_imports() + wrapper._preamble_bindings()
+        written = {call.args[3] for call in spy.call_args_list}
+        for _, line in table:
+            self.assertIn(line, written)
+            self.assertIn(line, code)
 
     def test_cpu_graph_does_not_bind_gpu_allocators(self):
         def fn(x):
