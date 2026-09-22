@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 
 #include <gtest/gtest.h>
@@ -46,6 +47,30 @@ TEST(StringUtilTest, testStrWideSingleMultibyte) {
   EXPECT_EQ(narrowC, c10::str(c));
 }
 } // namespace test_str_wide_single_multibyte
+
+namespace test_str_wide_malformed {
+// The surrogate handling is only compiled off Windows; the Windows path goes
+// through u16u8 instead.
+#ifndef _WIN32
+TEST(StringUtilTest, testStrWideMalformedSurrogate) {
+  // A high surrogate with nothing after it.
+  EXPECT_THROW((void)c10::str(std::wstring(1, L'\xD800')), c10::ValueError);
+  // A low surrogate with no high surrogate before it.
+  EXPECT_THROW((void)c10::str(std::wstring(1, L'\xDC00')), c10::ValueError);
+  // A high surrogate followed by a non-surrogate.
+  std::wstring unpairedHigh;
+  unpairedHigh.push_back(L'\xD800');
+  unpairedHigh.push_back(L'A');
+  EXPECT_THROW((void)c10::str(unpairedHigh), c10::ValueError);
+
+  // A well-formed pair still decodes: U+1F600 as UTF-8.
+  std::wstring pair;
+  pair.push_back(L'\xD83D');
+  pair.push_back(L'\xDE00');
+  EXPECT_EQ(std::string("\xF0\x9F\x98\x80"), c10::str(pair));
+}
+#endif
+} // namespace test_str_wide_malformed
 
 namespace test_str_wide_empty {
 TEST(StringUtilTest, testStrWideEmpty) {
