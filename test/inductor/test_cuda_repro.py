@@ -3768,6 +3768,46 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.common(fn4, [y])
 
+    @unittest.skipUnless(HAS_GPU, "requires GPU")
+    @config.patch(force_layout_optimization=True)
+    def test_conv2d_backward_keeps_eager_grad_input_stride(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/197514
+        # force_layout_optimization can make convolution_backward fake-prop
+        # channels-last before original output strides are recorded, leaking
+        # NHWC into user-visible grad_input.
+        def fn(x, w, b):
+            return F.conv2d(x, w, b, stride=(2, 2), padding=2, groups=1)
+
+        torch.manual_seed(0)
+        x0 = torch.randn(
+            1, 3, 4, 4, device=self.device, dtype=torch.float32, requires_grad=True
+        )
+        w0 = torch.randn(
+            3, 3, 3, 3, device=self.device, dtype=torch.float32, requires_grad=True
+        )
+        b0 = torch.randn(3, device=self.device, dtype=torch.float32, requires_grad=True)
+
+        y_ref = fn(x0, w0, b0)
+        grad = torch.randn_like(y_ref)
+        grad = grad / grad.norm()
+        ref_grads = torch.autograd.grad(y_ref, (x0, w0, b0), grad)
+
+        x1 = x0.detach().clone().requires_grad_(True)
+        w1 = w0.detach().clone().requires_grad_(True)
+        b1 = b0.detach().clone().requires_grad_(True)
+
+        torch._dynamo.reset()
+        y_compiled = torch.compile(fn, backend="inductor")(x1, w1, b1)
+        compiled_grads = torch.autograd.grad(y_compiled, (x1, w1, b1), grad)
+
+        self.assertEqual(
+            compiled_grads[0],
+            ref_grads[0],
+            atol=1e-5,
+            rtol=1e-5,
+            exact_stride=True,
+        )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
