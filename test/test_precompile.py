@@ -1705,8 +1705,9 @@ class TestPrecompile(TestCase):
         # exec: the source is parsed before the cache is read.
         from torch._precompile import _parse_artifact_metadata
 
+        m, x = torch.nn.Linear(4, 3).eval(), torch.randn(2, 4)
         code, cache = _precompile_pair(
-            _files_fn, _FilesModel(), torch.randn(2, 4), backend="eager"
+            lambda model, xx: model(xx), m, x, backend="eager"
         )
         bad_code = code.replace("BACKEND = 'eager'", "BACKEND = 'nope'")
         self.assertNotEqual(bad_code, code)

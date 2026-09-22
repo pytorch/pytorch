@@ -76,7 +76,7 @@ caching mode).
 .. autoclass:: torch.compiler.precompile.Capture
 
 .. autoclass:: torch.compiler.precompile.PrecompiledRunnable
-   :members: installed, unload
+   :members: unload
 
 .. autoclass:: torch.compiler.precompile.PrecompileSummary
    :members: complete, dropped_guard_types, kept_guard_types
