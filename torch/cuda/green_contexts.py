@@ -146,6 +146,8 @@ def is_localization_supported(device_id: int | None = None) -> bool:
     if device_id is None:
         device_id = torch.cuda.current_device() if torch.cuda.is_initialized() else 0
     device = c_int()
+    # Use ctypes: loading cuda.bindings' driver dispatch alongside NVML can
+    # make CUDA initialization segfault in forked children.
     result = _get_cuda_library().cuDeviceGet(byref(device), device_id)
     # pyrefly: ignore [missing-attribute]
     if result == _drv.CUresult.CUDA_ERROR_NOT_INITIALIZED.value:
@@ -358,6 +360,8 @@ class SMPartition:
         same nonzero length; scalars are broadcast to that length. If every
         option is scalar, the split has one group. An early discovery group can
         exhaust the SMs needed by later groups.
+        A group with both ``num_sms=0`` and ``backfill=True`` consumes all
+        remaining SMs and must be the last group.
         Returns ``(partitions, remainder)``, with ``None`` for an empty remainder.
         The remainder does not inherit the requested alignment.
 
@@ -437,6 +441,12 @@ class SMPartition:
             raise ValueError("backfill entries must be bool values")
         params = []
         for index, count in enumerate(counts):
+            if count == 0 and backfills[index] and index < len(counts) - 1:
+                raise ValueError(
+                    f"Split group {index} has num_sms=0 and backfill=True, which "
+                    "consumes all remaining SMs. Only the last group may use this "
+                    "combination; move it last or specify a positive num_sms."
+                )
             # pyrefly: ignore [missing-attribute]
             param = _drv.CU_DEV_SM_RESOURCE_GROUP_PARAMS()
             param.smCount = count
