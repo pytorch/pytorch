@@ -2277,13 +2277,6 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
         return False
     if not _use_autotune_backend("NVGEMM"):
         return False
-    configured_backends = OrderedSet(
-        backend.strip()
-        for backend in config.max_autotune_gemm_backends.upper().split(",")
-        if backend.strip()
-    )
-    if not configured_backends.issubset(OrderedSet(["ATEN", "NVGEMM"])):
-        return False
 
     # The native alpha argument is currently implemented only by the vendored
     # NVFP4 provider.  The packed FP4 dtype is shared with MXFP4, so include the
