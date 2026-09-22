@@ -913,14 +913,26 @@ kernel void fractional_max_pool2d_backward(
     constant T* grad_output [[buffer(1)]],
     constant int64_t* indices [[buffer(2)]],
     constant FractionalMaxPoolParams& params [[buffer(3)]],
+    device c10::metal::ErrorMessages* error_buffer [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
+  const int64_t index = indices[tid];
+  const int64_t plane_size = static_cast<int64_t>(params.inputH) * params.inputW;
+  if (index < 0 || index >= plane_size) {
+    TORCH_REPORT_ERROR(
+        error_buffer,
+        "Found an invalid max index: ",
+        index,
+        " (plane size is ",
+        plane_size,
+        ")");
+    return;
+  }
   const int32_t plane =
       static_cast<int32_t>(tid) / (params.outputW * params.outputH);
-  const long plane_offset =
-      static_cast<long>(plane) * params.inputH * params.inputW;
+  const int64_t plane_offset = static_cast<int64_t>(plane) * plane_size;
 
   ::c10::metal::AtomicType<T>::atomic_add(
-      grad_input, plane_offset + indices[tid], grad_output[tid]);
+      grad_input, plane_offset + index, grad_output[tid]);
 }
 
 #define REGISTER_FRACTIONAL_MAX_POOL2D(T)                                  \
@@ -938,6 +950,7 @@ kernel void fractional_max_pool2d_backward(
       constant T * grad_output [[buffer(1)]],                              \
       constant int64_t* indices [[buffer(2)]],                             \
       constant FractionalMaxPoolParams& params [[buffer(3)]],              \
+      device ::c10::metal::ErrorMessages* error_buffer [[buffer(4)]],      \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_FRACTIONAL_MAX_POOL2D(float);
@@ -1003,14 +1016,27 @@ kernel void fractional_max_pool3d_backward(
     constant T* grad_output [[buffer(1)]],
     constant int64_t* indices [[buffer(2)]],
     constant FractionalMaxPool3dParams& params [[buffer(3)]],
+    device c10::metal::ErrorMessages* error_buffer [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
+  const int64_t index = indices[tid];
+  const int64_t plane_size =
+      static_cast<int64_t>(params.inputT) * params.inputH * params.inputW;
+  if (index < 0 || index >= plane_size) {
+    TORCH_REPORT_ERROR(
+        error_buffer,
+        "Found an invalid max index: ",
+        index,
+        " (plane size is ",
+        plane_size,
+        ")");
+    return;
+  }
   const int32_t plane = static_cast<int32_t>(tid) /
       (params.outputW * params.outputH * params.outputT);
-  const long plane_offset =
-      static_cast<long>(plane) * params.inputT * params.inputH * params.inputW;
+  const int64_t plane_offset = static_cast<int64_t>(plane) * plane_size;
 
   ::c10::metal::AtomicType<T>::atomic_add(
-      grad_input, plane_offset + indices[tid], grad_output[tid]);
+      grad_input, plane_offset + index, grad_output[tid]);
 }
 
 #define REGISTER_FRACTIONAL_MAX_POOL3D(T)                                  \
@@ -1028,6 +1054,7 @@ kernel void fractional_max_pool3d_backward(
       constant T * grad_output [[buffer(1)]],                              \
       constant int64_t* indices [[buffer(2)]],                             \
       constant FractionalMaxPool3dParams& params [[buffer(3)]],            \
+      device ::c10::metal::ErrorMessages* error_buffer [[buffer(4)]],      \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_FRACTIONAL_MAX_POOL3D(float);

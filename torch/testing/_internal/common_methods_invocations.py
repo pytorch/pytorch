@@ -5319,6 +5319,12 @@ def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
+    def random_samples(shape):
+        if device != 'mps':
+            return {}
+        return {'_random_samples': make_tensor(shape, device=device, dtype=dtype,
+                                               low=0, high=1, requires_grad=False)}
+
     # Order: input_shape, kernel_size
     cases = (((1, 3, 9, 9), 3),
              ((1, 3, 9, 9), (4, 4)),
@@ -5335,8 +5341,7 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_size=2,
                 return_indices=return_indices,
-                _random_samples=make_tensor((*input_shape[:2], 2), device=device, dtype=dtype,
-                                            low=0, high=1, requires_grad=False),
+                **random_samples((*input_shape[:2], 2)),
             )
 
             # test case passing a tuple output size
@@ -5345,8 +5350,7 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_size=(2, 3),
                 return_indices=return_indices,
-                _random_samples=make_tensor((*input_shape[:2], 2), device=device, dtype=dtype,
-                                            low=0, high=1, requires_grad=False),
+                **random_samples((*input_shape[:2], 2)),
             )
 
             # test case passing an output ratio
@@ -5355,8 +5359,7 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_ratio=(0.5, 0.5),
                 return_indices=return_indices,
-                _random_samples=make_tensor((*input_shape[:2], 2), device=device, dtype=dtype,
-                                            low=0, high=1, requires_grad=False),
+                **random_samples((*input_shape[:2], 2)),
             )
 
     yield SampleInput(
@@ -5364,11 +5367,17 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
         (1, 1),
         output_ratio=(0.5, 0.5),
         return_indices=True,
-        _random_samples=make_tensor((1, 1, 2), device=device, dtype=dtype, low=0, high=1, requires_grad=False),
+        **random_samples((1, 1, 2)),
     )
 
 def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def random_samples(shape):
+        if device != 'mps':
+            return {}
+        return {'_random_samples': make_tensor(shape, device=device, dtype=dtype,
+                                               low=0, high=1, requires_grad=False)}
 
     # Order: input_shape, kernel_size
     cases = (((2, 3, 5, 5, 5), (2, 2, 2)),
@@ -5388,8 +5397,7 @@ def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_size=2,
                 return_indices=return_indices,
-                _random_samples=make_tensor((*input_shape[:2], 3), device=device, dtype=dtype,
-                                            low=0, high=1, requires_grad=False),
+                **random_samples((*input_shape[:2], 3)),
             )
 
             # test case passing a tuple output size
@@ -5398,8 +5406,7 @@ def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_size=(2, 3, 2),
                 return_indices=return_indices,
-                _random_samples=make_tensor((*input_shape[:2], 3), device=device, dtype=dtype,
-                                            low=0, high=1, requires_grad=False),
+                **random_samples((*input_shape[:2], 3)),
             )
 
             # test case passing an output ratio
@@ -5408,8 +5415,7 @@ def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, *
                 kernel_size,
                 output_ratio=(0.5, 0.5, 0.5),
                 return_indices=return_indices,
-                _random_samples=make_tensor((*input_shape[:2], 3), device=device, dtype=dtype,
-                                            low=0, high=1, requires_grad=False),
+                **random_samples((*input_shape[:2], 3)),
             )
 
 def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):

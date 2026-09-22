@@ -635,7 +635,7 @@ static void fractional_max_pool2d_backward_out_mps_template(const Tensor& grad_i
       auto pso = lib.getPipelineStateForFunc("fractional_max_pool2d_backward_" + scalarToMetalTypeString(input));
       getMPSProfiler().beginProfileKernel(pso, "fractional_max_pool2d_backward", {grad_output}, stream);
       [computeEncoder setComputePipelineState:pso];
-      mtl_setArgs(computeEncoder, grad_input_c, grad_output_c, indices_c, params);
+      mtl_setArgs(computeEncoder, grad_input_c, grad_output_c, indices_c, params, stream->getErrorBuffer());
       mtl_dispatch1DJob(computeEncoder, pso, numThreads);
       getMPSProfiler().endProfileKernel(pso, stream);
     }
@@ -740,7 +740,7 @@ static void fractional_max_pool3d_backward_out_mps_template(const Tensor& grad_i
       auto pso = lib.getPipelineStateForFunc("fractional_max_pool3d_backward_" + scalarToMetalTypeString(input));
       getMPSProfiler().beginProfileKernel(pso, "fractional_max_pool3d_backward", {grad_output}, stream);
       [computeEncoder setComputePipelineState:pso];
-      mtl_setArgs(computeEncoder, grad_input_c, grad_output_c, indices_c, params);
+      mtl_setArgs(computeEncoder, grad_input_c, grad_output_c, indices_c, params, stream->getErrorBuffer());
       mtl_dispatch1DJob(computeEncoder, pso, numThreads);
       getMPSProfiler().endProfileKernel(pso, stream);
     }

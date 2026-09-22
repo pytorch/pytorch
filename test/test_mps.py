@@ -991,6 +991,12 @@ class TestFractionalMaxPool(TestCaseMPS):
             with self.assertRaises(RuntimeError):
                 op(bad_grad, x, (2,) * ndim, (2,) * ndim, bad_indices)
 
+        for invalid_index in (-1, 7 ** ndim):
+            invalid_indices = indices.clone()
+            invalid_indices.flatten()[0] = invalid_index
+            with self.assertRaisesRegex(RuntimeError, "Found an invalid max index"):
+                op(grad, x, (2,) * ndim, (2,) * ndim, invalid_indices)
+
     @parametrize("ndim", [2, 3])
     def test_fractional_max_pool_generated_samples(self, ndim):
         # Exercise the public module's device RNG path as well as explicit samples.
