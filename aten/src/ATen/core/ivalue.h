@@ -12,6 +12,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
+#include <functional>
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
@@ -73,7 +74,7 @@ struct ComplexHolder : c10::intrusive_ptr_target {
  public:
   template <typename T>
   ComplexHolder(c10::complex<T> c) {
-    val = convert<decltype(val), c10::complex<T>>(c);
+    val = c10::convert<decltype(val), c10::complex<T>>(c);
   }
   ComplexHolder() = default;
   c10::complex<double> val;
@@ -1126,9 +1127,10 @@ struct TORCH_API IValue final {
         // Opaque tensors such as the ones constructed by the MKL-DNN backend
         // don't have storage so we just use their TensorImpls.
         // TODO: Find way to expose alias info for opaque tensors.
-        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
+        return std::hash<const void*>()(ten.unsafeGetTensorImpl());
       } else {
-        return reinterpret_cast<size_t>(ten.storage().unsafeGetStorageImpl());
+        return std::hash<const void*>()(
+            ten.storage().unsafeGetStorageImpl());
       }
     }
     size_t operator()(const IValue& val) const {
