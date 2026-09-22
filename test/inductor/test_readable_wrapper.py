@@ -5,9 +5,14 @@ import re
 import tempfile
 
 import torch
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -70,15 +75,29 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertTrue(re.search(r"^def triton_\w+\(", code, re.MULTILINE))
 
     @requires_cuda_and_triton
-    def test_emitted_module_runs_standalone_and_matches_eager(self):
+    @parametrize("autotune_at_compile_time", [None, True])
+    def test_emitted_module_runs_standalone_and_matches_eager(
+        self, autotune_at_compile_time
+    ):
         # The point of the mode: the file on its own is the program. Compile it from a
         # real path -- @triton.jit resolves its own source by filename, so a hoisted
-        # kernel cannot be exec'd from a bare string.
+        # kernel cannot be exec'd from a bare string. autotune_at_compile_time=True is
+        # what export_python compiles under.
         def fn(x):
             return torch.softmax(x * 2, dim=-1)
 
         x = torch.randn(64, 128, device="cuda")
-        expected, code = _code_for(fn, x, readable_wrapper=True)
+        cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        expected, code = _code_for(fn, x, readable_wrapper=True, **cfg)
+        self.assertEqual(expected, fn(x))
+        # Only the compile-time autotune script, which execs its kernels, keeps the
+        # AsyncCompile string form; the wrapper itself defines the kernel as code.
+        self.assertEqual(
+            code.count("= async_compile.triton("), 1 if autotune_at_compile_time else 0
+        )
+        self.assertEqual(self._run_standalone(code, [x])[0], expected)
+
+    def _run_standalone(self, code, args):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "artifact.py")
             with open(path, "w") as f:
@@ -86,8 +105,25 @@ class TestReadableWrapperCodegen(TestCase):
             ns: dict[str, object] = {"__file__": path, "__name__": "_readable_artifact"}
             with open(path) as f:
                 exec(compile(f.read(), path, "exec"), ns)
-            got = ns["call"]([x])  # type: ignore[operator]
-        self.assertEqual(got[0], expected)
+            return ns["call"](args)  # type: ignore[operator]
+
+    @requires_cuda_and_triton
+    def test_same_named_helpers_do_not_shadow(self):
+        # Scan helpers are named by op sequence and numbered per kernel, so these two
+        # combine_fns emit the same helper name with different constants.
+        def fn(x, y):
+            kw = {"dim": 0, "combine_mode": "pointwise"}
+            a = associative_scan(lambda p, q: p + q + 1, x, **kw)
+            return a, associative_scan(lambda p, q: p + q + 2, y, **kw)
+
+        x, y = torch.randn(64, device="cuda"), torch.randn(64, device="cuda")
+        result, code = _code_for(fn, x, y, readable_wrapper=True)
+        helpers = re.findall(r"^def (_triton_helper_fn\w*)\(", code, re.MULTILINE)
+        self.assertEqual(len(helpers), 2)
+        self.assertEqual(len(helpers), len(set(helpers)), helpers)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+        self.assertEqual(self._run_standalone(code, [x, y]), expected)
 
     @requires_cuda_and_triton
     def test_no_stale_pointer_to_a_cache_file(self):
@@ -114,27 +150,37 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertIn("async_compile.triton", code)
         self.assertIn("AsyncCompile()", code)
 
-    @requires_cuda_and_triton
     def test_shadowing_kernel_names_are_refused(self):
         def fn(x):
             return (x * 2).relu()
 
-        x = torch.randn(256, device="cuda")
+        x = torch.randn(256)
         with self.assertRaisesRegex(Exception, "unique_kernel_names"):
             _code_for(
                 fn, x, readable_wrapper=True, **{"triton.unique_kernel_names": False}
             )
 
-    @requires_cuda_and_triton
-    def test_benchmark_kernel_is_refused(self):
-        # benchmark_kernel appends a get_args()/call()/__main__ harness to each kernel;
-        # at module level those collide with each other and with the wrapper's own call.
+    @parametrize("flag", ["benchmark_kernel", "benchmark_combo_kernel"])
+    def test_benchmark_harness_is_refused(self, flag):
+        # these append a get_args()/call()/__main__ harness to each kernel; at module
+        # level those collide with each other and with the wrapper's own call.
         def fn(x):
             return (x * 2).relu()
 
-        x = torch.randn(256, device="cuda")
-        with self.assertRaisesRegex(Exception, "benchmark_kernel"):
-            _code_for(fn, x, readable_wrapper=True, benchmark_kernel=True)
+        with self.assertRaisesRegex(Exception, flag):
+            _code_for(fn, torch.randn(256), readable_wrapper=True, **{flag: True})
+
+    @parametrize("flag", ["cpp_wrapper", "fx_wrapper"])
+    def test_non_python_wrapper_is_refused(self, flag):
+        # these select a different wrapper, which would silently drop readable_wrapper
+        def fn(x):
+            return (x * 2).relu()
+
+        with self.assertRaisesRegex(Exception, "cpp_wrapper and fx_wrapper"):
+            _code_for(fn, torch.randn(256), readable_wrapper=True, **{flag: True})
+
+
+instantiate_parametrized_tests(TestReadableWrapperCodegen)
 
 
 if __name__ == "__main__":
