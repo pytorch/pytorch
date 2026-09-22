@@ -9,6 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 import torch
+from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -570,7 +571,13 @@ class MPSBasicTestsAOTI(TestCase):
 
         example_inputs = (torch.randn(8, device="mps"),)
         ep = torch.export.export(Model(), example_inputs)
-        so_path = torch._export.aot_compile(ep.module(), example_inputs)
+        # Without libtorch is the configuration the stray dependency actually
+        # hurts, an artifact meant to be opened somewhere else, and it is the
+        # only one the flag is added for. At the default the flag does not
+        # apply and this would be asserting against a build it says nothing
+        # about.
+        with inductor_config.patch({"aot_inductor.link_libtorch": False}):
+            so_path = torch._export.aot_compile(ep.module(), example_inputs)
 
         listed = subprocess.run(
             ["otool", "-L", so_path], capture_output=True, check=True
@@ -580,18 +587,20 @@ class MPSBasicTestsAOTI(TestCase):
             for line in listed.splitlines()
             if " (compatibility" in line
         ]
-        self.assertTrue(deps, f"otool reported no dependencies for {so_path}")
+        if not deps:
+            raise AssertionError(f"otool reported no dependencies for {so_path}")
 
+        # Named rather than counted, because a bare count tells whoever reads
+        # the failure nothing about which library came back.
         openmp = [d for d in deps if "omp" in os.path.basename(d).lower()]
-        self.assertEqual(openmp, [], f"unused OpenMP dependency in {so_path}")
+        if openmp:
+            raise AssertionError(f"unused OpenMP dependency in {so_path}: {openmp}")
 
         # The other half of the property: a library the model does reach has to
         # survive. Every Mach-O object links libSystem, so if that is gone the
         # flag is stripping things it should not.
-        self.assertTrue(
-            any(os.path.basename(d).startswith("libSystem") for d in deps),
-            f"expected libSystem among {deps}",
-        )
+        if not any(os.path.basename(d).startswith("libSystem") for d in deps):
+            raise AssertionError(f"expected libSystem among {deps}")
 
 
 if __name__ == "__main__":
