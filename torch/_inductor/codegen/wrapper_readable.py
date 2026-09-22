@@ -27,7 +27,7 @@ from .wrapper import PythonWrapperCodegen, SubgraphPythonWrapperCodegen
 # Emitted whatever the analysis says. `torch` is used by essentially every graph and is
 # what the rest of the preamble is written in terms of, so dropping it could only ever
 # be wrong.
-_ALWAYS_EMIT = frozenset({"torch"})
+_ALWAYS_EMIT = ("torch",)
 
 
 class _LineIfAsyncCompileUsed(DeferredLineBase):
