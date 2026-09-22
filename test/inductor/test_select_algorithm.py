@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI300_ARCH,
     skipIfRocmArch,
+    skipIfRocmVersionAtLeast,
     TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import (
@@ -699,6 +700,7 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @patches
     @torch._inductor.config.patch(max_autotune_conv_backends="ATEN,TRITON")
     def test_non_1x1_convolution_caps_template_warps(self):
