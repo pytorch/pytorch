@@ -749,7 +749,10 @@ std::optional<c10::ScalarType> out_dtype) {
     out_dtype.value_or(at::kBFloat16) == at::kBFloat16
   );
 #ifndef USE_ROCM
-  bool use_fast_path = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true) && a_b_and_out_are_bf16;
+  // GroupMM.cu dispatches sm9x and sm10x/sm11x; scaled_mm_arch_allowed cannot
+  // express sm11x, and this op is not scaled anyway.
+  const auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool use_fast_path = dprops->major >= 9 && dprops->major <= 11 && a_b_and_out_are_bf16;
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
