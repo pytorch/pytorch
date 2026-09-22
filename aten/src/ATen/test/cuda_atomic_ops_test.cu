@@ -2,9 +2,15 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <c10/test/util/Macros.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/cuda/CUDAException.h>
 
+#include <ATen/ATen.h>
+
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <vector>
 
 constexpr int blocksize = 256;
 constexpr int factor = 4;
@@ -287,4 +293,120 @@ TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestAtomicReturnValue)) {
   test_atomic_return_value<at::Half>();
   test_atomic_return_value<float>();
   test_atomic_return_value<double>();
+}
+
+namespace {
+
+// What the accessor overload has to get right is the bound it derives: the
+// distance to the last addressable element, which stops matching the element
+// count as soon as the accessor is strided.
+//
+// A pairing writes +0 to the neighbour, which no value check can see. The sign
+// bit gives it away, since (-0.0) + (+0.0) == +0.0, so a buffer seeded with
+// -0.0 answers "was this slot touched". Same trick as
+// TestFastAtomicAdd.VectorizedBounds in
+// test/cpp/aoti_abi_check/cuda/test_kernel_utils.cu, for the pointer form.
+constexpr uint16_t kNegZeroBits = 0x8000; // -0.0 as both fp16 and bf16
+
+template <typename scalar_t>
+__global__ void accessor_scatter_kernel(
+    at::PackedTensorAccessor64<scalar_t, 2> acc,
+    int64_t i0,
+    int64_t i1) {
+  at::native::fastAtomicAdd(acc, static_cast<scalar_t>(1), i0, i1);
+}
+
+// A 2x3 view into a 1-D tensor, `offset` elements in with the given strides --
+// the strided accessor is the object under test, so it is built the way one
+// actually reaches a kernel. Scatters +1 at (i0, i1) and returns the whole
+// buffer, so a write outside the view's region shows up.
+template <typename scalar_t>
+std::vector<scalar_t> accessorScatter(
+    std::vector<scalar_t> buf,
+    int64_t offset,
+    int64_t row_stride,
+    int64_t col_stride,
+    int64_t i0,
+    int64_t i1) {
+  const auto opts =
+      at::TensorOptions().dtype(c10::CppTypeToScalarType<scalar_t>::value);
+  const auto base =
+      at::from_blob(buf.data(), {static_cast<int64_t>(buf.size())}, opts)
+          .to(at::kCUDA);
+  const auto view =
+      at::as_strided(base, {2, 3}, {row_stride, col_stride}, offset);
+
+  accessor_scatter_kernel<scalar_t>
+      <<<1, 1>>>(view.packed_accessor64<scalar_t, 2>(), i0, i1);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  const auto out = base.cpu();
+  std::memcpy(buf.data(), out.const_data_ptr(), buf.size() * sizeof(scalar_t));
+  return buf;
+}
+
+template <typename scalar_t>
+bool wasWritten(scalar_t v) {
+  return v.x != kNegZeroBits;
+}
+
+template <typename scalar_t>
+void test_accessor_bounds() {
+  constexpr int64_t buf_numel = 16;
+  constexpr int64_t offset = 1; // odd 16-bit alignment, as a view would give
+
+  // Contiguous 2x3, strides 3/1: memory_span is 6. At this alignment even
+  // offsets pair left and odd ones pair right, so (0,1) at offset 1 pairs and
+  // is the positive control, while (1,2) at offset 5 can only look right, past
+  // the last element, and must fall back to a scalar atomic.
+  {
+    std::vector<scalar_t> buf(buf_numel);
+    for (auto& v : buf) {
+      v.x = kNegZeroBits;
+    }
+    const auto out =
+        accessorScatter<scalar_t>(std::move(buf), offset, 3, 1, 0, 1);
+    EXPECT_EQ(static_cast<float>(out[offset + 1]), 1.0f);
+    EXPECT_TRUE(wasWritten(out[offset + 2])) << "offset 1 should pair right";
+    EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start";
+  }
+  {
+    std::vector<scalar_t> buf(buf_numel);
+    for (auto& v : buf) {
+      v.x = kNegZeroBits;
+    }
+    const auto out =
+        accessorScatter<scalar_t>(std::move(buf), offset, 3, 1, 1, 2);
+    EXPECT_EQ(static_cast<float>(out[offset + 5]), 1.0f);
+    EXPECT_FALSE(wasWritten(out[offset + 6])) << "paired past the last element";
+    EXPECT_FALSE(wasWritten(out[buf_numel - 1])) << "wrote past the end";
+  }
+
+  // Non-contiguous 2x3, strides 6/2: element count is still 6, but the last
+  // addressable offset is 10, so memory_span is 11. Writing (1, 2) lands there
+  // and pairs left into offset 9, a gap the view steps over -- legal, and what
+  // a numel-derived bound of 6 would wrongly have refused.
+  {
+    std::vector<scalar_t> buf(buf_numel);
+    for (auto& v : buf) {
+      v.x = kNegZeroBits;
+    }
+    const auto out =
+        accessorScatter<scalar_t>(std::move(buf), offset, 6, 2, 1, 2);
+    EXPECT_EQ(static_cast<float>(out[offset + 10]), 1.0f);
+    EXPECT_TRUE(wasWritten(out[offset + 9])) << "declined to pair inside the region";
+    EXPECT_FALSE(wasWritten(out[offset + 11])) << "paired past the region";
+    EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start";
+  }
+}
+} // namespace
+
+TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestFastAtomicAddAccessorBounds)) {
+  if (!at::cuda::is_available()) return;
+  test_accessor_bounds<at::Half>();
+  // fastSpecializedAtomicAdd has no packed bf16 path before sm_80, so the
+  // pairing these cases assert on does not happen there.
+  if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
+    test_accessor_bounds<at::BFloat16>();
+  }
 }
