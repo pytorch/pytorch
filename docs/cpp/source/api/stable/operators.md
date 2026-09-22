@@ -172,5 +172,8 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::floor_divide
 ```
 
-```{doxygenfunction} torch::stable::sort
+```{doxygenfunction} torch::stable::sort(const torch::stable::Tensor &self, int64_t dim, bool descending)
+```
+
+```{doxygenfunction} torch::stable::sort(const torch::stable::Tensor &self, std::optional<bool> stable, int64_t dim, bool descending)
 ```
