@@ -123,7 +123,7 @@ class TestNativeAotTopKDeclaration(TestCase):
 
         self.assertEqual(
             aot.ARCHS,
-            ("sm_90", "sm_100f"),
+            ("sm_90", "sm_100f", "sm_120f"),
         )
 
     def test_dispatch_alignment_is_radix_only(self):

@@ -17,7 +17,7 @@ KERNEL_MODULE = "cutedsl_kernels.py"
 # against aten on Hopper and Blackwell.
 # These kernels require no architecture-conditional instructions. The exporter
 # chooses the widest compatible target for the build's supported devices.
-ARCHS = ("sm_90", "sm_100f")
+ARCHS = ("sm_90", "sm_100f", "sm_120f")
 
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}
 _RADIX_KS = (64, 128, 256, 512, 1024)

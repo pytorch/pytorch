@@ -22,7 +22,6 @@ import importlib.util
 import inspect
 import os
 import re
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 
@@ -77,18 +76,14 @@ _OPTIONAL_FNS = {
 }
 
 
-@dataclass(frozen=True)
-class ArchFamily:
-    """An ordered CUDA architecture family."""
-
-    name: str
-    members: tuple[tuple[int, int], ...]
-
-
-# Family membership is CUDA compatibility metadata, not something inferred from a
-# compute capability's major number. An f target serves its member and every later
-# member in this tuple.
-ARCH_FAMILIES = (ArchFamily("sm_10x", ((10, 0), (10, 3), (10, 7))),)
+# An sm_XYf target covers known devices with major X and minor >= Y. Keep the
+# target-to-device mapping explicit so runtime-only devices remain represented.
+FAMILY_TARGET_DEVICES = {
+    "sm_100f": ((10, 0), (10, 3), (10, 7)),
+    "sm_103f": ((10, 3), (10, 7)),
+    "sm_120f": ((12, 0), (12, 1)),
+    "sm_121f": ((12, 1),),
+}
 
 
 # Compiler targets offered by the default ARCHS. Runtime-only family members need
@@ -102,6 +97,12 @@ KNOWN_ARCHES = (
     "sm_103",
     "sm_103f",
     "sm_103a",
+    "sm_120",
+    "sm_120f",
+    "sm_120a",
+    "sm_121",
+    "sm_121f",
+    "sm_121a",
 )
 
 # Default ARCHS covers every compiler target known to native-AOT. Declarations
@@ -193,28 +194,17 @@ def suffix_of(arch: str) -> str:
     return match.group(2)
 
 
-def family_for_cc(cc: tuple[int, int]) -> ArchFamily | None:
-    """The declared CUDA architecture family containing ``cc``, if any."""
-    found = [family for family in ARCH_FAMILIES if cc in family.members]
-    if len(found) > 1:
-        raise RuntimeError(
-            f"compute capability {cc[0]}.{cc[1]} belongs to multiple CUDA "
-            f"architecture families: {', '.join(f.name for f in found)}"
-        )
-    return found[0] if found else None
-
-
 def target_devices(target: str) -> tuple[tuple[int, int], ...]:
     """Known device capabilities on which ``target`` can run."""
     target_cc = cc_of(target)
     if suffix_of(target) != "f":
         return (target_cc,)
-    family = family_for_cc(target_cc)
-    if family is None:
+    devices = FAMILY_TARGET_DEVICES.get(target)
+    if devices is None:
         raise RuntimeError(
-            f"family-specific target {target} has no entry in ARCH_FAMILIES"
+            f"family-specific target {target} has no entry in FAMILY_TARGET_DEVICES"
         )
-    return family.members[family.members.index(target_cc) :]
+    return devices
 
 
 def target_can_run_on(target: str, device_cc: tuple[int, int]) -> bool:
@@ -271,23 +261,29 @@ def known_device_capabilities() -> frozenset[tuple[int, int]]:
     return frozenset(cc for target in KNOWN_ARCHES for cc in target_devices(target))
 
 
-def _validate_arch_families() -> None:
-    seen: dict[tuple[int, int], str] = {}
-    for family in ARCH_FAMILIES:
-        if not family.members or len(set(family.members)) != len(family.members):
-            raise AssertionError(f"{family.name}: members must be non-empty and unique")
-        for cc in family.members:
-            if cc in seen:
-                raise AssertionError(
-                    f"compute capability {cc} belongs to both {seen[cc]} and "
-                    f"{family.name}"
-                )
-            seen[cc] = family.name
+def _validate_family_targets() -> None:
+    for target, devices in FAMILY_TARGET_DEVICES.items():
+        if suffix_of(target) != "f":
+            raise AssertionError(f"{target}: family target must have an f suffix")
+        if not devices or len(set(devices)) != len(devices):
+            raise AssertionError(f"{target}: devices must be non-empty and unique")
+        if devices[0] != cc_of(target):
+            raise AssertionError(
+                f"{target}: first device must match the target's compute capability"
+            )
+        target_major, target_minor = cc_of(target)
+        if any(
+            major != target_major or minor < target_minor for major, minor in devices
+        ):
+            raise AssertionError(
+                f"{target}: devices must have major {target_major} and minor >= "
+                f"{target_minor}"
+            )
     for target in KNOWN_ARCHES:
         target_devices(target)
 
 
-_validate_arch_families()
+_validate_family_targets()
 
 
 def _check_arity(mod, name: str, want: int, path: str) -> None:

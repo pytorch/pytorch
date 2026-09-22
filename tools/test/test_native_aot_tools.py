@@ -664,11 +664,19 @@ class TestArch(unittest.TestCase):
 
     def test_family_targets_follow_declared_members(self):
         self.assertEqual(
-            native_aot_decl.target_devices("sm_100f"),
+            native_aot_decl.FAMILY_TARGET_DEVICES["sm_100f"],
             ((10, 0), (10, 3), (10, 7)),
         )
+        self.assertEqual(
+            native_aot_decl.target_devices("sm_100f"),
+            native_aot_decl.FAMILY_TARGET_DEVICES["sm_100f"],
+        )
         self.assertEqual(native_aot_decl.target_devices("sm_103f"), ((10, 3), (10, 7)))
+        self.assertEqual(native_aot_decl.target_devices("sm_120f"), ((12, 0), (12, 1)))
+        self.assertEqual(native_aot_decl.target_devices("sm_121f"), ((12, 1),))
+        self.assertTrue(native_aot_decl.target_can_run_on("sm_103f", (10, 7)))
         self.assertTrue(native_aot_decl.target_can_run_on("sm_100f", (10, 7)))
+        self.assertTrue(native_aot_decl.target_can_run_on("sm_120f", (12, 1)))
         self.assertFalse(native_aot_decl.target_can_run_on("sm_100f", (10, 1)))
 
     def test_widest_compatible_target_prefers_family_coverage(self):
@@ -683,30 +691,38 @@ class TestArch(unittest.TestCase):
         self.assertEqual(choose(("sm_100a",), (10, 0)), "sm_100a")
         self.assertIsNone(choose(("sm_100a",), (10, 3)))
 
-    def test_family_logic_does_not_depend_on_a_shared_major(self):
-        future = native_aot_decl.ArchFamily("future", ((11, 0), (12, 0), (12, 2)))
+    def test_family_logic_is_not_special_cased_to_sm10x(self):
+        future = {"sm_110f": ((11, 0), (11, 2), (11, 7))}
         with tempfile.TemporaryDirectory() as ops:
             _write_fake_decl(ops, "ARCHS = ('sm_110f',)\n")
             with (
-                mock.patch.object(native_aot_decl, "ARCH_FAMILIES", (future,)),
+                mock.patch.object(native_aot_decl, "FAMILY_TARGET_DEVICES", future),
                 mock.patch.object(export, "OPS_DIR", ops),
             ):
                 self.assertEqual(
                     native_aot_decl.target_devices("sm_110f"),
-                    ((11, 0), (12, 0), (12, 2)),
+                    ((11, 0), (11, 2), (11, 7)),
                 )
-                self.assertTrue(native_aot_decl.target_can_run_on("sm_110f", (12, 2)))
+                self.assertTrue(native_aot_decl.target_can_run_on("sm_110f", (11, 7)))
                 self.assertEqual(
                     native_aot_decl.widest_compatible_target(
-                        ("sm_110f", "sm_120a"), (12, 2)
+                        ("sm_110f", "sm_117a"), (11, 7)
                     ),
                     "sm_110f",
                 )
                 match = gen_aot_lib._device_match("sm_110f")
-                self.assertEqual(export.targets_for_arches(["sm_122"]), ["sm_110f"])
+                self.assertEqual(export.targets_for_arches(["sm_117"]), ["sm_110f"])
         self.assertIn("major == 11", match)
-        self.assertIn("major == 12", match)
+        self.assertNotIn("major == 10", match)
         self.assertNotIn("minor >=", match)
+
+    def test_family_table_rejects_cross_major_coverage(self):
+        invalid = {"sm_110f": ((11, 0), (12, 0))}
+        with (
+            mock.patch.object(native_aot_decl, "FAMILY_TARGET_DEVICES", invalid),
+            self.assertRaisesRegex(AssertionError, "major 11 and minor >= 0"),
+        ):
+            native_aot_decl._validate_family_targets()
 
     def test_the_detected_arch_is_the_local_capability(self):
         # Without this the gate falls back to ARCHS and advertises hardware nothing was
@@ -737,6 +753,7 @@ class TestArch(unittest.TestCase):
         # artifact, which also serves SM103 without another copy of every kernel.
         self.assertEqual(f("10.0"), ["sm_100f"])
         self.assertEqual(f("Hopper 10.3a"), ["sm_100f"])
+        self.assertEqual(f("12.0;12.1a"), ["sm_120f"])
 
     def test_archs_from_cuda_arch_list_dedups(self):
         # "10.0;10.0+PTX" names one arch twice; a repeated entry would read as
@@ -748,6 +765,7 @@ class TestArch(unittest.TestCase):
 
     def test_known_devices_include_runtime_only_family_members(self):
         self.assertIn((10, 7), native_aot_decl.known_device_capabilities())
+        self.assertIn((12, 1), native_aot_decl.known_device_capabilities())
         self.assertNotIn("sm_107a", native_aot_decl.KNOWN_ARCHES)
 
     def test_build_arch_parser_does_not_choose_op_targets(self):
@@ -3062,7 +3080,7 @@ class TestShouldRun(unittest.TestCase):
         # after the main build, leaving a stage-2 run that cannot embed anything.
         for local, expected in (
             ("sm_86", False),
-            ("sm_120", False),
+            ("sm_120", True),
             ("sm_100", True),
             ("sm_103", True),
             ("sm_107", True),
@@ -3214,7 +3232,7 @@ class TestShouldRun(unittest.TestCase):
         self.assertTrue(ran)
         # The report is the branch's only observable, and on stderr: this is the one
         # gate that reports AND proceeds, where stdout carries the verdict.
-        self.assertIn("multi-arch: sm_90 sm_100f", err.getvalue())
+        self.assertIn("multi-arch: sm_90 sm_100f sm_120f", err.getvalue())
         self.assertEqual(out.getvalue(), "")
 
     def test_both_spellings_of_one_capability_run_as_one_arch(self):
