@@ -236,6 +236,12 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
+
+# FX metadata marking a compiler-created ``_scaled_mm(..., scale_result=...)``
+# that represents an explicit post-GEMM scalar multiply.  Unlike the public
+# operator argument, this scale must still be applied for BF16 output.
+FOLDED_SCALED_MM_OUTPUT_SCALE = "inductor_folded_scaled_mm_output_scale"
+
 # Scanned exactly once, when this module is imported. Safe because both
 # registration paths precede any import of inductor: autoloaded out-of-tree
 # backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
@@ -506,7 +512,13 @@ TMA_DESCRIPTOR_SIZE = 128
 #
 # 1. Legality. `make_tensor_descriptor` enforces rank 1-5, a unit innermost
 #    stride, and an innermost *block* extent of at least 16 bytes. This is the
-#    only alignment-shaped rule Triton actually checks.
+#    only alignment-shaped rule Triton actually checks. Note what it does NOT
+#    constrain: the logical innermost *extent*. `can_use_tma` requires that to
+#    be a 16-byte multiple; TDM has no such rule, because a descriptor load
+#    bounds-checks against the logical shape and zero-fills beyond it, so a
+#    block may legally overhang the extent. That is what admits FP16 head_dim
+#    65 (a 130-byte extent under a 128-element block). Do not copy TMA's rule
+#    here: it would reject padded head dimensions that are correct on TDM.
 # 2. Operand policy. Inductor additionally requires 16-byte storage offset and
 #    outer strides. Conservative, not required: it constrains where an operand
 #    may start, and does not establish base-pointer alignment.
@@ -2264,6 +2276,17 @@ def _use_autotune_backend(backend: str) -> bool:
     ]
 
 
+def _is_only_autotune_backend(backend: str) -> bool:
+    """Return whether ``backend`` is the only configured GEMM autotune backend."""
+    return OrderedSet(
+        [
+            x.strip()
+            for x in config.max_autotune_gemm_backends.upper().split(",")
+            if x.strip()
+        ]
+    ) == OrderedSet([backend.upper()])
+
+
 def _use_conv_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
@@ -2593,6 +2616,54 @@ def tdm_descriptor_row_major(mat: IRNode) -> bool | None:
     return _tdm_row_major_from_strides(strides_i)
 
 
+def _tdm_operand_policy_violation(
+    mat: IRNode,
+    accepted_dtypes: OrderedSet[torch.dtype],
+    offset: _IntLike,
+    outer_strides: Sequence[_IntLike],
+) -> str | None:
+    """Apply the shared TDM operand policy, or return why it does not hold.
+
+    Rank, orientation and symbol resolution differ between the dense MM and Flex
+    paths, so each caller prepares those itself and passes the results in. Every
+    check here is guard-free, which lets the callers keep their different guard
+    policies while agreeing on the rules.
+    """
+    from .virtualized import V
+
+    dtype = mat.get_dtype()
+    if dtype not in accepted_dtypes:
+        return f"unsupported dtype {dtype}"
+    if mat.get_name() in V.graph.unaligned_buffers:
+        return "buffer is marked unaligned"
+
+    itemsize = dtype.itemsize
+    aligned = _bytes_aligned
+
+    # Operand policy (rule 2). The innermost request extent (rule 1) depends on
+    # what the caller actually asks for, so it stays with the caller.
+    if not aligned(offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
+        return f"offset is not {_TDM_OPERAND_ALIGNMENT_BYTES}-byte aligned"
+    # Redundant under the 128-byte check below, kept because that one is
+    # provisional while this is an independent policy on outer strides.
+    if not all(
+        aligned(s * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES) for s in outer_strides
+    ):
+        return f"outer strides are not {_TDM_OPERAND_ALIGNMENT_BYTES}-byte aligned"
+
+    # Direct-path policy (rule 3): relative only, proves nothing about the
+    # absolute address.
+    if not all(
+        aligned(s * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES)
+        for s in outer_strides
+    ):
+        return (
+            "outer strides are not "
+            f"{_TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES}-byte aligned"
+        )
+    return None
+
+
 def _tdm_operand_compatible(
     mat: IRNode,
     accepted_dtypes: OrderedSet[torch.dtype],
@@ -2600,12 +2671,9 @@ def _tdm_operand_compatible(
     """Check descriptor semantics and the current direct-path selection policy."""
     from .virtualized import V
 
-    dtype = mat.get_dtype()
     sizes = mat.get_size()
     strides = mat.get_stride()
-    if dtype not in accepted_dtypes or len(sizes) != 2 or len(strides) != 2:
-        return False
-    if mat.get_name() in V.graph.unaligned_buffers:
+    if len(sizes) != 2 or len(strides) != 2:
         return False
 
     strides_i = [
@@ -2618,24 +2686,16 @@ def _tdm_operand_compatible(
     if row_major is None:
         return False
     outer_idx = 0 if row_major else 1
-    itemsize = dtype.itemsize
 
-    aligned = _bytes_aligned
-
-    # Operand policy (rule 2). The innermost block extent (rule 1) is checked by
-    # the template config filter, not by constraining the tensor extent here.
-    if not aligned(offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
-        return False
-    # Redundant under the 128-byte check below, kept because that one is
-    # provisional while this is an independent policy on outer strides.
-    if not aligned(strides_i[outer_idx] * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
-        return False
-
-    # Direct-path policy (rule 3): relative only, proves nothing about the
-    # absolute address.
-    return aligned(
-        strides_i[outer_idx] * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES
+    violation = _tdm_operand_policy_violation(
+        mat, accepted_dtypes, offset, [strides_i[outer_idx]]
     )
+    if violation is not None:
+        # Covers the shared dtype/alignment policy only; the rank and
+        # orientation exits above return before a reason exists.
+        log.debug("Dense TDM operand rejected for %s: %s", mat.get_name(), violation)
+        return False
+    return True
 
 
 def _guard_tdm_operand_layout(mat: IRNode) -> None:
@@ -2729,6 +2789,95 @@ def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
         and config.assume_aligned_inputs
         and _gfx1250_device_prereqs(device)
     )
+
+
+def use_flex_tdm_descriptor(
+    *matrices: IRNode,
+    block_shapes: Sequence[Sequence[sympy.Expr | int]],
+) -> bool:
+    """Return whether flex operands satisfy TDM descriptor and request constraints."""
+    from .virtualized import V
+
+    if not config.triton.enable_flex_tdm:
+        return False
+    if not matrices or not _gfx1250_device_prereqs(matrices[0].get_device()):
+        return False
+
+    # Checked rather than zipped loosely: zip() truncates, so a short list would
+    # silently leave later operands unvalidated.
+    if len(block_shapes) != len(matrices):
+        raise AssertionError("Expected one block shape per flex descriptor operand")
+
+    def _reject(mat: IRNode, reason: str) -> bool:
+        log.debug("Flex TDM descriptor rejected for %s: %s", mat.get_name(), reason)
+        return False
+
+    def operand_admissible(
+        mat: IRNode, block_shape: Sequence[sympy.Expr | int]
+    ) -> bool:
+        reject = functools.partial(_reject, mat)
+
+        sizes = mat.get_size()
+        strides = mat.get_stride()
+        if len(sizes) != 4 or len(strides) != 4:
+            return reject("expected four-dimensional sizes and strides")
+
+        itemsize = mat.get_dtype().itemsize
+        aligned = _bytes_aligned
+
+        if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
+            return reject("innermost stride is not statically known to be one")
+
+        # Offsets and strides stay symbolic so alignment can be proven without
+        # specializing dynamic sequence lengths; unprovable alignment disables
+        # TDM. The shared policy never resolves a hint, so passing the
+        # unresolved expressions keeps that property.
+        violation = _tdm_operand_policy_violation(
+            mat, _TDM_SUPPORTED_DTYPES, mat.get_layout().offset, strides[:-1]
+        )
+        if violation is not None:
+            return reject(violation)
+
+        if len(block_shape) != 2:
+            return reject("expected a two-dimensional block shape")
+
+        # Rule 1, against the extent actually requested, which is the block
+        # width rather than the logical dim. This is the frontend's minimum,
+        # not an alignment policy.
+        if not V.graph.sizevars.statically_known_geq(
+            block_shape[-1] * itemsize, _TDM_MIN_INNERMOST_REQUEST_BYTES
+        ):
+            return reject(
+                "innermost request extent is not statically known to hold at "
+                f"least {_TDM_MIN_INNERMOST_REQUEST_BYTES} bytes"
+            )
+
+        if not aligned(
+            block_shape[-1] * itemsize,
+            _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
+        ):
+            return reject("block width is not 128-byte aligned")
+
+        return True
+
+    # List-wide and guard-free, as in ``_tdm_operands_compatible``: rejecting a
+    # later operand must not leave guards behind for an earlier one.
+    if not all(
+        operand_admissible(mat, block_shape)
+        for mat, block_shape in zip(matrices, block_shapes)
+    ):
+        return False
+
+    # Bounds only: this does not pin a dynamic sequence length.
+    if not _descriptor_shapes_fit_in_int32(
+        [mat.get_size() for mat in matrices], add_guards=True
+    ):
+        log.debug(
+            "Flex TDM descriptor rejected for %s: shapes do not fit in int32",
+            [mat.get_name() for mat in matrices],
+        )
+        return False
+    return True
 
 
 def _tma_descriptor_max_offset_fits_in_int32(
@@ -3017,18 +3166,14 @@ def use_nv_universal_gemm_template(
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
         6. Base pointers are 16-byte aligned
-        7. Shape dimensions are not unbacked symbols
+        7. Shape dimensions are static
 
     Note:
         - Shape and stride constraints are handled internally by
           cutlass.operators.get_operators() which filters incompatible kernels.
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
-        - Dynamic shapes are supported as long as they have hints
-          (from example inputs).
     """
-    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
-
     if not ensure_cute_available():
         return False
 
@@ -3049,13 +3194,12 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # cutlass.operators can't handle unbacked symbols because it needs to evaluate
-    # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
-    # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
+    # cutlass.operators 0.2 cannot handle symbolic shapes because it hashes
+    # dimensions while evaluating its constraints.
     dims_to_check = [m, n, k]
     if g is not None:
         dims_to_check.append(g)
-    if any(has_free_unbacked_symbols(dim) for dim in dims_to_check):
+    if has_free_symbols(dims_to_check):
         return False
 
     # Base pointer must be 16-byte aligned. cutlass.operators can't check this at
@@ -3692,6 +3836,14 @@ def parallel_num_threads() -> int:
     return threads
 
 
+def fp32_matmul_precision_key() -> str:
+    # Read per-backend fp32 precision instead of
+    # torch.get_float32_matmul_precision(), which raises if the legacy and
+    # per-backend APIs have been mixed.
+    getter = torch._C._get_fp32_precision_getter
+    return f"cuda:{getter('cuda', 'matmul')},mkldnn:{getter('mkldnn', 'matmul')}"
+
+
 @functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
@@ -3701,31 +3853,44 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
-    if torch.xpu.is_available():
-        is_tf32 = torch.backends.mkldnn.allow_tf32
-    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
+def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
+    is_tf32 = False
+    if device.type == "cuda":
+        is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    elif device.type == "xpu":
+        is_tf32 = bool(torch.backends.mkldnn.allow_tf32)
+    device_info_key = _get_device_info_key(device)
+    ds_tops = (
+        datasheet_tops(dtype, is_tf32=is_tf32, device_name=device_info_key)
+        if device_info_key is not None
+        else None
+    )
     if ds_tops is not None:
         return ds_tops
 
-    if not torch.cuda.is_available():
+    if device.type != "cuda" or not torch.cuda.is_available():
         log.warning(
-            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
-            "Returning 0.0; roofline estimates will use memory bandwidth only."
+            "get_device_tflops: no Triton fallback available for %s. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only.",
+            device,
         )
         return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
-        8,
-        0,
-    )
+    device_idx = device.index
+    if device_idx is None:
+        log.warning("get_device_tflops requires a concrete CUDA device; returning 0.0")
+        return 0.0
+    try:
+        SM80OrLater = torch.cuda.get_device_capability(device_idx) >= (8, 0)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to query CUDA capability for %s; returning 0.0 TFLOPS",
+            device,
+            exc_info=True,
+        )
+        return 0.0
 
     if dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise AssertionError(
@@ -3736,14 +3901,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
-        sm_clock = max_clock_rate()
+        sm_clock = max_clock_rate(device_idx)
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            return get_max_tensorcore_tflops(dtype, sm_clock)
+            return get_max_tensorcore_tflops(dtype, sm_clock, device_idx)
 
         if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            return get_max_tensorcore_tflops(torch.float32, sm_clock)
+            return get_max_tensorcore_tflops(torch.float32, sm_clock, device_idx)
         else:
-            return get_max_simd_tflops(torch.float32, sm_clock)
+            return get_max_simd_tflops(torch.float32, sm_clock, device_idx)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype)
@@ -3752,6 +3917,34 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_tensorcore_tflops(torch.float32)
         else:
             return get_max_simd_tflops(torch.float32)
+
+
+def get_device_tflops(
+    dtype: torch.dtype, device: torch.device | str | None = None
+) -> float:
+    """
+    Return peak compute throughput without assuming a CUDA device.
+
+    Prefer registered or built-in device information. Devices exposed through
+    PyTorch's ``cuda`` device type, including ROCm, retain the existing Triton
+    fallback; other devices without registered information return zero.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for TFLOPS estimation")
+        return 0.0
+    try:
+        resolved_device = decode_device(resolved_device)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to resolve a device index for %s; returning 0.0 TFLOPS",
+            resolved_device,
+            exc_info=True,
+        )
+        return 0.0
+    return _get_device_tflops(dtype, resolved_device)
 
 
 def _current_accelerator_device() -> torch.device | None:

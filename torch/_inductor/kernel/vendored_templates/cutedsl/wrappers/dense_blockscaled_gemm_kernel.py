@@ -210,6 +210,7 @@ except ImportError:
 class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
     """Wrapper for vendored dense blockscaled GEMM template for SM100 GPUs."""
 
+    supports_output_scale = True
     supported_args_type = GemmArguments
     designed_for_min_cc = 100
 
@@ -267,9 +268,9 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         # Fused global scale: alpha is ALWAYS threaded as a trailing kernel arg
         # (ones when not fusing) so the kernel signature is consistent across all
         # compile/run paths -- a None alpha is not reliably dropped from the
-        # runtime signature. args.alpha (a TensorWrapper, len multiple-of-4) is
-        # applied elementwise in the epilogue; closure capture cannot read a
-        # runtime tensor there.
+        # runtime signature. args.alpha is a one-element FP32 TensorWrapper
+        # with 4-byte alignment, applied elementwise in the epilogue; closure
+        # capture cannot read a runtime tensor there.
         alpha = getattr(args, "alpha", None)
         if alpha is None:
             alpha = cute.runtime.make_fake_compact_tensor(
@@ -729,19 +730,38 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         return True
 
     @classmethod
+    def generate_operators_for_policy(
+        cls,
+        metadata_filter: Callable[[OperatorMetadata], bool],
+        *,
+        prefetch_mode: str,
+        use_pdl: bool,
+    ) -> list[VendoredDenseBlockScaledGemmKernel]:
+        """Generate operators without consulting mutable process-wide config."""
+        if use_pdl:
+            return []
+        return cls._generate_operators(
+            metadata_filter,
+            prefetch_mode=prefetch_mode,
+        )
+
+    @classmethod
     def _generate_operators(
         cls,
         metadata_filter: Callable[[OperatorMetadata], bool],
         epilogue_args=None,
         target_sm: TargetSm | None = None,
         args=None,
+        *,
+        prefetch_mode: str | None = None,
     ) -> list[VendoredDenseBlockScaledGemmKernel]:
         if target_sm is not None and target_sm.cc not in [100, 101, 103]:
             return []
         if epilogue_args is not None:
             return []
 
-        prefetch_mode = config.nvgemm_prefetch
+        if prefetch_mode is None:
+            prefetch_mode = config.nvgemm_prefetch
         prefetch_options = {
             "0": [False],
             "1": [True],

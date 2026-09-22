@@ -74,7 +74,7 @@ struct ComplexHolder : c10::intrusive_ptr_target {
  public:
   template <typename T>
   ComplexHolder(c10::complex<T> c) {
-    val = convert<decltype(val), c10::complex<T>>(c);
+    val = c10::convert<decltype(val), c10::complex<T>>(c);
   }
   ComplexHolder() = default;
   c10::complex<double> val;
