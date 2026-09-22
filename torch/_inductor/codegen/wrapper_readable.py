@@ -12,8 +12,9 @@ to the compile worker pool. And every hoisted kernel names itself by the wrapper
 ``__file__``, so they all share one autotune-cache key; that cache is effectively off in
 this mode (its configs_hash check keeps a wrong config from being applied).
 
-Only kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel is
-still emitted as a source string passed to ``async_compile.triton``.
+Only Triton kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel
+is still emitted as a source string passed to ``async_compile.triton``, and so are the
+kernels of other backends (C++, MPS, Halide, Pallas).
 """
 
 import re
@@ -55,11 +56,12 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
                 for line in metadata.splitlines()
                 if not line.startswith("# kernel path:")
             )
-        # @triton.jit helpers are numbered per kernel and named by op sequence, so two
-        # kernels can define the same helper name with different bodies; in one shared
+        # Kernels define module-level @triton.jit helpers under names that are only
+        # unique per kernel (scan combine_fns, flex attention's forward_inner, ...), so
+        # two kernels can define the same name with different bodies; in one shared
         # namespace the later def would win for both. Make them kernel-unique.
-        helpers = re.findall(r"^def (_triton_helper_fn\w*)\(", src_code, re.MULTILINE)
-        for helper in OrderedSet(helpers):
+        helpers = re.findall(r"^def (\w+)\(", src_code, re.MULTILINE)
+        for helper in OrderedSet(helpers) - OrderedSet([kernel_name, subs_name]):
             src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
         self.define_kernel(
             kernel_name,
