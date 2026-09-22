@@ -1712,6 +1712,23 @@ def add(x, y):
         self.assertEqual(counter.frame_count, 2)
         self.assertEqual(len(pkg.cache_entry().codes[0].guarded_codes), 2)
 
+    @torch._dynamo.config.patch(recompile_limit=1)
+    def test_truncated_frames_names_the_frame_that_hit_the_recompile_limit(self):
+        def fn(x):
+            return x + 1
+
+        pkg = CompilePackage(fn, explicit_capture=True)
+        compiled = torch._dynamo.optimize(backend="eager", package=pkg)(fn)
+        compiled(torch.randn(3))
+        self.assertEqual(pkg.truncated_frames, frozenset())
+        compiled(torch.randint(0, 5, (3,)))
+        code = fn.__code__
+        location = f"fn ({code.co_filename}:{code.co_firstlineno})"
+        self.assertEqual(pkg.truncated_frames, frozenset({location}))
+        # The variant captured before the limit stays in the package.
+        self.assertEqual(len(pkg.cache_entry().codes[0].guarded_codes), 1)
+        self.assertFalse(pkg.cache_entry().codes[0].bypassed)
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
