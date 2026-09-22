@@ -1191,6 +1191,22 @@ def export_python(
             for capture. Note that this deep copy includes the full weights of any
             ``nn.Module`` argument, so it transiently doubles that memory. Pass
             ``example_inputs`` explicitly for large modules to avoid the clone.
+            Capture restores the generator state it consumed, so capturing does not
+            advance the default generators the first call is about to draw from. A draw
+            naming an explicit ``torch.Generator`` is attributed to its output's device,
+            so the default generator for that device is restored while the named one is
+            left advanced. This is about
+            generator POSITION, not value parity with eager: ``backend="inductor"``
+            lowers random ops to inductor's own philox and produces different values
+            than eager at the same seed. The CPU generator is always saved; for
+            CUDA/XPU only the current device of each initialized accelerator and any
+            device reachable from the examples are, and a graph that draws elsewhere is
+            warned about rather than restored. The restore is process-global, so if
+            ``fn`` draws, a concurrent thread's draws during capture are rewound too --
+            precompile random computations before starting threads that share the
+            default generator. A graph containing no op that can draw never touches the
+            generators; one containing an opaque non-aten op conservatively restores
+            every saved generator; and a capture that raises restores nothing.
     """
     from torch.compiler._export_python import export_python as _export_python
 
