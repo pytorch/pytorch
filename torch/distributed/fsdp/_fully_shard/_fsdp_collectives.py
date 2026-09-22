@@ -616,17 +616,12 @@ def foreach_reduce(
         device=device,
     )
 
-    if any(num_leading_dims):
-        torch.ops.fsdp._reduce_scatter_copy_in_(
-            reduce_scatter_input.view(world_size, -1),
-            unsharded_grads,
-            num_leading_dims,
-            world_size,
-        )
-    else:
-        foreach_reduce_scatter_copy_in(
-            unsharded_grads, reduce_scatter_input, world_size
-        )
+    torch.ops.fsdp._reduce_scatter_copy_in_(
+        reduce_scatter_input.view(world_size, -1),
+        unsharded_grads,
+        num_leading_dims,
+        world_size,
+    )
 
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
