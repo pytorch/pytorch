@@ -5093,7 +5093,8 @@ class CheckFunctionManager:
 
         # TODO Be more explicit about the behavior for the users.
         # An explicit capture supplies a separate serialization filter. Ambient
-        # caching-precompile mode must not rewrite that package's live guards.
+        # caching-precompile mode must not rewrite that package's live guards,
+        # whether or not this compile saves them.
         if torch._dynamo.config.caching_precompile and not explicit_capture:
             _guard_filter_fn = guard_filter_fn or (lambda gs: [True for g in gs])
 
@@ -5209,10 +5210,11 @@ class CheckFunctionManager:
 
             serialized_guards = runtime_guards
             serialization_builder = builder
+            serialization_guard_manager = guard_manager
             if separate_save_build:
                 if serialization_filter is not None:
                     serialized_guards = apply_filter(serialization_filter)
-                serialization_builder, _ = self.build_guards(
+                serialization_builder, serialization_guard_manager = self.build_guards(
                     serialized_guards,
                     existing_diff_guard_sources,
                     f_code,
@@ -5221,21 +5223,26 @@ class CheckFunctionManager:
                     guard_filter_fn=serialization_filter,
                 )
             self.guard_manager = guard_manager
+            values_before_check: set[int] = (
+                set(builder.guard_tree_values) if separate_save_build else set()
+            )
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
 
             if separate_save_build:
-                # Value pruning keys off the guard tree: anything the tree does
-                # not reach is replaced by a placeholder. Dropping a guard must
-                # not drop the VALUE it named, because the rest of the state
-                # still refers to it -- a pruned tensor comes back with no
-                # dtype. So prune against the unfiltered tree. Merge AFTER
-                # compile_check_fn: DuplicateInputs/StorageOverlap register
-                # their tensor values on the runtime builder in there, and the
-                # serialization builder must inherit them or they prune away.
-                serialization_builder.guard_tree_values = {
-                    **builder.guard_tree_values,
-                    **serialization_builder.guard_tree_values,
-                }
+                # DuplicateInputs/StorageOverlap fetch their guard managers
+                # inside compile_check_fn, which registers the tensors they name
+                # on the RUNTIME builder only. Hand exactly those to the
+                # serialization builder. Nothing more: value pruning keys off
+                # guard_tree_values, so a value the saved copy's guards do not
+                # reach stays prunable, which is what dropping a guard from the
+                # artifact is for.
+                serialization_builder.guard_tree_values.update(
+                    {
+                        k: v
+                        for k, v in builder.guard_tree_values.items()
+                        if k not in values_before_check
+                    }
+                )
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -5264,6 +5271,14 @@ class CheckFunctionManager:
             and not output_graph.export
             and not torch.compiler._is_non_strict_tracing()
         ):
+            # The saved copy may hold guards the live manager does not, so it
+            # gets the same-frame check of its own.
+            if serialization_guard_manager is not guard_manager and (
+                not serialization_guard_manager.check(output_graph.local_scope)
+            ):
+                raise AssertionError(
+                    "Serialized guard failed on the same frame it was created. This is a bug - please create an issue."
+                )
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
                     self.guard_manager,
