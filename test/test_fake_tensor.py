@@ -2639,6 +2639,39 @@ assert not torch.cuda.is_initialized()
                 torch.select(x, dim=1, index=-10)
 
 
+    def test_meta_kernel_failure_does_not_log_error(self):
+        import logging
+
+        fake_logger = logging.getLogger("torch._subclasses.fake_tensor")
+        records = []
+
+        class Handler(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = Handler()
+        fake_logger.addHandler(handler)
+        prev_level = fake_logger.level
+        fake_logger.setLevel(logging.DEBUG)
+
+        try:
+            mode = FakeTensorMode()
+            with mode:
+                a = torch.randn(1, 1)
+                b = torch.randn(4, 16)
+                with self.assertRaises(RuntimeError):
+                    torch.cat([a, b], dim=1)
+        finally:
+            fake_logger.removeHandler(handler)
+            fake_logger.setLevel(prev_level)
+
+        error_logs = [r for r in records if r.levelno >= logging.ERROR]
+        self.assertEqual(len(error_logs), 0)
+        if not torch._functorch.config.fake_tensor_propagate_real_tensors:
+            debug_logs = [r for r in records if "failed while attempting to run meta" in r.getMessage()]
+            self.assertGreater(len(debug_logs), 0)
+
+
 instantiate_parametrized_tests(FakeTensorTest)
 
 
