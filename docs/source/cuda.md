@@ -480,7 +480,7 @@ so it must be the last group. Otherwise, specify a positive SM count.
 CUDA validates hardware constraints without PyTorch rounding the requested sizes.
 CUDA permits kernels to use additional SMs in some configurations involving MPS
 or dynamic parallelism; see the
-[CUDA green-context documentation](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GREEN__CONTEXTS.html).
+[CUDA green-context documentation](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__GREEN__CONTEXTS.html).
 
 `GreenContext.sm_count` reports the actual allocation, including for contexts
 created through the existing `num_sms` constructor. Independent constructor
