@@ -3296,6 +3296,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         artifact = MagicMock()
 
         with (
+            patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
             patch.object(
                 compile_tasks,
                 "_apply_subprocess_env_and_clear_caches",
