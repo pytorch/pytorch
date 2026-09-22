@@ -15,6 +15,7 @@ import hashlib
 import importlib
 import logging
 import re
+import threading
 from collections import OrderedDict
 from typing import Any, cast, TYPE_CHECKING
 
@@ -153,6 +154,9 @@ class CuTeDSLEpilogueArguments:
         result.traced_epilogue = None
         return result
 
+    def copy(self) -> CuTeDSLEpilogueArguments:
+        return self.with_tensors(self.tensors)
+
     @property
     def parameters(self) -> list[Any]:
         return list(self.tensors.values())
@@ -234,6 +238,8 @@ def _compile_nvgemm(
     fallback_fn=None,
     cc: int | None = None,
     base_kernel=None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
@@ -272,6 +278,8 @@ def _compile_nvgemm(
             args=args if cc is not None else None,
             cc=cc,
             base_kernel=base_kernel,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
             epilogue_specialization=_local_reduce_specialization(args_kwargs),
         )
 
@@ -279,44 +287,11 @@ def _compile_nvgemm(
     if fallback_fn is not None:
         artifact = fallback_fn(kernel)
     if artifact is None:
-        artifact = _compile_nvgemm_kernel(kernel, args)
+        with CUTEDSL_COMPILE_LOCK:
+            artifact = kernel.compile(args)
         was_compiled = True
 
     return artifact, args, kernel, was_compiled
-
-
-def _compile_nvgemm_kernel(kernel, args):
-    """Compile while preserving CuTe DSL's subscriptable compile protocol.
-
-    Runtime JIT monitors sometimes wrap ``cute.compile`` with an ordinary
-    function.  CUTLASS operators use ``cute.compile[options](...)``, so such a
-    wrapper turns a legitimate cache miss into ``'function' object is not
-    subscriptable``.  If the wrapper retained ``__wrapped__`` (as
-    ``functools.wraps`` does), temporarily restore the underlying compiler for
-    the duration of this already-serialized compilation.
-    """
-    import cutlass.cute as cute
-
-    with CUTEDSL_COMPILE_LOCK:
-        if hasattr(cute.compile, "__getitem__"):
-            return kernel.compile(args)
-
-        wrapped_compile = cute.compile
-        unwrapped_compile = wrapped_compile
-        while not hasattr(unwrapped_compile, "__getitem__"):
-            next_compile = getattr(unwrapped_compile, "__wrapped__", None)
-            if next_compile is None:
-                return kernel.compile(args)
-            unwrapped_compile = next_compile
-
-        log.warning(
-            "Temporarily unwrapping cute.compile for NVGEMM runtime compilation"
-        )
-        cute.compile = unwrapped_compile
-        try:
-            return kernel.compile(args)
-        finally:
-            cute.compile = wrapped_compile
 
 
 class CUDAContextMetadata:
@@ -522,7 +497,12 @@ def _worker_nvgemm_autotuning_precompile(
         # operator space. Done inside the patched region since construction may
         # query max_active_clusters, which the worker can't get from the driver.
         base_kernel = None
+        prefetch_mode = None
+        use_pdl = None
         if metadata is not None:
+            design = getattr(metadata, "design", None)
+            prefetch_mode = "1" if getattr(design, "use_prefetch", False) else "0"
+            use_pdl = getattr(design, "use_pdl", False)
             try:
                 base_kernel = metadata.operator_class(metadata)
             except Exception:
@@ -545,6 +525,8 @@ def _worker_nvgemm_autotuning_precompile(
             epilogue_source=epilogue_source,
             cc=worker_cc,
             base_kernel=base_kernel,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
         )
 
         if was_compiled:
@@ -680,6 +662,8 @@ def _lookup_gemm_kernel(
     args: Any | None = None,
     cc: int | None = None,
     base_kernel: Any | None = None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
     epilogue_specialization: tuple = (),
 ):
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
@@ -702,7 +686,13 @@ def _lookup_gemm_kernel(
         # args (e.g. a swap_ab kernel selected for the transposed problem while
         # the worker holds the original operands); fall back to the manifest.
         if kernel is None and fast:
-            kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+            kernel = get_kernel_by_name_via_args(
+                kernel_name,
+                args,
+                cc,
+                prefetch_mode=prefetch_mode,
+                use_pdl=use_pdl,
+            )
         if kernel is None:
             kernel = get_kernel_by_name(kernel_name)
         if kernel is None:
@@ -710,7 +700,14 @@ def _lookup_gemm_kernel(
         return kernel
 
     if base_kernel is None and fast:
-        base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+        base_kernel = get_kernel_by_name_via_args(
+            kernel_name,
+            args,
+            cc,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
+        )
+    epilogue_args = getattr(args, "epilogue", None) or epilogue_args
     kernel = get_efc_kernel_with_epilogue(
         kernel_name,
         epilogue_args,
@@ -972,6 +969,8 @@ def _nvgemm_run(
     aux_tensors: tuple = (),
     swap_ab: bool = False,
     output_scale=None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
 ):
     if swap_ab and len(input_tensors) >= 2:
         import torch
@@ -1111,6 +1110,8 @@ def _nvgemm_run(
             epilogue_source=epilogue_source,
             fallback_fn=disk_fallback,
             cc=_current_target_sm(dev_idx).cc,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
         )
 
         if was_compiled:
@@ -1196,7 +1197,9 @@ def _nvgemm_precompile(
     variant_kwargs: dict | None = None,
     max_active_clusters: int | None = None,
     swap_ab: bool = False,
-    has_output_scale: bool = False,
+    output_scale_param_name: str | None = None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
 ):
     """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
 
@@ -1218,7 +1221,11 @@ def _nvgemm_precompile(
     device = f"cuda:{device_index}"
     with FakeTensorMode():
         tensors = {}
-        for name in [*input_param_names, "output"]:
+        tensor_names = [*input_param_names]
+        if output_scale_param_name is not None:
+            tensor_names.append(output_scale_param_name)
+        tensor_names.append("output")
+        for name in tensor_names:
             tensors[name] = torch.empty_strided(
                 tuple(precompile_shapes[name]),
                 tuple(precompile_strides[name]),
@@ -1229,10 +1236,11 @@ def _nvgemm_precompile(
     input_tensors = tuple(tensors[n] for n in input_param_names)
     out = tensors["output"]
 
-    output_scale = None
-    if has_output_scale:
-        *gemm_list, output_scale = input_tensors
-        input_tensors = tuple(gemm_list)
+    output_scale = (
+        tensors[output_scale_param_name]
+        if output_scale_param_name is not None
+        else None
+    )
 
     # The generated runtime wrapper applies swap_ab before constructing GEMM
     # arguments.  Precompile must use the identical tensor signatures so its
@@ -1252,6 +1260,11 @@ def _nvgemm_precompile(
         cache_key = _create_gemm_cache_key(input_tensors, out)
         mem_key = (cache_key, device_index)
         if mem_key not in compiled_cache:
+            cc = (
+                device_capability[0] * 10 + device_capability[1]
+                if device_capability is not None
+                else None
+            )
             artifact, _, _, _ = _compile_nvgemm(
                 variant_name,
                 input_tensors,
@@ -1260,6 +1273,9 @@ def _nvgemm_precompile(
                 kernel_name=kernel_name,
                 args_kwargs=variant_kwargs,
                 output_scale=output_scale,
+                cc=cc,
+                prefetch_mode=prefetch_mode,
+                use_pdl=use_pdl,
             )
             disk_cache_set(
                 disk_fn_cache,
@@ -1422,6 +1438,8 @@ class NVUniversalGemmKernel(Kernel):
     def render(self) -> str:
         """Render the Python source for the NVGEMM kernel wrapper."""
         kernel_name_str = self.kernel_metadata["kernel_name"]
+        prefetch_mode = "1" if self.kernel_metadata.get("use_prefetch", False) else "0"
+        use_pdl = bool(self.kernel_metadata.get("use_pdl", False))
         acc_dtype_str = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
             self.accumulator_type, "cutlass.Float32"
         )
@@ -1445,7 +1463,7 @@ class NVUniversalGemmKernel(Kernel):
         direct_output_scale = (
             self.epilogue.output_scale
             if self.variant.name == "SCALED_GEMM"
-            and "VendoredDenseBlockScaledGemm" in kernel_name_str
+            and self.kernel_metadata.get("supports_output_scale", False)
             else None
         )
         has_epilogue = (
@@ -1508,7 +1526,8 @@ class NVUniversalGemmKernel(Kernel):
                 )
             else:
                 code.writeline(
-                    "from cutlass.operators.arguments import EpilogueArguments"
+                    "from cutlass.operators.arguments import "
+                    "EpilogueArguments as CuTeDSLEpilogueArguments"
                 )
         code.writeline("")
 
@@ -1583,12 +1602,7 @@ class NVUniversalGemmKernel(Kernel):
                 epi_kwargs_str = "epilogue_fn=_EPILOGUE_FN_SRC"
                 if epilogue_kwargs:
                     epi_kwargs_str += f", {epilogue_kwargs}"
-                epilogue_args_type = (
-                    "CuTeDSLEpilogueArguments"
-                    if not self.epilogue.is_evt_fallback
-                    else "EpilogueArguments"
-                )
-                code.writeline(f"epi_args = {epilogue_args_type}({epi_kwargs_str})")
+                code.writeline(f"epi_args = CuTeDSLEpilogueArguments({epi_kwargs_str})")
                 epi_args_expr = "epi_args"
                 epi_source_expr = "_EPILOGUE_FN_SOURCE"
                 aux_tensors.extend(self.epilogue.reads)
@@ -1683,6 +1697,8 @@ class NVUniversalGemmKernel(Kernel):
                     code.writeline("swap_ab=True,")
                 if direct_output_scale is not None:
                     code.writeline(f"output_scale={direct_output_scale},")
+                code.writeline(f"prefetch_mode={prefetch_mode!r},")
+                code.writeline(f"use_pdl={use_pdl!r},")
             code.writeline(")")
 
         # -- Precompile hook --
@@ -1714,7 +1730,9 @@ class NVUniversalGemmKernel(Kernel):
                 if self.swap_ab:
                     code.writeline("swap_ab=True,")
                 if direct_output_scale is not None:
-                    code.writeline("has_output_scale=True,")
+                    code.writeline(f"output_scale_param_name={direct_output_scale!r},")
+                code.writeline(f"prefetch_mode={prefetch_mode!r},")
+                code.writeline(f"use_pdl={use_pdl!r},")
             code.writeline(")")
 
         return code.getvalue()

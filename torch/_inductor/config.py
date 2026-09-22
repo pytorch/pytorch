@@ -588,12 +588,15 @@ autotune_cudagraph_benchmarking: bool = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
 )
 
-# Number of callable invocations captured in each CUDA graph used for
-# autotuning. Replaying a graph has a fixed launch cost which can dominate
-# sub-10us kernels and change their relative ordering. Capturing multiple
-# invocations amortizes that cost; timings are normalized per invocation.
-autotune_cudagraph_unroll = int(
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_UNROLL", "1")
+# Number of calls of the benchmarked callable captured into each CUDA graph by
+# benchmark_gpu_with_cuda_graph; the replay time is divided by this count so the
+# graph launch and inter-kernel gaps are amortized. With 1 (the default) each
+# timed sample is a full graph launch, which for microsecond kernels exceeds the
+# kernel time and hides the differences between autotune choices. Counts above
+# 1 trade cold-cache fidelity for launch-overhead rejection: the L2 flush in
+# benchmark_gpu runs once per replay, so only the first captured call is cold.
+autotune_cudagraph_benchmarking_iters: int = int(
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING_ITERS", "1")
 )
 
 
@@ -691,21 +694,32 @@ bmm_shared_a: bool = Config(
 )
 
 
-# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
-# in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
-# nvfp4, M=1..4096) showed the heuristic's ranked winner sits in the top ~5 for
-# small/large M and for all nvfp4, but for mid-M (~512) bf16 the best config can
-# rank much deeper -- capping at 5 there lost up to ~11%, while cap 10 recovered
-# nearly all of it (diminishing returns beyond 10). Set to 0, None, or env var
-# "none"/"all" to tune all configs.
-def _nvgemm_max_profiling_configs_default() -> int | None:
-    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
+# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM)
+# heuristic-ranked configs to profile per kernel family in max_autotune.
+# Explicitly supplemental, shape-scoped configs may be added after this cap.
+# Set to 0, None, or env var "none"/"all" to tune all configs.
+def _nvgemm_max_profiling_configs_default(env_name: str, default: str) -> int | None:
+    env_val = os.environ.get(env_name, default)
     if env_val.lower() in ("none", "all"):
         return None
     return int(env_val)
 
 
-nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default()
+# BF16 medium-M shapes can require a deeper heuristic pool; a sweep over
+# GDN2/attention/MoE and FLUX shapes found that 10 recovered nearly all of the
+# available performance while lower caps lost up to 11%.
+nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default(
+    "TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10"
+)
+
+# NVFP4 needs a smaller pool than BF16. This additional ceiling composes with
+# a finite general NVGEMM cap; disabling the general cap still tunes all
+# configs. Representative inference shapes across M=1..5120 retained their
+# selected-kernel performance with three ranked configs per family while
+# reducing candidate benchmarking time.
+nvgemm_nvfp4_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default(
+    "TORCHINDUCTOR_NVGEMM_NVFP4_MAX_PROFILING_CONFIGS", "3"
+)
 
 # When enabled, adds supplement kernel configs that nvMatmulHeuristics
 # doesn't explore (certain tile/cluster combos that empirically beat
@@ -720,6 +734,30 @@ nvgemm_supplement_configs: bool = (
 # small-M decode shapes typical in LLM inference (M << N).
 nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
+# CUDA-graph replay overhead is large enough to distort autotuning for the
+# short, decode-range NVFP4 GEMMs used during LLM inference.  Use a modest
+# scoped unroll for M <= 256 NVGEMM-only requests and native output-scale
+# choices, where the same unroll is propagated to every backend. Other
+# mixed-backend autotuning uses one replay per candidate. Set to 1 to disable.
+nvgemm_autotune_cudagraph_unroll = int(
+    os.environ.get("TORCHINDUCTOR_NVGEMM_AUTOTUNE_CUDAGRAPH_UNROLL", "16")
+)
+
+# Benchmark medium-M NVFP4 GEMMs against a rotating pool of weight tensors large
+# enough to exceed L2. Replaying one weight makes it artificially hot and can
+# select a slower kernel for transformer inference, where each layer uses a
+# different weight matrix. The benchmark request applies this only to small-M
+# NVFP4 inference shapes; the rotation pool is sized from the actual operand
+# footprint and device cache capacity.
+nvgemm_autotune_cold_cache: bool = (
+    os.environ.get("TORCHINDUCTOR_NVGEMM_AUTOTUNE_COLD_CACHE", "0") == "1"
+)
+
+# Controls weight-prefetch variants for the vendored SM100 block-scaled GEMM.
+# "autotune" generates both variants, while the NVGEMM heuristic admits
+# prefetched candidates only for measured shape-scoped configurations so it
+# does not double compile cost for every selected tile.
+nvgemm_prefetch: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0")
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
@@ -2370,6 +2408,13 @@ class triton:
     # TMA descriptors are only going to be generated if the above conditions
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
+
+    # Whether FlexAttention forward/decode may select AMD TDM descriptors on
+    # gfx1250. Defaults on: selection is capability-driven, so this is a kill
+    # switch for callers that do not own the flex_attention() call site and
+    # therefore cannot pass USE_TMA. It does not affect NVIDIA, XPU, dense GEMM
+    # or generic descriptor codegen.
+    enable_flex_tdm = True
 
     # (Experimental)
     # Whether to allow reordering tensor descriptor matches with descending
