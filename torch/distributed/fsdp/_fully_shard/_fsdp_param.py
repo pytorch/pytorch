@@ -212,7 +212,7 @@ class FSDPParam:
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
     _installed_grad_dtype_policy: tuple[bool, torch.dtype | None]
-    unsharded_grad_dtype: torch.dtype | None
+    unsharded_grad_dtype: torch.dtype
 
     def __init__(
         self,
@@ -828,13 +828,8 @@ class FSDPParam:
             param_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
-        if reduce_dtype is not None:
-            self.unsharded_grad_dtype = reduce_dtype
-        elif self._has_sharded_grad_dtype_override:
-            self.unsharded_grad_dtype = self.sharded_grad_dtype
-        else:
-            self.unsharded_grad_dtype = param_dtype or self.orig_dtype
-        # None indicates that the mixed precision is not enabled
+        # The input gradient policy only controls sharded gradient storage.
+        self.unsharded_grad_dtype = reduce_dtype or param_dtype or self.orig_dtype
 
     def _init_extensions(self) -> None:
         inner_tensor = self._sharded_local_tensor
@@ -1201,13 +1196,8 @@ class FSDPParam:
 
     @property
     def unsharded_zero_grad_data(self) -> torch.Tensor:
-        dtype = (
-            self._partial_grad.dtype
-            if self._partial_grad is not None
-            else self.unsharded_grad_dtype
-        )
         return self._get_grad_inner_tensor(
-            torch.zeros_like(self.unsharded_param, dtype=dtype)
+            torch.zeros_like(self.unsharded_param, dtype=self.unsharded_grad_dtype)
         )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:

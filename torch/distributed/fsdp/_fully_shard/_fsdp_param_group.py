@@ -659,11 +659,6 @@ class FSDPParamGroup:
                         grad = fsdp_param.unsharded_zero_grad_data
                     else:
                         continue
-                    partial = fsdp_param._partial_grad
-                    if partial is not None and partial.dtype != grad.dtype:
-                        # An unrestricted gradient policy may produce a new
-                        # dtype; preserve higher-precision pending reductions.
-                        grad = grad.to(torch.promote_types(grad.dtype, partial.dtype))
                     params, grads = grad_groups.setdefault(grad.dtype, ([], []))
                     params.append(fsdp_param)
                     grads.append(grad)
