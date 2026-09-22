@@ -1128,12 +1128,91 @@ def reduce_scatter_with_assert(
     return orig_reduce_scatter(*args, **kwargs)
 
 
+def _assert_equal_batched(cls, pairs: list[tuple[torch.Tensor, torch.Tensor]]):
+    if (
+        torch.utils._python_dispatch._get_current_dispatch_mode() is not None
+        or torch.overrides._get_current_function_mode() is not None
+    ):
+        for actual, expected in pairs:
+            cls.assertEqual(actual, expected)
+        return
+    groups = {}
+    for actual, expected in pairs:
+        if (
+            type(actual) not in (torch.Tensor, nn.Parameter)
+            or type(expected) not in (torch.Tensor, nn.Parameter)
+            or actual.layout != torch.strided
+            or expected.layout != torch.strided
+            or actual.is_quantized
+            or expected.is_quantized
+            or actual.device.type == "meta"
+            or actual.shape != expected.shape
+            or actual.dtype != expected.dtype
+            or actual.device != expected.device
+        ):
+            # Preserve the original comparison for unsupported attributes/types.
+            for a, b in pairs:
+                cls.assertEqual(a, b)
+            return
+        groups.setdefault((actual.device, actual.dtype), []).append((actual, expected))
+    try:
+        for group in groups.values():
+            if len(group) == 1:
+                cls.assertEqual(*group[0])
+                continue
+            with torch.no_grad():
+                actual = torch.cat([a.reshape(-1) for a, _ in group])
+                expected = torch.cat([b.reshape(-1) for _, b in group])
+            cls.assertEqual(actual, expected)
+    except AssertionError:
+        # Report the original per-parameter diagnostic on mismatch.
+        for actual, expected in pairs:
+            cls.assertEqual(actual, expected)
+        raise
+
+
 def check_sharded_parity(
     cls,  # unit test class
     replicated_module: nn.Module,
     sharded_module: nn.Module,
     prefixes_to_ignore: tuple[str, ...] = (),
 ):
+    # Batch small value checks to avoid a device synchronization per parameter.
+    # Keep reference distribution and metadata checks unchanged.
+    pairs: list[tuple[torch.Tensor, torch.Tensor]] = []
+    buffered_bytes = 0
+    batch_values = (
+        torch.utils._python_dispatch._get_current_dispatch_mode() is None
+        and torch.overrides._get_current_function_mode() is None
+    )
+
+    def check_values(actual, expected):
+        nonlocal buffered_bytes
+        if (
+            not batch_values
+            or type(actual) is not torch.Tensor
+            or type(expected) is not torch.Tensor
+        ):
+            _assert_equal_batched(cls, pairs)
+            pairs.clear()
+            buffered_bytes = 0
+            cls.assertEqual(actual, expected)
+            return
+        size = (
+            actual.numel() * actual.element_size()
+            + expected.numel() * expected.element_size()
+        )
+        # Bound retained payload and concatenation storage; compare large pairs directly.
+        if buffered_bytes + size > 1024 * 1024:
+            _assert_equal_batched(cls, pairs)
+            pairs.clear()
+            buffered_bytes = 0
+        if size > 1024 * 1024:
+            cls.assertEqual(actual, expected)
+            return
+        pairs.append((actual, expected))
+        buffered_bytes += size
+
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
         replicated_module.named_parameters(),
         sharded_module.named_parameters(),
@@ -1153,7 +1232,7 @@ def check_sharded_parity(
                 "so we cannot check for equality using it"
             )
         sharded_ref_param = distribute_tensor(replicated_param, mesh, placements)
-        cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
+        check_values(sharded_param.to_local(), sharded_ref_param.to_local())
         if replicated_param.grad is None:
             cls.assertIsNone(sharded_param.grad)
             continue
@@ -1162,7 +1241,9 @@ def check_sharded_parity(
         cls.assertIsInstance(sharded_param.grad, DTensor)
         if not isinstance(sharded_param.grad, DTensor):
             raise AssertionError("Expected sharded_param.grad to be a DTensor")  # mypy
-        cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
+        check_values(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
+
+    _assert_equal_batched(cls, pairs)
 
 
 class FSDPTestMultiThread(MultiThreadedTestCase):
