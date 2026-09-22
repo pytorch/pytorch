@@ -29,11 +29,10 @@
 namespace at::functionalization {
 
 Tensor resize__ViewMeta::forward(const Tensor& base) {
-  if (reapply_views) {
-    return base.as_strided(size, c10::contiguous_strides(size));
-  } else {
+  if (!reapply_views) {
     return at::as_strided_copy(base, size, c10::contiguous_strides(size));
   }
+  return base.as_strided(size, c10::contiguous_strides(size));
 }
 
 Tensor resize__ViewMeta::reverse(const Tensor& base, const Tensor& mutated_view) {
@@ -227,7 +226,10 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
 
 
 static at::Tensor lift_functionalize(const at::Tensor & self) {
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  if (at::functionalization::impl::isFunctionalTensor(self)) {
+    return self.view_as(self);
+  }
+
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift(self);
   return at::functionalization::impl::to_functional_tensor(out);

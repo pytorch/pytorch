@@ -3,8 +3,6 @@
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/Tensor.h>
@@ -194,7 +192,7 @@ Variable SavedVariable::unpack(c10::intrusive_ptr<Node> saved_for) const {
                "that failed to compute its gradient. The variable in question "
                "was changed in there or anywhere later. Good luck!";
       }
-      TORCH_CHECK(false, message.str());
+      TORCH_CHECK(false, std::move(message).str());
     }
   }
 

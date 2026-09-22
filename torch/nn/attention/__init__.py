@@ -3,6 +3,7 @@
 
 import contextlib
 from collections.abc import Iterable
+from contextvars import ContextVar
 from typing import Union
 from warnings import warn
 
@@ -29,7 +30,7 @@ __all__: list[str] = [
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
-# This only effects users of bias subclasses
+# This only affects users of bias subclasses
 # If this is set to True, we will warn the user if they are not using the fused kernels
 # As well, it will raise warnings for all the reasons why the fused kernels can't be run.
 # To set this to True, run
@@ -77,6 +78,12 @@ _backend_names = {
     "math": "MATH",
     "overrideable": "OVERRIDEABLE",
 }
+_sdpa_kernel_uses_priority = ContextVar("sdpa_kernel_uses_priority", default=False)
+
+
+def _is_sdp_priority_order_active() -> bool:
+    """Return whether an enclosing sdpa_kernel context set backend priority."""
+    return _sdpa_kernel_uses_priority.get()
 
 
 def _backend_from_string(name: str):
@@ -156,10 +163,14 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
     backends = list(dict.fromkeys(backends))
 
     previous_backends = _cur_sdpa_kernel_backends(with_priority=set_priority)
+    priority_token = _sdpa_kernel_uses_priority.set(
+        set_priority or _sdpa_kernel_uses_priority.get()
+    )
     try:
         _sdpa_kernel(backends, set_priority)
         yield {}
     finally:
+        _sdpa_kernel_uses_priority.reset(priority_token)
         _sdpa_kernel(previous_backends, set_priority)
 
 

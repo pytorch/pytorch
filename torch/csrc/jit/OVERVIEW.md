@@ -58,7 +58,7 @@ Sections start with a reference to the source file where the code related to the
     - [Required Passes](#required-passes)
     - [Derivative Preserving Optimization](#derivative-preserving-optimization)
     - [Post-derivative optimization](#post-derivative-optimization)
-    - [Derivate Splitting](#derivate-splitting)
+    - [Derivative Splitting](#derivative-splitting)
     - [Fusers](#fusers)
     - [Disabling Optimizations](#disabling-optimizations)
   - [JIT Logging](#jit-logging)
@@ -1139,7 +1139,7 @@ with prim::FusionGroup_0 = graph(%13 : Float(*, *),
   return (%hy, %cy)
 ```
 
-### Derivate Splitting ###
+### Derivative Splitting ###
 
 Many `Graphs` will require gradients (i.e. one of the inputs will have a `requires_grad` property set). In this case, it is unsafe to run post-derivative optimizations directly on the `Graph`. Instead, our approach is to first *split* the `Graph` into sub-Graphs where symbolic gradient formulas are known and produce an explicit `Graph` for the forward pass along with a complementary `Graph` that implements the backwards pass using some of the values computed in the forward pass. We can then apply post-derivative optimization to the forward graph. The "gradOutputs" for the backwards graph are only known when the backward pass runs, so we cannot fully optimize it at this time. For instance, we do not know if some of those gradOutputs will also `require_grad` meaning that a gradient-of-gradient situation exists. Instead the backward pass will use a new GraphExecutor object to run and optimize its execution. In this way, we can handle an indefinite number of recursive gradient calculations.
 

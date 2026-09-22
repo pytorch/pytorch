@@ -53,14 +53,16 @@ def find_free_port():
 
     for addr in addrs:
         family, type, proto, _, _ = addr
+        s = None
         try:
             s = socket.socket(family, type, proto)
             s.bind(("localhost", 0))
             s.listen(0)
             return s
         except OSError as e:
-            s.close()  # type: ignore[possibly-undefined]
-            print(f"Socket creation attempt failed: {e}")
+            if s is not None:
+                s.close()
+            logger.warning("Socket creation attempt failed: %s", e)
     raise RuntimeError("Failed to create a socket")
 
 
@@ -152,7 +154,7 @@ class EtcdServer:
         stderr: int | TextIO | None = None,
     ) -> None:
         """
-        Start the server, and waits for it to be ready. When this function returns the sever is ready to take requests.
+        Start the server, and waits for it to be ready. When this function returns the server is ready to take requests.
 
         Args:
             timeout: time (in seconds) to wait for the server to be ready

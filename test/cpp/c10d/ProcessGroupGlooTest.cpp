@@ -461,7 +461,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   enableProfilerLegacy(ProfilerConfig(
       ProfilerState::CPU, /* report_input_shapes */ true, false));
   for (const auto rank : c10::irange(size)) {
-    work[rank] = tests[rank].getProcessGroup().alltoall_base(
+    work[rank] = tests[rank].getProcessGroup().all_to_all_single(
         outputs[rank], inputs[rank], outputSplits[rank], inputSplits[rank]);
   }
 
@@ -553,21 +553,6 @@ void testMonitoredBarrier(const std::string& path) {
   for (auto& t : threads) {
     t.join();
   }
-}
-
-void testSequenceNumInit(const std::string& path) {
-  const auto size = 4;
-  auto tests = CollectiveTest::initialize(path, size);
-  for (const auto i : c10::irange(size)) {
-    tests[i].getProcessGroup().setSequenceNumberForGroup();
-  }
-
-  std::unordered_set<uint64_t> nums;
-  for (const auto i : c10::irange(size)) {
-    auto seqNum = tests[i].getProcessGroup().getSequenceNumberForGroup();
-    nums.insert(seqNum);
-  }
-  EXPECT_EQ(nums.size(), 1);
 }
 
 void testWaitDelay(const std::string& path) {
@@ -782,11 +767,6 @@ TEST(ProcessGroupGlooTest, testBarrier) {
 TEST(ProcessGroupGlooTest, testMonitoredBarrier) {
   TemporaryFile file;
   testMonitoredBarrier(file.path);
-}
-
-TEST(ProcessGroupGlooTest, testSequenceNumInit) {
-  TemporaryFile file;
-  testSequenceNumInit(file.path);
 }
 
 TEST(ProcessGroupGlooTest, testSend) {
