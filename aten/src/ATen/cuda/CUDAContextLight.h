@@ -84,9 +84,9 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 // The public handle uses the BLAS library's default workspace unless ATen
-// workspace caching is explicitly enabled. On ROCm the handle is unbound
-// explicitly, which releases the arena rocBLAS owns from handle creation;
-// rocBLAS then reallocates on demand outside the caching allocator.
+// workspace caching is explicitly enabled. On ROCm, ATen binds its
+// per-operation workspaces to a separate handle, so this one keeps the arena
+// rocBLAS allocates at handle creation, outside the caching allocator.
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
 
 // Internal scoped handle for ATen operations. When caching is disabled, it owns

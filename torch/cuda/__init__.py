@@ -1439,13 +1439,11 @@ def current_blas_handle():
 
     The handle uses the BLAS library's default workspace unless ATen workspace
     caching is explicitly enabled. When caching is disabled, internal ATen
-    operations may temporarily bind their own workspace, but restore the default
-    workspace before releasing it.
-
-    On ROCm the handle is left with no workspace bound, and rocBLAS allocates
-    its own on demand, outside the caching allocator and not during stream
-    capture. Bind one with ``rocblas_set_workspace`` before using the handle
-    inside a captured graph.
+    operations on CUDA may temporarily bind their own workspace to this handle,
+    but restore the default workspace before releasing it. On ROCm they use a
+    separate handle, so this one keeps the workspace rocBLAS allocated when it
+    was created, outside the caching allocator, and a workspace bound with
+    ``rocblas_set_workspace`` stays bound.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()

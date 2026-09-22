@@ -123,11 +123,12 @@ releases it when the operation returns. Set ``TORCH_CUBLAS_WORKSPACE_CACHE=1`` t
 workspace for each hipBLAS handle and HIP stream, which was the default before PyTorch 2.15.
 Persistent workspaces must not be used when capturing multiple HIP graphs on the same stream.
 
-Handles returned by ``torch.cuda.current_blas_handle()`` have no workspace bound when ATen workspace
-caching is disabled. rocBLAS may then allocate a workspace of its own on demand, outside the HIP
-caching allocator. Binding a workspace afterwards frees that allocation, and neither the allocation
-nor the free is legal while a stream is capturing, so bind one with ``rocblas_set_workspace`` before
-using such a handle inside a captured graph.
+When ATen workspace caching is disabled, ATen operations bind their workspaces to handles that
+``torch.cuda.current_blas_handle()`` never returns. The handle it returns keeps the workspace rocBLAS
+allocates when the handle is created, outside the HIP caching allocator; ``ROCBLAS_DEVICE_MEMORY_SIZE``
+overrides its size. A workspace bound to it with ``rocblas_set_workspace`` stays bound. rocBLAS frees
+its own workspace when one is bound, and grows it when a call needs more than it holds. Neither is
+legal while a stream is capturing, so bind before capture begins.
 
 Create the BLAS handle before capture begins, for example with a warmup operation on the capture
 stream. ``hipblasCreate`` initializes hipBLASLt, which allocates device memory that HIP rejects on a
