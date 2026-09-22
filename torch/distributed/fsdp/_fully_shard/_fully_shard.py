@@ -427,7 +427,9 @@ class FSDPModule:
         `no_sync` in FSDP1.
 
         Without synchronization, gradients accumulate on the native unsharded
-        parameters in the effective ``MixedPrecisionPolicy.reduce_dtype``.
+        parameters using ``MixedPrecisionPolicy.reduce_dtype`` when set,
+        otherwise their pre-FSDP ``grad_dtype`` policy. Parameters without an
+        explicit gradient policy accumulate in the compute dtype.
         Previously reduced gradients remain on the sharded parameters in their
         configured ``grad_dtype``. HSDP may also retain reduce-scattered gradients
         that still require all-reduce. These contributions remain separate.
@@ -773,6 +775,10 @@ class FSDPModule:
         reduce-scatter collectives. Similar to DDP's
         ``find_unused_parameters``.
 
+        Zero gradients must have the same dtype on every rank. If a parameter
+        has an explicit ``grad_dtype=None`` policy, set ``reduce_dtype`` in the
+        mixed precision policy before enabling this option.
+
         Args:
             reduce_scatter_unused_params (bool): Whether to include zero
                 gradients for unused parameters in gradient reduction.
@@ -781,13 +787,25 @@ class FSDPModule:
         """
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group.reduce_scatter_unused_params = (
-                        reduce_scatter_unused_params
+        groups = [
+            group
+            for module in modules
+            if isinstance(module, FSDPModule)
+            for group in module._get_fsdp_state()._fsdp_param_groups
+        ]
+        if reduce_scatter_unused_params:
+            for group in groups:
+                if group.mp_policy.reduce_dtype is None and any(
+                    param._has_sharded_grad_dtype_override
+                    and param.sharded_grad_dtype is None
+                    for param in group.fsdp_params
+                ):
+                    raise ValueError(
+                        "Reducing unused parameters with grad_dtype=None requires "
+                        "an explicit MixedPrecisionPolicy.reduce_dtype"
                     )
+        for group in groups:
+            group.reduce_scatter_unused_params = reduce_scatter_unused_params
 
     def set_reduce_scatter_max_input_buffers(
         self, max_input_buffers: int, *, recurse: bool = True

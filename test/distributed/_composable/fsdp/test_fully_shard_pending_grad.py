@@ -47,6 +47,29 @@ class TestFullyShardPendingGrad(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_unused_parameters(self, device):
+        class Model(TwoLinear):
+            def forward(self, inp, use_second):
+                return self.second(inp) if use_second else self.first(inp)
+
+        device = torch.device(device).type
+        model = Model(device, in_features=1, out_features=3).to(torch.bfloat16)
+        model.first.weight.grad_dtype = torch.float32
+        model.second.weight.grad_dtype = torch.bfloat16
+        fully_shard(model, mesh=init_device_mesh(device, (self.world_size,)))
+        model.set_reduce_scatter_unused_params(True)
+        inp = torch.full((1, 1), self.rank + 1, device=device, dtype=torch.bfloat16)
+        for first_rank in (0, 1):
+            model.zero_grad(set_to_none=True)
+            model(inp, use_second=self.rank != first_rank).sum().backward()
+            for param, expected in zip(
+                model.parameters(), ((first_rank + 1) / 2, (2 - first_rank) / 2)
+            ):
+                self.assertEqual(param.grad.dtype, param.grad_dtype)
+                actual = param.grad.full_tensor()
+                self.assertEqual(actual, torch.full_like(actual, expected))
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("cpu_offload", [False, True])
     def test_native_accumulation_dtypes(self, device, cpu_offload):
         device = torch.device(device).type
@@ -356,6 +379,53 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
     @property
     def world_size(self):
         return 4
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("cpu_offload", [False, True])
+    @parametrize("reduce_dtype", [None, torch.float32])
+    def test_grad_dtype_pending_reductions(self, device, cpu_offload, reduce_dtype):
+        device = torch.device(device).type
+        model = TwoLinear(device, in_features=1, out_features=5).to(torch.bfloat16)
+        model.first.weight.grad_dtype = torch.float32
+        model.second.weight.grad_dtype = torch.bfloat16
+        mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("replicate", "shard"))
+        fully_shard(
+            [model.first, model.second],
+            mesh=mesh,
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
+            offload_policy=CPUOffloadPolicy(pin_memory=False)
+            if cpu_offload
+            else OffloadPolicy(),
+        )
+        fully_shard(model)
+        model.set_requires_all_reduce(False)
+        for value in (256, 1, -256):
+            model(
+                torch.full((1, 1), value, device=device, dtype=torch.bfloat16)
+            ).sum().backward()
+        model.synchronize_gradients()
+        for param, expected in zip(
+            model.parameters(), (1, 0 if reduce_dtype is None else 1)
+        ):
+            self.assertEqual(param.grad.dtype, param.grad_dtype)
+            actual = param.grad.to(device).full_tensor()
+            self.assertEqual(actual, torch.full_like(actual, expected))
+
+        model.zero_grad(set_to_none=True)
+        for module, value in ((model.first, 4), (model.second, 5)):
+            module(
+                torch.full(
+                    (1, 1),
+                    value,
+                    device=device,
+                    dtype=torch.bfloat16,
+                    requires_grad=True,
+                )
+            ).sum().backward()
+        model.synchronize_gradients()
+        for param, expected in zip(model.parameters(), (4, 5)):
+            actual = param.grad.to(device).full_tensor()
+            self.assertEqual(actual, torch.full_like(actual, expected))
 
     @skip_if_lt_x_gpu(4)
     @parametrize("cpu_offload", [False, True])

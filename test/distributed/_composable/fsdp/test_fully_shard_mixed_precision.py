@@ -587,7 +587,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         reshard_after_backward: bool,
     ):
         model_dtype, grad_dtype = model_grad_dtypes
-        unsharded_grad_dtype = reduce_dtype or model_dtype
+        unsharded_grad_dtype = reduce_dtype or grad_dtype
         torch.manual_seed(42)
         model = nn.Linear(8, 8, device=device_type, dtype=model_dtype)
         ref_model = copy.deepcopy(model)
@@ -673,7 +673,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize("use_hsdp", [False, True])
     @parametrize("sum_reduction", [False, True])
-    def test_grad_dtype_per_parameter(self, use_hsdp: bool, sum_reduction: bool):
+    @parametrize("reduce_dtype", [None, torch.float32])
+    def test_grad_dtype_per_parameter(
+        self, use_hsdp: bool, sum_reduction: bool, reduce_dtype: torch.dtype | None
+    ):
         if use_hsdp and self.world_size != 4:
             self.skipTest("HSDP requires four devices")
         mesh = init_device_mesh(
@@ -687,21 +690,21 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         grad_dtypes = (torch.bfloat16, torch.float32)
         for param, grad_dtype in zip(model.parameters(), grad_dtypes):
             param.grad_dtype = grad_dtype
-        for param in ref_model.parameters():
-            param.grad_dtype = torch.float32
+        for param, grad_dtype in zip(ref_model.parameters(), grad_dtypes):
+            param.grad_dtype = reduce_dtype or grad_dtype
         fully_shard(
             model,
             mesh=mesh,
             mp_policy=MixedPrecisionPolicy(
-                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+                param_dtype=torch.bfloat16, reduce_dtype=reduce_dtype
             ),
         )
         if sum_reduction:
             model.set_gradient_divide_factor(1.0)
 
         def check_unsharded_grad_dtype(module: nn.Module, _inputs):
-            for param in module.parameters():
-                self.assertEqual(param.grad_dtype, torch.float32)
+            for param, grad_dtype in zip(module.parameters(), grad_dtypes):
+                self.assertEqual(param.grad_dtype, reduce_dtype or grad_dtype)
 
         model.register_forward_pre_hook(check_unsharded_grad_dtype)
         inp = torch.arange(16, device=device_type, dtype=torch.bfloat16).reshape(2, 8)
@@ -736,8 +739,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                         param.grad.to_local(), expected_grad.to(grad_dtype)
                     )
                 else:
-                    self.assertEqual(param.grad_dtype, torch.float32)
-                    self.assertEqual(param.grad.dtype, torch.float32)
+                    self.assertEqual(param.grad_dtype, reduce_dtype or grad_dtype)
+                    self.assertEqual(param.grad.dtype, reduce_dtype or grad_dtype)
                     self.assertEqual(param.grad, ref_param.grad)
             if not sync:
                 model.reshard()

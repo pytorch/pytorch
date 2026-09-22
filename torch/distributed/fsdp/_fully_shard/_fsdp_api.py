@@ -35,9 +35,12 @@ class MixedPrecisionPolicy:
             the unsharded parameter's ``grad_dtype`` to this dtype, so autograd
             produces and accumulates gradients in this dtype regardless of
             whether gradient synchronization is enabled. FSDP packs these
-            gradients without casting before reduction. If ``None``, this uses
-            the compute dtype. Reduced sharded gradients use each parameter's
-            ``grad_dtype`` as specified before calling
+            gradients without casting before reduction. If ``None``, FSDP
+            preserves each parameter's explicitly configured ``grad_dtype``,
+            including ``None`` to allow any incoming gradient dtype. Parameters
+            without an explicit gradient policy use the compute dtype.
+            Gradients with different dtypes are reduced separately. Reduced
+            sharded gradients use each parameter's ``grad_dtype`` as specified before calling
             :func:`fully_shard`. Changing this policy afterward is unsupported,
             including before the first forward. (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for

@@ -320,6 +320,139 @@ class TestFullyShardConversion(TestCase):
             else:
                 model(inp)
 
+    @parametrize("param_dtype", [None, torch.bfloat16])
+    def test_grad_dtype_default_reduction_preserves_accumulation(
+        self, device, param_dtype
+    ):
+        model = nn.Linear(
+            1,
+            2,
+            bias=False,
+            device=device,
+            dtype=torch.bfloat16 if param_dtype is None else torch.float32,
+        )
+        reference = copy.deepcopy(model).to(torch.bfloat16)
+        for module in (model, reference):
+            module.weight.grad_dtype = torch.float32
+        fully_shard(
+            model,
+            mesh=self.mesh,
+            mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype),
+        )
+        model.set_requires_gradient_sync(False)
+        model.set_reshard_after_backward(False)
+        for value in (256, 1, -256):
+            inp = torch.full((1, 1), value, device=device, dtype=torch.bfloat16)
+            model(inp).sum().backward()
+            reference(inp).sum().backward()
+        self.assertEqual(reference.weight.grad, torch.ones_like(reference.weight.grad))
+        self.assertEqual(model.weight.grad, reference.weight.grad)
+        self.assertEqual(model.weight.grad_dtype, torch.float32)
+        model.synchronize_gradients()
+        model.reshard()
+        self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
+
+    @parametrize("reduce_dtype", [None, torch.bfloat16])
+    def test_grad_dtype_none_preserves_incoming_dtype(self, device, reduce_dtype):
+        class FloatGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, weight):
+                return weight.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.float()
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(
+                    torch.ones(2, device=device, dtype=torch.bfloat16)
+                )
+
+            def forward(self, inp):
+                return FloatGrad.apply(self.weight) * inp
+
+        model, reference = Model(), Model()
+        model.weight.grad_dtype = None
+        reference.weight.grad_dtype = reduce_dtype
+        fully_shard(
+            model,
+            mesh=self.mesh,
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
+        )
+        model.set_requires_gradient_sync(False)
+        model.set_reshard_after_backward(False)
+        for value in (256, 1, -256):
+            inp = torch.full((2,), value, device=device, dtype=torch.bfloat16)
+            model(inp).sum().backward()
+            reference(inp).sum().backward()
+        self.assertEqual(model.weight.grad_dtype, reduce_dtype)
+        self.assertEqual(model.weight.grad.dtype, reference.weight.grad.dtype)
+        self.assertEqual(model.weight.grad, reference.weight.grad)
+        model.synchronize_gradients()
+        model.reshard()
+        self.assertIsNone(model.weight.grad_dtype)
+        self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
+
+    @parametrize("first_dtype", [torch.bfloat16, torch.float32])
+    def test_grad_dtype_none_partial_dtype_changes(self, device, first_dtype):
+        class InputGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, weight, inp):
+                ctx.save_for_backward(inp)
+                return weight * inp
+
+            @staticmethod
+            def backward(ctx, grad):
+                (inp,) = ctx.saved_tensors
+                return grad.to(inp.dtype) * inp, None
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(
+                    torch.ones(2, device=device, dtype=torch.bfloat16)
+                )
+                self.weight.grad_dtype = None
+
+            def forward(self, inp):
+                return InputGrad.apply(self.weight, inp)
+
+        model = Model()
+        mesh = init_device_mesh(
+            torch.device(device).type,
+            (1, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        fully_shard(model, mesh=mesh)
+        model.set_requires_all_reduce(False)
+        second_dtype = (
+            torch.float32 if first_dtype == torch.bfloat16 else torch.bfloat16
+        )
+        for dtype in (first_dtype, second_dtype):
+            value = 257 if dtype == torch.float32 else -256
+            model(torch.full((2,), value, device=device, dtype=dtype)).sum().backward()
+        model.synchronize_gradients()
+        self.assertIsNone(model.weight.grad_dtype)
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
+        self.assertEqual(model.weight.grad.full_tensor(), torch.ones(2, device=device))
+
+    @parametrize("reduce_dtype", [None, torch.float32])
+    def test_grad_dtype_none_unused_params_requires_dtype(self, device, reduce_dtype):
+        model = nn.Linear(2, 2, device=device)
+        model.weight.grad_dtype = None
+        fully_shard(
+            model,
+            mesh=self.mesh,
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
+        )
+        if reduce_dtype is None:
+            with self.assertRaisesRegex(ValueError, "grad_dtype=None.*reduce_dtype"):
+                model.set_reduce_scatter_unused_params(True)
+        else:
+            model.set_reduce_scatter_unused_params(True)
+
     @parametrize("grad_dtype", ["default", torch.float32, None])
     def test_grad_dtype_policy_preserved_after_conversion_and_replacement(
         self, device, grad_dtype
