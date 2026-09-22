@@ -2111,9 +2111,9 @@ class PrecompiledModule(PrecompiledRunnable):
         self._grad_param_indices: list[int] = []
         # Per user-input-leaf example shape, dtype, and device (None for a non-tensor
         # leaf, shape None for a subclass leaf; a marked-dynamic dim is None within the
-        # shape tuple); the drivers reject a runtime mismatch (invariants 3 and 6). Stride / memory format is enforced
-        # by the inductor artifact's own assert_size_stride, not recorded here. Populated by
-        # _compile().
+        # shape tuple); the drivers reject a runtime mismatch (invariants 3 and 6).
+        # Stride / memory format is enforced by the inductor artifact's own
+        # assert_size_stride, not recorded here. Populated by _compile().
         self._user_input_shapes: list[tuple[int | None, ...] | None] = []
         self._user_input_dtypes: list[str | None] = []
         self._user_input_devices: list[str | None] = []
@@ -2718,11 +2718,13 @@ class _PrecompileApi:
         faithfully reproduces ``fn`` only for callers that uphold that contract.
 
         THREADING: capture temporarily clears the example tensors' ``.grad`` and swaps
-        the example module's parameters in place, so two captures sharing a model would
-        corrupt each other. Capture is therefore serialized by one process-wide reentrant
-        lock, which also serializes captures of disjoint models; the inductor lowering
-        step has its own compiler lock. The lock orders precompile calls only: do not use
-        the example model from another thread while precompile runs. The capture lock is
+        the example module's parameters in place, and on the unbacked path patches the
+        global functorch ``fake_tensor_allow_unsafe_data_ptr_access`` config, so two
+        captures would corrupt each other. Capture is therefore serialized by one
+        process-wide reentrant lock, which also serializes captures of disjoint models;
+        the inductor lowering step has its own compiler lock. The lock orders precompile
+        calls only: do not use the example model, or construct a ``FakeTensorMode``
+        (torch.compile does), from another thread while precompile runs. The capture lock is
         held across ``fn`` itself, so an ``fn`` that blocks waiting on another thread's
         precompile deadlocks. For the same reason it is ordered before Dynamo's compile
         lock, which a nested inductor precompile takes while holding it: do not call

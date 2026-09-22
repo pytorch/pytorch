@@ -13,8 +13,9 @@ to the compile worker pool. And every hoisted kernel names itself by the wrapper
 ``__file__``, so they all share one autotune-cache key; that cache is effectively off in
 this mode (its configs_hash check keeps a wrong config from being applied).
 
-Only kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel is
-still emitted as a source string passed to ``async_compile.triton``.
+Only Triton kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel
+is still emitted as a source string passed to ``async_compile.triton``, and so are the
+kernels of other backends (C++, MPS, Halide, Pallas).
 """
 
 import re
@@ -75,11 +76,28 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         self._kernel_texts: list[str] = []
 
     @override
-    def _define_kernel_helper(self, *args, standalone: bool = False, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def _define_kernel_helper(
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: str | None = None,
+        gpu: bool = True,
+        cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
+    ) -> None:
         header_lines = self.header.get_lines_ref()
         start = len(header_lines)
-        super()._define_kernel_helper(*args, standalone=standalone, **kwargs)
-        if not standalone:
+        super()._define_kernel_helper(
+            kernel_name,
+            kernel_body,
+            metadata,
+            gpu,
+            cpp_definition,
+            standalone,
+            autotune_body,
+        )
+        if not standalone or len(header_lines) == start:
             # `X = async_compile.cpp_pybinding(...)` and friends are wrapper code: they
             # are what keep async_compile alive.
             return
@@ -173,11 +191,12 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
                 for line in metadata.splitlines()
                 if not line.startswith("# kernel path:")
             )
-        # @triton.jit helpers are numbered per kernel and named by op sequence, so two
-        # kernels can define the same helper name with different bodies; in one shared
+        # Kernels define module-level @triton.jit helpers under names that are only
+        # unique per kernel (scan combine_fns, flex attention's forward_inner, ...), so
+        # two kernels can define the same name with different bodies; in one shared
         # namespace the later def would win for both. Make them kernel-unique.
-        helpers = re.findall(r"^def (_triton_helper_fn\w*)\(", src_code, re.MULTILINE)
-        for helper in OrderedSet(helpers):
+        helpers = re.findall(r"^def (\w+)\(", src_code, re.MULTILINE)
+        for helper in OrderedSet(helpers) - OrderedSet([kernel_name, subs_name]):
             src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
         self.define_kernel(
             kernel_name,
@@ -186,7 +205,8 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
             standalone=True,
             # The compile-time autotune block execs its kernels instead of emitting
             # them, and a module-level kernel there has no __file__ to name itself by,
-            # so that block keeps the AsyncCompile form.
+            # so that block keeps the AsyncCompile form. It runs at compile time only
+            # and is not carried in the emitted module.
             autotune_body=(
                 self.async_compile_triton_body(subs_name, src_code, device_type)
                 if config.triton.autotune_at_compile_time
