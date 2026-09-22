@@ -12001,6 +12001,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    # pad_mm picks padded vs unpadded bmm by timing sub-0.1 ms calls, and a padded
+    # pick adds a second kernel, so this test pins shape padding off rather than
+    # letting a timing decision change the kernel count. See #145189.
+    @config.patch(shape_padding=False)
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
