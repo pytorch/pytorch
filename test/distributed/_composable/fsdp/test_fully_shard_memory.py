@@ -34,7 +34,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-
 class TestFullyShardMemory(FSDPTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
