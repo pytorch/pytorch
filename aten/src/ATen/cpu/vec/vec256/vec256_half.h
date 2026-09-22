@@ -252,15 +252,39 @@ Vectorized<Half> inline fmadd(
     const Vectorized<Half>& a,
     const Vectorized<Half>& b,
     const Vectorized<Half>& c) {
-  __m256 a_lo, a_hi;
-  __m256 b_lo, b_hi;
-  __m256 c_lo, c_hi;
-  cvtfp16_fp32(__m256i(a), a_lo, a_hi);
-  cvtfp16_fp32(__m256i(b), b_lo, b_hi);
-  cvtfp16_fp32(__m256i(c), c_lo, c_hi);
-  auto o1 = _mm256_fmadd_ps(a_lo, b_lo, c_lo);
-  auto o2 = _mm256_fmadd_ps(a_hi, b_hi, c_hi);
-  return cvtfp32_fp16(o1, o2);
+  return ternary_op_as_fp32(a, b, c, [](__m256 x, __m256 y, __m256 z) {
+    return _mm256_fmadd_ps(x, y, z);
+  });
+}
+
+template <>
+Vectorized<Half> inline fnmadd(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b,
+    const Vectorized<Half>& c) {
+  return ternary_op_as_fp32(a, b, c, [](__m256 x, __m256 y, __m256 z) {
+    return _mm256_fnmadd_ps(x, y, z);
+  });
+}
+
+template <>
+Vectorized<Half> inline fmsub(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b,
+    const Vectorized<Half>& c) {
+  return ternary_op_as_fp32(a, b, c, [](__m256 x, __m256 y, __m256 z) {
+    return _mm256_fmsub_ps(x, y, z);
+  });
+}
+
+template <>
+Vectorized<Half> inline fnmsub(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b,
+    const Vectorized<Half>& c) {
+  return ternary_op_as_fp32(a, b, c, [](__m256 x, __m256 y, __m256 z) {
+    return _mm256_fnmsub_ps(x, y, z);
+  });
 }
 
 CONVERT_VECTORIZED_INIT(Half, half)
