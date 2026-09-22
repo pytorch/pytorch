@@ -22283,9 +22283,9 @@ if RUN_GPU:
             for test_fn in (fn, fn_largest_false):
                 torch._dynamo.reset()
                 result, code = run_and_get_code(torch.compile(test_fn), inp)
-                self.assertIn(
-                    "sort_with_index",
+                self.assertRegex(
                     " ".join(code),
+                    "(topk|sort)_with_index",
                     "Expected Triton sort codegen for topk",
                 )
                 expected = test_fn(inp)

@@ -1010,6 +1010,192 @@ def sort_with_index(
 
 
 @triton.jit
+def _topk_pack64(x, idxs, rnumel, descending: tl.constexpr):
+    """Pack fp32 keys and lanes into int64 ordered like x.
+
+    The high word orders like the float (NaN above +inf, matching torch.sort),
+    the low word breaks ties by preferring lower lanes and keeps the NaN sign so
+    the unpacked value is bit-identical to the input.
+    """
+    bits = x.to(tl.int32, bitcast=True)
+    is_nan = x != x
+    nan_sign = is_nan & (bits < 0)
+    bits = tl.where(is_nan, bits & 0x7FFFFFFF, bits)
+    key = tl.where(bits < 0, bits ^ 0x7FFFFFFF, bits)
+    lane = idxs.to(tl.int32)
+    if descending:
+        lane = 0x7FFFFFFF - lane
+    low = lane.to(tl.uint32) | (nan_sign.to(tl.uint32) << 31)
+    packed = (key.to(tl.int64) << 32) | low.to(tl.int64)
+    if rnumel is not None:
+        if descending:
+            packed = tl.where(idxs < rnumel, packed, -9223372036854775808)
+        else:
+            packed = tl.where(idxs < rnumel, packed, 9223372036854775807)
+    return packed
+
+
+@triton.jit
+def _topk_unpack64(packed, descending: tl.constexpr):
+    key = (packed >> 32).to(tl.int32)
+    low = packed.to(tl.uint32)
+    bits = tl.where(key < 0, key ^ 0x7FFFFFFF, key)
+    neg_nan = ((key & 0x7FFFFFFF) > 0x7F800000) & ((low >> 31) != 0)
+    bits = tl.where(neg_nan, bits + (-2147483648), bits)
+    lane = (low & 0x7FFFFFFF).to(tl.int32)
+    if descending:
+        lane = 0x7FFFFFFF - lane
+    return bits.to(tl.float32, bitcast=True), lane
+
+
+@triton.jit
+def _topk_pack32(x, idxs, rnumel, descending: tl.constexpr, key_dtype: tl.constexpr):
+    """Pack 16-bit float keys and lanes into int32, like _topk_pack64.
+
+    x is rounded to key_dtype (the tensor's own dtype) first, which is exact
+    for plain loads and otherwise matches eager, whose input already carries
+    that dtype. Halving the key width halves the selection network's traffic.
+    """
+    h = x.to(key_dtype).to(tl.int16, bitcast=True).to(tl.int32)
+    is_nan = x != x
+    nan_sign = is_nan & (h < 0)
+    h = tl.where(is_nan, h & 0x7FFF, h)
+    key = tl.where(h < 0, h ^ 0x7FFF, h)
+    lane = idxs.to(tl.int32)
+    if descending:
+        lane = 0x7FFF - lane
+    packed = (key << 16) | lane | (nan_sign.to(tl.int32) << 15)
+    if rnumel is not None:
+        if descending:
+            packed = tl.where(idxs < rnumel, packed, -2147483648)
+        else:
+            packed = tl.where(idxs < rnumel, packed, 2147483647)
+    return packed
+
+
+@triton.jit
+def _topk_unpack32(packed, descending: tl.constexpr, key_dtype: tl.constexpr):
+    inf_bits: tl.constexpr = 0x7F80 if key_dtype == tl.bfloat16 else 0x7C00
+    key = packed >> 16
+    low = packed & 0xFFFF
+    h = tl.where(key < 0, key ^ 0x7FFF, key)
+    neg_nan = ((key & 0x7FFF) > inf_bits) & ((low >> 15) != 0)
+    h = tl.where(neg_nan, h + (-32768), h)
+    lane = low & 0x7FFF
+    if descending:
+        lane = 0x7FFF - lane
+    value = h.to(tl.int16).to(key_dtype, bitcast=True)
+    return value, lane
+
+
+@triton.jit
+def _topk_extract_fp32(
+    x, idxs, rnumel, k: tl.constexpr, dim: tl.constexpr, descending: tl.constexpr
+):
+    """Top-k of fp32 x by k rounds of extreme-key-then-lowest-lane reductions.
+
+    Keys stay 32-bit (sign-adjusted bits, NaN sign cleared so NaN orders above
+    +inf); the lane carries the NaN sign in bit 30 so the value is restored
+    bit-identical.
+    """
+    orig = x.to(tl.int32, bitcast=True)
+    is_nan = x != x
+    bits = tl.where(is_nan, orig & 0x7FFFFFFF, orig)
+    key = tl.where(bits < 0, bits ^ 0x7FFFFFFF, bits)
+    lane32 = idxs.to(tl.int32)
+    lane = lane32 | ((is_nan & (orig < 0)).to(tl.int32) << 30)
+    sentinel: tl.constexpr = -2147483648 if descending else 2147483647
+    if rnumel is not None:
+        key = tl.where(idxs < rnumel, key, sentinel)
+        if not descending:
+            lane = tl.where(idxs < rnumel, lane, 2147483647)
+    k2: tl.constexpr = constexpr_next_power_of_2(k)
+    slot_id = tl.arange(0, k2)
+    output_shape: tl.constexpr = x.shape[:dim] + [k2]
+    out_key = tl.full(output_shape, 0, tl.int32)
+    out_lane = tl.full(output_shape, 0, tl.int32)
+    for rank in tl.static_range(k):
+        if descending:
+            best = tl.max(key, axis=dim, keep_dims=True)
+        else:
+            best = tl.min(key, axis=dim, keep_dims=True)
+        best_lane = tl.min(
+            tl.where(key == best, lane, 2147483647), axis=dim, keep_dims=True
+        )
+        slot = slot_id == rank
+        out_key = tl.where(slot, best, out_key)
+        out_lane = tl.where(slot, best_lane, out_lane)
+        retire = lane == best_lane
+        key = tl.where(retire, sentinel, key)
+        if not descending:
+            # Ascending retires to INT_MAX, which a NaN key with an all-ones
+            # payload also reaches; keep retired lanes out of that tie.
+            lane = tl.where(retire, 2147483647, lane)
+    vbits = tl.where(out_key < 0, out_key ^ 0x7FFFFFFF, out_key)
+    vbits = tl.where((out_lane >> 30) != 0, vbits + (-2147483648), vbits)
+    return vbits.to(tl.float32, bitcast=True), out_lane & 0x3FFFFFFF
+
+
+@triton.jit
+def topk_with_index(
+    x,
+    idxs,
+    rnumel,
+    k: tl.constexpr,
+    dim: tl.constexpr,
+    descending: tl.constexpr,
+    key_dtype: tl.constexpr,
+):
+    """Top-k values and source indices in a [..., next_power_of_2(k)] block.
+
+    Only the first k lanes are valid.
+    key_dtype is the tensor's dtype; 16-bit floats select on 32-bit keys.
+    """
+    x, idxs = tl.broadcast(x, idxs)
+    tl.static_assert(
+        dim == len(x.shape) - 1, "only minor dimension is currently supported"
+    )
+    n: tl.constexpr = x.shape[dim]
+    k2: tl.constexpr = constexpr_next_power_of_2(k)
+    fp32_keys: tl.constexpr = key_dtype == tl.float32
+
+    if n >= 64 * k and fp32_keys:
+        # Few ranks over many lanes: rounds of "take the extreme key, then
+        # retire that lane" are tree reductions, which Triton lowers far
+        # better than the bitonic network's per-stage shuffles. fp32 keeps
+        # 32-bit keys and recovers the lane with a second reduction.
+        values, lanes = _topk_extract_fp32(x, idxs, rnumel, k, dim, descending)
+        return values, lanes.to(idxs.dtype)
+
+    if fp32_keys:
+        packed = _topk_pack64(x, idxs, rnumel, descending)
+    else:
+        packed = _topk_pack32(x, idxs, rnumel, descending, key_dtype)
+
+    if n >= 64 * k:
+        # 16-bit keys already share an int32 with the lane, so one reduction
+        # per rank finds both.
+        sentinel: tl.constexpr = -2147483648 if descending else 2147483647
+        output_shape: tl.constexpr = x.shape[:dim] + [k2]
+        slot_id = tl.arange(0, k2)
+        top = tl.full(output_shape, 0, packed.dtype)
+        for rank in tl.static_range(k):
+            if descending:
+                best = tl.max(packed, axis=dim, keep_dims=True)
+            else:
+                best = tl.min(packed, axis=dim, keep_dims=True)
+            top = tl.where(slot_id == rank, best, top)
+            packed = tl.where(packed == best, sentinel, packed)
+    else:
+        top = tl.topk(packed, k2, dim=dim, descending=descending)
+    if fp32_keys:
+        values, lanes = _topk_unpack64(top, descending)
+    else:
+        values, lanes = _topk_unpack32(top, descending, key_dtype)
+    return values.to(x.dtype), lanes.to(idxs.dtype)
+
+
+@triton.jit
 def select_one(x, mask, dim, keep_dims=False):
     idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
     ix = x.to(idtype, bitcast=True)

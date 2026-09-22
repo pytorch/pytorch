@@ -3354,6 +3354,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
+        # Largest top-k selected in this kernel; drives its launch config in
+        # the reduction heuristic.
+        self.topk_sort_k: int = 0
         self.reduction_result_families: dict[int, _DerivedIterationFamily] = {}
         # TensorDescriptorOptions for pointwise/reduction kernels; template
         # kernels set a resolved {block_shape, shape, strides} dict directly
@@ -6863,6 +6866,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
     ) -> tuple[CSEVariable, ...]:
         if not self.inside_reduction:
             raise AssertionError("expected inside_reduction")
@@ -6879,6 +6883,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
+        key_dtype = dtypes[0]
         dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
         if len(dtypes) != len(values):
             raise AssertionError(
@@ -6892,6 +6897,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             for i, value in enumerate(values)
         ]
+        result_shape = tuple(self.dense_size_list())
+        result_family = None
+        if top_k is not None and not V.graph.sizevars.statically_known_equals(
+            top_k, self.range_trees[-1].numel
+        ):
+            result_family = self.reduction_result_family(top_k)
+            result_shape = (*result_shape[:-1], str(next_power_of_2(top_k)))
 
         def csv(values):
             return " ".join(f"{value}," for value in values)
@@ -6902,8 +6914,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if all(self.cse.contains(cache_key) for cache_key in cache_keys):
                 return [self.cse.get(cache_key) for cache_key in cache_keys]
             result_vars = [
-                self.cse.newvar(dtype=dtype, shape=value.shape)
-                for dtype, value in zip(dtypes, broadcasted_values)
+                self.cse.newvar(dtype=dtype, shape=result_shape) for dtype in dtypes
             ]  # type: ignore[attr-defined]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
@@ -6919,10 +6930,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         rnumel = "None" if self._has_constant_mask(self.range_trees[-1]) else "rnumel"
 
         if len(values) == 2:
-            line = (
-                f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
-                f" {rnumel}, {dim}, stable={stable}, descending={descending})"
-            )
+            if top_k is None:
+                line = (
+                    f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
+                    f" {rnumel}, {dim}, stable={stable}, descending={descending})"
+                )
+            else:
+                if stable:
+                    raise AssertionError("top-k selection is unstable")
+                self.topk_sort_k = max(self.topk_sort_k, top_k)
+                line = (
+                    f"triton_helpers.topk_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
+                    f" {rnumel}, {top_k}, {dim}, {descending}, {triton_type(key_dtype)})"
+                )
             result_vars = cse_multiple(line, broadcasted_values, masks, dtypes)
         else:
             raise AssertionError("Unhandled sort")
@@ -6930,6 +6950,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for result_var, input_var in zip(result_vars, values):
             result_var.mask_vars = masks  # type: ignore[attr-defined]
             result_var.bounds = input_var.bounds
+
+        if result_family is not None:
+            result_family.set_value_masks(self, result_vars)
 
         return tuple(result_vars)
 
@@ -7432,6 +7455,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
+        if self.topk_sort_k:
+            out["topk_sort_k"] = self.topk_sort_k
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
