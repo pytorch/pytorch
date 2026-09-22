@@ -18,7 +18,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _BYPASS_REASON_MAX_CHARS,
@@ -1656,6 +1656,36 @@ def add(x, y):
         bare = CompilePackage(fn, explicit_capture=True)
         torch._dynamo.optimize(backend="eager", package=bare)(fn)(torch.randn(3))
         self.assertIn("TENSOR_MATCH", self._saved_guard_names(bare))
+
+    @torch._dynamo.config.patch(strict_precompile=False)
+    def test_explicit_capture_raises_where_the_ambient_cache_bypasses(self):
+        # A guard the artifact cannot carry is a bypass (a warning, the entry
+        # is dropped) for the ambient cache, and an error for a capture whose
+        # caller asked for exactly this frame, whatever strict_precompile says.
+        def fn(x, cfg=UnpicklableConfig()):
+            return x.sin() * cfg.scale
+
+        x = torch.randn(3)
+        ambient = CompilePackage(fn)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            torch._dynamo.optimize(backend="eager", package=ambient)(fn)(x)
+        self.assertTrue(any("package bypass" in line for line in logs.output))
+        self.assertTrue(ambient.cache_entry().codes[0].bypassed)
+
+        torch._dynamo.reset()
+        explicit = CompilePackage(fn, explicit_capture=True)
+        with self.assertRaisesRegex(PackageError, "config cannot pickle"):
+            torch._dynamo.optimize(backend="eager", package=explicit)(fn)(x)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_explicit_capture_is_not_recorded_into_the_ambient_cache(self):
+        def fn(x):
+            return x + 1
+
+        pkg = CompilePackage(fn, explicit_capture=True)
+        torch._dynamo.optimize(backend="eager", package=pkg)(fn)(torch.randn(3))
+        self.assertEqual(len(pkg.cache_entry().codes[0].guarded_codes), 1)
+        self.assertEqual(PrecompileContext._dynamo_cache_entries, {})
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
