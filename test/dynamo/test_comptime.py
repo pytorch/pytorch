@@ -10,6 +10,7 @@ from io import StringIO
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 # Because we don't support free variables in comptime at the moment,
@@ -21,6 +22,8 @@ SELF = None
 
 
 class ComptimeTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_print_single(self):
         global FILE
         FILE = StringIO()

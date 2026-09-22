@@ -20,6 +20,7 @@ from torch.optim.optimizer import Optimizer, register_optimizer_step_post_hook
 
 from .profiler import (
     _KinetoProfile,
+    CuspyConfig,
     ExecutionTraceObserver,
     PerformanceMetricsConfig,
     profile,
@@ -38,6 +39,7 @@ __all__ = [
     "tensorboard_trace_handler",
     "ProfilerAction",
     "ProfilerActivity",
+    "CuspyConfig",
     "PerformanceMetricsConfig",
     "ProfilerActivityConfig",
     "kineto_available",
