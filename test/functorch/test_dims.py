@@ -16,8 +16,12 @@ from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_LINUX,
+    IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TestCase,
 )
 
@@ -673,6 +677,10 @@ class TestMin(TestBase):
 class TestMinDevice(TestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/86710",
+    )
     def test_attn_device(self, device):
         # size from the BERT paper, 90% pretraining of sequence length 128
         self.attn(
