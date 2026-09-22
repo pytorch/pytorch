@@ -316,10 +316,8 @@ class TritonBundler:
                 try:
                     # Make sure the cubin path exists and is valid
                     for compile_result in result.kernel.compile_results:
-                        if (
-                            compile_result.kernel.cubin_raw is None
-                            and binary_index is not None
-                        ):
+                        has_retained_cubin = compile_result.kernel.cubin_raw is not None
+                        if not has_retained_cubin and binary_index is not None:
                             matches = binary_index.matching_payloads(
                                 compile_result.bundled_artifact_identity()
                             )
@@ -333,7 +331,7 @@ class TritonBundler:
                                     "Ignoring ambiguous bundled binaries for %s",
                                     result.kernel_name,
                                 )
-                        compile_result.reload_cubin_path()
+                        compile_result.reload_cubin_path(force=has_retained_cubin)
                         compile_result.kernel.retain_cubin_from_path()
                 except MissingTritonKernelError:
                     log.warning(

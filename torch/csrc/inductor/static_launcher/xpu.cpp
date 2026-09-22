@@ -434,13 +434,17 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   sycl::kernel* func =
       loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
 
-  PyObject* kernel_py = PyCapsule_New(
+  auto kernel_py = THPObjectPtr(PyCapsule_New(
       reinterpret_cast<void*>(func), "sycl_kernel", [](PyObject* cap) {
         void* ptr = PyCapsule_GetPointer(cap, "sycl_kernel");
         delete reinterpret_cast<sycl::kernel*>(ptr);
-      });
+      }));
+  if (!kernel_py) {
+    delete func;
+    return nullptr;
+  }
 
-  return Py_BuildValue("(Oii)", kernel_py, n_regs, n_spills);
+  return Py_BuildValue("(Oii)", kernel_py.get(), n_regs, n_spills);
   END_HANDLE_TH_ERRORS
 }
 
