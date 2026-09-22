@@ -844,6 +844,8 @@ class FSDPParam:
             )
         self._all_gather_metadata = None
         if has_fsdp_pre_all_gather:
+            # Payloads are unknown until fsdp_pre_all_gather runs; all_gather_inputs
+            # populates their layouts before copy-out.
             self._all_gather_copy_layouts = ()
         else:
             self._all_gather_copy_layouts = (
