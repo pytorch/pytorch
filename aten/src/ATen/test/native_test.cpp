@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/as_strided_native.h>
+#endif
 #include <c10/util/irange.h>
 
 using namespace at;
