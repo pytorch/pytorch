@@ -26,7 +26,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._p2p import (
     _build_p2p_edge_groups,
     _directed_edge_split_rounds,
-    _logical_edge_preconnect_rounds,
+    _physical_edge_matchings,
     _PP_EDGE_GROUP_CACHE,
     _preconnect_shared_p2p_edges,
     _stage_rank_assignment,
@@ -90,7 +90,7 @@ torch.manual_seed(0)
 
 
 class P2PInitializationTest(TestCase):
-    def test_schedule_builds_and_preconnects_one_shared_edge_group_map(self):
+    def test_schedule_builds_and_preconnects_one_directed_group_map(self):
         parent = MagicMock()
         assignment = dict(enumerate((0, 1, 2, 3, 0, 1, 2, 3)))
         stages = []
@@ -136,11 +136,11 @@ class P2PInitializationTest(TestCase):
         )
         self.assertTrue(all(stage._p2p_edge_groups is groups for stage in stages))
 
-    def test_per_edge_setup_requires_consistent_local_stage_metadata(self):
+    def test_setup_requires_consistent_local_stage_metadata(self):
         parent = MagicMock()
         assignment = {0: 0, 1: 1}
 
-        def make_stage(stage_index: int) -> MockPipelineStage:
+        def make_stage(stage_index: int, *, per_edge: bool) -> MockPipelineStage:
             stage = MockPipelineStage(
                 num_stages=2,
                 group_size=2,
@@ -149,23 +149,28 @@ class P2PInitializationTest(TestCase):
             )
             stage.stage_index = stage_index
             stage.device = torch.device("cpu")
-            stage.p2p_per_edge = True
+            stage.p2p_per_edge = per_edge
             stage.stage_index_to_group_rank = assignment
             return stage
 
-        stages = [make_stage(0), make_stage(1)]
+        stages = [make_stage(0, per_edge=False), make_stage(1, per_edge=False)]
         stages[1].stage_index_to_group_rank = {0: 1, 1: 0}
         with self.assertRaisesRegex(ValueError, "stage-to-rank assignment"):
             _PipelineSchedule._initialize_pipeline_distributed_state(
                 MagicMock(), stages, has_backward=True, initialize_p2p=True
             )
 
-        stages = [make_stage(0), make_stage(1)]
-        stages[1].device = torch.device("cuda", 1)
-        with self.assertRaisesRegex(ValueError, "use one device"):
-            _PipelineSchedule._initialize_pipeline_distributed_state(
-                MagicMock(), stages, has_backward=True, initialize_p2p=True
-            )
+        for per_edge in (False, True):
+            with self.subTest(per_edge=per_edge):
+                stages = [
+                    make_stage(0, per_edge=per_edge),
+                    make_stage(1, per_edge=per_edge),
+                ]
+                stages[1].device = torch.device("cuda", 1)
+                with self.assertRaisesRegex(ValueError, "use one device"):
+                    _PipelineSchedule._initialize_pipeline_distributed_state(
+                        MagicMock(), stages, has_backward=True, initialize_p2p=True
+                    )
 
     def test_p2p_initialization_state_is_independent_from_metadata(self):
         stage = MockPipelineStage(num_stages=1, group_size=1)
@@ -191,6 +196,14 @@ class P2PInitializationTest(TestCase):
         assignment = _stage_rank_assignment(
             {stage: stage % 4 for stage in range(8)}, group_size=4
         )
+
+        self.assertEqual(
+            _physical_edge_matchings(assignment),
+            (
+                ((0, 1), (2, 3)),
+                ((0, 3), (1, 2)),
+            ),
+        )
         self.assertEqual(
             _directed_edge_split_rounds(assignment),
             (
@@ -201,35 +214,24 @@ class P2PInitializationTest(TestCase):
             ),
         )
 
-    def test_shared_preconnect_rounds_preserve_repeated_logical_edges(self):
-        assignment = (0, 1, 2, 3, 0, 1, 2, 3)
+    def test_repeated_two_rank_assignment_uses_one_physical_pair(self):
+        assignment = _stage_rank_assignment(
+            {stage: stage % 2 for stage in range(8)}, group_size=2
+        )
 
-        rounds = _logical_edge_preconnect_rounds(assignment)
-
+        self.assertEqual(_physical_edge_matchings(assignment), (((0, 1),),))
         self.assertEqual(
-            rounds,
-            (
-                ((0, 1), (2, 3)),
-                ((1, 2), (3, 4)),
-                ((4, 5), (6, 7)),
-                ((5, 6),),
-            ),
-        )
-        self.assertTrue(
-            all(
-                len({assignment[stage] for edge in round_edges for stage in edge})
-                == 2 * len(round_edges)
-                for round_edges in rounds
-            )
+            _directed_edge_split_rounds(assignment),
+            (((0, 1),), ((1, 0),)),
         )
 
-    def test_shared_preconnect_exercises_raw_path(self):
+    def test_shared_preconnect_exercises_each_physical_pair_once(self):
         parent = MagicMock()
-        raw_work = MagicMock()
+        works = [MagicMock(), MagicMock()]
         with (
             patch(
                 "torch.distributed.pipelining._p2p.dist.get_world_size",
-                return_value=2,
+                return_value=4,
             ),
             patch(
                 "torch.distributed.pipelining._p2p.dist.get_rank",
@@ -237,22 +239,25 @@ class P2PInitializationTest(TestCase):
             ),
             patch(
                 "torch.distributed.pipelining._p2p.dist.isend",
-                return_value=raw_work,
+                side_effect=works,
             ) as isend,
             patch("torch.distributed.pipelining._p2p.dist.all_reduce") as sync,
         ):
             _preconnect_shared_p2p_edges(
                 parent,
-                {0: 0, 1: 1},
-                {0: torch.device("cpu")},
+                dict(enumerate((0, 1, 2, 3, 0, 1, 2, 3))),
                 torch.device("cpu"),
             )
 
-        isend.assert_called_once()
-        self.assertIs(isend.call_args.kwargs["group"], parent)
-        self.assertEqual(isend.call_args.kwargs["group_dst"], 1)
-        raw_work.wait.assert_called_once()
-        sync.assert_called_once()
+        self.assertEqual(
+            [call.kwargs["group_dst"] for call in isend.call_args_list],
+            [1, 3],
+        )
+        self.assertTrue(
+            all(call.kwargs["group"] is parent for call in isend.call_args_list)
+        )
+        self.assertTrue(all(work.wait.call_count == 1 for work in works))
+        self.assertEqual(sync.call_count, 2)
 
     def test_v_assignment_excludes_same_rank_turn_and_wraparound(self):
         assignment = _stage_rank_assignment(
@@ -261,6 +266,10 @@ class P2PInitializationTest(TestCase):
         )
 
         rounds = _directed_edge_split_rounds(assignment)
+        self.assertEqual(
+            _physical_edge_matchings(assignment),
+            (((0, 1), (2, 3)), ((1, 2),)),
+        )
         edges = {edge for round_edges in rounds for edge in round_edges}
         self.assertEqual(
             edges,
