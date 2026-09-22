@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -250,6 +251,8 @@ ROUND_TRIP_TEST_CASES = (
 
 
 class TestFloat8Dtype(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
@@ -425,6 +428,8 @@ class TestFloat8Dtype(TestCase):
 
 
 class TestFloat4Dtype(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # TODO(#146647): make the testing generic for shell dtypes
     def test_float4_e2m1fn_x2(self, device):
         # can create a tensor of dtype float4
@@ -536,6 +541,8 @@ instantiate_device_type_tests(TestFloat4Dtype, globals(), allow_xpu=True)
 
 
 class TestFloat8DtypeCPUOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     """
     Test of mul implementation
 
@@ -579,6 +586,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
 
 
 instantiate_device_type_tests(TestFloat8DtypeCPUOnly, globals(), only_for="cpu")
+
 
 if __name__ == "__main__":
     run_tests()
