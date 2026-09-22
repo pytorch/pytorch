@@ -315,12 +315,14 @@ public class IValue {
   }
 
   @DoNotStrip
+  @SuppressWarnings("unchecked")
   public Map<String, IValue> toDictStringKey() {
     preconditionType(TYPE_CODE_DICT_STRING_KEY, mTypeCode);
     return (Map<String, IValue>) mData;
   }
 
   @DoNotStrip
+  @SuppressWarnings("unchecked")
   public Map<Long, IValue> toDictLongKey() {
     preconditionType(TYPE_CODE_DICT_LONG_KEY, mTypeCode);
     return (Map<Long, IValue>) mData;
