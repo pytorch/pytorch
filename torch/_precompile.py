@@ -224,8 +224,9 @@ it.
 # whole runnable artifact).
 #
 # THREADING: the inductor lowering drives process-global compiler state and is
-# serialized by an internal lock, so concurrent backend="inductor" captures lower one
-# at a time. The make_fx trace and the backend="eager" path are NOT serialized.
+# serialized by _COMPILE_LOCK (torch/_functorch/_aot_autograd/to_standalone_python.py),
+# so concurrent backend="inductor" captures lower one at a time. The make_fx trace
+# and the backend="eager" path are NOT serialized.
 #
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
 # non-strict trace and is the only tracer implemented today -- everything above (the
