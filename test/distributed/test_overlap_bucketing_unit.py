@@ -2766,6 +2766,97 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
             os.unlink(trace_path)
 
 
+class TestPreBucketingCleanup(TestCase):
+    def test_deduplicates_parametrization_waits(self):
+        from torch._functorch.compile_utils import fx_graph_cse
+        from torch._inductor.fx_passes.bucketing import deduplicate_wait_tensors
+        from torch._inductor.fx_passes.fsdp import pre_bucket_fsdp_collectives
+        from torch.nn.utils import parametrize as nn_parametrize
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        group_size = 2
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=group_size, store=FakeStore()
+        )
+        self.addCleanup(dist.destroy_process_group)
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        class AllGatherParametrization(torch.nn.Module):
+            def forward(self, tensor):
+                gathered = torch.ops._c10d_functional.all_gather_into_tensor(
+                    tensor, group_size, group_name
+                )
+                return torch.ops._c10d_functional.wait_tensor(gathered)
+
+        class BiasModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.ones(4))
+                self.weight = torch.nn.Parameter(torch.ones(4))
+                nn_parametrize.register_parametrization(
+                    self, "bias", AllGatherParametrization(), unsafe=True
+                )
+                nn_parametrize.register_parametrization(
+                    self, "weight", AllGatherParametrization(), unsafe=True
+                )
+
+            def forward(self, x):
+                if self.bias is not None:
+                    return x + self.bias + self.weight
+                return x
+
+        module = BiasModule()
+        params = dict(module.named_parameters())
+
+        def functional_call(params, x):
+            return torch.func.functional_call(module, params, (x,))
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            traced = make_fx(functional_call)(params, torch.ones(group_size * 4))
+
+        def find_nodes(target):
+            return traced.graph.find_nodes(op="call_function", target=target)
+
+        all_gather = torch.ops._c10d_functional.all_gather_into_tensor.default
+        wait_tensor = torch.ops._c10d_functional.wait_tensor.default
+        self.assertEqual(len(find_nodes(all_gather)), 3)
+        self.assertEqual(len(find_nodes(wait_tensor)), 3)
+
+        traced = fx.GraphModule(traced, fx_graph_cse(traced.graph))
+        all_gather_nodes = find_nodes(all_gather)
+        self.assertEqual(len(all_gather_nodes), 2)
+        wait_nodes = find_nodes(wait_tensor)
+        self.assertEqual(len(wait_nodes), 3)
+        duplicate_all_gather = next(
+            node for node in all_gather_nodes if len(node.users) == 2
+        )
+        duplicate_waits = [
+            wait for wait in wait_nodes if wait.args[0] is duplicate_all_gather
+        ]
+        duplicate_users = list(duplicate_waits[1].users)
+        with traced.graph.inserting_after(duplicate_waits[1]):
+            chained_wait = traced.graph.call_function(
+                wait_tensor, (duplicate_waits[1],)
+            )
+        for user in duplicate_users:
+            user.replace_input_with(duplicate_waits[1], chained_wait)
+        duplicate_waits[0].prepend(duplicate_waits[1])
+
+        deduplicate_wait_tensors(traced.graph)
+
+        traced.graph.lint()
+        remaining_waits = find_nodes(wait_tensor)
+        self.assertEqual(len(remaining_waits), 2)
+        self.assertIn(duplicate_waits[0], remaining_waits)
+        self.assertNotIn(duplicate_waits[1], remaining_waits)
+        self.assertNotIn(chained_wait, remaining_waits)
+
+        pre_bucket_fsdp_collectives(traced, bucket_cap_mb=2000.0)
+
+        self.assertEqual(len(find_nodes(all_gather)), 0)
+        self.assertEqual(len(find_nodes(wait_tensor)), 1)
+
+
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestPreBucketingFsdpCollectives(InductorTestCase):
