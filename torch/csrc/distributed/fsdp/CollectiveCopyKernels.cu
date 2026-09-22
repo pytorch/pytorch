@@ -1,11 +1,16 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/ops/empty.h>
 #include <c10/util/TypeCast.h>
 #include <torch/csrc/distributed/fsdp/CollectiveCopyCUDA.hpp>
 #include <algorithm>
 #include <cstring>
 #include <type_traits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace c10d::fsdp::detail {
 
