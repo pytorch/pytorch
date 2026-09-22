@@ -4754,6 +4754,28 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "qr_piv received unrecognized mode 'hello'"):
             torch.linalg.qr_piv(t2, mode='hello')
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64)
+    def test_qr_piv_rank_revealing(self, device, dtype):
+        # Adversarial matrix: planted singular values [1, 0.1, 1e-3], with the
+        # near-null right-singular direction spread evenly across all columns
+        # (not aligned with any single column). Unpivoted QR stays numerically
+        # accurate here, but its R diagonal is not monotonically decreasing, so
+        # it fails to reveal the rank deficiency -- exactly the rank-revealing
+        # guarantee pivoting exists to provide.
+        A = torch.tensor([
+            [0.005634, -0.075095, 0.067838],
+            [0.057165, -0.099936, 0.043364],
+            [-0.218126, -0.566604, 0.784839],
+        ], dtype=dtype, device=device)
+
+        _, R, _ = torch.linalg.qr_piv(A, mode='reduced')
+        diagR = R.diagonal(dim1=-2, dim2=-1).abs()
+
+        # The rank-revealing guarantee: |R_11| >= |R_22| >= ... >= |R_kk|.
+        self.assertTrue(torch.all(diagR[:-1] >= diagR[1:] - 1e-6))
+
     def _check_einsum(self, *args, np_args=None):
         if np_args is None:
             np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
