@@ -1110,6 +1110,9 @@ def getitem_on_dict_manager(
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
         # TODO - source debug string is probably wrong here.
+        # Not recorded by _compared_by_value (no builder here): a
+        # DictGuardManager exists only under guard_on_key_order, whose
+        # install_dict_keys_match_guard records the same key.
         base_guard_manager.get_key_manager(
             index=index,
             source=key_source,
@@ -2541,6 +2544,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___dict_contains({key!r}, {dict_ref})"
         if code in self.already_added_code_parts:
             return
+        self._compared_by_value(key)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
@@ -2561,6 +2565,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"not ___dict_contains({key!r}, {dict_ref})"
         if code in self.already_added_code_parts:
             return
+        self._compared_by_value(key)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
@@ -2583,6 +2588,7 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
 
+        self._compared_by_value(item)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
@@ -2605,6 +2611,7 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
 
+        self._compared_by_value(item)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
@@ -4311,13 +4318,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         # tuple, see _keep_container_verbatim) must stay real even when an
         # unguarded attribute is the very same object and registers it mid-dump.
         # So must an object a guard compares by value itself (a dict key).
-        self._verbatim_elements: set[int] = set()
+        self._verbatim_elements: dict[int, Any] = {}
         stack = list(value_guarded_containers.values())
         while stack:
             value = stack.pop()
             if id(value) in self._verbatim_elements:
                 continue
-            self._verbatim_elements.add(id(value))
+            # Holds the value, like its sibling maps, so the id stays live: a
+            # __dict__ property may hand the walk a dict that dies with it.
+            self._verbatim_elements[id(value)] = value
             if inspect.ismodule(value) or isinstance(
                 value, (torch.Tensor, torch.nn.Module)
             ):
@@ -4334,7 +4343,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # dataclass), so a key can be one or hold one.
                 stack.extend(value)
                 stack.extend(value.values())
-            elif isinstance(value, (list, tuple, set, frozenset)):
+            elif isinstance(value, (list, tuple, set, frozenset, dict_keys)):
+                # A dict_keys view is a KeysView, not a set, and its reducer
+                # pickles each key as its own object.
                 stack.extend(value)
             if (fields := _instance_dict(value)) is not None:
                 # A by-value comparison reads every field, so the protection
@@ -4492,10 +4503,11 @@ class GuardsStatePickler(FunctionPicklerBase):
     # call-site default binding next to `f.__defaults__ == (...)`), and only
     # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
     # records those tuples in value_guarded_containers, which the pickler takes
-    # as a required argument. A non-const dict key is recorded there too
-    # (_compared_by_value): the key managers bake it and compare it by value at
-    # run time, and that comparison reads every field, so the protection extends
-    # through the key's instance dict. Two known limits: a slotted key's slot
+    # as a required argument. A non-const dict key and a *_CONTAINS comparand
+    # are recorded there too (_compared_by_value): the key managers and the
+    # contains guards bake them and compare by value at run time, and that
+    # comparison reads every field, so the protection extends through the
+    # key's instance dict. Two known limits: a slotted key's slot
     # values are not marked, and a tensor or nn.Module field still goes through
     # its own guard_tree_values check (a loaded copy could not compare equal to
     # the run-time object anyway). A dict/tuple SUBCLASS is verbatim whenever
