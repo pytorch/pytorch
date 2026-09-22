@@ -1052,6 +1052,8 @@ def _load_verify_dynamo():
 
 
 class TestVerifyDynamoRocm(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.verify_dynamo = _load_verify_dynamo()
