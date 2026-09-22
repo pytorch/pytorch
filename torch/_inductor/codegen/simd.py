@@ -4710,7 +4710,6 @@ class SIMDScheduling(BaseScheduling):
         self,
         node_info: NodeInfo,
         only_gen_src_code: bool,
-        is_first_combo_launch: bool,
     ) -> tuple[str, TritonKernel]:
         kernel_kwargs: dict[str, Any] = {}
         self.kernel_type.apply_feature_required_overrides(
@@ -4722,8 +4721,6 @@ class SIMDScheduling(BaseScheduling):
             tiling_scores=node_info.tiling_scores,
             **kernel_kwargs,
         )
-        kernel._from_combo_codegen = True
-        kernel._is_first_combo_launch = is_first_combo_launch
         self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
         with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
@@ -5155,7 +5152,7 @@ class SIMDScheduling(BaseScheduling):
                     kernel_code_list.append((None, None, node_group))
                 else:
                     src_code, kernel = self._codegen_standalone_kernel(
-                        node_info, only_gen_src_code, not kernel_code_list
+                        node_info, only_gen_src_code
                     )
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
@@ -5210,9 +5207,7 @@ class SIMDScheduling(BaseScheduling):
                         carve_out = list(group)
                     for pn in carve_out:
                         co_src, co_kernel = self._codegen_standalone_kernel(
-                            node_schedule_map[pn],
-                            only_gen_src_code,
-                            not kernel_code_list,
+                            node_schedule_map[pn], only_gen_src_code
                         )
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((co_src, co_kernel, [pn]))
@@ -5275,9 +5270,7 @@ class SIMDScheduling(BaseScheduling):
 
                 for pn in carve_out_pns:
                     co_src_code, co_kernel = self._codegen_standalone_kernel(
-                        node_schedule_map[pn],
-                        only_gen_src_code,
-                        not kernel_code_list,
+                        node_schedule_map[pn], only_gen_src_code
                     )
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((co_src_code, co_kernel, [pn]))
