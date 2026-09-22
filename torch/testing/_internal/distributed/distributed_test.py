@@ -567,6 +567,12 @@ class TestDistBackend(MultiProcessTestCase):
             and int(os.environ["WORLD_SIZE"]) < 8
         ):
             self.skipTest(TEST_SKIPS["small_worldsize"].message)
+        reason = getattr(test, "_skip_no_accelerator_before_spawn", None)
+        if (
+            reason is not None
+            and torch.accelerator.current_accelerator(check_available=False) is None
+        ):
+            self.skipTest(reason)
         super().setUp()
         # initialize temp directories
         initialize_temp_directories()
