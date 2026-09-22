@@ -89,7 +89,7 @@ class TestPrefixCopy(TestCase):
             tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
             self.assertIs(tensors[0], tensor)
             self.assertEqual(tensor.view(layouts[0].output_size).size(), (2, 3))
-            self.assertEqual(layouts[0].num_prefixes, 1)
+            self.assertEqual(layouts[0].outer_size, 1)
         else:
             with self.assertRaisesRegex(
                 RuntimeError, "Shard.*all-gather output must have.*elements"
@@ -114,7 +114,7 @@ class TestPrefixCopy(TestCase):
                 tensor.view(layouts[0].output_size).size(),
                 (input_size[0] * kwargs["world_size"], *input_size[1:]),
             )
-            self.assertEqual(layouts[0].num_prefixes, 1)
+            self.assertEqual(layouts[0].outer_size, 1)
 
     def test_all_gather_mixed_empty_inputs(self, device):
         world_size = 2
@@ -130,7 +130,7 @@ class TestPrefixCopy(TestCase):
         )
         self.assertIs(tensors[0], shards[0])
         self.assertIs(tensors[1], empty)
-        self.assertEqual([layout.num_prefixes for layout in layouts], [2, 1])
+        self.assertEqual([layout.outer_size for layout in layouts], [2, 1])
         self.assertEqual([layout.dim for layout in layouts], [1, 0])
         param = Mock(all_gather_outputs=[], all_gather_copy_layouts=layouts)
         param.init_all_gather_outputs = FSDPParam.init_all_gather_outputs.__get__(param)
@@ -184,8 +184,8 @@ class TestPrefixCopy(TestCase):
         params = [Mock(fsdp_placement=Shard(dim)) for dim in shard_dims]
         prepared = _prepare_reduce_scatter_inputs(params, grads, world_size)
         sizes = prepared.padded_unsharded_sizes
-        use_prefix_copy = nonzero_shards and world_size > 1
-        if use_prefix_copy:
+        use_direct_copy = nonzero_shards and world_size > 1
+        if use_direct_copy:
             self.assertIsNot(prepared.copy_in, foreach_reduce_scatter_copy_in)
         else:
             self.assertIs(prepared.copy_in, foreach_reduce_scatter_copy_in)
@@ -197,10 +197,10 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(output, expected, atol=0, rtol=0)
         self.assertEqual(
             counter.counts[torch.ops.fsdp._reduce_scatter_copy_in_.default],
-            int(use_prefix_copy),
+            int(use_direct_copy),
         )
         self.assertEqual(
-            counter.counts[torch.ops.fsdp.chunk_cat.default], int(not use_prefix_copy)
+            counter.counts[torch.ops.fsdp.chunk_cat.default], int(not use_direct_copy)
         )
 
     @parametrize(
@@ -208,12 +208,12 @@ class TestPrefixCopy(TestCase):
         [
             "shard0",
             "shard1",
-            "singleton_prefix",
+            "singleton_outer_size",
             "mixed",
             "extension",
             "post_forward",
             "post_forward_nonzero",
-            "zero_prefix",
+            "zero_outer_size",
             "mixed_fallback",
         ],
     )
@@ -226,20 +226,25 @@ class TestPrefixCopy(TestCase):
     def _test_all_gather_output(self, device, layout):
         world_size = 4
         layouts = {
-            "all_empty": ("zero_prefix",),
+            "all_empty": ("zero_outer_size",),
             "mixed": ("shard0", "shard1"),
-            "zero_prefix": ("zero_prefix", "shard0"),
-            "mixed_fallback": ("shard1", "extension", "post_forward", "zero_prefix"),
+            "zero_outer_size": ("zero_outer_size", "shard0"),
+            "mixed_fallback": (
+                "shard1",
+                "extension",
+                "post_forward",
+                "zero_outer_size",
+            ),
         }.get(layout, (layout,))
         params, expected, shards, outputs = [], [], [], []
         for kind in layouts:
             dim = 0 if kind in ("shard0", "post_forward") else 1
             shape = {
                 "shard0": (12, 5),
-                "singleton_prefix": (1, 12, 5),
+                "singleton_outer_size": (1, 12, 5),
                 "post_forward": (16, 5),
                 "post_forward_nonzero": (16, 8),
-                "zero_prefix": (0, 12, 5),
+                "zero_outer_size": (0, 12, 5),
             }.get(kind, (2, 12, 5))
             dtype = torch.bfloat16 if layout == "mixed" and dim == 1 else torch.float32
             tensor = make_tensor(shape, device=device, dtype=dtype)
@@ -375,14 +380,14 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], 0)
 
     @parametrize("num_chunks", [1, 4])
-    @parametrize("num_prefixes", [1, 128])
+    @parametrize("outer_size", [1, 128])
     @parametrize("inference", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.int64)
-    def test_split_copy(self, device, dtype, num_chunks, num_prefixes, inference):
+    def test_split_copy(self, device, dtype, num_chunks, outer_size, inference):
         with torch.inference_mode(inference):
             shapes = [
                 (num_chunks * 3, 5),
-                (num_prefixes, num_chunks * 3, 5),
+                (outer_size, num_chunks * 3, 5),
                 (2, 3, num_chunks * 2, 5),
             ]
             expected = [make_tensor(s, device=device, dtype=dtype) for s in shapes]
@@ -394,11 +399,11 @@ class TestPrefixCopy(TestCase):
             buffers = [t.new_full((t.numel() + 10,), 7) for t in expected]
             outputs = [b[5:-5].view(s) for b, s in zip(buffers, shapes)]
             splits = [t.numel() // num_chunks for t in expected]
-            prefixes = [math.prod(s[:dim]) for dim, s in enumerate(shapes)]
+            outer_sizes = [math.prod(s[:dim]) for dim, s in enumerate(shapes)]
             versions = [t._version for t in outputs] if not inference else None
 
             result = torch.ops.fsdp._all_gather_copy_out_(
-                outputs, source, splits, prefixes, num_chunks
+                outputs, source, splits, outer_sizes=outer_sizes, num_chunks=num_chunks
             )
 
             self.assertIsNone(result)
@@ -453,11 +458,11 @@ class TestPrefixCopy(TestCase):
         [
             ("chunks", "positive num_chunks"),
             ("split_count", "per output"),
-            ("prefix_count", "per output"),
+            ("outer_size_count", "per output"),
             ("negative_split", "non-negative"),
             ("split_sum", "sum"),
-            ("zero_prefix", "positive prefix"),
-            ("indivisible_prefix", "divisible"),
+            ("zero_outer_size", "positive outer size"),
+            ("indivisible_outer_size", "divisible"),
             ("input_size", "divisible"),
             ("output_size", "output size"),
             ("dtype", "dtype"),
@@ -468,21 +473,21 @@ class TestPrefixCopy(TestCase):
     def test_split_copy_invalid(self, device, invalid, match):
         source = torch.zeros(16, device=device)
         outputs = [torch.empty_like(source)]
-        splits, prefixes, num_chunks = [8], [2], 2
+        splits, outer_sizes, num_chunks = [8], [2], 2
         if invalid == "chunks":
             num_chunks = 0
         elif invalid == "split_count":
             splits = []
-        elif invalid == "prefix_count":
-            prefixes = []
+        elif invalid == "outer_size_count":
+            outer_sizes = []
         elif invalid == "negative_split":
             splits = [-8]
         elif invalid == "split_sum":
             splits = [10]
-        elif invalid == "zero_prefix":
-            prefixes = [0]
-        elif invalid == "indivisible_prefix":
-            prefixes = [3]
+        elif invalid == "zero_outer_size":
+            outer_sizes = [0]
+        elif invalid == "indivisible_outer_size":
+            outer_sizes = [3]
         elif invalid == "input_size":
             source = source[:-1]
         elif invalid == "output_size":
@@ -495,11 +500,11 @@ class TestPrefixCopy(TestCase):
             outputs = [torch.empty(32, device=device)[::2]]
         with self.assertRaisesRegex(RuntimeError, match):
             torch.ops.fsdp._all_gather_copy_out_(
-                outputs, source, splits, prefixes, num_chunks
+                outputs, source, splits, outer_sizes, num_chunks
             )
 
     @parametrize("num_chunks", [1, 4])
-    @parametrize("num_prefixes", [1, 128])
+    @parametrize("outer_size", [1, 128])
     @parametrize("noncontiguous", [False, True])
     @parametrize(
         "in_dtype,out_dtype",
@@ -511,11 +516,11 @@ class TestPrefixCopy(TestCase):
         ],
     )
     def test_chunk_cat(
-        self, device, num_chunks, num_prefixes, noncontiguous, in_dtype, out_dtype
+        self, device, num_chunks, outer_size, noncontiguous, in_dtype, out_dtype
     ):
         shapes = [
             (num_chunks + 1, 5),
-            (num_prefixes, num_chunks * 3, 5),
+            (outer_size, num_chunks * 3, 5),
             (2, 3, num_chunks * 2, 5),
         ]
         tensors = [make_tensor(s, device=device, dtype=in_dtype) for s in shapes]
@@ -550,7 +555,7 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(buffer[-5:], buffer.new_full((5,), 7))
 
     @parametrize("num_leading_dims", [1, 2])
-    def test_chunk_cat_empty_prefix(self, device, num_leading_dims):
+    def test_chunk_cat_empty_outer_size(self, device, num_leading_dims):
         tensor = make_tensor((2, 8, 3), device=device, dtype=torch.float32)
         if num_leading_dims == 2:
             tensor = tensor.unsqueeze(0)
@@ -574,7 +579,7 @@ class TestPrefixCopy(TestCase):
             ("dim_too_large", "input ndim"),
             ("indivisible_shard", "evenly divisible"),
             ("dtype", "same dtype"),
-            ("prefix_contiguity", "contiguous"),
+            ("input_contiguity", "contiguous"),
             ("output_contiguity", "contiguous"),
         ],
     )
@@ -599,7 +604,7 @@ class TestPrefixCopy(TestCase):
         elif invalid == "dtype":
             tensors.append(tensors[0].to(torch.float64))
             dims.append(1)
-        elif invalid == "prefix_contiguity":
+        elif invalid == "input_contiguity":
             tensors = [torch.zeros(8, 2, device=device).t()]
         elif invalid == "output_contiguity":
             output = output.t()
@@ -635,9 +640,9 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(output, expected, atol=0, rtol=0)
 
     @parametrize("operation", ["split", "chunk"])
-    @parametrize("prefix_count", [1, 2])
-    def test_functionalize(self, device, operation, prefix_count):
-        tensor = make_tensor((prefix_count, 8, 3), device=device, dtype=torch.float32)
+    @parametrize("outer_size", [1, 2])
+    def test_functionalize(self, device, operation, outer_size):
+        tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
         packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
         expected = tensor if operation == "split" else packed
         output = torch.empty_like(expected)
@@ -645,7 +650,7 @@ class TestPrefixCopy(TestCase):
         def copy(destination):
             if operation == "split":
                 torch.ops.fsdp._all_gather_copy_out_(
-                    [destination], packed, [tensor.numel() // 4], [prefix_count], 4
+                    [destination], packed, [tensor.numel() // 4], [outer_size], 4
                 )
             else:
                 torch.ops.fsdp._reduce_scatter_copy_in_(destination, [tensor], [1], 4)

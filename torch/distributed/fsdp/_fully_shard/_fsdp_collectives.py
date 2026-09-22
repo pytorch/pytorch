@@ -439,7 +439,7 @@ def _default_all_gather_output_fn(
     all_gather_output = all_gather_result.all_gather_output
     device = all_gather_output.device
     copy_outputs: list[torch.Tensor] = []
-    num_prefixes: list[int] = []
+    outer_sizes: list[int] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         all_gather_result.param_all_gather_input_numels,
         all_gather_result.param_all_gather_input_dtypes,
@@ -451,14 +451,14 @@ def _default_all_gather_output_fn(
         fsdp_param.alloc_all_gather_outputs()
         copy_outputs.extend(fsdp_param.all_gather_outputs)
         for layout in fsdp_param.all_gather_copy_layouts:
-            num_prefixes.append(layout.num_prefixes)
+            outer_sizes.append(layout.outer_size)
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
         torch.ops.fsdp._all_gather_copy_out_(
             copy_outputs,
             all_gather_output,
             all_gather_result.all_gather_input_split_sizes,
-            num_prefixes,
+            outer_sizes,
             world_size,
         )
 
