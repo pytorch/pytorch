@@ -8715,10 +8715,10 @@ class TritonScheduling(SIMDScheduling):
 
         current_device = V.graph.get_current_device_or_throw()
 
-        # The wrapper literal below is the dedented, stripped source; the eager
-        # submission must be the same bytes so CompiledTritonKernels (keyed on the
-        # exact string) hits at wrapper time instead of compiling the kernel twice
-        # and overwriting the same cache file.
+        # The default wrapper's async_compile.triton literal is this dedented, stripped
+        # source; the eager submission must be the same bytes so CompiledTritonKernels
+        # (keyed on the exact string) hits at wrapper time instead of compiling the
+        # kernel twice and overwriting the same cache file.
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
         if wrapper.async_compiles_triton_kernels and async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
