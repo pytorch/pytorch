@@ -1106,8 +1106,15 @@ class TestPrecompile(TestCase):
 
             # A subclass input's outer dtype is checked like a dense one (invariant 6).
             x64 = distribute_tensor(torch.randn(5, 4).double(), mesh, [Replicate()])
-            with self.assertRaisesRegex(PrecompileError, "dtype"):
+            with self.assertRaisesRegex(PrecompileError, "runtime input has dtype"):
                 f_c(m, x64)
+            code_e, cache_e = torch.compiler.precompile(
+                lambda model, x: model(x), m, x, backend="eager"
+            )
+            f_e = torch.compiler.precompile.load(code_e, cache_e)
+            self.assertEqual(f_e(m, x).to_local(), ref.to_local())
+            with self.assertRaisesRegex(PrecompileError, "runtime input has dtype"):
+                f_e(m, x64)
         finally:
             dist.destroy_process_group()
             for k, v in saved_env.items():

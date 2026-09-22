@@ -88,8 +88,8 @@ it.
 #    "real" mode, so each size is baked as a constant).
 #    Capture also constrains the example INPUTS: a NESTED tensor (either layout) is
 #    refused on BOTH capture paths, as a restriction rather than a claim that it cannot be
-#    fakeified -- nothing downstream of the trace has a nested representation (the recorded
-#    dense shape/dtype/device the driver checks against is None for one). That refusal
+#    fakeified -- nothing downstream of the trace has a nested representation (there is
+#    no dense shape for the driver to check one against). That refusal
 #    applies to a traceable wrapper subclass's INNER tensors too, since a wrapper reports
 #    non-nested whatever it wraps.
 #    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
@@ -405,8 +405,9 @@ def _dense_dtype(t: object) -> str | None:
     metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime. The
     graph is specialized to the example dtype (invariant 6).
 
-    Unlike _dense_shape this applies to a wrapper subclass too: its outer dtype is the
-    one AOTAutograd specializes on, so a mismatched subclass dtype must be rejected.
+    Unlike _dense_shape this applies to a wrapper subclass too. The kernels are built
+    against the subclass's inner leaves, so the outer dtype is only a proxy for them; it
+    is a faithful one for the supported subclasses (DTensor copies its local shard's).
     """
     if isinstance(t, torch.Tensor):
         return str(t.dtype)
@@ -705,8 +706,8 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     either fake mode: the unbacked path's ShapeEnv could mint the symbolic nested int a
     jagged tensor's ragged dim needs (a static capture has none, so fakeifying one there
     dies on a raw internal assertion), but nothing downstream of the trace has a nested
-    representation either way -- the recorded dense shape/dtype/device the driver checks
-    against is None for one. Running ahead of every shape read also gets the STRIDED
+    representation either way -- there is no dense shape for the driver to check one
+    against. Running ahead of every shape read also gets the STRIDED
     layout, whose ``t.shape`` read raises inside NestedTensorImpl, this same named refusal.
     """
     if a.is_nested:
@@ -1817,8 +1818,8 @@ class PrecompiledModule(PrecompiledRunnable):
         # exactly the params that received one, leaving frozen / non-contributing
         # params' .grad as None.
         self._grad_param_indices: list[int] = []
-        # Per user-input-leaf example shape, dtype, and device (None for a subclass /
-        # non-tensor leaf; a marked-dynamic dim is None within the shape tuple); the drivers
+        # Per user-input-leaf example shape, dtype, and device (None for a non-tensor leaf,
+        # shape None for a subclass leaf; a marked-dynamic dim is None within the shape tuple); the drivers
         # reject a runtime mismatch (invariants 3 and 6). Stride / memory format is enforced
         # by the inductor artifact's own assert_size_stride, not recorded here. Populated by
         # _compile().
