@@ -14,8 +14,9 @@ from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    skipXPUIf,
 )
-from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._triton import has_triton
 
 
@@ -132,17 +133,6 @@ class TestCompilerBisector(TestCase):
 
 class TestCompilerBisectorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-
-    bisector_ns = "_test_bisector"
-
-    def tearDown(self):
-        if hasattr(torch.ops, self.bisector_ns):
-            delattr(torch.ops, self.bisector_ns)
-        if hasattr(self, "lib"):
-            self.lib._destroy()
-
-    def get_op(self, name):
-        return getattr(getattr(torch.ops, self.bisector_ns), name).default
 
     @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bad_decomp(self, device):
@@ -355,9 +345,8 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
 
-    # XPU doesn't support cudagrah
-    @requires_cuda
     @unittest.skipIf(not has_triton(), "requires Triton")
+    @skipXPUIf(True, "XPU doesn't support cudagraphs")
     def test_cudagraph_bisect_max(self, device):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
         import os
@@ -409,7 +398,11 @@ class TestCompilerBisectorDevice(TestCase):
         )
         # Minimize test runtime by searching only the subsystem that's broken.
         with patch.dict(
-            os.environ, {"TORCH_BISECT_BACKEND": "aot_eager_decomp_partition"}
+            os.environ,
+            {
+                "TORCH_BISECT_BACKEND": "aot_eager_decomp_partition",
+                "TORCH_BISECT_TEST_DEVICE": device,
+            },
         ):
             output = subprocess.run(
                 [
