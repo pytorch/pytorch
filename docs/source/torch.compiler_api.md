@@ -61,18 +61,24 @@ model(s) passed as arguments -- ahead of time from the caller's own calls, and l
 a self-contained Python source artifact plus an acceleration cache that a fresh process
 reloads. No weights are baked in, so the model is passed again at runtime. The contract is
 Note [precompile programming model] in `torch/_precompile.py`. Documented here are the
-module's public types: the tracer configuration a capture takes, the capture handle it
-returns, and the coverage and guard report it produces. It is distinct from
+module's `load` and its public types: the tracer configuration a capture takes, the
+capture handle it returns, the runnable a load returns, and the coverage and guard
+report it produces. It is distinct from
 `torch._dynamo.config.caching_precompile` (a `torch.compile` caching mode).
 
 % Rendered from the docstrings, so this reference cannot drift from the source.
 
 ```{eval-rst}
+.. autofunction:: torch.compiler.precompile.load
+
 .. autoexception:: torch.compiler.PrecompileError
 
 .. autoclass:: torch.compiler.precompile.MakeFxTracer
 
 .. autoclass:: torch.compiler.precompile.Capture
+
+.. autoclass:: torch.compiler.precompile.PrecompiledRunnable
+   :members: unload
 
 .. autoclass:: torch.compiler.precompile.PrecompileSummary
    :members: complete, dropped_guard_types, kept_guard_types
