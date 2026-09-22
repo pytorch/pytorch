@@ -1,13 +1,17 @@
 # Owner(s): ["oncall: pt2"]
 import copy
+import gc
+import inspect
 import io
 import os
 import pickle
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+import weakref
 
 import torch
 import torch.utils._pytree as _pytree
@@ -868,6 +872,13 @@ class TestPrecompile(TestCase):
         # The public location: test_public_bindings.test_correct_module_names also
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
+        # export_python is the disk-cached decorator over precompile; it lives
+        # under the same compiler namespace, not as a top-level torch.* verb.
+        self.assertIn("export_python", torch.compiler.__all__)
+        self.assertNotIn("export_python", torch.__all__)
+        self.assertFalse(hasattr(torch, "export_python"))
+        self.assertTrue(callable(torch.compiler.export_python))
+        self.assertEqual(torch.compiler.export_python.__module__, "torch.compiler")
 
     def test_backend_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
@@ -2803,6 +2814,279 @@ class TestPrecompileNumerics(TestCase):
 
 
 instantiate_device_type_tests(TestPrecompileNumerics, globals())
+
+
+@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
+class TestExportPython(TestCase):
+    # torch.compiler.export_python is the disk-cached decorator over
+    # torch.compiler.precompile: first call writes the emitted, self-contained python,
+    # later calls read and exec it directly. Run device-generically so the inductor
+    # path is exercised on CUDA too.
+
+    def _tmp_path(self, name="artifact.py"):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return os.path.join(d, name)
+
+    def test_eager_write_then_load(self, device):
+        path = self._tmp_path()
+        x = make_tensor((4, 4), device=device, dtype=torch.float32)
+        y = make_tensor((4, 4), device=device, dtype=torch.float32)
+        expected = (x * 2 + y).relu()
+
+        def build():
+            @torch.compiler.export_python(path=path, backend="eager")
+            def run(a, b):
+                return (a * 2 + b).relu()
+
+            return run
+
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(build()(x, y), expected)
+        self.assertTrue(os.path.exists(path))
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("def forward(", f.read())
+
+        # A fresh decorator over the same path loads the emitted source from disk
+        # rather than recompiling.
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as cm:
+            self.assertEqual(build()(x, y), expected)
+        self.assertIn("about to EXEC", "\n".join(cm.output))
+
+    def test_creates_parent_dirs(self, device):
+        path = self._tmp_path(os.path.join("nested", "deep", "artifact.py"))
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp * 2
+
+        self.assertEqual(run(x), x * 2)
+        self.assertTrue(os.path.exists(path))
+
+    def test_example_inputs_drives_capture(self, device):
+        @torch.compiler.export_python(
+            path=self._tmp_path("ex.py"),
+            backend="eager",
+            example_inputs=[make_tensor((3, 3), device=device, dtype=torch.float32)],
+        )
+        def run(inp):
+            return inp.relu()
+
+        # Capture is specialized to the (3, 3) example, so a (5, 5) runtime input is
+        # rejected -- proving example_inputs, not the call args, drove capture.
+        with self.assertRaisesRegex(PrecompileError, "shape"):
+            run(make_tensor((5, 5), device=device, dtype=torch.float32))
+
+    def test_non_deepcopyable_first_call_arg_errors(self, device):
+        # A non-leaf tensor cannot be deep-copied; the None example_inputs path must
+        # surface a clear error pointing at example_inputs, not a raw deepcopy error.
+        @torch.compiler.export_python(path=self._tmp_path("nc.py"), backend="eager")
+        def run(inp):
+            return inp + 1
+
+        non_leaf = make_tensor(
+            (4,), device=device, dtype=torch.float32
+        ).requires_grad_()
+        with self.assertRaisesRegex(PrecompileError, "example_inputs"):
+            run(non_leaf * 2)
+
+    def test_no_cache_sidecar_written(self, device):
+        # export_python is cache-free: the first run commits only the self-contained
+        # .py, never a .cache sidecar, and a fresh decorator reloads from the .py alone.
+        path = self._tmp_path()
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        def build():
+            @torch.compiler.export_python(path=path, backend="eager")
+            def run(inp):
+                return inp.sin()
+
+            return run
+
+        self.assertEqual(build()(x), x.sin())
+        self.assertFalse(os.path.exists(path + ".cache"))
+        self.assertEqual(build()(x), x.sin())
+
+    def test_explicit_examples_released_after_materialization(self, device):
+        example = make_tensor((4,), device=device, dtype=torch.float32)
+        example_ref = weakref.ref(example)
+
+        @torch.compiler.export_python(
+            path=self._tmp_path("example_lifetime.py"),
+            backend="eager",
+            example_inputs=[example],
+        )
+        def run(inp):
+            return inp + 1
+
+        del example
+        self.assertEqual(
+            run(make_tensor((4,), device=device, dtype=torch.float32)).shape,
+            (4,),
+        )
+        gc.collect()
+        self.assertIsNone(example_ref())
+
+    def test_decompositions_released_after_materialization(self, device):
+        path = self._tmp_path("decomposition_lifetime.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def seed(inp):
+            return inp + 1
+
+        self.assertEqual(seed(x), x + 1)
+        payload = make_tensor((4,), device=device, dtype=torch.float32)
+        payload_ref = weakref.ref(payload)
+
+        def make_decomposition(value):
+            def decomposition(inp):
+                return inp + value.sum() * 0
+
+            return decomposition
+
+        decomposition = make_decomposition(payload)
+        table = {torch.ops.aten.sin.default: decomposition}
+
+        @torch.compiler.export_python(path=path, backend="eager", decompositions=table)
+        def loaded(inp):
+            return inp + 1
+
+        self.assertEqual(loaded(x), x + 1)
+        del payload, decomposition, table
+        gc.collect()
+        self.assertIsNone(payload_ref())
+
+    def test_decorated_method_binds_instance(self, device):
+        path = self._tmp_path("method.py")
+
+        class Model(torch.nn.Module):
+            @torch.compiler.export_python(path=path, backend="eager")
+            def run(self, inp):
+                return inp + 1
+
+        model = Model()
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        self.assertTrue(inspect.ismethod(model.run))
+        self.assertEqual(model.run(x), x + 1)
+
+    def test_decorated_function_is_picklable(self, device):
+        name = "_export_python_pickle_fixture"
+
+        def original(inp):
+            return inp + 1
+
+        original.__name__ = name
+        original.__qualname__ = name
+        original.__module__ = __name__
+        wrapped = torch.compiler.export_python(
+            path=self._tmp_path("pickle.py"), backend="eager"
+        )(original)
+        globals()[name] = wrapped
+        try:
+            self.assertIs(pickle.loads(pickle.dumps(wrapped)), wrapped)
+        finally:
+            del globals()[name]
+
+    def test_hill_climb_edited_source_takes_effect(self, device):
+        path = self._tmp_path("edit.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+
+        with open(path, encoding="utf-8") as f:
+            code = f.read()
+        edited = code.replace(
+            "torch.ops.aten.add.Tensor(flat_1, 1)",
+            "torch.ops.aten.add.Tensor(flat_1, 100)",
+        )
+        self.assertNotEqual(
+            edited, code, "expected the add constant in the emitted graph"
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(edited)
+
+        # A fresh decorator sees the edited source and always exec's it, so the edited
+        # constant takes effect.
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run2(inp):
+            return inp + 1
+
+        self.assertEqual(run2(x), x + 100)
+
+    def test_first_call_applies_mutation_once(self, device):
+        path = self._tmp_path("bn.py")
+        torch.manual_seed(0)
+        m = torch.nn.BatchNorm1d(4).to(device).train()
+        x = make_tensor((8, 4), device=device, dtype=torch.float32)
+
+        ref = torch.nn.BatchNorm1d(4).to(device).train()
+        ref.load_state_dict(m.state_dict())
+        ref(x)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(model, inp):
+            return model(inp)
+
+        run(m, x)
+        # Capture deep-copies the args, so the running stats are updated exactly once
+        # (by the artifact), matching a single eager application -- not twice.
+        self.assertEqual(m.running_mean, ref.running_mean)
+        self.assertEqual(m.running_var, ref.running_var)
+
+    def test_decompositions_forwarded(self, device):
+        from unittest.mock import patch
+
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        sentinel: dict = {}
+        real = torch.compiler.precompile
+        captured: dict = {}
+
+        def spy(fn, *a, **k):
+            captured["decompositions"] = k.get("decompositions")
+            return real(fn, *a, **k)
+
+        @torch.compiler.export_python(
+            path=self._tmp_path("dec.py"), backend="eager", decompositions=sentinel
+        )
+        def run(inp):
+            return inp + 1
+
+        with patch.object(torch.compiler, "precompile", spy):
+            self.assertEqual(run(x), x + 1)
+        self.assertIs(captured["decompositions"], sentinel)
+
+    def test_existing_artifact_ignores_changed_backend(self, device):
+        # Presence is the sole signal: a new decorator over an existing path loads it
+        # as-is even with a different backend, so the on-disk eager artifact is reused
+        # and NOT re-lowered through inductor.
+        path = self._tmp_path("sole_signal.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            first = f.read()
+        self.assertNotIn("Inductor output code", first)
+
+        @torch.compiler.export_python(path=path, backend="inductor")
+        def run2(inp):
+            return inp + 1
+
+        self.assertEqual(run2(x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), first)
+
+
+instantiate_device_type_tests(TestExportPython, globals())
 
 
 if __name__ == "__main__":
