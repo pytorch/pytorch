@@ -977,6 +977,12 @@ def run_common_test(test_module, test_directory, options):
     )
 
 
+def run_pg_wrapper_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module, test_directory, options, ("ProcessGroupGlooWrapperTest",)
+    )
+
+
 def run_test_with_subprocess(test_module, test_directory, options):
     return run_test(
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
@@ -1473,7 +1479,7 @@ CUSTOM_HANDLERS = {
     "distributed/test_c10d_common": run_common_test,
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
     "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
-    "distributed/test_pg_wrapper": run_test_with_subprocess,
+    "distributed/test_pg_wrapper": run_pg_wrapper_test,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
     "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
