@@ -115,6 +115,12 @@ class SerializeError(RuntimeError):
     pass
 
 
+def _is_flydsl_kernel_wrapper(target: Any) -> bool:
+    return target is torch._higher_order_ops.flydsl_kernel_wrapper_mutation or (
+        target is torch._higher_order_ops.flydsl_kernel_wrapper_functional
+    )
+
+
 def _reverse_map(d: dict[Any, Enum]):
     return {v.value: k for k, v in d.items()}
 
@@ -820,6 +826,11 @@ class GraphModuleSerializer(metaclass=Final):
                 outputs=self.serialize_outputs(node),
                 # TODO: create a new tensor_values here, meta might have faketensor info
                 metadata=self.serialize_metadata(node),
+            )
+        elif _is_flydsl_kernel_wrapper(node.target):
+            raise SerializeError(
+                "torch.export serialization of FlyDSL kernel wrappers is unsupported "
+                "because launcher and call-spec indices are process-local"
             )
         elif isinstance(node.target, torch._ops.HigherOrderOperator):
 
@@ -2692,6 +2703,11 @@ class GraphModuleDeserializer(metaclass=Final):
         ):
             raise SerializeError(
                 "deserialize nyi for torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional"
+            )
+        elif _is_flydsl_kernel_wrapper(target):
+            raise SerializeError(
+                "torch.export deserialization of FlyDSL kernel wrappers is unsupported "
+                "because launcher and call-spec indices are process-local"
             )
         elif isinstance(target, torch._ops.HigherOrderOperator):
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)

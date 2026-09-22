@@ -2,9 +2,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
+import io
 import inspect
 import unittest
 from collections.abc import Callable
+from dataclasses import replace
 from unittest import mock
 
 import torch
@@ -13,13 +15,20 @@ from torch._higher_order_ops.flydsl_kernel_wrap import (
     flydsl_kernel_wrapper_functional,
     flydsl_kernel_wrapper_mutation,
     flydsl_launcher_side_table,
+    invoke_flydsl_launcher,
     restore_flydsl_launcher_arguments,
     split_flydsl_launcher_arguments,
     TraceableFlyDSLLauncher,
 )
 from torch._inductor.codegen.flydsl.flydsl_utils import runtime_available
+from torch._inductor.codecache import BypassFxGraphCache, CacheabilityValidator
 from torch._library.utils import get_layout_constraint_tag
 from torch.export.graph_signature import OutputKind
+from torch.fx.passes.canonicalize import (
+    _canonical_node_key,
+    _is_safe_to_reorder,
+    canonicalize_graph,
+)
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -197,6 +206,38 @@ class FlyDSLCaptureTest(TestCase):
         self.assertEqual("stream", stream_parameter[1].name)
         with self.assertRaisesRegex(TypeError, "unexpected keyword argument 'stream'"):
             captured("out", "inp", stream=fx.Stream(None))
+
+    @requires_flydsl
+    def test_invoke_restores_defaulted_stream_in_original_position(self):
+        @flyc.jit
+        def launcher(
+            out: fx.Tensor,
+            stream: Stream = fx.Stream(None),
+            inp: fx.Tensor = None,
+        ):
+            pass
+
+        captured = torch.library.wrap_flydsl(launcher, mutates_args={"out"})
+        registration = flydsl_launcher_side_table.get_registration(
+            captured.launcher_idx
+        )
+        calls = []
+
+        def record(*args, **kwargs):
+            calls.append((args, kwargs))
+
+        invoke_flydsl_launcher(
+            replace(registration, launcher=record),
+            ("OUT", "INP"),
+        )
+
+        stream_parameter = registration.stream_parameter
+        self.assertIsNotNone(stream_parameter)
+        assert stream_parameter is not None
+        self.assertEqual(
+            [(('OUT', stream_parameter[1].default, 'INP'), {})],
+            calls,
+        )
 
     @requires_flydsl
     def test_wrap_rejects_multiple_defaulted_streams(self):
@@ -491,6 +532,183 @@ class FlyDSLCaptureTest(TestCase):
         self.assertEqual(("self", "inp"), tuple(registration.signature.parameters))
         self.assertEqual((0,), registration.mutated_arg_indices)
 
+    @requires_flydsl
+    def test_invoke_bound_jit_method_reattaches_receiver(self):
+        class LauncherOwner:
+            @flyc.jit
+            def launch(
+                self,
+                out: fx.Tensor,
+                inp: fx.Tensor,
+                *,
+                rows: fx.Int32,
+            ):
+                pass
+
+        owner = LauncherOwner()
+        captured = torch.library.wrap_flydsl(
+            owner.launch,
+            mutates_args={"out"},
+        )
+        registration = flydsl_launcher_side_table.get_registration(
+            captured.launcher_idx
+        )
+        calls = []
+
+        def record(*args, **kwargs):
+            calls.append((args, kwargs))
+
+        invoke_flydsl_launcher(
+            replace(registration, launcher=record),
+            ("OUT", "INP", 8),
+        )
+
+        self.assertIs(owner, registration.bound_self)
+        self.assertEqual(("out", "inp", "rows"), tuple(registration.signature.parameters))
+        self.assertEqual((0,), registration.mutated_arg_indices)
+        self.assertEqual([((owner, "OUT", "INP"), {"rows": 8})], calls)
+
+    def test_mutation_hop_is_impure(self):
+        graph = torch.fx.Graph()
+        out = graph.placeholder("out")
+        mutation = graph.call_function(
+            flydsl_kernel_wrapper_mutation,
+            kwargs={
+                "launcher_idx": 0,
+                "call_spec_idx": 0,
+                "args": (out,),
+                "mutated_arg_indices": (0,),
+            },
+        )
+        graph.output(out)
+
+        self.assertTrue(mutation.is_impure())
+
+    def test_dce_preserves_mutation_hop(self):
+        graph = torch.fx.Graph()
+        out = graph.placeholder("out")
+        graph.call_function(
+            flydsl_kernel_wrapper_mutation,
+            kwargs={
+                "launcher_idx": 0,
+                "call_spec_idx": 0,
+                "args": (out,),
+                "mutated_arg_indices": (0,),
+            },
+        )
+        graph.output(out)
+
+        graph.eliminate_dead_code()
+
+        self.assertEqual(
+            1,
+            len(
+                graph.find_nodes(
+                    op="call_function",
+                    target=flydsl_kernel_wrapper_mutation,
+                )
+            ),
+        )
+
+    def test_canonicalization_preserves_mutation_before_read(self):
+        graph = torch.fx.Graph()
+        out = graph.placeholder("out")
+        graph.call_function(
+            flydsl_kernel_wrapper_mutation,
+            kwargs={
+                "launcher_idx": 0,
+                "call_spec_idx": 0,
+                "args": (out,),
+                "mutated_arg_indices": (0,),
+            },
+        )
+        result = graph.call_function(torch.ops.aten.add.Tensor, (out, 1))
+        graph.output(result)
+
+        def canonical_key(node, canonical_idx):
+            if node.op == "placeholder":
+                return (0, node.name)
+            return _canonical_node_key(node, canonical_idx)
+
+        canonicalize_graph(graph, canonical_key, _is_safe_to_reorder)
+
+        call_targets = [node.target for node in graph.nodes if node.op == "call_function"]
+        self.assertEqual(
+            [flydsl_kernel_wrapper_mutation, torch.ops.aten.add.Tensor],
+            call_targets,
+        )
+
+    def test_flydsl_hops_bypass_persistent_fx_graph_cache(self):
+        for target, kwargs in (
+            (
+                flydsl_kernel_wrapper_mutation,
+                {
+                    "launcher_idx": 0,
+                    "call_spec_idx": 0,
+                    "args": (),
+                    "mutated_arg_indices": (),
+                },
+            ),
+            (
+                flydsl_kernel_wrapper_functional,
+                {
+                    "launcher_idx": 0,
+                    "call_spec_idx": 0,
+                    "args": (),
+                    "mutated_arg_indices": (),
+                    "tensors_to_clone": (),
+                },
+            ),
+        ):
+            with self.subTest(target=target):
+                graph = torch.fx.Graph()
+                result = graph.call_function(target, kwargs=kwargs)
+                graph.output(result)
+                graph_module = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+                with self.assertRaisesRegex(
+                    BypassFxGraphCache,
+                    f"Can't cache HigherOrderOperator: {target.name()}",
+                ):
+                    CacheabilityValidator(
+                        graph_module,
+                        require_shape_env=False,
+                    ).validate()
+
+    @requires_flydsl
+    def test_export_serde_rejects_process_local_indices(self):
+        @flyc.jit
+        def launcher(out: fx.Tensor, inp: fx.Tensor):
+            pass
+
+        captured = torch.library.wrap_flydsl(launcher, mutates_args={"out"})
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                out = torch.empty_like(inp)
+                captured(out, inp)
+                return out
+
+        mutation = torch.export.export(Model(), (torch.randn(8),))
+        functional = mutation.run_decompositions()
+
+        for name, exported in (("mutation", mutation), ("functional", functional)):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(RuntimeError, "process-local"):
+                    torch.export.save(exported, io.BytesIO())
+
+                legacy_artifact = io.BytesIO()
+                with mock.patch(
+                    "torch._export.serde.serialize._is_flydsl_kernel_wrapper",
+                    return_value=False,
+                ):
+                    torch.export.save(exported, legacy_artifact)
+                legacy_artifact.seek(0)
+                with self.assertRaisesRegex(
+                    RuntimeError, "error when deserializing"
+                ):
+                    torch.export.load(legacy_artifact)
+
     def test_hop_reports_tensor_subclass_once(self):
         class TensorSubclass(torch.Tensor):
             @classmethod
@@ -706,6 +924,7 @@ class FlyDSLCaptureTest(TestCase):
             flydsl_launcher_side_table.get_registration(first.launcher_idx)
         with self.assertRaisesRegex(AssertionError, "was not registered"):
             flydsl_launcher_side_table.get_call_spec(first_call_spec)
+
     @requires_flydsl
     def test_flydsl_op_is_opaque_to_symbolic_trace(self):
         captured_launcher = torch.library.wrap_flydsl(

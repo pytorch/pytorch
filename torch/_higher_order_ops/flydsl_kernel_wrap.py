@@ -22,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.fx.node import has_side_effect
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -307,8 +308,16 @@ def invoke_flydsl_launcher(
     registration: FlyDSLLauncherRegistration,
     args: tuple[Any, ...],
 ) -> None:
+    signature = registration.signature
+    stream_parameter = registration.stream_parameter
+    if stream_parameter is not None:
+        stream_index, parameter = stream_parameter
+        parameters = list(signature.parameters.values())
+        parameters.insert(stream_index, parameter)
+        signature = signature.replace(parameters=parameters)
+        args = (*args[:stream_index], parameter.default, *args[stream_index:])
     positional_args, keyword_args = split_flydsl_launcher_arguments(
-        registration.signature,
+        signature,
         args,
     )
     if registration.bound_self is not None:
@@ -318,7 +327,7 @@ def invoke_flydsl_launcher(
 
 class FlyDSLKernelWrapperMutation(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flydsl_kernel_wrapper_mutation", cacheable=True)
+        super().__init__("flydsl_kernel_wrapper_mutation", cacheable=False)
 
     def __call__(
         self,
@@ -337,7 +346,7 @@ class FlyDSLKernelWrapperMutation(HigherOrderOperator):
 
 class FlyDSLKernelWrapperFunctional(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flydsl_kernel_wrapper_functional", cacheable=True)
+        super().__init__("flydsl_kernel_wrapper_functional", cacheable=False)
 
     def __call__(
         self,
@@ -358,6 +367,12 @@ class FlyDSLKernelWrapperFunctional(HigherOrderOperator):
 
 flydsl_kernel_wrapper_mutation = FlyDSLKernelWrapperMutation()
 flydsl_kernel_wrapper_functional = FlyDSLKernelWrapperFunctional()
+
+# The mutation is represented in the HOP's nested ``args`` tuple rather than
+# its return value, so FX cannot infer this side effect from dataflow alone.
+# Do not use the effects-token system here: independent kernel launches do not
+# require a total order with every other effectful operator.
+has_side_effect(flydsl_kernel_wrapper_mutation)
 
 
 @flydsl_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
