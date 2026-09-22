@@ -460,8 +460,8 @@ test_cpuset_num_threads() {
     echo "taskset not available, skipping cpuset num_threads test"
     return
   fi
-  env -u OMP_NUM_THREADS -u MKL_NUM_THREADS taskset -c 0 python -c \
-    'import torch; n = torch.get_num_threads(); print("num_threads =", n); assert n == 1, n'
+  (cd test && env -u OMP_NUM_THREADS -u MKL_NUM_THREADS taskset -c 0 python -c \
+    'import torch; n = torch.get_num_threads(); print("num_threads =", n); assert n == 1, n')
   assert_git_not_dirty
 }
 
