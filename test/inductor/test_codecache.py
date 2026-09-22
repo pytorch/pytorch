@@ -62,6 +62,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.output_code import CompiledFxGraphConstants
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.static_triton_launcher import MissingTritonKernelError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.triton_bundler import TritonBundler
 from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
@@ -1164,6 +1165,93 @@ class TestFxGraphCache(TestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
         with torch.cuda.device(1):
             x1 = torch.randn(32, device="cuda")
+            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
+        self.assertIsNotNone(cached_autotuner._jit_fallback)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_missing_bundled_cubin_during_load_falls_back_to_jit(self):
+        def fn(x):
+            return x.sin()
+
+        with torch.cuda.device(0):
+            x0 = torch.randn(32, device="cuda")
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
+
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        cached_autotuner = static_autotuner.kernel
+        static_kernel = cached_autotuner.launchers[0].__globals__["runner"].__self__
+        cubin_path = static_kernel._agnostic_cubin_path()
+
+        os.remove(cubin_path)
+        with torch.cuda.device(1):
+            x1 = torch.randn(32, device="cuda")
+            with self.assertRaisesRegex(
+                MissingTritonKernelError, "disappeared while loading"
+            ):
+                static_kernel._load_device_agnostic_kernel_from_path(cubin_path, 1)
+            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
+        self.assertIsNotNone(cached_autotuner._jit_fallback)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_failed_jit_fallback_compilation_retries(self):
+        def fn(x):
+            return x.sin()
+
+        with torch.cuda.device(0):
+            x0 = torch.randn(32, device="cuda")
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
+
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        cached_autotuner = static_autotuner.kernel
+        shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        old_libdevice_path = os.environ.get("TRITON_LIBDEVICE_PATH")
+        missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
+        self.assertFalse(os.path.exists(missing_libdevice_path))
+        with torch.cuda.device(1):
+            x1 = torch.randn(32, device="cuda")
+            # Exercise a real Triton compiler failure after the static launch
+            # has released its artifacts, then restore the toolchain and retry.
+            os.environ["TRITON_LIBDEVICE_PATH"] = missing_libdevice_path
+            try:
+                with self.assertRaises(FileNotFoundError):
+                    graph.current_callable([x1.clone()])
+            finally:
+                if old_libdevice_path is None:
+                    del os.environ["TRITON_LIBDEVICE_PATH"]
+                else:
+                    os.environ["TRITON_LIBDEVICE_PATH"] = old_libdevice_path
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
         self.assertIsNotNone(cached_autotuner._jit_fallback)
 

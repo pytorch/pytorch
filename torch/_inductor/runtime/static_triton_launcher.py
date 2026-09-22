@@ -237,12 +237,27 @@ class StaticallyLaunchedTritonKernel:
             )
         return self.reload_cubin_from_raw(self.cubin_path)
 
+    def _load_device_agnostic_kernel_from_path(self, cubin_path: str, device: int):
+        try:
+            return self.C_impl._load_kernel(cubin_path, self.name, self.shared, device)
+        except RuntimeError as error:
+            if not os.path.exists(cubin_path):
+                raise MissingTritonKernelError(
+                    f"Triton kernel binary disappeared while loading {cubin_path}"
+                ) from error
+            raise
+
+    def _load_device_agnostic_kernel(self, device: int):
+        return self._load_device_agnostic_kernel_from_path(
+            self._agnostic_cubin_path(), device
+        )
+
     def load_kernel(self, device: int) -> None:
         if self.device_agnostic:
             if device in self.functions:
                 return
-            (module, function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-                self._agnostic_cubin_path(), self.name, self.shared, device
+            (module, function, self.n_regs, self.n_spills) = (
+                self._load_device_agnostic_kernel(device)
             )
             self.modules[device] = module
             self.functions[device] = function
@@ -559,8 +574,8 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         if self.device_agnostic:
             if device in self.functions:
                 return
-            (function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-                self._agnostic_cubin_path(), self.name, self.shared, device
+            (function, self.n_regs, self.n_spills) = self._load_device_agnostic_kernel(
+                device
             )
             # XPU has no separate module handle (only the function capsule).
             self.functions[device] = function

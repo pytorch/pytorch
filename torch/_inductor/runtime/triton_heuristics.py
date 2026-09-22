@@ -682,6 +682,7 @@ class CachingAutotuner(KernelInterface):
         self._cached_launcher: LauncherType | None = None
         self._compile_kernel_from_src: Callable[[], CachingAutotuner] | None = None
         self._jit_fallback: CachingAutotuner | None = None
+        self._jit_fallback_pending = False
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -1221,6 +1222,7 @@ class CachingAutotuner(KernelInterface):
         self._plugins = get_caching_autotuner_plugins(self)
         self._compile_kernel_from_src = None
         self._jit_fallback = None
+        self._jit_fallback_pending = False
 
     def get_device_interface(self):
         # this code cannot run in compile workers, because it imports from torch
@@ -2466,9 +2468,12 @@ class CachingAutotuner(KernelInterface):
             "falling back to JIT compilation"
         )
         compile_kernel_from_src = self._compile_kernel_from_src
-        self.release_benchmark_artifacts()
+        if not self._jit_fallback_pending:
+            self.release_benchmark_artifacts()
+            self._jit_fallback_pending = True
         self._jit_fallback = compile_kernel_from_src()
         self._compile_kernel_from_src = None
+        self._jit_fallback_pending = False
         return self._jit_fallback.run(
             *args, stream=stream, benchmark_run=benchmark_run, **kwargs
         )
@@ -2485,7 +2490,10 @@ class CachingAutotuner(KernelInterface):
             return self._jit_fallback.run(
                 *args, stream=stream, benchmark_run=benchmark_run, **kwargs
             )
-
+        if self._jit_fallback_pending:
+            return self._run_jit_fallback(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
         try:
             return self._run(
                 *args, stream=stream, benchmark_run=benchmark_run, **kwargs
