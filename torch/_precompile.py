@@ -2367,3 +2367,91 @@ def _read_artifact(
             f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
         ) from e
     return python_code, cache
+
+
+def _runnable_from_pair(
+    python_code: str, cache: bytes, *, _trusted: bool = False
+) -> PrecompiledRunnable:
+    """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
+
+    The retired callable API's ``load``, kept as the loader core the module's entry
+    points build on. ``_trusted`` suppresses the exec warning for a pair this process
+    itself just rendered.
+    """
+    # Unpickling the cache references classes in AOTAutograd's runtime; import
+    # dynamo first so that import completes in a non-circular order (otherwise
+    # a cold load can hit a runtime_wrappers <-> _dynamo circular import).
+    import torch._dynamo
+
+    # The whole calling convention is consumed by the driver INLINED in python_code
+    # (emitted from torch._precompile_driver), so the loaded object needs none of it.
+    # _parse_artifact_metadata still runs to validate python_code is a precompile
+    # artifact and to read BACKEND for the cache-pairing check below.
+    meta = _parse_artifact_metadata(python_code)
+    backend = cast(str, meta["BACKEND"])
+
+    # weights_only=True is safe (plain str/int/bytes dict). The cache is acceleration
+    # only, so an unreadable envelope or a FORMAT / VERSION mismatch degrades to JIT'ing
+    # from python_code rather than crashing. A BACKEND or CODE_HASH mismatch is
+    # different -- it signals a wrong (python_code, cache) pairing -- so it hard-fails
+    # rather than running under foreign metadata.
+    artifact = None
+    try:
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        if blob.get("format") != _CACHE_FORMAT or blob.get("version") != (
+            _CACHE_VERSION
+        ):
+            log.warning(
+                "torch.compiler.precompile.load got a cache with format=%r "
+                "version=%r, expected %r / %r; it is likely from a different torch "
+                "build. Falling back to JIT from python_code.",
+                blob.get("format"),
+                blob.get("version"),
+                _CACHE_FORMAT,
+                _CACHE_VERSION,
+            )
+            blob = None
+        if blob is not None:
+            if blob.get("backend") != backend:
+                raise PrecompileError(
+                    f"cache backend {blob.get('backend')!r} does not match the "
+                    f"python_code backend {backend!r}; the cache and python_code "
+                    "came from different precompile captures."
+                )
+            # See Note [precompile programming model], invariant 7.
+            expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
+            if blob.get("code_hash") != expected_code_hash:
+                raise PrecompileError(
+                    "cache does not match python_code (its code_hash "
+                    f"{blob.get('code_hash')!r} != sha256(python_code) "
+                    f"{expected_code_hash!r}); the cache and python_code came from "
+                    "different precompile captures. Pair each cache with the "
+                    "python_code from the same capture."
+                )
+            artifact = blob.get("artifact")
+    except PrecompileError:
+        raise
+    except Exception as e:
+        log.warning(
+            "torch.compiler.precompile.load could not read the cache envelope (%s: %s); "
+            "the cache is likely corrupt or from a different torch build. Falling "
+            "back to JIT from python_code.",
+            type(e).__name__,
+            e,
+        )
+    if artifact is not None:
+        # Prime the inductor kernel caches from the bundle so the exec of python_code
+        # below loads the precompiled kernels instead of recompiling them. A stale or
+        # corrupt bundle just leaves the caches cold, and python_code JITs.
+        try:
+            torch.compiler.load_cache_artifacts(artifact)
+        except Exception as e:
+            log.warning(
+                "torch.compiler.precompile.load could not prime the cache from the "
+                "artifact bundle (%s: %s); it is likely stale or from a different "
+                "torch build. Falling back to JIT from python_code.",
+                type(e).__name__,
+                e,
+            )
+    forward = _make_inlined_forward(python_code, warn=not _trusted)
+    return PrecompiledModule._from_loaded(forward, backend=backend)
