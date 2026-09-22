@@ -1714,6 +1714,10 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
         {
             "is_entry": i == 0,
             "bypassed": code.bypassed,
+            # Never entered Dynamo: skipped before tracing (no tensor in the
+            # frame, e.g. the continuation after a trailing .backward()), so
+            # it ran eager during capture and the driver runs it eager too.
+            "trivial": not code.has_compile_id and not code.bypassed,
             "code": code.python_code,
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
@@ -1776,10 +1780,16 @@ def _serving_mode(frames: list[dict[str, Any]]) -> str:
     A frame it cannot reach would run eager, silently giving up the compiled
     variant; a frame it reaches but has no variant of (a bypassed continuation)
     would raise on the very path capture exercised. Either way the capture is
-    served by installing instead, which has a compiler behind it.
+    served by installing instead, which has a compiler behind it. A trivial
+    continuation -- one Dynamo never traced because no tensor reached it --
+    ran eager during capture and is served eager, so it counts as covered.
     """
     reachable = _reachable_frames(frames)
-    covered = {i for i, frame in enumerate(frames) if frame["variants"]}
+    covered = {
+        i
+        for i, frame in enumerate(frames)
+        if frame["variants"] or (frame.get("trivial") and not frame["is_entry"])
+    }
     return "standalone" if covered == reachable else "installed"
 
 
@@ -2154,6 +2164,7 @@ class PrecompiledModule(PrecompiledRunnable):
                 "format": _CACHE_FORMAT,
                 "version": _CACHE_VERSION,
                 "backend": self._backend,
+                "tracer": self._tracer,
                 "code_hash": code_hash,
                 "artifact": self._artifact_bytes,
             },
@@ -2478,6 +2489,9 @@ def _runnable_from_pair(
     # artifact and to read BACKEND for the cache-pairing check below.
     meta = _parse_artifact_metadata(python_code)
     backend = cast(str, meta["BACKEND"])
+    # TRACER is absent on make_fx artifacts predating the tag; the cache envelope
+    # defaults the same way, so an older pair still matches.
+    tracer = cast(str, meta.get("TRACER", "make_fx"))
 
     # weights_only=True is safe (plain str/int/bytes dict). The cache is acceleration
     # only, so an unreadable envelope or a FORMAT / VERSION mismatch degrades to JIT'ing
@@ -2505,6 +2519,12 @@ def _runnable_from_pair(
                 raise PrecompileError(
                     f"cache backend {blob.get('backend')!r} does not match the "
                     f"python_code backend {backend!r}; the cache and python_code "
+                    "came from different precompile captures."
+                )
+            if blob.get("tracer", "make_fx") != tracer:
+                raise PrecompileError(
+                    f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
+                    f"the python_code tracer {tracer!r}; the cache and python_code "
                     "came from different precompile captures."
                 )
             # See Note [precompile programming model], invariant 7.
@@ -2657,8 +2677,8 @@ def load(
     :class:`torch.compiler.precompile.PrecompiledRunnable`.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
-    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend`` or
-    ``code_hash`` does not match ``python_code`` -- the pair came from different
+    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
+    ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.

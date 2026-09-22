@@ -536,6 +536,18 @@ def _build_multigraph_forward():
                 f"{list(target.co_freevars)!r}, which a self-contained artifact "
                 f"cannot rebuild. Regenerate it from a module-level function."
             )
+        if not frame["variants"] and frame.get("trivial") and not is_entry:
+            # Dynamo skipped this continuation before tracing (no tensor reached
+            # it), so it ran as plain Python during capture; rebuild it as one.
+            # Its module is opened for the globals the bytecode reads.
+            scope = _scope(frame)
+
+            def _plain(closure):
+                return types.FunctionType(target, scope, target.co_name, None, closure)
+
+            if target.co_freevars:
+                return _plain
+            return _plain(None)
         if not frame["variants"]:
             # Nothing to dispatch, for one of two reasons the coverage-gap
             # error below would misdiagnose: adding examples fixes neither.
