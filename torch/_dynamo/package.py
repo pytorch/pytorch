@@ -26,7 +26,7 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import nullcontext
 from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
@@ -41,6 +41,7 @@ from .bytecode_transformation import (
     get_code_keys,
     is_compiled_fn_name,
 )
+from .types import GuardFilterEntry
 from .utils import CleanupHook, counters, dynamo_timed, increment_frame
 
 
@@ -1071,6 +1072,13 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        *,
+        serialization_guard_filter_fn: Callable[
+            [Sequence[GuardFilterEntry]], Sequence[bool]
+        ]
+        | None = None,
+        explicit_capture: bool = False,
+        serving: bool = False,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
@@ -1088,6 +1096,20 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
+        # Runtime guards stay intact; this filter applies only to the guard
+        # state recorded in the package.
+        self._serialization_guard_filter_fn = serialization_guard_filter_fn
+        # A torch.compiler.precompile capture or serve, as opposed to the
+        # ambient caching_precompile cache: the live guards are built strictly,
+        # only the (filtered) saved copy is recorded, and the package is never
+        # auto-persisted. Independent of the filter: a package can carry a
+        # filter without being an explicit capture, and the other way round.
+        self._explicit_capture = explicit_capture
+        # Serves a loaded artifact. A frame it does not cover still compiles
+        # and counts toward the recompile limit, but nothing will ever save
+        # this package, so its guards are neither serialized nor held to the
+        # strictness of a capture.
+        self._serving = serving
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
@@ -1096,6 +1118,20 @@ class CompilePackage:
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def serialization_guard_filter_fn(
+        self,
+    ) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None:
+        return self._serialization_guard_filter_fn
+
+    @property
+    def explicit_capture(self) -> bool:
+        return self._explicit_capture
+
+    @property
+    def serving(self) -> bool:
+        return self._serving
 
     def initialize(
         self,
