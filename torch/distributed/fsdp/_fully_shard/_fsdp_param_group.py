@@ -23,6 +23,7 @@ from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    _wait_all_gather,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -532,12 +533,9 @@ class FSDPParamGroup:
         # accumulated grad-reduction state, and restores sharded params.
         current_stream = self.device_handle.current_stream()
         if self._all_gather_result is not None:
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                current_stream.wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            self._all_gather_comm.release_output()
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
             self._post_reduce_event = None
@@ -644,7 +642,7 @@ class FSDPParamGroup:
                 unsharded_grads: list[torch.Tensor] = []
 
                 for fsdp_param in self.fsdp_params:
-                    if not hasattr(fsdp_param, "_unsharded_param"):
+                    if fsdp_param._unsharded_param is None:
                         continue
                     # May have an accumulated gradient of the reduce dtype if the
                     # previous backward did not reduce-scatter
@@ -808,12 +806,9 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                torch.accelerator.current_stream().wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            self._all_gather_comm.release_output()
         self._post_forward_indices.clear()
 
     def _wait_for_post_backward(self):
@@ -888,12 +883,14 @@ class FSDPParamGroup:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
+            self._all_gather_comm.release_output()
 
     def _to_sharded_post_forward(self):
         if not self.is_sharded_post_forward:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+            self._all_gather_comm.release_output()
 
     def _to_unsharded(self):
         if not self.is_unsharded:

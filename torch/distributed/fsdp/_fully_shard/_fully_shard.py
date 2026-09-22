@@ -556,6 +556,14 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
+        Create a separate stateful backend/layout instance for each FSDP
+        parameter group. Sharing registered storage through a backend pool does
+        not permit sharing a stateful instance. The stateless default layout
+        does not impose this restriction. Consult the backend's documentation
+        for supported layouts and storage lifetime requirements.
+        A backend cannot be replaced while an all-gather is pending, while
+        parameters are unsharded, or after they adopt backend-owned output storage.
+
         Args:
             comm (AllGather): Custom all-gather communication.
         """
@@ -567,6 +575,20 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
+            if comm is not fsdp_param_group._all_gather_comm and (
+                fsdp_param_group._all_gather_result is not None
+                or fsdp_param_group.is_unsharded
+                or any(
+                    param._keep_all_gather_output_storage
+                    for param in fsdp_param_group.fsdp_params
+                )
+            ):
+                raise ValueError(
+                    "cannot replace an all-gather backend with pending work, "
+                    "unsharded parameters, or backend-owned outputs; "
+                    "install it before the first unshard"
+                )
+            comm.layout._bind_owner(fsdp_param_group)
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:

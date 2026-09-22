@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import torch
 import torch.distributed as dist
 
+from ._all_gather_layout import AllGatherLayout, DEFAULT_ALL_GATHER_LAYOUT
+
 
 _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
 
@@ -98,9 +100,31 @@ class Comm(ABC):
 
 
 class AllGather(Comm):
+    """Interface for the all_gather comm primitive.
+
+    Set ``layout`` to customize input packing and parameter output views.
+    The default layout uses rank-major copy-in and copy-out.
     """
-    Interface for all_gather comm primitive
-    """
+
+    layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
+    # Preserve version counters when outputs may alias saved parameter views.
+    reuses_output_storage: bool = False
+
+    def release_output(self) -> None:
+        """Release this group's output lease on the compute stream.
+
+        Called after reshard or after waiting for a discarded unused prefetch.
+        Previously returned parameter views must remain valid objects. A backend
+        sharing their storage must restore the same regions on the next gather
+        and order overwrites after all local and remote consumers finish.
+        The backend must protect reuse during both input packing and collective
+        execution; FSDP does not synchronize backend-owned output reuse.
+
+        Must be idempotent when no output is active. FSDP also calls this after
+        failed input preparation or collective setup, on a stream ordered after
+        any work already queued by that call. A backend whose communication may
+        have partially failed must prevent unsafe reuse rather than recover it.
+        """
 
     @abstractmethod
     def __call__(

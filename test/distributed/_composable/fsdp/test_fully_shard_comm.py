@@ -7,6 +7,8 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
+from contextlib import nullcontext
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import torch
@@ -26,10 +28,20 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
+from torch.distributed.fsdp._fully_shard._all_gather_layout import (
+    _can_use_param_contiguous_output,
+    AllGatherLayout,
+    AllGatherOutputs,
+    AllGatherParamMetadata,
+    DefaultAllGatherLayout,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
+    _wait_all_gather,
+    AllGatherInput,
+    AllGatherResult,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -41,12 +53,13 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param import free_storage, ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -72,6 +85,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -2125,6 +2139,392 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
+class _TestAllGatherLayout(AllGatherLayout):
+    def __init__(self, mode):
+        self.mode = mode
+        self.alternate_layouts = mode == "fallback"
+        self.splits = []
+
+    def prepare_output(self, metadata):
+        enabled = self.mode != "rank_major" and metadata.can_use_param_contiguous_output
+        self.splits = metadata.input_split_sizes if enabled else []
+        if self.alternate_layouts:
+            self.mode = "rank_major" if enabled else "custom"
+        return self.splits or None
+
+    def finalize_outputs(self, output, params, world_size, metadata):
+        outputs = self.param_contiguous_output_views(
+            output, [param.input_numels for param in params], world_size
+        )
+        for param, views in zip(params, outputs):
+            if param.outputs:
+                param.outputs[0].copy_(views[0])
+        return AllGatherOutputs(outputs, backend_owned=True)
+
+
+class _TestAllGatherWork(dist.Work):
+    def __init__(self, work, source, output, splits, world_size):
+        super().__init__()
+        self.work = work
+        self.source = source
+        self.output = output
+        self.splits = splits
+        self.world_size = world_size
+        self.event = None
+
+    def wait(self, timeout=None):
+        stream = torch.get_device_module(self.output.device).current_stream()
+        if self.event is not None:
+            stream.wait_event(self.event)
+            return True
+        if self.work is not None:
+            self.work.wait()
+        chunks = self.source.view(self.world_size, -1).split(self.splits, dim=1)
+        self.output.copy_(torch.cat([chunk.flatten() for chunk in chunks]))
+        self.event = stream.record_event()
+        return True
+
+
+class _TestAllGather(DefaultAllGather):
+    """Emulate output layouts with a fixed dtype/device and persistent storage."""
+
+    reuses_output_storage = True
+
+    def __init__(self, mode):
+        self.layout = _TestAllGatherLayout(mode)
+        self.output = self.last_use = None
+        self.observed_layouts = set()
+        self.allocations = self.async_calls = 0
+
+    def allocate(self, size, *, dtype, device):
+        if self.last_use is not None:
+            torch.get_device_module(device).current_stream().wait_event(self.last_use)
+        if self.output is None or self.output.numel() != torch.Size(size).numel():
+            self.output = torch.empty(size, dtype=dtype, device=device)
+            self.allocations += 1
+        return self.output
+
+    def __call__(self, output_tensor, input_tensor, group, async_op=False):
+        splits = self.layout.splits
+        self.observed_layouts.add("custom" if splits else "rank_major")
+        self.async_calls += int(async_op)
+        if not splits:
+            return super().__call__(output_tensor, input_tensor, group, async_op)
+        source = torch.empty_like(output_tensor)
+        work = super().__call__(source, input_tensor, group, async_op)
+        work = _TestAllGatherWork(work, source, output_tensor, splits, group.size())
+        if async_op:
+            return work
+        work.wait()
+
+    def release_output(self):
+        if self.output is not None:
+            stream = torch.get_device_module(self.output.device).current_stream()
+            self.last_use = stream.record_event()
+
+
+@instantiate_parametrized_tests
+class TestAllGatherLayouts(TestCase):
+    def test_async_write_before_wait_preserves_version(self):
+        output = torch.arange(4.0)
+        parameter = nn.Parameter(output)
+        loss = parameter.square().sum()
+        work = MagicMock(spec=dist.Work)
+        comm = MagicMock(spec=AllGather, return_value=work)
+        comm.reuses_output_storage = True
+        stream = torch.cpu.current_stream()
+        prepared = AllGatherInput(torch.ones(4), output, [], [], [])
+        with unittest.mock.patch(
+            "torch.distributed.fsdp._fully_shard._fsdp_collectives._default_all_gather_input_fn",
+            return_value=prepared,
+        ):
+            result = foreach_all_gather(
+                [], MagicMock(), True, stream, stream, torch.device("cpu"), comm
+            )
+        # An async worker can finish its write before FSDP calls Work.wait().
+        output.copy_(output.clone())
+        _wait_all_gather(result)
+        work.wait.assert_called_once()
+        loss.backward()
+        self.assertEqual(parameter.grad, 2 * output)
+
+    @parametrize("failure", ["allocate", "copy_in", "collective"])
+    def test_failed_gather_releases_output(self, failure):
+        error = RuntimeError("injected failure")
+        comm = MagicMock(spec=AllGather, side_effect=error)
+        comm.allocate.return_value = torch.empty(4)
+        if failure == "allocate":
+            comm.allocate.side_effect = error
+
+        def prepare(params, group, device, backend):
+            output = backend.allocate((4,), dtype=torch.float32, device=device)
+            if failure == "copy_in":
+                raise error
+            return AllGatherInput(torch.ones(2), output, [[torch.float32]], [[2]], [2])
+
+        stream = torch.cpu.current_stream()
+        with (
+            unittest.mock.patch(
+                "torch.distributed.fsdp._fully_shard._fsdp_collectives._default_all_gather_input_fn",
+                prepare,
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected failure"),
+        ):
+            foreach_all_gather(
+                [],
+                MagicMock(),
+                False,
+                stream,
+                stream,
+                torch.device("cpu"),
+                comm,
+            )
+        comm.release_output.assert_called_once()
+
+    @parametrize("cleanup", ["_reset_iter_state", "finalize_backward"])
+    def test_unused_prefetch_waits_before_release(self, cleanup):
+        work = MagicMock(spec=dist.Work)
+        result = AllGatherResult(torch.empty(0), None, work, [], [], [])
+        group = MagicMock(_all_gather_result=result)
+        release = group._all_gather_comm.release_output
+        work.wait.side_effect = release.assert_not_called
+        for _ in range(2):
+            getattr(FSDPParamGroup, cleanup)(group)
+        work.wait.assert_called_once()
+        release.assert_called_once()
+
+    @staticmethod
+    def _eligible(dtype=torch.float32, **overrides):
+        fields = dict(
+            fsdp_placement=SimpleNamespace(dim=0),
+            is_dtensor=False,
+            _sharded_local_tensor=SimpleNamespace(),
+            sharded_state=ShardedState.SHARDED,
+        )
+        return _can_use_param_contiguous_output(
+            [SimpleNamespace(**(fields | overrides))], [[dtype]], [[2]], torch.float32
+        )
+
+    @parametrize(
+        "overrides",
+        [
+            {},
+            {"dtype": torch.bfloat16},
+            {"fsdp_placement": SimpleNamespace(dim=1)},
+            {"is_dtensor": True},
+            {"sharded_state": ShardedState.SHARDED_POST_FORWARD},
+            {"_sharded_local_tensor": SimpleNamespace(fsdp_pre_all_gather=None)},
+            {"_sharded_local_tensor": SimpleNamespace(fsdp_post_all_gather=None)},
+        ],
+    )
+    def test_eligibility(self, overrides):
+        self.assertEqual(self._eligible(**overrides), not overrides)
+
+    def test_compiled_backward_eligibility(self):
+        from torch._dynamo import compiled_autograd
+
+        backward_eligibility = []
+
+        @torch._dynamo.disable
+        def hook(grad):
+            self.assertFalse(compiled_autograd.compiled_autograd_enabled)
+            self.assertTrue(compiled_autograd.in_compiled_autograd_region)
+            backward_eligibility.append(self._eligible())
+            return grad
+
+        torch._dynamo.reset()
+        try:
+            value = torch.tensor([2.0], requires_grad=True)
+            output = value.square()
+            output.register_hook(hook)
+            with compiled_autograd._enable(
+                lambda graph: torch.compile(graph, backend="aot_eager")
+            ):
+                self.assertFalse(self._eligible())
+                output.sum().backward()
+            self.assertEqual(value.grad, torch.tensor([4.0]))
+            self.assertEqual(backward_eligibility, [False])
+            self.assertTrue(self._eligible())
+        finally:
+            torch._dynamo.reset()
+
+    @parametrize("custom,owned", [(False, False), (False, True), (True, False)])
+    def test_output_hook_layout_contract(self, custom, owned):
+        layout = _TestAllGatherLayout("custom") if custom else DefaultAllGatherLayout()
+        result = AllGatherResult(torch.empty(4), None, None, [], [], [], layout)
+        params = [SimpleNamespace(_keep_all_gather_output_storage=owned)]
+        callback = MagicMock()
+        expect_error = self.assertRaisesRegex(ValueError, "rank-major layout")
+        with expect_error if custom or owned else nullcontext():
+            foreach_all_gather_copy_out(
+                result, params, MagicMock(), all_gather_output_fn=callback
+            )
+        self.assertEqual(callback.call_count, 0 if custom or owned else 1)
+
+
+class TestAllGatherLayoutCopyOut(TestCase):
+    def test_param_contiguous_output_versions(self, device):
+        output = torch.arange(10.0, device=device)[2:]
+        views = DefaultAllGatherLayout().param_contiguous_output_views(
+            output, [[4], [4]], 1
+        )
+        first, second = [nn.Parameter(tensors[0]) for tensors in views]
+        loss = first.square().sum()
+        with torch.no_grad():
+            second.add_(1)
+        self.assertEqual(first, torch.arange(2.0, 6.0, device=device))
+        self.assertEqual(first.data_ptr(), output.data_ptr())
+        self.assertEqual(second.data_ptr(), output[4:].data_ptr())
+        loss.backward()
+        self.assertEqual(first.grad, 2 * first.detach())
+
+    @parametrize("shard_dim", [0, 1, 2])
+    @parametrize("inference", [False, True])
+    def test_default_copy_out(self, device, shard_dim, inference):
+        with torch.inference_mode(inference):
+            world_size = 2
+            expected = [
+                torch.arange(48.0, device=device).view(2, 4, 6),
+                torch.arange(8, dtype=torch.bfloat16, device=device).view(4, 2),
+            ]
+            shard_dims = [shard_dim, 0]
+            source = torch.cat(
+                [
+                    tensor.chunk(world_size, dim=dim)[rank]
+                    .contiguous()
+                    .flatten()
+                    .view(torch.uint8)
+                    for rank in range(world_size)
+                    for tensor, dim in zip(expected, shard_dims)
+                ]
+            )
+            params = []
+            for tensor, dim in zip(expected, shard_dims):
+                shard_size = list(tensor.shape)
+                shard_size[dim] //= world_size
+                params.append(
+                    AllGatherParamMetadata(
+                        [tensor.numel() // world_size],
+                        [tensor.dtype],
+                        dim,
+                        torch.Size(shard_size),
+                        [],
+                        False,
+                    )
+                )
+            layout = DefaultAllGatherLayout()
+            saved = []
+            for iteration in range(2):
+                result = layout.finalize_outputs(source, params, world_size, None)
+                self.assertFalse(result.backend_owned)
+                for param, outputs, tensor in zip(params, result.tensors, expected):
+                    self.assertEqual(outputs[0].view(tensor.shape), tensor)
+                    if iteration == 0:
+                        param.outputs = outputs
+                        if not inference:
+                            parameter = nn.Parameter(outputs[0])
+                            saved.append((parameter, parameter.square().sum()))
+                        free_storage(outputs[0])
+                    else:
+                        self.assertIs(outputs[0], param.outputs[0])
+                        if not inference:
+                            self.assertEqual(outputs[0]._version, 0)
+            for (parameter, loss), tensor in zip(saved, expected):
+                loss.backward()
+                self.assertEqual(parameter.grad, 2 * tensor.flatten())
+
+
+class TestFullyShardLayoutParity(FSDPTest):
+    @property
+    def world_size(self):
+        return 4
+
+    @skip_if_lt_x_gpu(4)
+    def test_layout_training(self, device):
+        self.run_subtests(
+            {
+                "mode": ["custom", "rank_major", "fallback"],
+                "reshard": [True, False, 2],
+                "async_op": [False, True],
+                "mixed": [False, True],
+            },
+            functools.partial(self._test_training, device=device),
+        )
+
+    @skip_if_lt_x_gpu(4)
+    def test_compiled_layout_training(self, device):
+        self._test_training(
+            device, "custom", reshard=True, async_op=False, mixed=True, compiled=True
+        )
+
+    def _test_training(self, device, mode, reshard, async_op, mixed, compiled=False):
+        torch.manual_seed(312)
+        native = nn.Sequential(*[MLP(16) for _ in range(3)]).to(device)
+        candidate = copy.deepcopy(native)
+        models = (native, candidate)
+        policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16 if mixed else None)
+        comms = []
+        for model in models:
+            for block in model:
+                fully_shard(block, mp_policy=policy, reshard_after_forward=reshard)
+                if model is candidate:
+                    if comms:
+                        with self.assertRaisesRegex(ValueError, "cannot be shared"):
+                            block.set_custom_all_gather(comms[0])
+                    comm = _TestAllGather(mode)
+                    block.set_custom_all_gather(comm)
+                    comms.append(comm)
+            fully_shard(model, mp_policy=policy, reshard_after_forward=False)
+            model._set_unshard_async_op(async_op)
+        run_candidate = (
+            torch.compile(candidate, backend="aot_eager") if compiled else candidate
+        )
+        optimizers = [torch.optim.SGD(model.parameters(), lr=0.01) for model in models]
+        for step in range(3):
+            torch.manual_seed(1234 + self.rank + step)
+            inp = torch.randn(4, 16, device=device)
+            losses = []
+            for model, optimizer in zip((native, run_candidate), optimizers):
+                optimizer.zero_grad(set_to_none=True)
+                loss = model(inp).float().square().sum()
+                loss.backward()
+                losses.append(loss.detach())
+            self.assertEqual(losses[0], losses[1])
+            for p, q in zip(native.parameters(), candidate.parameters()):
+                self.assertEqual(p.grad.to_local(), q.grad.to_local())
+            for optimizer in optimizers:
+                optimizer.step()
+            for p, q in zip(native.parameters(), candidate.parameters()):
+                self.assertEqual(p.to_local(), q.to_local())
+            for block, comm in zip(candidate, comms):
+                if type(reshard) is int:
+                    continue
+                self.assertEqual(comm.allocations, 1)
+                owned = mode != "rank_major"
+                for param in block._get_fsdp_state()._fsdp_param_group.fsdp_params:
+                    self.assertEqual(param._keep_all_gather_output_storage, owned)
+                    if owned:
+                        storage = param.all_gather_outputs[0].untyped_storage()
+                        self.assertEqual(storage.data_ptr(), comm.output.data_ptr())
+                if owned:
+                    with self.assertRaisesRegex(
+                        ValueError, "cannot replace.*all-gather"
+                    ):
+                        block.set_custom_all_gather(DefaultAllGather())
+        expected_layouts = {"rank_major" if mode == "rank_major" else "custom"}
+        if mode == "fallback" or type(reshard) is int:
+            expected_layouts.add("rank_major")
+        for comm in comms:
+            self.assertEqual(comm.observed_layouts, expected_layouts)
+            self.assertEqual(comm.async_calls > 0, async_op)
+
+
+instantiate_device_type_tests(TestAllGatherLayoutCopyOut, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestFullyShardLayoutParity, globals(), only_for=("cuda", "xpu")
+)
 
 
 if __name__ == "__main__":
