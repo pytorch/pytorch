@@ -84,92 +84,6 @@ class GemmVariant(Enum):
         return False
 
 
-def _is_nvfp4_problem(
-    variant: GemmVariant,
-    input_dtype_a: torch.dtype,
-    input_dtype_b: torch.dtype | None,
-    scale_type_a: Any | None,
-    scale_type_b: Any | None,
-) -> bool:
-    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
-
-    return (
-        variant == GemmVariant.SCALED_GEMM
-        and input_dtype_a == torch.float4_e2m1fn_x2
-        and input_dtype_b == torch.float4_e2m1fn_x2
-        and scale_type_a == ScalingType.BlockWise1x16
-        and scale_type_b == ScalingType.BlockWise1x16
-    )
-
-
-def _use_nvfp4_pdl(logical_m: int, logical_n: int, logical_k: int) -> bool:
-    if config.nvgemm_pdl == "1":
-        return True
-    if config.nvgemm_pdl != "auto":
-        return False
-    # End-to-end hybrid-model measurements at M=48 and M=64 regress with PDL
-    # when the smaller contracted/output width is intermediate-sized, even
-    # though the same kernels can be faster in isolation. Interpolate that
-    # opt-out across M=33..64; keep PDL when the smaller width is <=2048 or
-    # >=4096, and in the measured M<=32 and M>=128 regimes.
-    return not (32 < logical_m <= 64 and 2048 < min(logical_n, logical_k) < 4096)
-
-
-def _nvgemm_max_configs(is_nvfp4: bool, available: int) -> int:
-    general_limit = config.nvgemm_max_profiling_configs
-    if not general_limit:
-        return available
-    if is_nvfp4 and config.nvgemm_nvfp4_max_profiling_configs:
-        return min(general_limit, config.nvgemm_nvfp4_max_profiling_configs)
-    return general_limit
-
-
-def _nvgemm_cudagraph_unroll(
-    variant: GemmVariant,
-    input_dtype_a: torch.dtype,
-    input_dtype_b: torch.dtype | None,
-    output_shape: torch.Size | list[int] | tuple[int, ...],
-    scale_type_a: Any | None,
-    scale_type_b: Any | None,
-    allow_mixed_backend_unroll: bool = False,
-) -> int:
-    """Return one common CUDA-graph unroll for an NVGEMM problem.
-
-    Candidate-dependent unrolls would make the fixed replay overhead differ
-    across choices, so this policy depends only on the GEMM problem.  The
-    scoped value is intentionally limited to the decode-range NVFP4 cases
-    measured in LLM inference. It is used when NVGEMM is the only backend or
-    when the caller explicitly applies the same unroll to every mixed-backend
-    choice. Other mixed-backend problems, BF16, and larger GEMMs use one
-    invocation so every candidate has the same replay overhead.
-    """
-    from torch._inductor.utils import _is_only_autotune_backend
-
-    if (
-        _is_nvfp4_problem(
-            variant,
-            input_dtype_a,
-            input_dtype_b,
-            scale_type_a,
-            scale_type_b,
-        )
-        and len(output_shape) == 2
-        and output_shape[0] <= 256
-        and (_is_only_autotune_backend("NVGEMM") or allow_mixed_backend_unroll)
-    ):
-        return config.nvgemm_autotune_cudagraph_unroll
-    return 1
-
-
-def _nvgemm_cold_cache_shape(
-    output_shape: torch.Size | list[int] | tuple[int, ...],
-) -> bool:
-    # Cold-weight benchmarking is opt-in.  Apply it uniformly to the small-M
-    # inference regime; the benchmarker derives the rotation-pool size from the
-    # actual operand footprint and device cache size.
-    return len(output_shape) == 2 and 0 < output_shape[0] <= 256
-
-
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     """Benchmark request for NVIDIA Universal GEMM kernels."""
 
@@ -188,13 +102,11 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         swizzle_type_b: Any | None = None,
         swap_ab: bool = False,
         has_bias_epilogue: bool = False,
-        has_output_scale: bool = False,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self.has_bias_epilogue = has_bias_epilogue
-        self.has_output_scale = has_output_scale
         self._workspace: torch.Tensor | None = None
         self._disk_fn_cache: dict = {}
         self.workspace_size = workspace_size
@@ -204,35 +116,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
         self.swap_ab = swap_ab
-        input_dtype_b = (
-            self.input_tensor_meta[1].dtype if len(self.input_tensor_meta) > 1 else None
-        )
-        self.cudagraph_unroll = _nvgemm_cudagraph_unroll(
-            variant,
-            self.input_tensor_meta[0].dtype,
-            input_dtype_b,
-            self.output_tensor_meta.sizes,
-            scale_type_a,
-            scale_type_b,
-            allow_mixed_backend_unroll=has_output_scale,
-        )
-        from torch._inductor.utils import _is_only_autotune_backend
-
-        self.cold_cache_benchmarking = (
-            config.nvgemm_autotune_cold_cache
-            and (_is_only_autotune_backend("NVGEMM") or has_output_scale)
-            and _is_nvfp4_problem(
-                variant,
-                self.input_tensor_meta[0].dtype,
-                input_dtype_b,
-                scale_type_a,
-                scale_type_b,
-            )
-            and _nvgemm_cold_cache_shape(self.output_tensor_meta.sizes)
-        )
-        self.cudagraph_cold_cache_input_indices = (
-            (1, 3) if self.cold_cache_benchmarking else ()
-        )
 
     def benchmark(
         self,
@@ -250,26 +133,21 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         from the view's layout.
 
         """
+        from torch._inductor.runtime.benchmarking import benchmarker
+
         input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
         if out is None:
             out = self.output_tensor_meta.to_tensor()
 
-        from torch._dynamo.device_interface import get_interface_for_device
-
-        device_interface = get_interface_for_device(input_tensors[0].device.type)
-        with device_interface.device(input_tensors[0].device.index):  # type: ignore[attr-defined]
-            return self._benchmark_on_current_device(input_tensors, out)
-
-    def _benchmark_on_current_device(
-        self,
-        input_tensors: tuple[torch.Tensor, ...],
-        out: torch.Tensor,
-    ) -> float:
         fn = self.make_run_fn(*input_tensors, out=out)
         try:
-            return self.benchmark_run_fn(fn, *input_tensors, out=out)
+            if self.benchmark_with_cudagraphs:
+                res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
+            else:
+                res = self.do_bench(fn, *input_tensors, out=out)
         finally:
             self.cleanup_run_fn()
+        return res
 
     def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor):
         """Create a function to run the NVIDIA Universal GEMM kernel."""
@@ -279,17 +157,11 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
         _ensure_fp4_dtype_registered()
-        logical_m = out.shape[-2]
 
         if self.has_bias_epilogue:
             # Benchmark the real fused kernel (GEMM + bias-add epilogue). The
             # bias is the last input; the rest are the GEMM operands.
             return self._make_bias_run_fn(input_tensors, out)
-
-        output_scale = None
-        if self.has_output_scale:
-            output_scale = input_tensors[-1]
-            input_tensors = input_tensors[:-1]
 
         # swap_ab: transpose operands and write into a transposed view of `out`
         # (zero-copy). See _nvgemm_run for the full explanation.
@@ -302,7 +174,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
                 input_tensors = (b.t(), a.t()) + input_tensors[2:]
             out = out.t()
 
-        helper_kwargs: dict[str, Any] = {"logical_m": logical_m}
+        helper_kwargs: dict[str, Any] = {}
         if self.variant == GemmVariant.SCALED_GEMM:
             scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b = (
                 _get_scaled_gemm_modes(
@@ -312,16 +184,14 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
                     self.swizzle_type_b,
                 )
             )
-            helper_kwargs.update(
-                {
-                    "scale_mode_a": scale_mode_a,
-                    "swizzle_mode_a": swizzle_mode_a,
-                    "scale_mode_b": scale_mode_b,
-                    "swizzle_mode_b": swizzle_mode_b,
-                }
-            )
+            helper_kwargs = {
+                "scale_mode_a": scale_mode_a,
+                "swizzle_mode_a": swizzle_mode_a,
+                "scale_mode_b": scale_mode_b,
+                "swizzle_mode_b": swizzle_mode_b,
+            }
 
-        cache_key = _create_gemm_cache_key(input_tensors, out, logical_m=logical_m)
+        cache_key = _create_gemm_cache_key(input_tensors, out)
         dev_idx = input_tensors[0].device.index or 0
         kernel_name = self.kernel.metadata.operator_name
         disk_config_key = _make_disk_config_key(
@@ -357,7 +227,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.accumulator_type,
             kernel_obj=self.kernel,
             args_kwargs=helper_kwargs,
-            output_scale=output_scale,
             fallback_fn=disk_fallback,
         )
 
@@ -419,7 +288,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             has_epilogue=True,
             aux_tensors=(bias,),
             epilogue_source=_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
-            logical_m=out.shape[-2],
         )
         dev_idx = gemm_tensors[0].device.index or 0
         disk_config_key = _make_disk_config_key(
@@ -453,7 +321,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             out,
             self.accumulator_type,
             kernel_name=kernel_name,
-            args_kwargs={"logical_m": out.shape[-2]},
             epilogue_args=epilogue_args,
             epilogue_source=_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
             fallback_fn=disk_fallback,
@@ -525,7 +392,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
         swap_ab: bool = False,
         kernel_layout: Layout | None = None,
         bias_node: Buffer | None = None,
-        output_scale_node: Buffer | None = None,
     ) -> None:
         super().__init__(
             name=name,
@@ -546,7 +412,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.supports_epilogue_fusion = supports_epilogue_fusion
         self.swap_ab = swap_ab
         self.bias_node = bias_node
-        self.output_scale_node = output_scale_node
         self._kernel_layout = kernel_layout or layout
         self._cached_output_node: TensorBox | None = None
 
@@ -566,7 +431,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
             swizzle_type_b=swizzle_type_b,
             swap_ab=swap_ab,
             has_bias_epilogue=bias_node is not None,
-            has_output_scale=output_scale_node is not None,
         )
 
     def __str__(self) -> str:
@@ -594,9 +458,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
         # rebuild a properly-registered buffer.
         if self._cached_output_node is not None:
             # pyrefly: ignore [missing-attribute]
-            cached_buffer = self._cached_output_node.data.data
-            cached_name = cached_buffer.get_name()
-            if V.graph.name_to_buffer.get(cached_name) is cached_buffer:
+            cached_name = self._cached_output_node.data.data.get_name()
+            if cached_name in V.graph.name_to_buffer:
                 return self._cached_output_node
             self._cached_output_node = None
 
@@ -617,7 +480,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
             supports_epilogue_fusion=self.supports_epilogue_fusion,
             swap_ab=self.swap_ab,
             bias_node=self.bias_node,
-            output_scale_node=self.output_scale_node,
         )
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
@@ -631,7 +493,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
     def to_callable(self):
         return self.bmreq.make_run_fn
 
-    def kernel_hash_key(self) -> str:
+    def hash_key(self) -> str:
         # `select_algorithm` uses this as a precompile dedup key. Two callers
         # wrapping the same physical kernel name but with different accumulator/
         # scale/swizzle types produce distinct compiled artifacts; collapsing
@@ -647,27 +509,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 self.swizzle_type_a,
                 self.swizzle_type_b,
                 "swap_ab" if self.swap_ab else "",
-                "output_scale" if self.output_scale_node is not None else "",
-            )
-        )
-
-    def hash_key(self) -> str:
-        """Include the benchmark policy in persistent timing cache identity."""
-        benchmark_policy = (
-            "required"
-            if self._benchmark_with_cudagraphs
-            else "auto"
-            if self.bmreq.config_cudagraph_benchmarking
-            else "off"
-        )
-        use_cudagraphs = benchmark_policy != "off"
-        return "_".join(
-            (
-                self.kernel_hash_key(),
-                f"cudagraph={benchmark_policy}",
-                f"unroll={self.bmreq.cudagraph_unroll if use_cudagraphs else 1}",
-                "cold_cache="
-                f"{int(use_cudagraphs and self.bmreq.cold_cache_benchmarking)}",
             )
         )
 
@@ -688,23 +529,9 @@ class NVUniversalGemmCaller(ChoiceCaller):
         )
         from torch._inductor.utils import Placeholder
 
-        kernel_impl = getattr(self.kernel, "impl", None)
         kernel_metadata = {
             "kernel_name": self.kernel.metadata.operator_name,
             "min_cc": self.kernel.designed_for_min_cc,
-            "supports_output_scale": getattr(
-                self.kernel, "supports_output_scale", False
-            ),
-            "use_prefetch": getattr(
-                kernel_impl,
-                "use_prefetch",
-                getattr(self.kernel.metadata.design, "use_prefetch", False),
-            ),
-            "use_pdl": getattr(
-                kernel_impl,
-                "use_pdl",
-                getattr(self.kernel.metadata.design, "use_pdl", False),
-            ),
         }
         accumulator_type = self.accumulator_type
         workspace_size = self.workspace_size
@@ -716,7 +543,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
         input_nodes = self.input_nodes
         swap_ab = self.swap_ab
         has_bias = self.bias_node is not None
-        has_output_scale = self.output_scale_node is not None
 
         def make_kernel_render(
             out_node,
@@ -733,11 +559,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 if isinstance(inp, StorageBox):
                     inp = inp.data
                 processed_inputs.append(inp)
-
-            output_scale_node = None
-            if has_output_scale:
-                output_scale_node = processed_inputs[-1]
-                processed_inputs = processed_inputs[:-1]
 
             # A baked bias is the last input, consumed by the epilogue rather
             # than as a GEMM operand.
@@ -766,8 +587,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 swap_ab=swap_ab,
                 # pyrefly: ignore [bad-argument-type]
                 bias_node=bias_node,
-                # pyrefly: ignore [bad-argument-type]
-                output_scale_node=output_scale_node,
             )
 
             def render():
@@ -856,7 +675,6 @@ def _add_nv_gemm_choices_impl(
     swap_ab: bool = False,
     kernel_layout: Layout | None = None,
     bias_node: Buffer | None = None,
-    output_scale_node: Buffer | None = None,
 ) -> None:
     """
     Unified implementation for adding NVIDIA Universal GEMM choices.
@@ -912,7 +730,7 @@ def _add_nv_gemm_choices_impl(
         log.debug("Failed to create dummy tensors for %s", variant.op_name)
         return
 
-    helper_kwargs: dict[str, Any] = {"logical_m": layout.size[-2]}
+    helper_kwargs: dict[str, Any] = {}
     if variant == GemmVariant.SCALED_GEMM:
         try:
             scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b = (
@@ -925,14 +743,12 @@ def _add_nv_gemm_choices_impl(
             )
         except NotImplementedError:
             return
-        helper_kwargs.update(
-            {
-                "scale_mode_a": scale_mode_a,
-                "swizzle_mode_a": swizzle_mode_a,
-                "scale_mode_b": scale_mode_b,
-                "swizzle_mode_b": swizzle_mode_b,
-            }
-        )
+        helper_kwargs = {
+            "scale_mode_a": scale_mode_a,
+            "swizzle_mode_a": swizzle_mode_a,
+            "scale_mode_b": scale_mode_b,
+            "swizzle_mode_b": swizzle_mode_b,
+        }
 
     args = _create_gemm_arguments(
         variant.name,
@@ -972,27 +788,6 @@ def _add_nv_gemm_choices_impl(
         candidate_source = "scaled"
     else:
         candidate_source = "manifest"
-    is_nvfp4 = False
-    # PDL is enabled only through the measured NVFP4 shape policy below. Do
-    # not let the global generation default leak into other scaled formats.
-    scaled_use_pdl = False
-    if mm_inputs is not None:
-        input_dtype_a = mm_inputs.dtype(mm_inputs._mat1_idx)
-        input_dtype_b = mm_inputs.dtype(mm_inputs._mat2_idx)
-        is_nvfp4 = _is_nvfp4_problem(
-            variant,
-            input_dtype_a,
-            input_dtype_b,
-            scale_type_a,
-            scale_type_b,
-        )
-        problem_m, problem_n, problem_k = mm_inputs.mnk_hinted()
-        logical_m = problem_n if swap_ab else problem_m
-        logical_n = problem_m if swap_ab else problem_n
-        if is_nvfp4:
-            # NVFP4 operands store two logical K values per byte.
-            scaled_use_pdl = _use_nvfp4_pdl(logical_m, logical_n, 2 * problem_k)
-
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
         args,
         cc_int,
@@ -1001,51 +796,26 @@ def _add_nv_gemm_choices_impl(
         efc_only=bias_node is not None,
         candidate_source=candidate_source,
         classifier_key="nvgemm_efc_partition_v1",
-        scaled_use_pdl=scaled_use_pdl,
     )
-    if not config.epilogue_fusion:
+    if not config.epilogue_fusion or (swap_ab and variant == GemmVariant.SCALED_GEMM):
         efc_kernels = []
     if bias_node is not None:
         non_efc_kernels = []
-    if output_scale_node is not None:
-        non_efc_kernels = [
-            kernel
-            for kernel in non_efc_kernels
-            if getattr(kernel, "supports_output_scale", False)
-        ]
-        efc_kernels = []
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
         return
 
-    max_configs = _nvgemm_max_configs(
-        is_nvfp4,
-        max(len(non_efc_kernels), len(efc_kernels)),
-    )
-    fallback_max_configs = _nvgemm_max_configs(
-        False,
-        max(len(non_efc_kernels), len(efc_kernels)),
+    max_configs = config.nvgemm_max_profiling_configs or max(
+        len(non_efc_kernels), len(efc_kernels)
     )
     if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM) and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
         unfiltered_efc_kernels = efc_kernels
         non_efc_kernels = heuristics.filter_kernels(
-            non_efc_kernels,
-            mm_inputs,
-            max_configs,
-            accumulator_type,
-            is_nvfp4=is_nvfp4,
-            swap_ab=swap_ab,
-            fallback_count=fallback_max_configs,
+            non_efc_kernels, mm_inputs, max_configs, accumulator_type
         )
         efc_kernels = heuristics.filter_kernels(
-            efc_kernels,
-            mm_inputs,
-            max_configs,
-            accumulator_type,
-            is_nvfp4=is_nvfp4,
-            swap_ab=swap_ab,
-            fallback_count=fallback_max_configs,
+            efc_kernels, mm_inputs, max_configs, accumulator_type
         )
         if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
             wide_tile_ns = (64, 128) if variant == GemmVariant.GEMM else (128, 256)
@@ -1056,12 +826,7 @@ def _add_nv_gemm_choices_impl(
                     if kernel.metadata.design.tile_shape[1] == tile_n
                 ]
                 ranked = heuristics.filter_kernels(
-                    wide_kernels,
-                    mm_inputs,
-                    1,
-                    accumulator_type,
-                    is_nvfp4=is_nvfp4,
-                    swap_ab=swap_ab,
+                    wide_kernels, mm_inputs, 1, accumulator_type
                 )
                 if ranked and ranked[0] not in efc_kernels:
                     efc_kernels.append(ranked[0])
@@ -1077,20 +842,12 @@ def _add_nv_gemm_choices_impl(
 
     # When a bias is baked in, it is appended as the last caller input so the
     # scheduler tracks it as a read; the caller/kernel split it back off.
-    caller_input_nodes = list(input_nodes)
-    if bias_node is not None:
-        caller_input_nodes.append(bias_node)
-    if output_scale_node is not None:
-        caller_input_nodes.append(output_scale_node)
+    caller_input_nodes = (
+        [*input_nodes, bias_node] if bias_node is not None else input_nodes
+    )
 
     num_added = 0
     for kernel, supports_epilogue_fusion in all_kernels:
-        # The vendored block-scaled kernel has a dedicated runtime alpha
-        # argument. Advertise fusion so a pure scalar multiply can select that
-        # path without requiring the heavier generic EFC kernel.
-        supports_epilogue_fusion = (
-            supports_epilogue_fusion or output_scale_node is not None
-        )
         name = f"{variant.op_name}_{next(NVUniversalGemmCaller.index_counter)}"
         workspace_size = kernel.get_workspace_size(args).size_bytes
         try:
@@ -1110,7 +867,6 @@ def _add_nv_gemm_choices_impl(
                 swap_ab=swap_ab,
                 kernel_layout=kernel_layout,
                 bias_node=bias_node,
-                output_scale_node=output_scale_node,
             )
             choices.append(caller)
             num_added += 1
@@ -1170,8 +926,7 @@ def add_nv_universal_gemm_choices(
     # small-tile configs that make swap_ab win.
     mat_a, mat_b = inputs.mat1mat2()
     swap_inputs = MMKernelInputs(
-        [PermuteView.create(mat_b, [1, 0]), PermuteView.create(mat_a, [1, 0])],
-        out_dtype=layout.dtype,
+        [PermuteView.create(mat_b, [1, 0]), PermuteView.create(mat_a, [1, 0])]
     )
     _add_nv_gemm_choices_impl(
         choices=choices,
@@ -1273,7 +1028,6 @@ def add_nv_universal_scaled_gemm_choices(
     input_nodes: list[Buffer],
     accumulator_type: torch.dtype | None = None,
     kernel_inputs: MMKernelInputs | None = None,
-    output_scale_node: Buffer | None = None,
 ) -> None:
     """
     Add NVIDIA Universal Scaled GEMM (FP8) kernels to the autotune choices.
@@ -1335,7 +1089,6 @@ def add_nv_universal_scaled_gemm_choices(
         scale_type_b=scale_type_b,
         swizzle_type_a=swizzle_type_a,
         swizzle_type_b=swizzle_type_b,
-        output_scale_node=output_scale_node,
     )
 
     # swap_ab: see add_nv_universal_gemm_choices for the rationale (swap A/B so
@@ -1369,25 +1122,19 @@ def add_nv_universal_scaled_gemm_choices(
     # Kernel output shape is (N, M) — the transpose of the original (M, N)
     swap_kernel_layout = _transposed_kernel_layout(layout)
 
-    # Rank against the transposed (N, M, K) problem.  Using the original
-    # MMKernelInputs here hides the narrow-N tactics that make this transform
-    # useful for decode-sized M.
-    swap_inputs = MMKernelInputs(
-        [PermuteView.create(mat_b, [1, 0]), PermuteView.create(mat_a, [1, 0])],
-        out_dtype=layout.dtype,
-    )
+    # Skip heuristic filtering for swap_ab: mm_inputs has original (M, N, K) but
+    # the swapped kernel sees (N, M, K). Let the benchmark pick the best kernel.
     _add_nv_gemm_choices_impl(
         choices=choices,
         layout=layout,
         input_nodes=input_nodes,
         variant=GemmVariant.SCALED_GEMM,
         accumulator_type=accumulator_type or torch.float32,
-        mm_inputs=swap_inputs,
+        mm_inputs=None,
         scale_type_a=swap_scale_type_a,
         scale_type_b=swap_scale_type_b,
         swizzle_type_a=swap_swizzle_type_a,
         swizzle_type_b=swap_swizzle_type_b,
         swap_ab=True,
         kernel_layout=swap_kernel_layout,
-        output_scale_node=output_scale_node,
     )
