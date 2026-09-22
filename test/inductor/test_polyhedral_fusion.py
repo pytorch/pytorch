@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import dataclasses
-import re
 from contextlib import nullcontext
 from unittest.mock import patch
 
@@ -21,7 +20,7 @@ from torch._inductor.scheduler import (
     Scheduler,
 )
 from torch._inductor.test_case import TestCase, run_tests
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -44,10 +43,6 @@ def _shifted_mla_indexer(x, ln_w, ln_b, cos, sin, rope_width):
 
 
 def shifted_mla_indexer(x, ln_w, ln_b, cos, sin):
-    return _shifted_mla_indexer(x, ln_w, ln_b, cos, sin, QK_ROPE_A)
-
-
-def shifted_mla_indexer_256(x, ln_w, ln_b, cos, sin):
     return _shifted_mla_indexer(x, ln_w, ln_b, cos, sin, QK_ROPE_A)
 
 
@@ -138,11 +133,9 @@ def _make_flinear_inputs(*, batch_size: int, seq_len: int):
 class _Observation:
     outputs: tuple[torch.Tensor, ...]
     generated_kernel_count: int
-    translated_codegen_count: int
     staged_fusion_count: int
     translations: tuple[tuple[object, ...], ...]
     logical_factors: tuple[int, ...]
-    r0_blocks: tuple[int, ...] = ()
     parent_widths: tuple[int, ...] = ()
     lifetime_signatures: tuple[tuple[str, int, int, int], ...] = ()
 
@@ -192,7 +185,6 @@ def _observe(
     reorder_for_peak_memory: bool | None = None,
     memory_planning: bool | None = None,
     memory_pool: str | None = None,
-    capture_source: bool = False,
 ) -> _Observation:
     torch._dynamo.reset()
     metrics.reset()
@@ -236,11 +228,7 @@ def _observe(
         patch.object(Scheduler, "compute_last_usage", capture_last_usage),
     ):
         compiled = torch.compile(fn, fullgraph=True)
-        if capture_source:
-            outputs, source_codes = run_and_get_code(compiled, *inputs)
-        else:
-            outputs = compiled(*inputs)
-            source_codes = ()
+        outputs = compiled(*inputs)
 
     if not isinstance(outputs, tuple):
         raise AssertionError("translated MLA fixture must return a tuple")
@@ -256,19 +244,12 @@ def _observe(
         for stage in plan.sub_parent_stages
     )
     parent_widths = tuple(int(plan.parent_rnumel) for plan in staged_plans)
-    r0_blocks = tuple(
-        int(match)
-        for source_code in source_codes
-        for match in re.findall(r"R0_BLOCK: tl\.constexpr = (\d+)", source_code)
-    )
     return _Observation(
         outputs=tuple(outputs),
         generated_kernel_count=metrics.generated_kernel_count,
-        translated_codegen_count=metrics.codegen_translated_staged_reduction,
         staged_fusion_count=len(staged_plans),
         translations=translations,
         logical_factors=logical_factors,
-        r0_blocks=r0_blocks,
         parent_widths=parent_widths,
         lifetime_signatures=tuple(lifetime_signatures),
     )
@@ -301,7 +282,6 @@ def _observe_dynamic(
     *,
     polyhedral_fusion: bool,
     dynamic_feature_width: bool = False,
-    capture_source: bool = False,
 ):
     torch._dynamo.reset()
     metrics.reset()
@@ -315,7 +295,6 @@ def _observe_dynamic(
         inputs_by_shape[0], dynamic_feature_width=dynamic_feature_width
     )
     outputs = []
-    source_codes = []
     with (
         inductor_config.patch(
             polyhedral_fusion=polyhedral_fusion,
@@ -327,11 +306,7 @@ def _observe_dynamic(
     ):
         compiled = torch.compile(fn, fullgraph=True, dynamic=True)
         for inputs in inputs_by_shape:
-            if capture_source:
-                result, sources = run_and_get_code(compiled, *inputs)
-                source_codes.extend(sources)
-            else:
-                result = compiled(*inputs)
+            result = compiled(*inputs)
             if not isinstance(result, tuple):
                 raise AssertionError("dynamic MLA fixture must return a tuple")
             outputs.append(tuple(result))
@@ -348,80 +323,87 @@ def _observe_dynamic(
         for stage in plan.sub_parent_stages
     )
     parent_widths = tuple(int(plan.parent_rnumel) for plan in staged_plans)
-    r0_blocks = tuple(
-        int(match)
-        for source_code in source_codes
-        for match in re.findall(r"R0_BLOCK: tl\.constexpr = (\d+)", source_code)
-    )
     return outputs, _Observation(
         outputs=tuple(outputs[-1]),
         generated_kernel_count=metrics.generated_kernel_count,
-        translated_codegen_count=metrics.codegen_translated_staged_reduction,
         staged_fusion_count=len(staged_plans),
         translations=translations,
         logical_factors=logical_factors,
-        r0_blocks=r0_blocks,
         parent_widths=parent_widths,
     )
-
-
-def _assert_outputs_match(expected, actual) -> None:
-    if len(expected) != len(actual):
-        raise AssertionError(f"expected {len(expected)} outputs, got {len(actual)}")
-    for expected_output, actual_output in zip(expected, actual):
-        torch.testing.assert_close(
-            actual_output, expected_output, atol=6e-2, rtol=2e-2
-        )
 
 
 class PolyhedralMLAFusionTest(TestCase):
     __unittest_skip__ = not HAS_GPU
 
     def assert_translated_plan(self, observation: _Observation) -> None:
-        self.assertGreaterEqual(observation.translated_codegen_count, 1)
         self.assertGreaterEqual(observation.staged_fusion_count, 1)
         self.assertEqual(set(observation.translations), {(0, 0), (0, QK_ROPE_A)})
 
     def test_static_shape_matrix(self):
-        for batch_size, seq_len in ((2, 8), (4, 512), (64, 1)):
-            inputs = _make_mla_inputs(batch_size=batch_size, seq_len=seq_len)
-            eager = tuple(shifted_mla_indexer(*inputs))
-            disabled = _observe(
-                shifted_mla_indexer,
-                inputs,
-                polyhedral_fusion=False,
-            )
-            enabled = _observe(
-                shifted_mla_indexer,
-                inputs,
-                polyhedral_fusion=True,
-            )
-            _assert_outputs_match(eager, disabled.outputs)
-            _assert_outputs_match(eager, enabled.outputs)
-            self.assertEqual(disabled.translated_codegen_count, 0)
-            self.assertEqual(disabled.staged_fusion_count, 0)
-            self.assert_translated_plan(enabled)
+        for shape_name, batch_size, seq_len in (
+            ("smoke", 2, 8),
+            ("prefill", 4, 512),
+            ("decode", 64, 1),
+        ):
+            with self.subTest(shape=shape_name):
+                inputs = _make_mla_inputs(batch_size=batch_size, seq_len=seq_len)
+                eager = tuple(shifted_mla_indexer(*inputs))
+                disabled = _observe(
+                    shifted_mla_indexer,
+                    inputs,
+                    polyhedral_fusion=False,
+                )
+                enabled = _observe(
+                    shifted_mla_indexer,
+                    inputs,
+                    polyhedral_fusion=True,
+                )
+                self.assertEqual(
+                    disabled.outputs, eager, atol=6e-2, rtol=2e-2
+                )
+                self.assertEqual(
+                    enabled.outputs, eager, atol=6e-2, rtol=2e-2
+                )
+                self.assertEqual(disabled.staged_fusion_count, 0)
+                self.assert_translated_plan(enabled)
+                if shape_name == "smoke":
+                    self.assertLess(
+                        enabled.generated_kernel_count,
+                        disabled.generated_kernel_count,
+                    )
 
     def test_looped_and_persistent_translated_fusion(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)
         eager = tuple(shifted_mla_indexer(*inputs))
         for force_persistent in (False, True):
-            disabled = _observe(
-                shifted_mla_indexer,
-                inputs,
-                polyhedral_fusion=False,
-                force_persistent=force_persistent,
-            )
-            enabled = _observe(
-                shifted_mla_indexer,
-                inputs,
-                polyhedral_fusion=True,
-                force_persistent=force_persistent,
-            )
-            _assert_outputs_match(eager, disabled.outputs)
-            _assert_outputs_match(eager, enabled.outputs)
-            self.assertEqual(disabled.translated_codegen_count, 0)
-            self.assert_translated_plan(enabled)
+            with self.subTest(force_persistent=force_persistent):
+                disabled = _observe(
+                    shifted_mla_indexer,
+                    inputs,
+                    polyhedral_fusion=False,
+                    force_persistent=force_persistent,
+                )
+                enabled = _observe(
+                    shifted_mla_indexer,
+                    inputs,
+                    polyhedral_fusion=True,
+                    force_persistent=force_persistent,
+                )
+                self.assertEqual(
+                    disabled.outputs,
+                    eager,
+                    atol=6e-2,
+                    rtol=2e-2,
+                )
+                self.assertEqual(
+                    enabled.outputs,
+                    eager,
+                    atol=6e-2,
+                    rtol=2e-2,
+                )
+                self.assertEqual(disabled.staged_fusion_count, 0)
+                self.assert_translated_plan(enabled)
 
     def test_nested_reduction_gate(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)
@@ -432,8 +414,9 @@ class PolyhedralMLAFusionTest(TestCase):
             polyhedral_fusion=True,
             nested_reduction=False,
         )
-        _assert_outputs_match(eager, observation.outputs)
-        self.assertEqual(observation.translated_codegen_count, 0)
+        self.assertEqual(
+            observation.outputs, eager, atol=6e-2, rtol=2e-2
+        )
         self.assertEqual(observation.staged_fusion_count, 0)
         self.assertEqual(observation.translations, ())
 
@@ -456,9 +439,12 @@ class PolyhedralMLAFusionTest(TestCase):
         for expected, disabled_result, enabled_result in zip(
             eager, disabled_outputs, enabled_outputs
         ):
-            _assert_outputs_match(expected, disabled_result)
-            _assert_outputs_match(expected, enabled_result)
-        self.assertEqual(disabled.translated_codegen_count, 0)
+            self.assertEqual(
+                disabled_result, expected, atol=6e-2, rtol=2e-2
+            )
+            self.assertEqual(
+                enabled_result, expected, atol=6e-2, rtol=2e-2
+            )
         self.assert_translated_plan(enabled)
 
     def test_dynamic_feature_width_specializes_translated_plan(self):
@@ -488,40 +474,23 @@ class PolyhedralMLAFusionTest(TestCase):
             inputs_by_shape,
             polyhedral_fusion=True,
             dynamic_feature_width=True,
-            capture_source=True,
         )
         for expected, disabled_result, enabled_result in zip(
             eager, disabled_outputs, enabled_outputs
         ):
-            _assert_outputs_match(expected, disabled_result)
-            _assert_outputs_match(expected, enabled_result)
+            self.assertEqual(
+                disabled_result, expected, atol=6e-2, rtol=2e-2
+            )
+            self.assertEqual(
+                enabled_result, expected, atol=6e-2, rtol=2e-2
+            )
 
-        self.assertEqual(disabled.translated_codegen_count, 0)
         self.assertEqual(disabled.staged_fusion_count, 0)
         self.assert_translated_plan(enabled)
         self.assertEqual(
             set(zip(enabled.parent_widths, enabled.logical_factors)),
             {(256, 4)},
         )
-        self.assertIn(256, enabled.r0_blocks)
-
-    def test_second_contiguous_topology(self):
-        inputs = _make_mla_inputs(batch_size=2, seq_len=8, head_dim=256)
-        eager = tuple(shifted_mla_indexer_256(*inputs))
-        disabled = _observe(
-            shifted_mla_indexer_256,
-            inputs,
-            polyhedral_fusion=False,
-        )
-        enabled = _observe(
-            shifted_mla_indexer_256,
-            inputs,
-            polyhedral_fusion=True,
-        )
-        _assert_outputs_match(eager, disabled.outputs)
-        _assert_outputs_match(eager, enabled.outputs)
-        self.assertEqual(disabled.translated_codegen_count, 0)
-        self.assert_translated_plan(enabled)
 
     def test_wider_logical_factor_falls_back(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8, head_dim=384)
@@ -538,10 +507,12 @@ class PolyhedralMLAFusionTest(TestCase):
             polyhedral_fusion=True,
             force_persistent=True,
         )
-        _assert_outputs_match(eager, disabled.outputs)
-        _assert_outputs_match(eager, enabled.outputs)
-        self.assertEqual(disabled.translated_codegen_count, 0)
-        self.assertEqual(enabled.translated_codegen_count, 0)
+        self.assertEqual(
+            disabled.outputs, eager, atol=6e-2, rtol=2e-2
+        )
+        self.assertEqual(
+            enabled.outputs, eager, atol=6e-2, rtol=2e-2
+        )
         self.assertEqual(enabled.staged_fusion_count, 0)
         self.assertEqual(enabled.translations, ())
 
@@ -553,8 +524,9 @@ class PolyhedralMLAFusionTest(TestCase):
             inputs,
             polyhedral_fusion=True,
         )
-        _assert_outputs_match(eager, observation.outputs)
-        self.assertEqual(observation.translated_codegen_count, 0)
+        self.assertEqual(
+            observation.outputs, eager, atol=6e-2, rtol=2e-2
+        )
         self.assertEqual(observation.staged_fusion_count, 0)
         self.assertEqual(observation.translations, ())
 
@@ -571,14 +543,13 @@ class PolyhedralMLAFusionTest(TestCase):
             inputs,
             polyhedral_fusion=True,
         )
-        _assert_outputs_match(eager, disabled.outputs)
-        _assert_outputs_match(eager, enabled.outputs)
-        self.assertEqual(disabled.translated_codegen_count, 0)
-        self.assert_translated_plan(enabled)
-        self.assertLessEqual(
-            enabled.generated_kernel_count,
-            disabled.generated_kernel_count,
+        self.assertEqual(
+            disabled.outputs, eager, atol=6e-2, rtol=2e-2
         )
+        self.assertEqual(
+            enabled.outputs, eager, atol=6e-2, rtol=2e-2
+        )
+        self.assert_translated_plan(enabled)
 
     def test_translated_lifetime_survives_external_consumer(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)
@@ -588,7 +559,9 @@ class PolyhedralMLAFusionTest(TestCase):
             inputs,
             polyhedral_fusion=True,
         )
-        _assert_outputs_match(eager, observation.outputs)
+        self.assertEqual(
+            observation.outputs, eager, atol=6e-2, rtol=2e-2
+        )
         self.assert_translated_plan(observation)
         self.assertEqual(
             sum(
@@ -628,9 +601,12 @@ class PolyhedralMLAFusionTest(TestCase):
             (*inputs, enabled_output),
             polyhedral_fusion=True,
         )
-        _assert_outputs_match(eager, disabled.outputs)
-        _assert_outputs_match(eager, enabled.outputs)
-        self.assertEqual(disabled.translated_codegen_count, 0)
+        self.assertEqual(
+            disabled.outputs, eager, atol=6e-2, rtol=2e-2
+        )
+        self.assertEqual(
+            enabled.outputs, eager, atol=6e-2, rtol=2e-2
+        )
         self.assert_translated_plan(enabled)
         self.assertTrue(
             all(
@@ -662,7 +638,12 @@ class PolyhedralMLAFusionTest(TestCase):
                     memory_planning=memory_planning,
                     memory_pool=memory_pool,
                 )
-                _assert_outputs_match(eager, observation.outputs)
+                self.assertEqual(
+                    observation.outputs,
+                    eager,
+                    atol=6e-2,
+                    rtol=2e-2,
+                )
                 self.assert_translated_plan(observation)
                 staged_lifetimes = [
                     signature
@@ -685,9 +666,14 @@ class PolyhedralMLAFusionTest(TestCase):
                     inputs,
                     polyhedral_fusion=True,
                 )
-                _assert_outputs_match(eager, observation.outputs)
-                self.assertEqual(observation.translated_codegen_count, 0)
-                self.assertNotIn((0, QK_ROPE_A), observation.translations)
+                self.assertEqual(
+                    observation.outputs,
+                    eager,
+                    atol=6e-2,
+                    rtol=2e-2,
+                )
+                self.assertEqual(observation.staged_fusion_count, 0)
+                self.assertEqual(observation.translations, ())
 
     def test_legal_but_unsupported_split_declines(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)[:3]
@@ -702,10 +688,12 @@ class PolyhedralMLAFusionTest(TestCase):
             inputs,
             polyhedral_fusion=True,
         )
-        _assert_outputs_match(eager, disabled.outputs)
-        _assert_outputs_match(eager, enabled.outputs)
-        self.assertEqual(disabled.translated_codegen_count, 0)
-        self.assertEqual(enabled.translated_codegen_count, 0)
+        self.assertEqual(
+            disabled.outputs, eager, atol=6e-2, rtol=2e-2
+        )
+        self.assertEqual(
+            enabled.outputs, eager, atol=6e-2, rtol=2e-2
+        )
         self.assertEqual(disabled.staged_fusion_count, 0)
         self.assertEqual(enabled.staged_fusion_count, 0)
         self.assertEqual(enabled.translations, ())

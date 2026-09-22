@@ -40,9 +40,7 @@ from torch._inductor.scheduler import (
     SubParentAccessRelation,
     SubParentEpilogueCandidate,
     SubParentEpilogueGrouping,
-    SubParentEpilogueStage,
     SubParentOutputGroup,
-    StagedReductionPlan,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
