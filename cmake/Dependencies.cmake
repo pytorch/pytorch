@@ -1507,6 +1507,14 @@ if(NOT INTERN_BUILD_MOBILE)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
       endif()
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 12)
+        # See the matching CMAKE_CXX_FLAGS block in the top-level
+        # CMakeLists.txt for why: pins std::hardware_destructive_interference_size
+        # to a fixed value so GCC's -Winterference-size (otherwise fatal
+        # under -Werror, and first hit on nvcc's host-compiler pass over
+        # c10/cuda/CUDAEvent.h on aarch64) has nothing to warn about.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler --param=destructive-interference-size=64 ")
+      endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
