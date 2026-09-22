@@ -17,9 +17,14 @@ VENDOR_SCRIPT = REPO_ROOT / "tools" / "vendoring" / "quack" / "vendor.sh"
 FLEX_GEMM_PATCHES = REPO_ROOT / "tools" / "vendoring" / "quack" / "flex_gemm_patches"
 # Classes the FlexGEMM patch series may add to QuACK: generic protocol hooks
 # only. Concrete FlexGEMM EpiOps live in torch/_inductor/kernel/flex_gemm/quack_ops.
-FLEX_GEMM_PATCH_CLASSES = {"_FragmentEpiModMixin"}
+FLEX_GEMM_PATCH_CLASSES = {"_FragmentEpiModMixin", "ModProblem"}
 
 
+# Python 3.10's IntEnum formatting breaks QuACK schema inference, not native-AOT.
+@unittest.skipIf(
+    sys.version_info < (3, 11),
+    "QuACK custom-op imports require Python 3.11 or newer",
+)
 @unittest.skipIf(
     importlib.util.find_spec("cutlass") is None,
     "vendored QuACK imports require CuTeDSL/CUTLASS",

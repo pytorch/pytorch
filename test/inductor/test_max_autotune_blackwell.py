@@ -1,10 +1,10 @@
 # Owner(s): ["module: inductor"]
 import unittest
-import unittest.mock
+from unittest import mock
 
 import torch
 from torch._inductor import config
-from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
+from torch._inductor.heuristics.registry import _HEURISTIC_CACHE, get_template_heuristic
 from torch._inductor.heuristics.template.triton import (
     BaseHeuristicSingleton,
     BlackwellGPUGemmConfig,
@@ -12,6 +12,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
 )
+from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
@@ -480,6 +481,96 @@ class TestMaxAutotuneBlackwell(TestCase):
             FileCheck().check_count(make_desc_api, 1, exactly=True).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    def test_resolved_host_tma_descriptor_args_symbolic_block_shape(self):
+        from types import SimpleNamespace
+
+        from torch._inductor.codegen.triton import TritonKernel
+
+        # A block shape naming an autotuned kernel arg stays a name for the
+        # launcher to look up per config; anything else resolves to a value.
+        signature = [SimpleNamespace(name="XBLOCK")]
+        kernel = SimpleNamespace(
+            args=SimpleNamespace(python_argdefs=lambda: ([], [], signature, [])),
+            persistent_reduction=False,
+            host_tma_descriptor_args={
+                "in_ptr0": SimpleNamespace(
+                    block_shape=["XBLOCK", 128, "YBLOCK"],
+                    shape=[1024, "s0"],
+                    strides=["s0", 1],
+                )
+            },
+        )
+
+        resolved = TritonKernel.resolved_host_tma_descriptor_args(kernel)
+
+        self.assertEqual(
+            resolved["in_ptr0"],
+            {
+                "block_shape": ["XBLOCK", 128, "YBLOCK"],
+                "shape": [1024, "s0"],
+                "strides": ["s0", 1],
+            },
+        )
+        # An already-resolved dict passes through untouched.
+        kernel.host_tma_descriptor_args = {"in_ptr1": {"block_shape": [64]}}
+        self.assertEqual(
+            TritonKernel.resolved_host_tma_descriptor_args(kernel),
+            {"in_ptr1": {"block_shape": [64]}},
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_host_side_tma_signature_upgraded_at_precompile(self):
+        from torch._inductor.runtime import triton_heuristics
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        a = torch.randn(1024, 1024).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(1024, 1024).to(torch.float16).to(GPU_TYPE)
+
+        captured: list[dict] = []
+        orig = triton_heuristics.CachingAutotuner._create_compile_meta
+
+        def _spy(self, cfg):
+            meta = orig(self, cfg)
+            if self.inductor_meta.get("host_tma_descriptor_args"):
+                captured.append(dict(meta["signature"]))
+            return meta
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_host_side_tma": True,
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+                }
+            ),
+            mock.patch.object(
+                triton_heuristics.CachingAutotuner, "_create_compile_meta", _spy
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(mm), a, b)
+
+        torch.testing.assert_close(actual, mm(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(captured, "no host-side TMA kernel was precompiled")
+        upgraded = [
+            ty
+            for sig in captured
+            for ty in sig.values()
+            if isinstance(ty, str) and ty.startswith("tensordesc<")
+        ]
+        self.assertTrue(upgraded, f"no arg upgraded to tensordesc<>: {captured}")
+        # Block dims must be concrete by this point: the launcher resolves the
+        # autotuned symbol per config.
+        FileCheck().check_regex(r"tensordesc<\w+\[\d+, \d+\]>").run("\n".join(upgraded))
+        # The upgrade is the launcher's job now, so codegen must not have
+        # already baked it into the generated module.
+        FileCheck().check_not("tensordesc<").run(code[0])
 
 
 @instantiate_parametrized_tests
@@ -999,55 +1090,93 @@ class TestBlackwellAutoWSConstraints(TestCase):
         self.assertEqual(visited, set(range(num_tiles)))
 
 
+@unittest.skipIf(torch.version.hip is not None, "CUDA-specific template heuristics")
+@instantiate_parametrized_tests
 class TestBlackwellAutoWSConfigs(TestCase):
     """autoWS config selection for the Blackwell persistent-TMA template."""
 
-    def test_autows_heuristic_uses_autows_configs(self):
+    @parametrize(
+        "op_name,heuristic_cls",
+        (
+            ("mm", CUDABlackwellPersistentTMATemplateConfigHeuristic),
+            ("addmm", CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic),
+            ("scaled_mm", CUDAScaledBlackwellTMATemplateConfigHeuristic),
+        ),
+    )
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    @parametrize("initial_autows", (False, True))
+    def test_autows_configs_follow_current_mode(
+        self, op_name, heuristic_cls, search_space, initial_autows
+    ):
         with (
-            unittest.mock.patch(
-                "torch._inductor.heuristics.template.triton.USE_META_WS", True
-            ),
-            config.patch({"triton.enable_template_autows": True}),
+            mock.patch.dict(_HEURISTIC_CACHE, clear=True),
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch("torch._inductor.heuristics.template.triton.USE_META_WS", True),
         ):
-            _HEURISTIC_CACHE.clear()
-            for cls in (
-                CUDABlackwellPersistentTMATemplateConfigHeuristic,
-                CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-            ):
-                BaseHeuristicSingleton._instances.pop(cls, None)
+            first_heuristic = None
+            for enabled in (initial_autows, not initial_autows, initial_autows):
+                with config.patch(
+                    {
+                        "triton.enable_template_autows": enabled,
+                        "max_autotune_gemm_search_space": search_space,
+                    }
+                ):
+                    heuristic = heuristic_cls()
+                    if first_heuristic is None:
+                        first_heuristic = heuristic
+                    self.assertIs(heuristic, first_heuristic)
+                    self.assertIs(
+                        get_template_heuristic(
+                            blackwell_ws_persistent_tma_mm_template.uid,
+                            "cuda",
+                            op_name,
+                        ),
+                        heuristic,
+                    )
+                    configs = heuristic._get_config_generator().keywords["configs"]
+                    self.assertEqual(
+                        {getattr(cfg, "use_meta_ws", False) for cfg in configs},
+                        {enabled},
+                    )
+                    if enabled:
+                        expected = (
+                            heuristic._generate_autows_exhaustive_configs()
+                            if search_space == "EXHAUSTIVE"
+                            else heuristic._generate_autows_configs()
+                        )
+                        self.assertEqual(configs, expected)
+                    else:
+                        self.assertIs(
+                            configs,
+                            heuristic.exhaustive_configs
+                            if search_space == "EXHAUSTIVE"
+                            else heuristic.mm_configs,
+                        )
+                        if op_name == "addmm":
+                            self.assertEqual(
+                                heuristic.mm_configs,
+                                heuristic.blackwell_persistent_mm_configs
+                                + heuristic.blackwell_persistent_addmm_configs,
+                            )
+
+    def test_autows_default_configs_are_subset_of_exhaustive(self):
+        with mock.patch.dict(BaseHeuristicSingleton._instances, clear=True):
             heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
-            addmm_heuristic = CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic()
-
-        self.assertEqual(heuristic.mm_configs, heuristic._generate_autows_configs())
-        # addmm shares the autoWS set rather than its own non-autoWS configs
-        self.assertEqual(
-            addmm_heuristic.mm_configs, heuristic._generate_autows_configs()
-        )
-        self.assertEqual(
-            len(heuristic.exhaustive_configs),
-            len(heuristic._generate_autows_exhaustive_configs()),
-        )
-        for cfg in heuristic.mm_configs:
-            self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
-            self.assertTrue(cfg.use_meta_ws)
-        expected_stages = [
-            cfg.num_stages for cfg in heuristic.blackwell_persistent_mm_configs
-        ]
-        two_cta_stages = [
-            cfg.num_stages
-            for cfg in heuristic.mm_configs
-            if cfg.two_ctas and cfg.data_partition_factor == 1
-        ]
-        self.assertEqual(two_cta_stages, expected_stages)
-
-    def tearDown(self):
-        super().tearDown()
-        _HEURISTIC_CACHE.clear()
-        for cls in (
-            CUDABlackwellPersistentTMATemplateConfigHeuristic,
-            CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-        ):
-            BaseHeuristicSingleton._instances.pop(cls, None)
+            configs = heuristic._generate_autows_configs()
+            exhaustive_configs = heuristic._generate_autows_exhaustive_configs()
+            for cfg in configs:
+                self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
+                self.assertTrue(cfg.use_meta_ws)
+                self.assertIn(cfg, exhaustive_configs)
+            expected_stages = [
+                cfg.num_stages for cfg in heuristic.blackwell_persistent_mm_configs
+            ]
+            two_cta_stages = [
+                cfg.num_stages
+                for cfg in configs
+                if cfg.two_ctas and cfg.data_partition_factor == 1
+            ]
+            self.assertEqual(two_cta_stages, expected_stages)
 
 
 if __name__ == "__main__":
