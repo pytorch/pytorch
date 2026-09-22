@@ -90,7 +90,12 @@ def vt_identity_compare(
     from .functions import UserMethodVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
-    from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
+    from .sets import (
+        DictKeySetVariable,
+        FrozensetVariable,
+        OrderedSetVariable,
+        SetVariable,
+    )
 
     if isinstance(
         left,
@@ -100,6 +105,7 @@ def vt_identity_compare(
             SetVariable,
             FrozensetVariable,
             DictKeySetVariable,
+            OrderedSetVariable,
             TracebackVariable,
             ExceptionVariable,
             UserMethodVariable,
@@ -835,11 +841,11 @@ def pyfloat_as_double(
         if result.python_type() is not float:
             # Outer gate mirrors PyFloat_CheckExact; strict subclasses still fall through.
             if not issubclass(result.python_type(), float):
-                raise_type_error(
-                    tx,
-                    f"{obj.python_type_name()}.__float__ returned non-float "
-                    f"(type {result.python_type_name()})",
-                )
+                if sys.version_info >= (3, 15):
+                    err_msg = f"{obj.python_qualified_name()}.__float__() must return a float, not {result.python_qualified_name()}"
+                else:
+                    err_msg = f"{obj.python_type_name()}.__float__ returned non-float (type {result.python_type_name()})"
+                raise_type_error(tx, err_msg)
     elif obj.tp_as_number.nb_index is not None:
         index = pynumber_index(tx, obj)
         if index.is_python_constant():
@@ -964,10 +970,11 @@ def pynumber_index(
     result = obj.nb_index_impl(tx)
 
     if not pylong_check(result.python_type()):
-        raise_type_error(
-            tx,
-            f"__index__ returned non-int (type {result.python_type_name()})",
-        )
+        if sys.version_info >= (3, 15):
+            err_msg = f"{obj.python_qualified_name()}.__index__() must return an int, not {result.python_qualified_name()}"
+        else:
+            err_msg = f"__index__ returned non-int (type {result.python_type_name()})"
+        raise_type_error(tx, err_msg)
 
     return result
 
