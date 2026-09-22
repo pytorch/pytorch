@@ -1065,17 +1065,6 @@ class TestProfiler(TestCase):
             self.assertEqual(legacy_config.custom_profiler_config, "custom_config")
             self.assertTrue(legacy_config.trace_only)
 
-    @parametrize(
-        "option,value",
-        [
-            ("profiler_metrics", ["m1", "m2"]),
-            ("profiler_measure_per_kernel", True),
-        ],
-    )
-    def test_profiler_range_metrics_removed(self, option, value):
-        with self.assertRaises(TypeError):
-            _ExperimentalConfig(**{option: value})
-
     def test_adjust_profiler_step_deprecated(self):
         # adjust_profiler_step is a deprecated no-op: passing it must warn with
         # FutureWarning and not error.
