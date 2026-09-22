@@ -16,6 +16,7 @@ import typing
 from torch._precompile import (
     Capture,
     capture,
+    DynamoTracer,
     load,
     MakeFxTracer,
     PrecompiledRunnable,
@@ -31,7 +32,7 @@ from torch.compiler._precompile_types import PrecompileSummary
 # Sphinx) resolves them under torch.compiler.precompile, where they are re-exported.
 # capture and load are re-homed where they are defined: a function's annotations
 # resolve through its own globals, not its __module__.
-for _t in (Capture, MakeFxTracer, PrecompiledRunnable, PrecompileSummary):
+for _t in (Capture, DynamoTracer, MakeFxTracer, PrecompiledRunnable, PrecompileSummary):
     # torch._precompile uses ``from __future__ import annotations``, and
     # typing.get_type_hints resolves a class's string annotations through its
     # __module__. Resolving against the DEFINING module before the re-homing keeps
@@ -50,6 +51,7 @@ __all__ = [
     "capture",
     "load",
     "Capture",
+    "DynamoTracer",
     "MakeFxTracer",
     "PrecompiledRunnable",
     "PrecompileSummary",
