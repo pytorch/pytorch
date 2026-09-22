@@ -92,8 +92,6 @@ class TestTransportRegistry(TestCase):
         register_transport("test", _TestTransport)
         with self.assertRaisesRegex(ValueError, "already registered"):
             register_transport("test", _TestTransport)
-        with self.assertRaisesRegex(ValueError, "already registered"):
-            register_transport("tcp", _TestTransport)
 
     def test_factory_must_be_callable(self):
         with self.assertRaisesRegex(TypeError, "must be callable"):
@@ -141,14 +139,30 @@ class TestTransportRegistry(TestCase):
             _TestTransport.is_supported = True
 
     def test_available_transports(self):
-        entry_point = _EntryPoint("external", _TestTransport)
+        register_transport("local", _TestTransport)
+        entry_point = _EntryPoint("EXTERNAL", _TestTransport)
         with patch.object(
             _registry, "_iter_entry_points", return_value=iter([entry_point])
         ):
-            self.assertEqual(
-                available_transports(),
-                ("external", "nixl", "tcp", "torchcomms", "ucxx"),
-            )
+            self.assertEqual(available_transports(), ("external", "local"))
+
+    def test_entry_point_registration_requires_replace(self):
+        entry_point = _EntryPoint("EXTERNAL", _TestTransport)
+        with patch.object(
+            _registry, "_iter_entry_points", side_effect=lambda: iter([entry_point])
+        ):
+            with self.assertRaisesRegex(ValueError, "already registered"):
+                register_transport("external", _TestTransport)
+            register_transport("external", _TestTransport, replace=True)
+            self.assertIsInstance(new_transport("external"), _TestTransport)
+
+    def test_no_implicit_backends(self):
+        with patch.object(
+            _registry, "_iter_entry_points", side_effect=lambda: iter(())
+        ):
+            self.assertEqual(available_transports(), ())
+            with self.assertRaisesRegex(ValueError, "unknown transport"):
+                new_transport("nixl")
 
 
 def _completed_work(error=None):
