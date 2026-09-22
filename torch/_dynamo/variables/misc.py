@@ -39,7 +39,7 @@ import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from torch._dynamo.variables.base import MutationType
 from torch._dynamo.variables.lists import TupleVariable
-from torch._guards import Source
+from torch._guards import GuardSource, Source
 
 from .. import config, graph_break_hints, trace_rules, variables
 from ..bytecode_transformation import (
@@ -61,6 +61,7 @@ from ..source import (
     DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
+    ListGetItemSource,
     TypeDictSource,
     TypeMROSource,
     TypeSource,
@@ -69,6 +70,7 @@ from ..source import (
 from ..utils import (
     check_positional,
     check_unspec_or_constant_args,
+    guard_if_dyn,
     identity,
     istype,
     no_keywords,
@@ -94,8 +96,17 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import generic_str
-from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
+from .object_protocol import generic_str, pynumber_index
+from .user_defined import (
+    call_random_fn,
+    is_standard_setattr,
+    random_call_arg,
+    random_call_example_arg,
+    random_call_value_source,
+    RandomCallOnSource,
+    unsupported_random_call_arg,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -3037,6 +3048,101 @@ class RandomClassVariable(VariableTracker):
         )
 
 
+class RandomStateVariable(VariableTracker):
+    _cpython_type = tuple
+
+    _nonvar_fields = {
+        "example_state",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        example_state: tuple[Any, ...],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.example_state = example_state
+
+    def python_type(self) -> type[tuple]:  # type: ignore[type-arg]
+        return tuple
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.source is None:
+            raise AssertionError("RandomStateVariable must have a source")
+        codegen(self.source)
+
+    def _getitem(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        index = key.as_python_constant()
+        if not isinstance(index, (int, slice)):
+            raise_type_error(tx, "tuple indices must be integers or slices")
+        try:
+            value = self.example_state[index]
+        except IndexError:
+            raise_observed_exception(IndexError, tx, args=["tuple index out of range"])
+        except ValueError as exc:
+            raise_observed_exception(ValueError, tx, args=list(exc.args))
+        if self.source is None:
+            raise AssertionError("RandomStateVariable must have a source")
+        source = GetItemSource(self.source, index)
+        if type(value) is tuple:
+            return RandomStateVariable(value, source=source)
+        if type(value) in (bool, int):
+            from .builder import VariableBuilder
+
+            return VariableBuilder(tx, source).wrap_unspecialized_primitive(value)
+        unimplemented(
+            gb_type="Unsupported random state value",
+            context=f"value type: {type(value).__name__}",
+            explanation="Dynamo cannot model this runtime random state value.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    @staticmethod
+    def _unsupported_operation(operation: str) -> NoReturn:
+        unimplemented(
+            gb_type="Unsupported random.Random state operation",
+            context=f"operation: {operation}",
+            explanation=(
+                "Dynamo cannot apply this operation to a runtime random state."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        self._unsupported_operation("hash")
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        self._unsupported_operation(op)
+
+    def mp_subscript_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        return self._getitem(tx, key)
+
+    def sq_item_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        return self._getitem(tx, key)
+
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return variables.ConstantVariable.create(len(self.example_state))
+
+    sq_length_impl = mp_length_impl
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        return [
+            self._getitem(tx, variables.ConstantVariable.create(index))
+            for index in range(len(self.example_state))
+        ]
+
+
 class RandomVariable(VariableTracker):
     """random.Random()
 
@@ -3065,6 +3171,30 @@ class RandomVariable(VariableTracker):
         "shuffle",
         "sample",
     }
+    _replay_method_names = _stateful_fn_names | {
+        "__getattribute__",
+        "__setattr__",
+        "_randbelow",
+        "getrandbits",
+    }
+    _cpython_replay_methods = {
+        "__getattribute__": random.Random.__getattribute__,
+        "__setattr__": random.Random.__setattr__,
+        "_randbelow": inspect.getattr_static(random.Random, "_randbelow"),
+        "getstate": random.Random.getstate,
+        "getrandbits": random.Random.getrandbits,
+        "randint": random.Random.randint,
+        "random": random.Random.random,
+        "randrange": random.Random.randrange,
+        "sample": random.Random.sample,
+        "seed": random.Random.seed,
+        "setstate": random.Random.setstate,
+        "shuffle": random.Random.shuffle,
+        "uniform": random.Random.uniform,
+    }
+    _replay_attribute_names = {"VERSION"}
+    _cpython_replay_attributes = {"VERSION": random.Random.VERSION}
+    _runtime_primitive_types = {bool, int}
 
     def __init__(
         self,
@@ -3092,19 +3222,23 @@ class RandomVariable(VariableTracker):
 
     @staticmethod
     def is_supported_random_obj(val: Random) -> bool:
-        if type(val) is not random.Random:
+        if type(val) is not RandomVariable._cpython_type:
             return False
-        for name in RandomVariable._stateful_fn_names:
-            if not hasattr(val, name):
+        instance_dict = object.__getattribute__(val, "__dict__")
+        for name in RandomVariable._replay_method_names:
+            canonical_method = RandomVariable._cpython_replay_methods[name]
+            if (
+                name in instance_dict
+                or inspect.getattr_static(type(val), name, None) is not canonical_method
+            ):
                 return False
-            meth = getattr(val, name)
-            if inspect.isbuiltin(meth):
-                # e.g. random.Random.random
-                if meth != getattr(random.Random, name).__get__(val):
-                    return False
-            else:
-                if getattr(meth, "__func__", None) is not getattr(random.Random, name):
-                    return False
+        for name in RandomVariable._replay_attribute_names:
+            if (
+                name in instance_dict
+                or inspect.getattr_static(type(val), name, None)
+                != (RandomVariable._cpython_replay_attributes[name])
+            ):
+                return False
         return True
 
     @staticmethod
@@ -3143,17 +3277,178 @@ class RandomVariable(VariableTracker):
         RandomVariable.check_state(state_obj)
         return state_obj
 
+    def _record_source_call(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        *,
+        return_argument: int | None = None,
+    ) -> int:
+        if self.source is None:
+            raise AssertionError("source-backed random call requires a source")
+        self._check_source_replay_allowed(tx)
+        index = len(tx.output.random_calls)
+        tx.output.random_calls.append(
+            (
+                RandomCallOnSource(self.source, name, return_argument=return_argument),
+                args,
+                kwargs,
+            )
+        )
+        return index
+
+    def _check_source_replay_allowed(self, tx: "InstructionTranslatorBase") -> None:
+        tx.output.side_effects.check_allowed_side_effect(self)
+        if not tx.output.is_root_tracer():
+            tx.output.side_effects.raise_unsafe_side_effect(self)
+
+    @classmethod
+    def _constant_runtime_population(
+        cls, tx: "InstructionTranslatorBase", population: list[VariableTracker]
+    ) -> tuple[list[bool | int | float], tuple[object, ...]] | None:
+        try:
+            values = [random_call_example_arg(item) for item in population]
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            return None
+        value_types = {type(value) for value in values}
+        if len(value_types) > 1 or not value_types.issubset(
+            cls._runtime_primitive_types
+        ):
+            return None
+        try:
+            for index, (item, value) in enumerate(zip(population, values)):
+                source = item.source
+                if type(value) is int and (
+                    source is None
+                    or source.guard_source is not GuardSource.RANDOM_VALUE
+                ):
+                    if source is None and not item.is_python_constant():
+                        return None
+                    value = guard_if_dyn(pynumber_index(tx, item.realize()))
+                    if not isinstance(value, int):
+                        return None
+                    values[index] = value
+                torch._as_tensor_fullprec(value)
+        except (OverflowError, RuntimeError, TypeError, ValueError):
+            return None
+        try:
+            runtime_values = tuple(random_call_arg(item) for item in population)
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            return None
+        return values, runtime_values  # type: ignore[return-value]
+
+    @staticmethod
+    def _wrap_runtime_sequence(
+        tx: "InstructionTranslatorBase", index: int, values: list[Any]
+    ) -> list[VariableTracker]:
+        from .builder import VariableBuilder
+
+        base = random_call_value_source(index)
+        return [
+            VariableBuilder(
+                tx, ListGetItemSource(base, i)
+            ).wrap_unspecialized_primitive(value)
+            for i, value in enumerate(values)
+        ]
+
+    @staticmethod
+    def _unsupported_runtime_population(name: str) -> NoReturn:
+        unimplemented(
+            gb_type="Unsupported random.Random sequence",
+            context=f"method: random.Random.{name}",
+            explanation=(
+                f"Dynamo cannot represent the runtime-dependent result of "
+                f"random.Random.{name}() for this population."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    @staticmethod
+    def _unsupported_runtime_scalar(name: str) -> NoReturn:
+        unimplemented(
+            gb_type="Unsupported random.Random scalar result",
+            context=f"method: random.Random.{name}",
+            explanation=(
+                f"Dynamo cannot safely represent every runtime result of "
+                f"random.Random.{name}() as a graph input."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def _validate_int_result_range(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> None:
+        example_args = tuple(random_call_example_arg(arg) for arg in args)
+        example_kwargs = {
+            key: random_call_example_arg(value) for key, value in kwargs.items()
+        }
+        try:
+            inspect.signature(getattr(self.random, name)).bind(
+                *example_args, **example_kwargs
+            )
+        except TypeError as exc:
+            raise_observed_exception(TypeError, tx, args=list(exc.args))
+
+        values = []
+        for arg in (*args, *kwargs.values()):
+            arg = arg.realize()
+            if arg.is_python_constant() and arg.as_python_constant() is None:
+                continue
+            if arg.source is None and not arg.is_python_constant():
+                self._unsupported_runtime_scalar(name)
+            value = guard_if_dyn(pynumber_index(tx, arg))
+            if not isinstance(value, int):
+                self._unsupported_runtime_scalar(name)
+            values.append(value)
+        if any(value < -(1 << 63) or value >= 1 << 63 for value in values):
+            self._unsupported_runtime_scalar(name)
+
+    @staticmethod
+    def _runtime_args(
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[tuple[object, ...], dict[str, object]]:
+        try:
+            return (
+                tuple(random_call_arg(arg) for arg in args),
+                {key: random_call_arg(value) for key, value in kwargs.items()},
+            )
+        except NotImplementedError:
+            unsupported_random_call_arg(name)
+
     def seed(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        tx.output.side_effects.mutation(self)
-        self.random.seed(
-            *[x.as_python_constant() for x in args],
-            **{key: val.as_python_constant() for key, val in kwargs.items()},
-        )
+        try:
+            inspect.signature(self.random.seed).bind(*args, **kwargs)
+        except TypeError as exc:
+            raise_observed_exception(TypeError, tx, args=list(exc.args))
+        try:
+            python_args = tuple(random_call_example_arg(x) for x in args)
+            python_kwargs = {
+                key: random_call_example_arg(val) for key, val in kwargs.items()
+            }
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            unsupported_random_call_arg("seed")
+        try:
+            self.random.seed(*python_args, **python_kwargs)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        if self.source is not None:
+            runtime_args, runtime_kwargs = self._runtime_args("seed", args, kwargs)
+            self._record_source_call(tx, "seed", runtime_args, runtime_kwargs)
+        else:
+            tx.output.side_effects.mutation(self)
         return variables.ConstantVariable.create(None)
 
     def getstate(
@@ -3162,7 +3457,26 @@ class RandomVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.wrap_state(self.random.getstate())
+        try:
+            inspect.signature(self.random.getstate).bind(*args, **kwargs)
+        except TypeError as exc:
+            raise_observed_exception(TypeError, tx, args=list(exc.args))
+        python_args = tuple(random_call_example_arg(arg) for arg in args)
+        python_kwargs = {
+            key: random_call_example_arg(value) for key, value in kwargs.items()
+        }
+        try:
+            state = self.random.getstate(*python_args, **python_kwargs)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        if self.source is None:
+            return self.wrap_state(state)
+        runtime_args, runtime_kwargs = self._runtime_args("getstate", args, kwargs)
+        index = self._record_source_call(tx, "getstate", runtime_args, runtime_kwargs)
+        return RandomStateVariable(
+            state,
+            source=random_call_value_source(index),
+        )
 
     def setstate(
         self,
@@ -3170,8 +3484,34 @@ class RandomVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        tx.output.side_effects.mutation(self)
-        self.random.setstate(self.unwrap_state(args[0]))
+        def example_state(value: VariableTracker) -> Any:
+            if isinstance(value, RandomStateVariable):
+                return value.example_state
+            return random_call_example_arg(value)
+
+        try:
+            inspect.signature(self.random.setstate).bind(*args, **kwargs)
+        except TypeError as exc:
+            raise_observed_exception(TypeError, tx, args=list(exc.args))
+        try:
+            python_args = tuple(example_state(arg) for arg in args)
+            python_kwargs = {key: example_state(value) for key, value in kwargs.items()}
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            unimplemented(
+                gb_type="Unsupported random.Random state",
+                context="state cannot be represented as a Python constant",
+                explanation="Dynamo cannot represent this random state value.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        try:
+            self.random.setstate(*python_args, **python_kwargs)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        if self.source is not None:
+            runtime_args, runtime_kwargs = self._runtime_args("setstate", args, kwargs)
+            self._record_source_call(tx, "setstate", runtime_args, runtime_kwargs)
+        else:
+            tx.output.side_effects.mutation(self)
         return variables.ConstantVariable.create(None)
 
     def shuffle(
@@ -3184,12 +3524,26 @@ class RandomVariable(VariableTracker):
         check_positional(tx, name, len(args), 1, 1)
         no_keywords(tx, name, kwargs)
         seq = args[0].realize()
+        if not isinstance(seq, (variables.ListVariable, variables.DequeVariable)):
+            self._unsupported_runtime_population(name)
+        if self.source is not None:
+            runtime_population = self._constant_runtime_population(tx, seq.items)
+            if runtime_population is None:
+                self._unsupported_runtime_population(name)
+            population, runtime_values = runtime_population
+            shuffled = list(population)
+            self.random.shuffle(shuffled)
+            index = self._record_source_call(
+                tx, name, (runtime_values,), {}, return_argument=0
+            )
+            tx.output.side_effects.mutation(seq)
+            seq.items[:] = self._wrap_runtime_sequence(tx, index, shuffled)
+            return variables.ConstantVariable.create(None)
+
         tx.output.side_effects.mutation(self)
         # shuffle's permutation depends only on the sequence length and the
         # RNG state, not on the elements, so shuffle a list of indices to
         # both advance the symbolic RNG and obtain the permutation to apply.
-        if not hasattr(seq, "items"):
-            raise AssertionError("shuffle only supports ListVariable and TupleVariable")
         perm = list(range(len(seq.items)))
         self.random.shuffle(perm)
         tx.output.side_effects.mutation(seq)
@@ -3205,13 +3559,32 @@ class RandomVariable(VariableTracker):
         name = "sample"
         check_positional(tx, name, len(args), 2, 2)
         no_keywords(tx, name, kwargs)
+        if not issubclass(args[0].python_type(), Sequence):
+            raise_type_error(
+                tx,
+                "Population must be a sequence.  For dicts or sets, use sorted(d).",
+            )
         elems = unpack_iterable(tx, args[0])
-        k = args[1].as_python_constant()
-        if not isinstance(k, int) or k < 0 or k > len(elems):
+        k = guard_if_dyn(pynumber_index(tx, args[1]))
+        if not isinstance(k, int):
+            self._unsupported_runtime_population(name)
+        if k < 0 or k > len(elems):
             raise_value_error(
                 tx,
                 "Sample larger than population or is negative",
             )
+        if self.source is not None:
+            runtime_population = self._constant_runtime_population(tx, elems)
+            if runtime_population is None:
+                self._unsupported_runtime_population(name)
+            population, runtime_values = runtime_population
+            sampled = self.random.sample(population, k)
+            index = self._record_source_call(tx, name, (runtime_values, k), {})
+            return variables.ListVariable(
+                self._wrap_runtime_sequence(tx, index, sampled),
+                mutation_type=variables.base.ValueMutationNew(),
+            )
+
         tx.output.side_effects.mutation(self)
         # Like shuffle, sample's selected positions depend only on the
         # population length and RNG state, so sample over an index range to
@@ -3223,6 +3596,18 @@ class RandomVariable(VariableTracker):
         )
 
     def _call_random(self, tx, name, args, kwargs):
+        if self.source is not None:
+            self._check_source_replay_allowed(tx)
+            if name in ("randint", "randrange"):
+                self._validate_int_result_range(tx, name, args, kwargs)
+            return call_random_fn(
+                tx,
+                getattr(self.random, name),
+                args,
+                kwargs,
+                RandomCallOnSource(self.source, name),
+            )
+
         tx.output.side_effects.mutation(self)
         state = self.random.getstate()
 
@@ -3283,26 +3668,6 @@ class RandomVariable(VariableTracker):
         "randrange": Method(_randrange),
         "uniform": Method(_uniform),
     }
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if self.source is not None and name in self._stateful_fn_names:
-            unimplemented(
-                gb_type="Stateful random.Random method",
-                context=f"method: random.Random.{name}",
-                explanation=(
-                    f"Dynamo cannot trace random.Random.{name}() on a persistent "
-                    "random number generator because its behavior depends on state "
-                    "that changes between calls."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(

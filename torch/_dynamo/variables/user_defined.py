@@ -1879,11 +1879,84 @@ class RemovableHandleClass:
     pass
 
 
+class RandomCallOnSource:
+    def __init__(
+        self,
+        source: Source,
+        method_name: str,
+        *,
+        return_argument: int | None = None,
+    ) -> None:
+        self.source = source
+        self.method_name = method_name
+        self.return_argument = return_argument
+
+
+class RandomCallResultRef:
+    def __init__(self, call_index: int, path: tuple[object, ...] = ()) -> None:
+        self.call_index = call_index
+        self.path = path
+
+
+class RandomCallInputRef:
+    def __init__(self, source: Source) -> None:
+        self.source = source
+
+
+def random_call_result_ref(source: Source | None) -> RandomCallResultRef | None:
+    path: list[object] = []
+    while isinstance(source, GetItemSource):
+        path.append(source.unpack_slice() if source.index_is_slice else source.index)
+        source = source.base
+    if isinstance(source, RandomValueSource):
+        result_path = tuple(reversed(path))
+        return RandomCallResultRef(source.random_call_index, result_path)
+    return None
+
+
+def random_call_value_source(call_index: int) -> RandomValueSource:
+    return RandomValueSource(call_index)
+
+
+def random_call_arg(value: VariableTracker) -> Any:
+    if ref := random_call_result_ref(value.source):
+        return ref
+    try:
+        return value.as_python_constant()
+    except AsPythonConstantNotImplementedError:
+        if value.source is not None:
+            return RandomCallInputRef(value.source)
+        raise NotImplementedError(
+            "random call argument has no pregraph source"
+        ) from None
+
+
+def random_call_example_arg(value: VariableTracker) -> Any:
+    if isinstance(value, variables.UnspecializedPythonVariable):
+        return value.raw_value
+    if isinstance(value, variables.SymNodeVariable):
+        return value.sym_num.node.hint
+    return value.as_python_constant()
+
+
+def unsupported_random_call_arg(name: str) -> NoReturn:
+    unimplemented(
+        gb_type="Unsupported random.Random argument",
+        context=f"method: random.Random.{name}",
+        explanation=(
+            "Dynamo cannot reconstruct this random call argument before "
+            "the compiled graph runs."
+        ),
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
 def call_random_fn(
     tx: "InstructionTranslatorBase",
     fn: Callable[..., Any],
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
+    replay_fn: RandomCallOnSource | None = None,
 ) -> VariableTracker:
     from .builder import VariableBuilder
 
@@ -1893,14 +1966,30 @@ def call_random_fn(
         if isinstance(random_var, variables.RandomVariable):
             return random_var.call_method(tx, fn.__name__, args, kwargs)
 
-    args = [x.as_python_constant() for x in args]
-    kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+    example_args = tuple(random_call_example_arg(x) for x in args)
+    example_kwargs = {k: random_call_example_arg(v) for k, v in kwargs.items()}
+    try:
+        runtime_args = tuple(random_call_arg(x) for x in args)
+        runtime_kwargs = {k: random_call_arg(v) for k, v in kwargs.items()}
+    except NotImplementedError:
+        unsupported_random_call_arg(
+            replay_fn.method_name
+            if replay_fn is not None
+            else getattr(fn, "__name__", type(fn).__name__)
+        )
     random_call_index = len(tx.output.random_calls)
     # NB: it is probably not important for the example_value to be exactly correct,
     # we just need the right type
-    example_value = fn(*args, **kwargs)
-    source = RandomValueSource(random_call_index)
-    tx.output.random_calls.append((fn, args, kwargs))  # type: ignore[arg-type]
+    try:
+        example_value = fn(*example_args, **example_kwargs)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise_observed_exception(type(exc), tx, args=list(exc.args))
+    source = (
+        random_call_value_source(random_call_index)
+        if replay_fn is not None
+        else RandomValueSource(random_call_index)
+    )
+    tx.output.random_calls.append((replay_fn or fn, runtime_args, runtime_kwargs))
     # TODO: arguably, this should route to wrap_symint/wrap_symfloat
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now

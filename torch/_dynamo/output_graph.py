@@ -184,7 +184,12 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
-from .variables.user_defined import UserDefinedDictVariable
+from .variables.user_defined import (
+    RandomCallInputRef,
+    RandomCallOnSource,
+    RandomCallResultRef,
+    UserDefinedDictVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -344,11 +349,75 @@ class GraphCompileReason:
             graph_break_reasons.append(self)
 
 
-def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
-    def _gen_rand_values() -> list[Any]:
-        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+def _get_gen_rand_values_fn(random_calls: Any) -> Callable[..., list[Any]]:
+    def _gen_rand_values(*replay_values: Any) -> list[Any]:
+        replay_values_iter = iter(replay_values)
+
+        def resolve(value: Any, results: list[Any]) -> Any:
+            if isinstance(value, RandomCallInputRef):
+                return next(replay_values_iter)
+            if isinstance(value, RandomCallResultRef):
+                result = results[value.call_index]
+                for index in value.path:
+                    result = result[index]
+                return result
+            if isinstance(value, tuple):
+                return tuple(resolve(item, results) for item in value)
+            if isinstance(value, list):
+                return [resolve(item, results) for item in value]
+            if isinstance(value, dict):
+                return {key: resolve(item, results) for key, item in value.items()}
+            return value
+
+        results: list[Any] = []
+        for fn, args, kwargs in random_calls:
+            replay_obj = (
+                next(replay_values_iter) if isinstance(fn, RandomCallOnSource) else None
+            )
+            resolved_args = tuple(resolve(arg, results) for arg in args)
+            resolved_kwargs = {
+                key: resolve(value, results) for key, value in kwargs.items()
+            }
+            if isinstance(fn, RandomCallOnSource):
+                if replay_obj is None:
+                    raise AssertionError("sourced random call requires an object")
+                method = getattr(replay_obj, fn.method_name)
+                if fn.return_argument is not None:
+                    mutable_args = list(resolved_args)
+                    mutable_args[fn.return_argument] = list(
+                        mutable_args[fn.return_argument]
+                    )
+                    method(*mutable_args, **resolved_kwargs)
+                    result = mutable_args[fn.return_argument]
+                else:
+                    result = method(*resolved_args, **resolved_kwargs)
+            else:
+                result = fn(*resolved_args, **resolved_kwargs)
+            results.append(result)
+        return results
 
     return _gen_rand_values
+
+
+def _get_random_call_sources(random_calls: Any) -> list[Source]:
+    sources: list[Source] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, RandomCallInputRef):
+            sources.append(value.source)
+        elif isinstance(value, (tuple, list)):
+            for item in value:
+                collect(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect(item)
+
+    for fn, args, kwargs in random_calls:
+        if isinstance(fn, RandomCallOnSource):
+            sources.append(fn.source)
+        collect(args)
+        collect(kwargs)
+    return sources
 
 
 class FakeRootModule(torch.nn.Module):
@@ -951,7 +1020,11 @@ class OutputGraph(OutputGraphCommon):
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
         self.random_calls: list[
-            tuple[Callable[..., object], tuple[object, ...], dict[str, object]]
+            tuple[
+                Callable[..., object] | RandomCallOnSource,
+                tuple[object, ...],
+                dict[str, object],
+            ]
         ] = []
         self.random_values_var: Any = None
 
@@ -2148,7 +2221,13 @@ class OutputGraph(OutputGraphCommon):
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
-            random_calls_instructions.extend(create_call_function(0, False))
+            replay_sources = _get_random_call_sources(self.random_calls)
+            for source in replay_sources:
+                codegen(source)
+            random_calls_instructions.extend(codegen.get_instructions())
+            random_calls_instructions.extend(
+                create_call_function(len(replay_sources), False)
+            )
             random_calls_instructions.append(
                 codegen.create_store(self.random_values_var),
             )

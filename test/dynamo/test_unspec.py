@@ -4,9 +4,11 @@ import math
 import random
 import subprocess
 import sys
+import threading
 import time
 import unittest
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import numpy as np
@@ -399,7 +401,7 @@ else:
             return y, rand2, rand3
 
         inp = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         random.seed(0)
         y_1, rand2_1, rand3_1 = fn(inp, random.Random(12))
         state_1 = random.getstate()
@@ -426,7 +428,7 @@ else:
             return x + r1 + r2 + r3 + r4
 
         inp = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         rand1_1 = random.Random(1)
         rand2_1 = random.Random(2)
         rand3_1 = random.Random(3)
@@ -439,6 +441,225 @@ else:
         self.assertEqual(rand1_1.getstate(), rand1_2.getstate())
         self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
         self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
+
+    def test_random_object_alternating_instances_dynamic_shapes(self):
+        def fn(x, rand):
+            return x + rand.random()
+
+        shapes = ([1], [1, 5], [2, 2], [2, 3])
+
+        def run(call_fn):
+            rand1 = random.Random(1)
+            rand2 = random.Random(2)
+            outputs = [
+                call_fn(torch.zeros(shape, dtype=torch.float64), rand)
+                for shape, rand in zip(shapes, (rand1, rand2, rand1, rand2))
+            ]
+            return outputs, rand1.getstate(), rand2.getstate()
+
+        expected = run(fn)
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, dynamic=True, fullgraph=True)
+        actual = run(opt_fn)
+
+        self.assertEqual(actual, expected)
+        self.assertLess(cnts.frame_count, len(shapes))
+
+    def test_random_object_aliases_share_replay_state(self):
+        def fn(x, rand1, rand2):
+            return x + rand1.random() + rand2.random()
+
+        eager_rand = random.Random(0)
+        expected = fn(torch.zeros(1, dtype=torch.float64), eager_rand, eager_rand)
+        compiled_rand = random.Random(0)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.zeros(1, dtype=torch.float64), compiled_rand, compiled_rand
+        )
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_rand.getstate(), eager_rand.getstate())
+
+    def test_random_object_cond_side_effect(self):
+        rand = random.Random(0)
+        initial_state = rand.getstate()
+
+        def true_fn(x):
+            return x + rand.random()
+
+        def false_fn(x):
+            return x + rand.random()
+
+        def fn(pred, x):
+            return torch.cond(pred, true_fn, false_fn, (x,))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError, "HOP: Unsafe side effect"
+        ):
+            opt_fn(torch.tensor(False), torch.zeros(1, dtype=torch.float64))
+        self.assertEqual(rand.getstate(), initial_state)
+
+    def test_random_object_method_override_guard(self):
+        def fn(x, rand):
+            return x * rand.random()
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x, random.Random(0)), fn(x, random.Random(0)))
+
+        overridden = random.Random(0)
+        overridden.random = lambda: 2.0
+        self.assertEqual(opt_fn(x, overridden), fn(x, overridden))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_random_object_class_method_override_guard(self):
+        def fn(x, rand):
+            return x * rand.random()
+
+        random_type = random.Random
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x, random_type(0)), fn(x, random_type(0)))
+
+        with mock.patch.object(random_type, "random", lambda self: 2.0):
+            self.assertEqual(opt_fn(x, random_type(0)), fn(x, random_type(0)))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_random_object_class_method_overridden_before_trace(self):
+        def fn(x, rand):
+            return x + rand.random()
+
+        random_type = random.Random
+        rand = random_type(0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with (
+            mock.patch.object(random_type, "getstate", lambda self: ()),
+            self.assertRaises(torch._dynamo.exc.Unsupported),
+        ):
+            opt_fn(torch.zeros(1, dtype=torch.float64), rand)
+
+    def test_random_object_randbelow_override_guard(self):
+        def fn(x, rand):
+            return x + rand.randint(1, 9)
+
+        random_type = random.Random
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.zeros(1, dtype=torch.float64)
+        self.assertEqual(opt_fn(x, random_type(0)), fn(x, random_type(0)))
+
+        with mock.patch.object(random_type, "_randbelow", lambda self, n: 0):
+            self.assertEqual(opt_fn(x, random_type(0)), fn(x, random_type(0)))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_random_object_missing_class_descriptor(self):
+        def fn(x, rand):
+            return x + rand.random()
+
+        random_type = random.Random
+        uniform = random_type.uniform
+        del random_type.uniform
+        try:
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
+                opt_fn(torch.zeros(1), random_type(0))
+        finally:
+            random_type.uniform = uniform
+
+    def test_random_object_replay_ignores_random_class_rebind(self):
+        def fn(x, rand):
+            return x + rand.random()
+
+        random_type = random.Random
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.zeros(1, dtype=torch.float64)
+        self.assertEqual(opt_fn(x, random_type(0)), fn(x, random_type(0)))
+
+        class FakeRandom:
+            def __init__(self):
+                raise AssertionError("runtime replay used the module binding")
+
+        expected_rand = random_type(1)
+        actual_rand = random_type(1)
+        with mock.patch.object(random, "Random", FakeRandom):
+            self.assertEqual(opt_fn(x, actual_rand), fn(x, expected_rand))
+        self.assertEqual(actual_rand.getstate(), expected_rand.getstate())
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_random_object_concurrent_cache_hits(self):
+        barrier = None
+
+        def backend(gm, _):
+            def run(*args):
+                if barrier is not None:
+                    barrier.wait(timeout=10)
+                return gm(*args)
+
+            return run
+
+        def fn(x, rand):
+            return x + rand.random()
+
+        rand = random.Random(0)
+        x = torch.zeros(1, dtype=torch.float64)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        opt_fn(x, rand)
+
+        rand.seed(0)
+        barrier = threading.Barrier(2)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(opt_fn, x, rand) for _ in range(2)]
+            actual = [future.result(timeout=10).item() for future in futures]
+
+        eager_rand = random.Random(0)
+        expected = [eager_rand.random() for _ in range(2)]
+        self.assertEqual(sorted(actual), sorted(expected))
+        self.assertEqual(rand.getstate(), eager_rand.getstate())
+
+    def test_random_float_runtime_dtype(self):
+        def fn(x, rand):
+            return x * rand.random()
+
+        x = torch.arange(4.0)
+        expected = fn(x, random.Random(0))
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+            x, random.Random(0)
+        )
+        self.assertEqual(actual, expected)
+
+    def test_random_object_huge_integer_range_fallback(self):
+        def constant_bound(rand):
+            return rand.randrange(10**20)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported random.Random scalar result"
+        ):
+            torch.compile(constant_bound, backend="eager", fullgraph=True)(
+                random.Random(0)
+            )
+
+        def dynamic_bound(x, rand, stop):
+            return x + rand.randrange(stop)
+
+        opt_fn = torch.compile(dynamic_bound, backend="eager", fullgraph=True)
+        opt_fn(torch.zeros(1, dtype=torch.float64), random.Random(0), 10)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported random.Random scalar result"
+        ):
+            opt_fn(torch.zeros(1, dtype=torch.float64), random.Random(0), 10**20)
+
+    def test_random_object_derived_symint_argument(self):
+        def fn(x, rand):
+            return x + rand.randrange(x.shape[0])
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported random.Random"
+        ):
+            opt_fn(torch.zeros(3), random.Random(0))
 
     def test_random_object_shuffle(self):
         # shuffle on an explicit Random object is an exact, reproducible,
@@ -459,6 +680,72 @@ else:
         self.assertEqual(ref_items, res_items)
         self.assertEqual(ref_tensors, res_tensors)
         self.assertEqual(ref_r, res_r)
+
+    def test_random_object_shuffle_unrepresentable_integer(self):
+        def fn(rand):
+            values = [10**100, 2, 3]
+            rand.shuffle(values)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported random.Random sequence"
+        ):
+            opt_fn(random.Random(0))
+
+    def test_random_object_shuffle_float_fallback(self):
+        def fn(rand):
+            values = [float("nan"), 2.0, 3.0]
+            rand.shuffle(values)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported random.Random sequence"
+        ):
+            opt_fn(random.Random(0))
+
+    def test_random_object_shuffle_dynamic_integer_range(self):
+        def fn(x, rand, value):
+            values = [value, 2, 3]
+            rand.shuffle(values)
+            return x + values[0]
+
+        x = torch.zeros(1, dtype=torch.float64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn(x, random.Random(0), 10)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported random.Random sequence"
+        ):
+            opt_fn(x, random.Random(0), 10**20)
+
+    def test_random_object_shuffle_tuple_raises(self):
+        def fn(rand, values):
+            rand.shuffle(values)
+
+        eager_rand = random.Random(0)
+        with self.assertRaisesRegex(TypeError, "does not support item assignment"):
+            fn(eager_rand, (1, 2, 3))
+
+        compiled_rand = random.Random(0)
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "does not support item assignment"):
+            opt_fn(compiled_rand, (1, 2, 3))
+        self.assertEqual(compiled_rand.getstate(), eager_rand.getstate())
+
+    def test_random_object_shuffle_range_raises(self):
+        def fn(rand, values):
+            rand.shuffle(values)
+
+        eager_rand = random.Random(0)
+        with self.assertRaisesRegex(TypeError, "does not support item assignment"):
+            fn(eager_rand, range(3))
+
+        compiled_rand = random.Random(0)
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "does not support item assignment"):
+            opt_fn(compiled_rand, range(3))
+        self.assertEqual(compiled_rand.getstate(), eager_rand.getstate())
 
     def test_random_object_sample(self):
         # sample selects index positions, so it is exact/reproducible for an
@@ -481,6 +768,80 @@ else:
         self.assertEqual(ref[2], res[2])
         self.assertEqual(ref[3], res[3])
 
+    def test_random_object_sample_dynamic_k(self):
+        def fn(x, rand, k):
+            return x + rand.sample([1, 2, 3], k)[0]
+
+        x = torch.zeros(1)
+        eager_rand = random.Random(0)
+        expected = [fn(x, eager_rand, k) for k in (2, 1, 2)]
+
+        compiled_rand = random.Random(0)
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        actual = [opt_fn(x, compiled_rand, k) for k in (2, 1, 2)]
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_rand.getstate(), eager_rand.getstate())
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_random_object_sample_numpy_integer_k(self):
+        def fn(x, rand, k):
+            return x + rand.sample([1, 2, 3], k)[0]
+
+        x = torch.zeros(1)
+        eager_rand = random.Random(0)
+        expected = fn(x, eager_rand, np.int64(2))
+        compiled_rand = random.Random(0)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(
+            x, compiled_rand, np.int64(2)
+        )
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_rand.getstate(), eager_rand.getstate())
+
+    def test_random_object_sample_numpy_float_k_raises(self):
+        def fn(rand, k):
+            return rand.sample([1, 2, 3], k)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "non-int"):
+            opt_fn(random.Random(0), np.float64(2.0))
+
+    def test_random_object_seed_bytearray_fallback(self):
+        def fn(x, rand, seed):
+            rand.seed(seed)
+            return x + rand.random()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported random.Random argument"
+        ):
+            opt_fn(torch.zeros(1), random.Random(0), bytearray(b"abc"))
+
+    @parametrize("method_name", ("randint", "random"))
+    def test_random_bound_method_cache(self, method_name):
+        def fn(x, method):
+            if method_name == "randint":
+                return x + method(1, 9)
+            return x + method()
+
+        eager_rand = random.Random(0)
+        expected = [
+            fn(torch.zeros(1), getattr(eager_rand, method_name)) for _ in range(5)
+        ]
+        compiled_rand = random.Random(0)
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        actual = [
+            opt_fn(torch.zeros(1), getattr(compiled_rand, method_name))
+            for _ in range(5)
+        ]
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_rand.getstate(), eager_rand.getstate())
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_random_object_sample_raises(self):
         # A sample larger than the population raises ValueError like eager.
         def fn():
@@ -490,6 +851,23 @@ else:
         opt_fn = torch.compile(fn, backend="eager")
         with self.assertRaises(ValueError):
             opt_fn()
+
+    @parametrize("population_type", ("set", "dict"))
+    def test_random_object_sample_non_sequence_raises(self, population_type):
+        def fn(rand, population):
+            return rand.sample(population, 2)
+
+        if population_type == "set":
+            population = {1, 2, 3}
+        else:
+            population = {1: None, 2: None, 3: None}
+
+        rand = random.Random(0)
+        initial_state = rand.getstate()
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "Population must be a sequence"):
+            opt_fn(rand, population)
+        self.assertEqual(rand.getstate(), initial_state)
 
     @parametrize("method", ("shuffle", "sample"))
     def test_random_module_shuffle_sample(self, method):
@@ -516,19 +894,12 @@ else:
         expected, expected_state = run(fn)
         random.seed(7)
         cnts = CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         actual, actual_state = run(opt_fn)
 
         self.assertEqual(actual, expected)
         self.assertEqual(actual_state, expected_state)
         self.assertLess(cnts.frame_count, torch._dynamo.config.recompile_limit)
-
-        torch._dynamo.reset()
-        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Stateful random.Random method"
-        ):
-            fullgraph_fn(torch.zeros(1), list(range(10)))
 
     def test_persistent_random_object_shuffle_sample(self):
         def fn(x, rand):
@@ -559,7 +930,7 @@ else:
 
         expected, expected_state = run(fn, random.Random(7))
         cnts = CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         actual, actual_state = run(opt_fn, random.Random(7))
 
         self.assertEqual(actual, expected)
@@ -590,23 +961,14 @@ else:
 
         expected, expected_state = run(fn, random.Random(7))
         cnts = CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         actual, actual_state = run(opt_fn, random.Random(7))
 
         self.assertEqual(actual, expected)
         self.assertEqual(actual_state, expected_state)
         self.assertLess(cnts.frame_count, torch._dynamo.config.recompile_limit)
 
-        torch._dynamo.reset()
-        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Stateful random.Random method"
-        ):
-            fullgraph_fn(torch.zeros(1), random.Random(7))
-
     def test_random_module_seed_shuffle(self):
-        # Both stateful calls execute eagerly at graph breaks, so the first
-        # compiled call must use the seeded state.
         def fn(x):
             items = list(range(10))
             random.seed(0)
@@ -624,11 +986,143 @@ else:
         expected, expected_state = run(fn)
         random.seed(123)
         cnts = CompileCounter()
-        actual, actual_state = run(torch.compile(fn, backend=cnts))
+        actual, actual_state = run(torch.compile(fn, backend=cnts, fullgraph=True))
 
         self.assertEqual(actual, expected)
         self.assertEqual(actual_state, expected_state)
-        self.assertLessEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_random_module_getstate_setstate(self):
+        def fn(x):
+            state = random.getstate()
+            initial_position = state[1][-1]
+            first = random.random()
+            random.setstate(state)
+            restored = random.random()
+            return x + first + restored, initial_position, first, restored
+
+        def run(call_fn):
+            outputs = [call_fn(torch.zeros(1, dtype=torch.float64)) for _ in range(3)]
+            return outputs, random.getstate()
+
+        random.seed(7)
+        expected = run(fn)
+        random.seed(7)
+        cnts = CompileCounter()
+        actual = run(torch.compile(fn, backend=cnts, fullgraph=True))
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_random_module_bound_method_rebind_guard(self):
+        alias = random.randint
+
+        def fn(x):
+            return x + alias(1, 9)
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        random.seed(0)
+        opt_fn(torch.zeros(1, dtype=torch.float64))
+
+        alias = random.uniform
+        random.seed(1)
+        expected = fn(torch.zeros(1, dtype=torch.float64))
+        random.seed(1)
+        actual = opt_fn(torch.zeros(1, dtype=torch.float64))
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_random_state_slice(self):
+        def fn(rand):
+            return rand.getstate()[:1]
+
+        rand = random.Random(0)
+        expected = fn(rand)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(rand)
+        self.assertEqual(actual, expected)
+
+    def test_random_state_slice_restore(self):
+        def fn(rand):
+            state = rand.getstate()[:]
+            rand.random()
+            rand.setstate(state=state)
+            return rand.random()
+
+        eager_rand = random.Random(0)
+        expected = fn(eager_rand)
+        compiled_rand = random.Random(0)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(compiled_rand)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_rand.getstate(), eager_rand.getstate())
+
+    def test_random_state_zero_step_slice_raises(self):
+        def fn(rand):
+            return rand.getstate()[::0]
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(ValueError, "slice step cannot be zero"):
+            opt_fn(random.Random(0))
+
+    def test_random_state_float_slot_unsupported(self):
+        def fn(x, rand):
+            return x + rand.getstate()[2]
+
+        rand = random.Random(0)
+        rand.gauss(0, 1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported random state value"
+        ):
+            opt_fn(torch.zeros(1), rand)
+
+    @parametrize(
+        "case",
+        (
+            "getstate_arg",
+            "getstate_kwarg",
+            "setstate_missing",
+            "setstate_extra",
+            "seed_extra",
+        ),
+    )
+    def test_random_state_method_signature_errors(self, case):
+        def fn(rand):
+            if case == "getstate_arg":
+                return rand.getstate(1)
+            if case == "getstate_kwarg":
+                return rand.getstate(value=1)
+            if case == "setstate_missing":
+                return rand.setstate()
+            if case == "setstate_extra":
+                state = rand.getstate()
+                return rand.setstate(state, state)
+            return rand.seed(1, 2, 3)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_fn(random.Random(0))
+
+    @parametrize("operation", ("equality", "hash"))
+    def test_random_state_unsupported_operation(self, operation):
+        if operation == "equality":
+
+            def fn(rand):
+                return rand.getstate() == rand.getstate()
+
+        else:
+
+            def fn(rand):
+                return hash(rand.getstate())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Unsupported random.Random state operation",
+        ):
+            opt_fn(random.Random(0))
 
     def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash
