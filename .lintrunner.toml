@@ -598,7 +598,7 @@ exclude_patterns = [
     # Vendored: raw throws are upstream's call, not ours.
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
-    'third_party/perfetto/sdk/perfetto.cc',  # amalgamated perfetto SDK
+    'third_party/perfetto/sdk/**',  # amalgamated perfetto SDK
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
     'c10/util/order_preserving_flat_hash_map.h',
