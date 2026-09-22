@@ -4906,6 +4906,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m, "s": s, "x": x}, True)
         self._test_check_fn(ref, loaded, {"m": m, "s": {_Color.BLUE}, "x": x}, False)
 
+    def test_a_mapping_proxy_key_shared_with_a_module_attribute_stays_real(self):
+        # MAPPING_KEYS_CHECK records the proxy's keys (what its leaf compares);
+        # a torch.Size key is the one non-literal shape wrap_mapping_proxy lets
+        # through, and pickle hands a tuple subclass to reducer_override.
+        def fn(m, mp, x):
+            for k in mp:
+                x = x + k[0]
+            return m(x)
+
+        dims = torch.Size([1, 2])
+        mp = types.MappingProxyType({dims: 0})
+        m, x = _NetWithTags(dims), torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("MAPPING_KEYS_CHECK", "TYPE_MATCH"), fn, m, mp, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "mp": mp, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(list(state.local_scope["mp"]), [torch.Size([1, 2])])
+
     def test_a_dict_keys_comparand_shares_a_key_with_a_module_attribute(self):
         # EQUALS_MATCH on a dict_keys view compares every key by value, and the
         # view's reducer pickles each key as its own object, so a key that is
