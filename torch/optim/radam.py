@@ -348,13 +348,14 @@ def _single_tensor_radam(
             param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
         else:
             if rho_t > 5.0:
-                param.add_(
-                    bias_corrected_exp_avg
-                    * lr
-                    * _compute_adaptive_lr()
-                    * _compute_rect(),
-                    alpha=-1.0,
-                )
+                adaptive_lr = _compute_adaptive_lr()
+                if differentiable:
+                    update = bias_corrected_exp_avg * adaptive_lr * lr * _compute_rect()
+                else:
+                    update = bias_corrected_exp_avg.mul(adaptive_lr)
+                    update.mul_(lr)
+                    update.mul_(_compute_rect())
+                param.add_(update, alpha=-1.0)
             else:
                 param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
 
