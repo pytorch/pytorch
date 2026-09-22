@@ -69,8 +69,10 @@ static const py::str& get_orig_backend_str() {
   // NB: leak
   PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::str> storage;
   return storage
-      .call_once_and_store_result(
-          []() -> py::str { return "_torchdynamo_orig_backend"; })
+      .call_once_and_store_result([]() {
+        return py::reinterpret_steal<py::str>(
+            PyUnicode_InternFromString("_torchdynamo_orig_backend"));
+      })
       .get_stored();
 }
 
