@@ -235,7 +235,7 @@ it.
 #    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
 #    run. The code_hash binds the cache to its python_code:
-#    load() rejects a (code, cache) pair from different precompile() calls (same
+#    load() rejects a (code, cache) pair from different precompile captures (same
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
 # self-contained: ``python_code`` runs on its own -- it inlines the composed graph
@@ -253,7 +253,7 @@ it.
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair that did not come from the same precompile() call.
+# (python_code, cache) pair that did not come from the same precompile capture.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -2483,7 +2483,8 @@ def _runnable_from_pair(
     # a cold load can hit a runtime_wrappers <-> _dynamo circular import).
     import torch._dynamo
 
-    # The whole calling convention is consumed by the driver INLINED in python_code
+    # The whole calling convention (MODULE_POSITIONS, OUT_SPEC, USER_INPUT_*, PARAM_*,
+    # BUFFER_*, IN_SPEC, ...) is consumed by the driver INLINED in python_code
     # (emitted from torch._precompile_driver), so the loaded object needs none of it.
     # _parse_artifact_metadata still runs to validate python_code is a precompile
     # artifact and to read BACKEND for the cache-pairing check below.
@@ -2493,11 +2494,12 @@ def _runnable_from_pair(
     # defaults the same way, so an older pair still matches.
     tracer = cast(str, meta.get("TRACER", "make_fx"))
 
-    # weights_only=True is safe (plain str/int/bytes dict). The cache is acceleration
-    # only, so an unreadable envelope or a FORMAT / VERSION mismatch degrades to JIT'ing
-    # from python_code rather than crashing. A BACKEND or CODE_HASH mismatch is
-    # different -- it signals a wrong (python_code, cache) pairing -- so it hard-fails
-    # rather than running under foreign metadata.
+    # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
+    # are the inductor save_cache_artifacts bundle, used below to prime the kernel
+    # caches. The cache is acceleration only, so an unreadable envelope or a FORMAT /
+    # VERSION mismatch degrades to JIT'ing from python_code rather than crashing. A
+    # BACKEND or CODE_HASH mismatch is different -- it signals a wrong (python_code,
+    # cache) pairing -- so it hard-fails rather than running under foreign metadata.
     artifact = None
     try:
         blob = torch.load(io.BytesIO(cache), weights_only=True)
@@ -2505,7 +2507,7 @@ def _runnable_from_pair(
             _CACHE_VERSION
         ):
             log.warning(
-                "torch.compiler.precompile.load got a cache with format=%r "
+                "torch.compiler.precompile got a cache with format=%r "
                 "version=%r, expected %r / %r; it is likely from a different torch "
                 "build. Falling back to JIT from python_code.",
                 blob.get("format"),
@@ -2527,7 +2529,8 @@ def _runnable_from_pair(
                     f"the python_code tracer {tracer!r}; the cache and python_code "
                     "came from different precompile captures."
                 )
-            # See Note [precompile programming model], invariant 7.
+            # Reject a cache whose code_hash does not match this python_code (a
+            # mismatched pairing); see Note [precompile programming model], invariant 7.
             expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
             if blob.get("code_hash") != expected_code_hash:
                 raise PrecompileError(
@@ -2542,27 +2545,37 @@ def _runnable_from_pair(
         raise
     except Exception as e:
         log.warning(
-            "torch.compiler.precompile.load could not read the cache envelope (%s: %s); "
-            "the cache is likely corrupt or from a different torch build. Falling "
-            "back to JIT from python_code.",
+            "torch.compiler.precompile could not read the cache envelope (%s: %s); the "
+            "cache is likely corrupt or from a different torch build. Falling back "
+            "to JIT from python_code.",
             type(e).__name__,
             e,
         )
     if artifact is not None:
         # Prime the inductor kernel caches from the bundle so the exec of python_code
-        # below loads the precompiled kernels instead of recompiling them. A stale or
-        # corrupt bundle just leaves the caches cold, and python_code JITs.
+        # below loads the precompiled kernels (Triton binaries / autotune results)
+        # instead of recompiling them. The composed python_code runs its inlined
+        # kernels directly (no compile_fx re-entry, so no FxGraphCache lookup); the
+        # acceleration is the warm kernel cache. This is a pure acceleration: a stale /
+        # cross-torch-version / corrupt bundle that fails to load just leaves the caches
+        # cold, and python_code JITs -- same result, no crash.
         try:
             torch.compiler.load_cache_artifacts(artifact)
         except Exception as e:
             log.warning(
-                "torch.compiler.precompile.load could not prime the cache from the "
+                "torch.compiler.precompile could not prime the cache from the "
                 "artifact bundle (%s: %s); it is likely stale or from a different "
                 "torch build. Falling back to JIT from python_code.",
                 type(e).__name__,
                 e,
             )
+    # Run the driver inlined in python_code. It carries the full calling convention and
+    # runtime safety checks (subclass wrap/unwrap, param/buffer lifting, grad harvest,
+    # input/model validation) and JITs the kernels -- which hit the primed cache when
+    # the bundle above loaded, so the "cache" path is exec-with-warm-kernels rather than
+    # a separate runtime.
     forward = _make_inlined_forward(python_code, warn=not _trusted)
+
     return PrecompiledModule._from_loaded(forward, backend=backend)
 
 
