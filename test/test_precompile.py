@@ -4157,9 +4157,8 @@ class TestPrecompileLoad(TestCase):
     @parametrize("backend", ["inductor", "eager"])
     def test_load_in_a_fresh_process(self, backend):
         state = os.path.join(self.dir, "state.pt")
-        expected = _load_pair(*self._write(self.artifact, self.cache, backend=backend))(
-            self.model, self.x
-        )
+        self._write(self.artifact, self.cache, backend=backend)
+        expected = self.model(self.x)
         torch.save(
             {"state_dict": self.model.state_dict(), "x": self.x, "expected": expected},
             state,
