@@ -562,7 +562,11 @@ partial_fn = functools.partial(fn, scale=2)
     def test_itertools_islice_basic_ops(self):
         # Test cases taken from the CPython test TestBasicOps.test_islice. That test has a lot of
         # cases that we can't realistically support, whence we copy the sensible cases here.
+        # fn collects (actual, expected) pairs instead of asserting inline: tracing
+        # TestCase.assertEqual costs seconds and tests nothing about islice.
         def fn():
+            checks = []
+
             for args in [  # islice(args) should agree with range(args)
                 (10, 20, 3),
                 (10, 3, 20),
@@ -571,8 +575,8 @@ partial_fn = functools.partial(fn, scale=2)
                 (10, 3),
                 (20,),
             ]:
-                self.assertEqual(
-                    list(itertools.islice(range(100), *args)), list(range(*args))
+                checks.append(
+                    (list(itertools.islice(range(100), *args)), list(range(*args)))
                 )
 
             for args, tgtargs in [  # Stop when seqn is exhausted
@@ -580,41 +584,44 @@ partial_fn = functools.partial(fn, scale=2)
                 ((10, 110), ((10, 100))),
                 ((110,), (100,)),
             ]:
-                self.assertEqual(
-                    list(itertools.islice(range(100), *args)), list(range(*tgtargs))
+                checks.append(
+                    (list(itertools.islice(range(100), *args)), list(range(*tgtargs)))
                 )
 
             # Test stop=None
-            self.assertEqual(list(itertools.islice(range(10), None)), list(range(10)))
-            self.assertEqual(
-                list(itertools.islice(range(10), None, None)), list(range(10))
+            checks.append((list(itertools.islice(range(10), None)), list(range(10))))
+            checks.append(
+                (list(itertools.islice(range(10), None, None)), list(range(10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), None, None, None)), list(range(10))
+            checks.append(
+                (list(itertools.islice(range(10), None, None, None)), list(range(10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), 2, None)), list(range(2, 10))
+            checks.append(
+                (list(itertools.islice(range(10), 2, None)), list(range(2, 10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), 1, None, 2)), list(range(1, 10, 2))
+            checks.append(
+                (list(itertools.islice(range(10), 1, None, 2)), list(range(1, 10, 2)))
             )
 
             # Test number of items consumed     SF #1171417
             it = iter(range(10))
-            self.assertEqual(list(itertools.islice(it, 3)), list(range(3)))
-            self.assertEqual(list(it), list(range(3, 10)))
+            checks.append((list(itertools.islice(it, 3)), list(range(3))))
+            checks.append((list(it), list(range(3, 10))))
 
             it = iter(range(10))
-            self.assertEqual(list(itertools.islice(it, 3, 3)), [])
-            self.assertEqual(list(it), list(range(3, 10)))
+            checks.append((list(itertools.islice(it, 3, 3)), []))
+            checks.append((list(it), list(range(3, 10))))
 
             # Issue #10323:  Less islice in a predictable state
             c = itertools.count()
-            self.assertEqual(list(itertools.islice(c, 1, 3, 50)), [1])
-            self.assertEqual(next(c), 3)
+            checks.append((list(itertools.islice(c, 1, 3, 50)), [1]))
+            checks.append((next(c), 3))
+
+            return checks
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        opt_fn()
+        for actual, expected in opt_fn():
+            self.assertEqual(actual, expected)
 
     @unittest.expectedFailure
     def test_itertools_islice_intlike(self):
