@@ -2137,6 +2137,7 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
+        # The two blank separator lines are gated too, so a dropped wait leaves no gap.
         for line in ("", "", "async_compile.wait(globals())", "del async_compile"):
             self.write_preamble_line(self.prefix, ("async_compile",), line)
 
