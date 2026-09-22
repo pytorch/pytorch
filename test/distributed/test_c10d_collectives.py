@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -14,6 +13,7 @@ if not dist.is_available():
 from c10d_backend_common import (
     C10D_BACKENDS,
     C10dBackendTest,
+    C10dBackendTestContinuous,
     instantiate_backend_tests,
 )
 
@@ -451,41 +451,9 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTest):
             dist.all_to_all_single(output, input)
 
 
-class AbstractContinuousCollectivesTest(CollectivesTestMixin):
-    world_size = 2
-    timeout = timedelta(seconds=60)
-
-    @classmethod
-    def backend_str(cls):
-        return cls.backend_name
-
-    @property
-    def device(self):
-        if self.device_type == "cuda":
-            return torch.device("cuda", self.rank)
-        return torch.device(self.device_type)
-
-    @classmethod
-    def _init_pg(cls, rank, world_size, rdvz_file):
-        if "_store_prefix" not in cls.__dict__:
-            cls._store_prefix = rdvz_file
-        if cls.device_type == "cuda":
-            torch.cuda.set_device(rank)
-        super()._init_pg(rank, world_size, rdvz_file)
-
-    @classmethod
-    def _run_test_given_id(cls, test_id, **kwargs):
-        # Reuse Python workers, not communicators. Keep the first collective
-        # in every method on a freshly initialized process group.
-        iteration = cls.__dict__.get("_test_iteration", 0)
-        if iteration:
-            dist.destroy_process_group()
-            cls.pg = None
-            # Never race deletion of the previous FileStore's rendezvous file.
-            cls._init_pg(cls.rank, cls.world_size, f"{cls._store_prefix}.{iteration}")
-        cls._test_iteration = iteration + 1
-        super()._run_test_given_id(test_id, **kwargs)
-
+class AbstractContinuousCollectivesTest(
+    CollectivesTestMixin, C10dBackendTestContinuous
+):
     def test_broadcast(self):
         self._test_transport_matrix(self._test_broadcast)
 
