@@ -190,15 +190,15 @@ def _eager_forward(*args):
     ):
         if not isinstance(_t, _torch.Tensor):
             continue
-        _act = tuple(_t.shape)
-        if _shp is not None and (
-            len(_act) != len(_shp) or any(a != e for a, e in zip(_act, _shp))
-        ):
-            _fail(
-                f"precompile: a runtime input has shape {_act} but the artifact was "
-                f"traced with shape {tuple(_shp)}; the graph is specialized to the static "
-                f"dims (invariant 3). Retrace for this shape, or use backend='eager'."
-            )
+        if _shp is not None:
+            _act = tuple(_t.shape)
+            if len(_act) != len(_shp) or any(a != e for a, e in zip(_act, _shp)):
+                _fail(
+                    f"precompile: a runtime input has shape {_act} but the artifact was "
+                    f"traced with shape {tuple(_shp)}; the graph is specialized to the "
+                    f"static dims (invariant 3). Retrace for this shape, or use "
+                    f"backend='eager'."
+                )
         if _dt is not None and str(_t.dtype) != _dt:
             _fail(
                 f"precompile: a runtime input has dtype {_t.dtype} but the artifact was "
@@ -288,17 +288,17 @@ def _inductor_forward(*args):
         if not isinstance(_t, _torch.Tensor):
             continue
         # A dim recorded as None was captured dynamic (unbacked); any size is valid.
-        _act = tuple(_t.shape)
-        if _shp is not None and (
-            len(_act) != len(_shp)
-            or any(e is not None and a != e for a, e in zip(_act, _shp))
-        ):
-            _fail(
-                f"precompile: a runtime input has shape {_act} but the artifact was "
-                f"traced with shape {tuple(_shp)} (None = a dynamic dim, any size); the "
-                f"graph is specialized to the static dims (invariant 3). Retrace, mark "
-                f"the dim dynamic via mark_unbacked, or use backend='eager'."
-            )
+        if _shp is not None:
+            _act = tuple(_t.shape)
+            if len(_act) != len(_shp) or any(
+                e is not None and a != e for a, e in zip(_act, _shp)
+            ):
+                _fail(
+                    f"precompile: a runtime input has shape {_act} but the artifact was "
+                    f"traced with shape {tuple(_shp)} (None = a dynamic dim, any size); "
+                    f"the graph is specialized to the static dims (invariant 3). Retrace, "
+                    f"mark the dim dynamic via mark_unbacked, or use backend='eager'."
+                )
         if _dt is not None and str(_t.dtype) != _dt:
             _fail(
                 f"precompile: a runtime input has dtype {_t.dtype} but the artifact was "
