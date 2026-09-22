@@ -401,6 +401,8 @@ You can implement your own pipeline schedule by extending one of the following t
 
 `PipelineScheduleSingle` is for schedules that assigns *only one* stage per rank.
 `PipelineScheduleMulti` is for schedules that assigns multiple stages per rank.
+All stages assigned to one rank must execute on one device; adjacent same-rank
+stages pass activations and gradients directly without device copies.
 
 For example, `ScheduleGPipe` and `Schedule1F1B` are subclasses of `PipelineScheduleSingle`.
 Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, and `ScheduleZBVZeroBubble`
