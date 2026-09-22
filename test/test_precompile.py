@@ -2158,6 +2158,7 @@ class TestPrecompile(TestCase):
         code, _cache = torch.compiler.precompile(outer, torch.ones(2), backend="eager")
         self.assertIn("def forward", code)
 
+    @unittest.skipIf(not hasattr(os, "fork"), "needs os.fork")
     def test_capture_lock_survives_a_fork(self):
         # The capture lock is process-global, and fork copies it in whatever state the
         # parent left it: a child forked while another parent thread held it inherits a
