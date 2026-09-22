@@ -1083,6 +1083,7 @@ class TestFxGraphCache(TestCase):
         loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
             static_autotuner.kernel_name
         ]
+        coordinator = loaded_autotuner.run.__self__
         with torch.cuda.device(0):
             self.assertEqual(graph.current_callable([x0])[0], fn(x0))
 
@@ -1090,7 +1091,7 @@ class TestFxGraphCache(TestCase):
         with torch.cuda.device(1):
             x1 = torch.randn(32, device="cuda")
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNotNone(loaded_autotuner._jit_fallback)
+        self.assertIsNot(loaded_autotuner.run.__self__, coordinator)
 
     @requires_cuda_and_triton
     @config.patch(
@@ -1115,7 +1116,10 @@ class TestFxGraphCache(TestCase):
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
         cached_autotuner = static_autotuner.kernel
-        self.assertIsNone(cached_autotuner._compile_kernel_from_src)
+        self.assertNotIn("run", cached_autotuner.__dict__)
+        self.assertNotIn("_compile_kernel_from_src", cached_autotuner.__dict__)
+        self.assertNotIn("_jit_fallback_condition", cached_autotuner.__dict__)
+        self.assertIs(cached_autotuner.run.__self__, cached_autotuner)
         self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -1150,13 +1154,14 @@ class TestFxGraphCache(TestCase):
         self.reset()
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
+        coordinator = cached_autotuner.run.__self__
         self.assertEqual(len(cached_autotuner.launchers), 2)
 
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
         with torch.cuda.device(1):
             x1 = torch.randn(32, device="cuda")
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNotNone(cached_autotuner._jit_fallback)
+        self.assertIsNot(cached_autotuner.run.__self__, coordinator)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
@@ -1187,12 +1192,13 @@ class TestFxGraphCache(TestCase):
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
         cached_autotuner = static_autotuner.kernel
+        coordinator = cached_autotuner.run.__self__
 
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
         with torch.cuda.device(1):
             x1 = torch.randn(32, device="cuda")
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNotNone(cached_autotuner._jit_fallback)
+        self.assertIsNot(cached_autotuner.run.__self__, coordinator)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
@@ -1221,6 +1227,7 @@ class TestFxGraphCache(TestCase):
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
         cached_autotuner = static_autotuner.kernel
+        coordinator = cached_autotuner.run.__self__
         static_kernel = cached_autotuner.launchers[0].__globals__["runner"].__self__
         cubin_path = static_kernel._agnostic_cubin_path()
 
@@ -1232,7 +1239,7 @@ class TestFxGraphCache(TestCase):
             ):
                 static_kernel._load_kernel_from_path(cubin_path, 1)
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNotNone(cached_autotuner._jit_fallback)
+        self.assertIsNot(cached_autotuner.run.__self__, coordinator)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
@@ -1261,6 +1268,7 @@ class TestFxGraphCache(TestCase):
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
         cached_autotuner = static_autotuner.kernel
+        coordinator = cached_autotuner.run.__self__
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
         old_libdevice_path = os.environ.get("TRITON_LIBDEVICE_PATH")
         missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
@@ -1279,7 +1287,7 @@ class TestFxGraphCache(TestCase):
                 else:
                     os.environ["TRITON_LIBDEVICE_PATH"] = old_libdevice_path
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNotNone(cached_autotuner._jit_fallback)
+        self.assertIsNot(cached_autotuner.run.__self__, coordinator)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
@@ -1310,17 +1318,38 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
 
         graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        second_graph = pickle.loads(pickle.dumps(graph))
+        second_static_autotuner = second_graph._triton_bundle.static_autotuners[0]
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
-        cached_autotuner = static_autotuner.kernel
+        # Load the second serialized graph into a distinct generated module so
+        # it owns an independent static autotuner and fallback coordinator.
+        PyCodeCache.cache_clear()
+        TritonBundler.read_and_emit(second_graph._triton_bundle)
+        second_graph.after_deserialization(CompiledFxGraphConstants())
+        cached_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        second_cached_autotuner = second_graph.current_callable.__globals__[  # type: ignore[union-attr]
+            second_static_autotuner.kernel_name
+        ]
+        coordinator = cached_autotuner.run.__self__
+        second_coordinator = second_cached_autotuner.run.__self__
+        self.assertIsNot(coordinator, cached_autotuner)
+        self.assertIsNot(second_coordinator, second_cached_autotuner)
+        self.assertIsNot(coordinator, second_coordinator)
         static_kernel = cached_autotuner.launchers[0].__globals__["runner"].__self__
         cubin_path = static_kernel._agnostic_cubin_path()
+        second_static_kernel = (
+            second_cached_autotuner.launchers[0].__globals__["runner"].__self__
+        )
+        self.assertEqual(cubin_path, second_static_kernel._agnostic_cubin_path())
 
-        run_code = type(cached_autotuner)._run.__code__
-        fallback_code = type(cached_autotuner)._run_jit_fallback.__code__
-        compile_kernel_from_src = cached_autotuner._compile_kernel_from_src
+        run_code = type(cached_autotuner).run.__code__
+        fallback_code = type(coordinator)._run_fallback.__code__
+        compile_kernel_from_src = coordinator._compile_kernel_from_src
         if compile_kernel_from_src is None:
             raise AssertionError("source compilation callback is not set")
         compile_code = compile_kernel_from_src.__code__
@@ -1331,15 +1360,18 @@ class TestFxGraphCache(TestCase):
         trace_condition = threading.Condition()
         fallback_entries = 0
         compile_calls = 0
-        compiled_launcher_count = 0
+        compiled_launcher_counts = []
+        compiled_autotuners = []
         candidate_run_entries = 0
+        candidate_runs = 0
+        max_candidate_runs = 0
         compile_lock_owned = False
 
-        def run_on_device(x, device, pause_static=False):
+        def run_on_device(graph_to_run, x, device, pause_static=False):
             def trace(frame, event, arg):
                 nonlocal candidate_run_entries, compile_calls
-                nonlocal compiled_launcher_count, compile_lock_owned
-                nonlocal fallback_entries
+                nonlocal candidate_runs, compile_lock_owned, fallback_entries
+                nonlocal max_candidate_runs
                 if frame.f_code is compile_code:
                     with trace_condition:
                         if event == "call":
@@ -1347,22 +1379,35 @@ class TestFxGraphCache(TestCase):
                         elif event == "line" and compile_lock._is_owned():
                             compile_lock_owned = True
                         elif event == "return":
-                            compiled_launcher_count = len(arg.launchers)
+                            compiled_launcher_counts.append(len(arg.launchers))
+                            compiled_autotuners.append(arg)
                         trace_condition.notify_all()
                     return trace
-                if event != "call":
-                    return trace
-                if pause_static and frame.f_code is run_code:
+                if (
+                    pause_static
+                    and event == "call"
+                    and frame.f_code is run_code
+                    and frame.f_locals.get("self") is cached_autotuner
+                ):
                     active_paused.set()
                     if not release_active.wait(timeout=30):
                         raise AssertionError("timed out waiting to release active run")
-                elif (
-                    frame.f_code is run_code
-                    and frame.f_locals.get("self") is not cached_autotuner
+                elif frame.f_code is run_code and frame.f_locals.get("self") not in (
+                    cached_autotuner,
+                    second_cached_autotuner,
                 ):
                     with trace_condition:
-                        candidate_run_entries += 1
-                        first_candidate_run = candidate_run_entries == 1
+                        if event == "call":
+                            candidate_run_entries += 1
+                            candidate_runs += 1
+                            max_candidate_runs = max(max_candidate_runs, candidate_runs)
+                            first_candidate_run = candidate_run_entries == 1
+                            self.assertTrue(compile_lock._is_owned())
+                        elif event == "return":
+                            candidate_runs -= 1
+                            first_candidate_run = False
+                        else:
+                            return trace
                         trace_condition.notify_all()
                     if first_candidate_run:
                         candidate_run_paused.set()
@@ -1370,7 +1415,7 @@ class TestFxGraphCache(TestCase):
                             raise AssertionError(
                                 "timed out waiting to release fallback run"
                             )
-                elif frame.f_code is fallback_code:
+                elif event == "call" and frame.f_code is fallback_code:
                     with trace_condition:
                         fallback_entries += 1
                         trace_condition.notify_all()
@@ -1379,19 +1424,19 @@ class TestFxGraphCache(TestCase):
             sys.settrace(trace)
             try:
                 with torch.cuda.device(device):
-                    return graph.current_callable([x])[0]
+                    return graph_to_run.current_callable([x])[0]
             finally:
                 sys.settrace(None)
 
         with torch.cuda.device(1):
             x1 = torch.randn(65536, device="cuda")
         with ThreadPoolExecutor(max_workers=3) as pool:
-            first = pool.submit(run_on_device, x0.clone(), 0, True)
+            first = pool.submit(run_on_device, graph, x0.clone(), 0, True)
             self.assertTrue(active_paused.wait(timeout=30))
             os.remove(cubin_path)
             PyCodeCache.cache_clear()
-            second = pool.submit(run_on_device, x1.clone(), 1)
-            third = pool.submit(run_on_device, x1.clone(), 1)
+            second = pool.submit(run_on_device, graph, x1.clone(), 1)
+            third = pool.submit(run_on_device, second_graph, x1.clone(), 1)
             try:
                 with trace_condition:
                     self.assertTrue(
@@ -1400,15 +1445,14 @@ class TestFxGraphCache(TestCase):
                             timeout=30,
                         )
                     )
-                with cached_autotuner._jit_fallback_condition:
+                with coordinator._condition:
                     self.assertTrue(
-                        cached_autotuner._jit_fallback_condition.wait_for(
-                            lambda: cached_autotuner._jit_fallback_pending
-                            and cached_autotuner._jit_fallback_compiling,
+                        coordinator._condition.wait_for(
+                            lambda: coordinator._pending and coordinator._compiling,
                             timeout=30,
                         )
                     )
-                    self.assertEqual(cached_autotuner._jit_fallback_active_runs, 1)
+                    self.assertEqual(coordinator._active_runs, 1)
                     self.assertTrue(cached_autotuner.launchers)
             finally:
                 release_active.set()
@@ -1418,13 +1462,20 @@ class TestFxGraphCache(TestCase):
                 with trace_condition:
                     self.assertTrue(
                         trace_condition.wait_for(
-                            lambda: compiled_launcher_count > 1 and compile_lock_owned,
+                            lambda: compiled_launcher_counts
+                            and compiled_launcher_counts[0] > 1
+                            and compile_lock_owned,
                             timeout=30,
                         )
                     )
-                with cached_autotuner._jit_fallback_condition:
-                    self.assertIsNone(cached_autotuner._jit_fallback)
-                    self.assertTrue(cached_autotuner._jit_fallback_compiling)
+                    self.assertEqual(candidate_run_entries, 1)
+                    self.assertEqual(max_candidate_runs, 1)
+                with coordinator._condition:
+                    self.assertIsNone(coordinator._fallback)
+                    self.assertTrue(coordinator._compiling)
+                with second_coordinator._condition:
+                    self.assertIsNone(second_coordinator._fallback)
+                    self.assertTrue(second_coordinator._compiling)
                 self.assertFalse(second.done())
                 self.assertFalse(third.done())
             finally:
@@ -1436,23 +1487,31 @@ class TestFxGraphCache(TestCase):
             with trace_condition:
                 self.assertTrue(
                     trace_condition.wait_for(
-                        lambda: compile_calls == 1 and candidate_run_entries == 2,
+                        lambda: compile_calls == 2 and candidate_run_entries == 2,
                         timeout=30,
                     )
                 )
-        self.assertIsNotNone(cached_autotuner._jit_fallback)
+        self.assertIs(coordinator._fallback, second_coordinator._fallback)
         self.assertEqual(fallback_entries, 2)
-        self.assertEqual(compile_calls, 1)
-        self.assertGreater(compiled_launcher_count, 1)
+        self.assertEqual(compile_calls, 2)
+        self.assertGreater(compiled_launcher_counts[0], 1)
+        self.assertIs(compiled_autotuners[0], compiled_autotuners[1])
         self.assertEqual(candidate_run_entries, 2)
+        self.assertEqual(candidate_runs, 0)
+        self.assertEqual(max_candidate_runs, 1)
         self.assertTrue(compile_lock_owned)
-        self.assertEqual(len(cached_autotuner._jit_fallback.launchers), 1)
-        self.assertEqual(cached_autotuner._jit_fallback_active_runs, 0)
-        self.assertFalse(cached_autotuner._jit_fallback_pending)
-        self.assertFalse(cached_autotuner._jit_fallback_compiling)
-        self.assertIsNone(cached_autotuner._compile_kernel_from_src)
-        self.assertFalse(cached_autotuner.launchers)
-        self.assertFalse(cached_autotuner.compile_results)
+        self.assertEqual(len(coordinator._fallback.launchers), 1)
+        for cached, fallback_coordinator in (
+            (cached_autotuner, coordinator),
+            (second_cached_autotuner, second_coordinator),
+        ):
+            self.assertIs(cached.run.__self__, coordinator._fallback)
+            self.assertEqual(fallback_coordinator._active_runs, 0)
+            self.assertFalse(fallback_coordinator._pending)
+            self.assertFalse(fallback_coordinator._compiling)
+            self.assertIsNone(fallback_coordinator._compile_kernel_from_src)
+            self.assertFalse(cached.launchers)
+            self.assertFalse(cached.compile_results)
 
     @requires_cuda_and_triton
     @config.patch(

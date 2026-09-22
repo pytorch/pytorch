@@ -5697,7 +5697,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
                     static_triton_bundle_key=None,  # no need to save again
                 )
                 if self.static_autotuner.has_device_agnostic_static_launchers():
-                    self.static_autotuner._compile_kernel_from_src = (
+                    self.static_autotuner.install_jit_fallback(
                         self.compile_kernel_from_src
                     )
                 return self.static_autotuner
@@ -5707,6 +5707,5 @@ class StaticAutotunerFuture(CodeCacheFuture):
                     "falling back to JIT compilation"
                 )
                 compile_kernel_from_src = self.compile_kernel_from_src
-                self.static_autotuner._compile_kernel_from_src = None
                 self.static_autotuner.release_benchmark_artifacts()
                 return compile_kernel_from_src()
