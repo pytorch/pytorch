@@ -12,7 +12,7 @@ namespace c10d::fsdp::detail {
 using c10::static_cast_with_inter_type;
 
 // Mirrors the copy kernels in aten/src/ATen/native/cuda/TensorShape.cu.
-// Raw descriptors preserve those algorithms without per-prefix Tensor views.
+// Raw descriptors preserve those algorithms without Tensor views for each outer slice.
 static constexpr int64_t BLOCK_SIZE = 128;
 static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;

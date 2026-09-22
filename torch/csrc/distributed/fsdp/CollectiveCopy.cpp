@@ -16,15 +16,15 @@ void check_all_gather_copy_out_inputs(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
-    at::IntArrayRef num_prefixes,
+    at::IntArrayRef outer_sizes,
     int64_t num_chunks) {
   TORCH_CHECK(num_chunks > 0, "expected positive num_chunks");
   TORCH_CHECK(
       input.layout() == at::kStrided && input.is_contiguous(),
       "expected a contiguous strided input");
   TORCH_CHECK(
-      split_sizes.size() == out.size() && num_prefixes.size() == out.size(),
-      "expected one split size and prefix count per output");
+      split_sizes.size() == out.size() && outer_sizes.size() == out.size(),
+      "expected one split size and outer size per output");
   TORCH_CHECK(
       input.numel() % num_chunks == 0,
       "input size must be divisible by num_chunks");
@@ -36,8 +36,8 @@ void check_all_gather_copy_out_inputs(
         "split sizes must be non-negative and sum to the input chunk size");
     remaining -= split_sizes[i];
     TORCH_CHECK(
-        num_prefixes[i] > 0 && split_sizes[i] % num_prefixes[i] == 0,
-        "split size must be divisible by its positive prefix count");
+        outer_sizes[i] > 0 && split_sizes[i] % outer_sizes[i] == 0,
+        "split size must be divisible by its positive outer size");
     TORCH_CHECK(
         out[i].layout() == at::kStrided && out[i].is_contiguous(),
         "expected contiguous strided outputs");
@@ -60,15 +60,15 @@ void all_gather_copy_out(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
-    at::IntArrayRef num_prefixes,
+    at::IntArrayRef outer_sizes,
     int64_t num_chunks) {
   check_all_gather_copy_out_inputs(
-      out, input, split_sizes, num_prefixes, num_chunks);
+      out, input, split_sizes, outer_sizes, num_chunks);
   std::vector<int64_t> sizes;
   std::vector<at::Tensor> outputs;
   for (const auto i : c10::irange(out.size())) {
-    const auto size = split_sizes[i] / num_prefixes[i];
-    if (num_prefixes[i] == 1) {
+    const auto size = split_sizes[i] / outer_sizes[i];
+    if (outer_sizes[i] == 1) {
       auto output = out[i].view({num_chunks, -1});
       if (input.scalar_type() == at::kByte) {
         output = output.view(at::kByte);
@@ -81,9 +81,10 @@ void all_gather_copy_out(
     if (input.scalar_type() == at::kByte) {
       output = output.view(at::kByte);
     }
-    auto prefixes = output.view({num_prefixes[i], num_chunks, size}).unbind(0);
-    sizes.insert(sizes.end(), num_prefixes[i], size);
-    outputs.insert(outputs.end(), prefixes.begin(), prefixes.end());
+    auto outer_slices =
+        output.view({outer_sizes[i], num_chunks, size}).unbind(0);
+    sizes.insert(sizes.end(), outer_sizes[i], size);
+    outputs.insert(outputs.end(), outer_slices.begin(), outer_slices.end());
   }
   if (input.numel() > 0) {
     at::split_with_sizes_copy_out(
@@ -119,13 +120,13 @@ void check_reduce_scatter_copy_in_inputs(
     const auto dim = num_leading_dims[i];
     TORCH_CHECK(
         tensor.layout() == at::kStrided && (dim == 0 || tensor.is_contiguous()),
-        "prefix copies require contiguous strided inputs");
+        "nonzero-dimension copies require contiguous strided inputs");
     TORCH_CHECK(
         dim >= 0 && dim < tensor.dim(),
         "leading dimension count must be non-negative and less than input ndim");
     TORCH_CHECK(
         dim == 0 || tensor.size(dim) % num_chunks == 0,
-        "prefix copies require an evenly divisible shard dimension");
+        "nonzero-dimension copies require an evenly divisible shard dimension");
     TORCH_CHECK(
         tensor.dtype() == tensors[0].dtype(),
         "inputs must have the same dtype");
@@ -158,8 +159,8 @@ at::Tensor& reduce_scatter_copy_in(
       inputs.push_back(tensor);
       continue;
     }
-    auto prefixes = tensor.flatten(0, dim - 1).unbind(0);
-    inputs.insert(inputs.end(), prefixes.begin(), prefixes.end());
+    auto outer_slices = tensor.flatten(0, dim - 1).unbind(0);
+    inputs.insert(inputs.end(), outer_slices.begin(), outer_slices.end());
   }
   return at::_chunk_cat_out(out, inputs, 0, num_chunks);
 }
@@ -168,7 +169,7 @@ at::Tensor& reduce_scatter_copy_in(
 
 TORCH_LIBRARY_FRAGMENT(fsdp, m) {
   m.def(
-      "_all_gather_copy_out_(Tensor(a!)[] self, Tensor input, int[] split_sizes, int[] num_prefixes, int num_chunks) -> ()");
+      "_all_gather_copy_out_(Tensor(a!)[] self, Tensor input, int[] split_sizes, int[] outer_sizes, int num_chunks) -> ()");
   m.def(
       "_reduce_scatter_copy_in_(Tensor(a!) self, Tensor[] tensors, int[] num_leading_dims, int num_chunks) -> Tensor(a!)");
 }
