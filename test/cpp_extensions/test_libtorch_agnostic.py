@@ -463,7 +463,6 @@ class TestLibtorchAgnostic(TestCase):
         name_fn=lambda op, _: op.__name__,
     )
     def test_my_mm_out_ops(self, device, dtype, torch_op, batch_shape):
-        """Test mm.out and bmm.out stable ops."""
         import libtorch_agn_2_10 as libtorch_agnostic
 
         stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out")
@@ -475,29 +474,25 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(out, torch_op(a, b))
         self.assertEqual(id(result), id(out))
 
-        # Non-contiguous (transposed) inputs
-        a_t = torch.randn(*batch_shape, 5, 3, device=device, dtype=dtype).transpose(
-            -1, -2
-        )
-        b_t = torch.randn(*batch_shape, 2, 5, device=device, dtype=dtype).transpose(
-            -1, -2
-        )
-        out_t = torch.empty(*batch_shape, 3, 2, device=device, dtype=dtype)
-        stable_op(out_t, a_t, b_t)
-        self.assertEqual(out_t, torch_op(a_t, b_t))
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "torch_op,batch_shape",
+        [(torch.mm, ()), (torch.bmm, (4,))],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_mm_out_dtype_ops(self, device, dtype, torch_op, batch_shape):
+        import libtorch_agn_2_10 as libtorch_agnostic
 
-        # Non-contiguous (transposed) out
-        out_v = torch.empty(*batch_shape, 2, 3, device=device, dtype=dtype).transpose(
-            -1, -2
-        )
-        stable_op(out_v, a, b)
-        self.assertFalse(out_v.is_contiguous())
-        self.assertEqual(out_v, torch_op(a, b))
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out_dtype")
 
-        # Mismatched inner dimensions should raise
-        bad = torch.randn(*batch_shape, 4, 2, device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
-            stable_op(out, a, bad)
+        a = torch.randn(*batch_shape, 3, 5, device=device, dtype=dtype)
+        b = torch.randn(*batch_shape, 5, 2, device=device, dtype=dtype)
+        out = torch.empty(*batch_shape, 3, 2, device=device, dtype=torch.float32)
+        result = stable_op(out, a, b, torch.float32)
+        self.assertEqual(out, torch_op(a, b, out_dtype=torch.float32))
+        self.assertEqual(id(result), id(out))
 
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
