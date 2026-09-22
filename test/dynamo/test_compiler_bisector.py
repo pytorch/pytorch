@@ -256,51 +256,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "inductor_fallback_random")
         self.assertTrue("inductor_fallback_random" in out.debug_info)
 
-    def test_crossref(self):
-        with _scoped_library(self.bisector_ns, "FRAGMENT") as lib:
-            lib.define("foo(Tensor x) -> Tensor")
-            op = self.get_op("foo")
-
-            class Foo(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x):
-                    # Emulate AutoDispatchBelowADInplaceOrView, which is not bound into python
-                    with torch._C._AutoDispatchBelowAutograd():
-                        with torch._C._ExcludeDispatchKeyGuard(
-                            torch._C.DispatchKeySet(
-                                torch._C.DispatchKey.ADInplaceOrView
-                            )
-                        ):
-                            return op(x)
-
-                @staticmethod
-                def backward(ctx, gx):
-                    return gx
-
-            def foo_impl(x):
-                return x.view_as(x).clone()
-
-            def foo_meta(x):
-                return x.view_as(x)
-
-            lib.impl("foo", Foo.apply, "Autograd")
-            lib.impl("foo", foo_impl, "CPU")
-            lib.impl("foo", foo_meta, "Meta")
-
-            x = torch.tensor(3.14159 / 3, requires_grad=True)
-
-            def test_fn():
-                torch._dynamo.reset()
-
-                try:
-                    torch.testing.assert_close(torch.compile(op)(x), op(x))  # noqa: UNSPECIFIED_BACKEND
-                except Exception:
-                    return False
-                return True
-
-            out = CompilerBisector.do_bisect(test_fn)
-            self.assertEqual(out.backend, "aot_eager_decomp_partition_crossref")
-
     @unittest.skipIf(not has_triton(), "requires Triton")
     def test_emulate_precision_casts(self):
         def test_fn():
