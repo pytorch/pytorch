@@ -15,6 +15,7 @@ from torch.cuda._utils import (
     _cuda_bindings_driver as _drv,
     _cuda_bindings_runtime as _rt,
     _ensure_cuda_bindings_version,
+    _get_device_index,
     _HAS_CUDA_BINDINGS,
 )
 
@@ -22,14 +23,21 @@ from torch.cuda._utils import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from torch.types import Device
+
 __all__ = [
     "GreenContext",
     "SMPartition",
     "execute_in_green_contexts",
     "get_green_context_from_stream",
+    "get_num_locality_domains",
+    "is_localization_supported",
 ]
 
 _STREAMS_PER_GREEN_CONTEXT_POOL = 32
+_NVML_ERROR_NOT_SUPPORTED = 3
+_NVML_DEVICE_MIG_ENABLE = 1
+_NVML_GPU_VIRTUALIZATION_MODE_VGPU = 2
 
 _WORKQUEUE_SCOPE_VALUES = {
     "device_ctx": 0,
@@ -87,6 +95,14 @@ def _ensure_workqueue_supported() -> None:
     )
 
 
+def _ensure_localization_supported() -> None:
+    _ensure_cuda_version(
+        13040,
+        "Green Context localization requires user mode driver and "
+        "cuda.bindings package 13.4+",
+    )
+
+
 def _ensure_disjoint_sm_split_supported() -> None:
     _ensure_cuda_version(
         13010,
@@ -106,6 +122,132 @@ def _parse_workqueue_scope(workqueue_scope: str | None) -> int | None:
     return _WORKQUEUE_SCOPE_VALUES[workqueue_scope]
 
 
+def _uses_single_locality_domain_nvml(device: Device) -> bool | None:
+    from ctypes import byref, c_int, c_uint, c_void_p, CDLL
+
+    try:
+        nvml_h = CDLL("libnvidia-ml.so.1")
+        if nvml_h.nvmlInit() != 0:
+            return None
+        device_index = torch.cuda._get_nvml_device_index(device)
+        device_handle = c_void_p()
+        if (
+            nvml_h.nvmlDeviceGetHandleByIndex_v2(device_index, byref(device_handle))
+            != 0
+        ):
+            return None
+
+        vgpu_mode = c_int()
+        status = nvml_h.nvmlDeviceGetVirtualizationMode(device_handle, byref(vgpu_mode))
+        if status not in (0, _NVML_ERROR_NOT_SUPPORTED):
+            return None
+        if status == 0 and vgpu_mode.value == _NVML_GPU_VIRTUALIZATION_MODE_VGPU:
+            return True
+
+        is_mig_device = c_uint()
+        status = nvml_h.nvmlDeviceIsMigDeviceHandle(device_handle, byref(is_mig_device))
+        if status not in (0, _NVML_ERROR_NOT_SUPPORTED):
+            return None
+        if status == 0 and is_mig_device.value != 0:
+            return True
+
+        current_mig_mode = c_uint()
+        pending_mig_mode = c_uint()
+        status = nvml_h.nvmlDeviceGetMigMode(
+            device_handle, byref(current_mig_mode), byref(pending_mig_mode)
+        )
+        if status not in (0, _NVML_ERROR_NOT_SUPPORTED):
+            return None
+        if status == 0 and current_mig_mode.value == _NVML_DEVICE_MIG_ENABLE:
+            return True
+
+        numa_node = c_uint()
+        status = nvml_h.nvmlDeviceGetNumaNodeId(device_handle, byref(numa_node))
+        if status not in (0, _NVML_ERROR_NOT_SUPPORTED):
+            return None
+        return status == 0
+    except (AttributeError, IndexError, OSError):
+        return None
+
+
+def _get_num_locality_domains_nvml() -> int | None:
+    try:
+        # Without initializing the CUDA driver/context, we can only determine
+        # locality domain support under certain conditions:
+        # all NVML devices visible through `CUDA_VISIBLE_DEVICES` must agree;
+        # we assume that `device_id` must be one of these devices.
+        # Locality domains are not supported on Windows, but this is already
+        # checked in `_ensure_supported` above.
+        # We check for vGPU/MIG devices or devices exposed as NUMA nodes:
+        # these don't support locality domains either, so it must be 1.
+        # Finally, all devices with SM 10.X have exactly 2 locality domains,
+        # and devices with SM < 10.0 or SM == 12.X have 1 locality domain.
+        # These conditions might evolve in the future.
+
+        visible_devices = torch.cuda._parse_visible_devices()
+        # UUID parsing stops at the first identifier with a different prefix,
+        # so a returned string list beginning with MIG- contains only MIG UUIDs.
+        if (
+            visible_devices
+            and isinstance(visible_devices[0], str)
+            and visible_devices[0].startswith("MIG-")
+        ):
+            return 1
+        num_nvml_devices = torch.cuda._device_count_nvml()
+        if num_nvml_devices <= 0:
+            reason = "NVML device count is not available"
+        else:
+            loc_domains = set()
+            for nvml_id in range(num_nvml_devices):
+                capability = torch.cuda._raw_device_capability_nvml(nvml_id)
+                single_domain = _uses_single_locality_domain_nvml(nvml_id)
+                if single_domain is None or capability is None:
+                    reason = f"NVML device queries failed for visible device {nvml_id}"
+                    break
+                loc_domains.add(2 if not single_domain and capability[0] == 10 else 1)
+            else:
+                if len(loc_domains) == 1:
+                    return loc_domains.pop()
+                reason = (
+                    "visible NVML devices have different inferred locality domain "
+                    f"counts: {sorted(loc_domains)}"
+                )
+    except (AttributeError, IndexError, OSError, RuntimeError, ValueError) as error:
+        reason = str(error)
+    warnings.warn(
+        f"Cannot determine the locality domain count using NVML: {reason}. "
+        "Falling back to CUDA driver initialization, which may poison subsequent "
+        "forks that use CUDA.",
+        stacklevel=3,
+    )
+    return None
+
+
+@functools.cache
+def _get_num_locality_domains(device_id: int) -> int:
+    _ensure_supported()
+    _ensure_localization_supported()
+    # pyrefly: ignore [missing-attribute]
+    device_result = _drv.cuDeviceGet(device_id)
+    # pyrefly: ignore [missing-attribute]
+    if device_result[0] == _drv.CUresult.CUDA_ERROR_NOT_INITIALIZED:
+        count = _get_num_locality_domains_nvml()
+        if count is not None:
+            return count
+        _check_cuda_bindings(_drv.cuInit(0))  # pyrefly: ignore [missing-attribute]
+        # pyrefly: ignore [missing-attribute]
+        device_result = _drv.cuDeviceGet(device_id)
+    device = _check_cuda_bindings(device_result)
+    return _check_cuda_bindings(
+        # pyrefly: ignore [missing-attribute]
+        _drv.cuDeviceGetAttribute(
+            # pyrefly: ignore [missing-attribute]
+            _drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_COUNT,
+            device,
+        )
+    )
+
+
 def _ensure_primary_context() -> None:
     # pyrefly: ignore [missing-attribute]
     current_ctx = _check_cuda_bindings(_drv.cuCtxGetCurrent())
@@ -118,6 +260,39 @@ def _ensure_primary_context() -> None:
     )
     # pyrefly: ignore [missing-attribute]
     _check_cuda_bindings(_rt.cudaFree(0))
+
+
+def get_num_locality_domains(device: Device = None) -> int:
+    r"""Return the number of CUDA locality domains, or one if unavailable.
+
+    Accepts a device index, CUDA device string, or :class:`torch.device`.
+    Before CUDA initialization, first tries NVML without initializing the driver.
+    If NVML cannot determine the count, warns and initializes the driver to query
+    it directly. This fallback may poison subsequent forks that use CUDA.
+    """
+    try:
+        if torch.cuda.is_initialized():
+            device_id = _get_device_index(device, optional=True)
+        elif device is None:
+            device_id = 0
+        else:
+            parsed_device = torch.device(device) if isinstance(device, str) else device
+            if (
+                isinstance(parsed_device, torch.device)
+                and parsed_device.type == "cuda"
+                and parsed_device.index is None
+            ):
+                device_id = 0
+            else:
+                device_id = _get_device_index(device)
+        return _get_num_locality_domains(device_id)
+    except (RuntimeError, ValueError, TypeError):
+        return 1
+
+
+def is_localization_supported(device: Device = None) -> bool:
+    r"""Return whether CUDA green context localization is available."""
+    return get_num_locality_domains(device) > 1
 
 
 class SMPartition:
@@ -177,6 +352,27 @@ class SMPartition:
         r"""The co-scheduled SM alignment reported by CUDA for this resource."""
         return self._resource.sm.smCoscheduledAlignment
 
+    @property
+    def locality_domain_id(self) -> int | None:
+        r"""The locality domain reported by CUDA, or ``None`` if unspecified.
+
+        Returns ``None`` if locality queries require newer CUDA software.
+        This reads metadata, not the physical locality of every selected SM.
+        """
+        try:
+            _ensure_localization_supported()
+        except RuntimeError:
+            return None
+        # Nested splits need not inherit locality metadata. Backfill may also
+        # include SMs outside this domain; an ID is not a containment guarantee.
+        flag = (
+            # pyrefly: ignore [missing-attribute]
+            _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_LOCALITY_DOMAIN_ID
+        )
+        if self._resource.sm.flags & flag:
+            return self._resource.sm.localityDomainId
+        return None
+
     def split(
         self,
         *,
@@ -184,6 +380,7 @@ class SMPartition:
         coscheduled_sm_count: int | Sequence[int] = 0,
         preferred_coscheduled_sm_count: int | Sequence[int] = 0,
         backfill: bool | Sequence[bool] = False,
+        locality_domain_ids: int | None | Sequence[int | None] = None,
     ) -> tuple[tuple[SMPartition, ...], SMPartition | None]:
         r"""Split this resource into disjoint groups and an optional remainder.
 
@@ -203,8 +400,12 @@ class SMPartition:
                 Preferred larger grouping size, when CUDA can combine groups.
                 Zero selects the CUDA default. Default: ``0``.
             backfill (bool or sequence of bool, optional): Allow CUDA to fill
-                groups with SMs outside the co-scheduling constraints.
+                groups with SMs outside the co-scheduling or locality constraints.
                 Default: ``False``.
+            locality_domain_ids (int, None, or sequence of int or None, optional):
+                Select SMs from these locality domains during splitting. ``None``
+                leaves locality unconstrained. Requires CUDA driver and bindings
+                13.4+ when any domain is specified. Default: ``None``.
 
         Each option can be a scalar or a sequence. All sequences must have the
         same nonzero length; scalars are broadcast to that length. If every
@@ -241,6 +442,7 @@ class SMPartition:
             "coscheduled_sm_count": coscheduled_sm_count,
             "preferred_coscheduled_sm_count": preferred_coscheduled_sm_count,
             "backfill": backfill,
+            "locality_domain_ids": locality_domain_ids,
         }
         sequences = {
             name: tuple(value)
@@ -261,6 +463,16 @@ class SMPartition:
         co_counts = values["coscheduled_sm_count"]
         preferred = values["preferred_coscheduled_sm_count"]
         backfills = values["backfill"]
+        domains = values["locality_domain_ids"]
+        if any(domain is not None for domain in domains):
+            _ensure_localization_supported()
+        for domain in domains:
+            if domain is not None and (
+                not isinstance(domain, int) or isinstance(domain, bool) or domain < 0
+            ):
+                raise ValueError(
+                    "locality_domain_ids entries must be nonnegative integers or None"
+                )
         for name, values in (
             ("num_sms", counts),
             ("coscheduled_sm_count", co_counts),
@@ -284,6 +496,12 @@ class SMPartition:
                     # pyrefly: ignore [missing-attribute]
                     _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_BACKFILL
                 )
+            if domains[index] is not None:
+                param.flags |= (
+                    # pyrefly: ignore [missing-attribute]
+                    _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_LOCALITY_DOMAIN_ID
+                )
+                param.localityDomainId = domains[index]
             params.append(param)
         resources, remainder = _check_cuda_bindings(
             # pyrefly: ignore [missing-attribute]
@@ -370,16 +588,14 @@ class GreenContext:
         # we don't own the green context object until it has been set up
         self._is_owning = False
         _ensure_supported()
+        locality_domain_id = None
 
         # if green_context_obj is provided, we just check that nothing else
         # is provided, and that the context is valid.
         if green_context_obj is not None:
-            # Querying the device of an existing context requires cuCtxGetDevice_v2.
-            _ensure_cuda_version(
-                13040,
-                "Wrapping a green context requires user mode driver and "
-                "cuda.bindings package 13.4+",
-            )
+            # we require latest support here, to be able to query everything
+            # about the given green context + be able to use cuCtxGetDevice_v2
+            _ensure_localization_supported()
             other_values = [
                 num_sms,
                 workqueue_scope,
@@ -398,7 +614,29 @@ class GreenContext:
                 raise RuntimeError("Green ctx conversion to regular ctx failed!")
             # pyrefly: ignore [missing-attribute]
             device_id = int(_check_cuda_bindings(_drv.cuCtxGetDevice_v2(context)))
-            self._init_from_cuda_objects(device_id, green_context_obj, context)
+            num_locality_domains = get_num_locality_domains(device_id)
+            sm_res = _check_cuda_bindings(
+                # pyrefly: ignore [missing-attribute]
+                _drv.cuGreenCtxGetDevResource(
+                    # pyrefly: ignore [missing-attribute]
+                    green_context_obj,
+                    # pyrefly: ignore [missing-attribute]
+                    _drv.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM,
+                )
+            )
+            if (
+                sm_res.sm.flags
+                # pyrefly: ignore [missing-attribute]
+                & _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_LOCALITY_DOMAIN_ID
+            ) != 0:
+                locality_domain_id = sm_res.sm.localityDomainId
+            self._init_from_cuda_objects(
+                device_id,
+                green_context_obj,
+                context,
+                locality_domain_id,
+                num_locality_domains,
+            )
             return
 
         scope_value = _parse_workqueue_scope(workqueue_scope)
@@ -430,6 +668,7 @@ class GreenContext:
         # pyrefly: ignore [missing-attribute]
         drv_device = _check_cuda_bindings(_drv.cuDeviceGet(device_id))
         resources = []
+        num_locality_domains = 1
 
         if num_sms is not None:
             sm_resource = _check_cuda_bindings(
@@ -455,6 +694,9 @@ class GreenContext:
 
         if sm_partition is not None:
             resources.append(sm_partition._resource)
+            locality_domain_id = sm_partition.locality_domain_id
+            if locality_domain_id is not None:
+                num_locality_domains = get_num_locality_domains(device_id)
 
         if scope_value is not None:
             wq_resource = _check_cuda_bindings(
@@ -493,7 +735,13 @@ class GreenContext:
             _check_cuda_bindings(_drv.cuGreenCtxDestroy(green_ctx))
             raise
 
-        self._init_from_cuda_objects(device_id, green_ctx, context)
+        self._init_from_cuda_objects(
+            device_id,
+            green_ctx,
+            context,
+            locality_domain_id,
+            num_locality_domains,
+        )
         self._is_owning = True
 
     def __del__(self) -> None:
@@ -539,10 +787,14 @@ class GreenContext:
         device_id: int,
         green_ctx: Any,
         context: Any,
+        locality_domain_id: int | None,
+        num_locality_domains: int,
     ) -> None:
         self._device_id = device_id
         self._green_ctx = green_ctx
         self._context = context
+        self._locality_domain_id = locality_domain_id
+        self._num_locality_domains = num_locality_domains
         self._sm_count: int | None = None
         self._parent_stream: torch.cuda.Stream | None = None
         self._green_ctx_streams: list[Any | None] = [
@@ -557,6 +809,7 @@ class GreenContext:
         coscheduled_sm_count: int | Sequence[int] = 0,
         preferred_coscheduled_sm_count: int | Sequence[int] = 0,
         backfill: bool | Sequence[bool] = False,
+        locality_domain_ids: int | None | Sequence[int | None] = None,
         workqueue_scope: str | None = None,
         workqueue_concurrency_limit: int | None = None,
         device_id: int | None = None,
@@ -579,6 +832,7 @@ class GreenContext:
             coscheduled_sm_count=coscheduled_sm_count,
             preferred_coscheduled_sm_count=preferred_coscheduled_sm_count,
             backfill=backfill,
+            locality_domain_ids=locality_domain_ids,
         )
         return tuple(
             GreenContext(
@@ -678,6 +932,21 @@ class GreenContext:
         )
         self._sm_count = sm_resource.sm.smCount
         return self._sm_count
+
+    @property
+    def locality_domain_id(self) -> int | None:
+        self._ensure_alive()
+        return self._locality_domain_id
+
+    @property
+    def has_locality_domain(self) -> bool:
+        self._ensure_alive()
+        return self._locality_domain_id is not None and self._locality_domain_id >= 0
+
+    @property
+    def num_locality_domains(self) -> int:
+        self._ensure_alive()
+        return self._num_locality_domains
 
     def _ensure_alive(self) -> None:
         if self._green_ctx is None or self._context is None:
