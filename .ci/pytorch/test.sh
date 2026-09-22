@@ -2308,71 +2308,6 @@ test_torchtitan() {
   popd
 }
 
-test_operator_benchmark() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir -p "$TEST_REPORTS_DIR"
-  TEST_DIR=$(pwd)
-  ARCH=$(uname -m)
-
-  test_inductor_set_cpu_affinity
-
-  cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install . -v --no-build-isolation
-
-  # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
-  # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
-  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    export MIOPEN_FIND_MODE=FAST
-  fi
-
-  cd "${TEST_DIR}"/benchmarks/operator_benchmark
-  $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
-      --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json" \
-
-  pip_install pandas
-  python check_perf_csv.py \
-      --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-      --expected "${ARCH}_expected_ci_operator_benchmark_eager_float32_cpu.csv"
-}
-
-test_operator_microbenchmark() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir -p "$TEST_REPORTS_DIR"
-  TEST_DIR=$(pwd)
-
-  # When running the baseline (nightly wheel), tag outputs so the compare step can distinguish them
-  local suffix=""
-  if [[ "${TEST_CONFIG:-}" == *_baseline ]]; then
-    suffix="_baseline"
-  fi
-
-  test_inductor_set_cpu_affinity
-
-  cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install . -v --no-build-isolation
-
-  cd "${TEST_DIR}"/benchmarks/operator_benchmark
-
-  # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
-  # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
-  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    export MIOPEN_FIND_MODE=FAST
-  fi
-
-  # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
-  # OP_BENCHMARK_TESTS env var can override the default operator list (set via _linux-test.yml matrix)
-  local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
-  for op in $op_list; do
-    $TASKSET python -m "pt.${op}_test" --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile${suffix}.json" \
-      --benchmark-name "PyTorch operator microbenchmark" --use-compile
-    $TASKSET python -m "pt.${op}_test" --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}${suffix}.json" \
-      --benchmark-name "PyTorch operator microbenchmark"
-  done
-}
-
 test_attention_microbenchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -2453,46 +2388,6 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
-elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
-  TEST_MODE="short"
-
-  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    if [[ "${TEST_CONFIG}" == *long* ]]; then
-      TEST_MODE="long"
-    elif [[ "${TEST_CONFIG}" == *all* ]]; then
-      TEST_MODE="all"
-    fi
-
-    test_operator_benchmark cpu ${TEST_MODE}
-
-  fi
-elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
-  # Support single-operator selection via config name:
-  #   operator_microbenchmark_{op}_test     — run against the PR-built wheel
-  #   operator_microbenchmark_{op}_baseline — install latest nightly and run against it
-  if [[ "${TEST_CONFIG}" =~ operator_microbenchmark_(.+)_(test|baseline) ]] && [[ "${BASH_REMATCH[1]}" != "" ]]; then
-    export OP_BENCHMARK_TESTS="${BASH_REMATCH[1]}"
-  fi
-  if [[ "${TEST_CONFIG}" == *_baseline ]]; then
-    # Derive the nightly wheel channel from BUILD_ENVIRONMENT so baseline matches the PR
-    # build's CUDA/ROCm toolchain. Override by setting BASELINE_INDEX_URL in the workflow.
-    if [[ -z "${BASELINE_INDEX_URL:-}" ]]; then
-      if [[ "${BUILD_ENVIRONMENT}" == *cuda12.8* ]]; then
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
-      elif [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
-      elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
-        # Keep in sync with the ROCm version in the benchmarks docker image
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm7.2"
-      else
-        echo "ERROR: cannot infer BASELINE_INDEX_URL from BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
-        exit 1
-      fi
-    fi
-    echo "Installing nightly torch from ${BASELINE_INDEX_URL} for baseline comparison"
-    pip install --pre --force-reinstall --index-url "${BASELINE_INDEX_URL}" torch
-  fi
-  test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then

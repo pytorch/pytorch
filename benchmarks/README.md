@@ -27,7 +27,6 @@ Please refer to each subfolder to discover each benchmark suite. Links are provi
 * [Dynamo](dynamo/README.md)
 * [Functional autograd](functional_autograd_benchmark/README.md)
 * [Instruction counts](instruction_counts/README.md)
-* [Operator](operator_benchmark/README.md)
 * [Overrides](overrides_benchmark/README.md)
 * [Sparse](sparse/README.md)
 * [Tensor expression](tensorexpr/HowToRun.md)

@@ -289,19 +289,13 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
 void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   auto grain_size = at::internal::GRAIN_SIZE;
   // Numbers based on benchmarking.
-  // Benchmark: benchmarks/operator_benchmarks/pt/gelu_test.py
 #ifdef C10_MOBILE
   // Benchmarked on S8 US phone.
-  // Internal benchmarking that converts operator benchmark into
-  // a torchscript module and run that on mobile.
+  // Internal benchmarking using a torchscript module on mobile.
   // Same benchmark as server side.
   constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{6144};
 #else
   // Benchmarked on i9 8 core 16 thread machine.
-  // 1 thread: cd benchmark/operator_benchmarks;
-  //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
-  // 2 threads: cd benchmark/operator_benchmarks;
-  //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
   constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{16384};
 #endif
   if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {

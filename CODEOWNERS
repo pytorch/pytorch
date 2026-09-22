@@ -1068,7 +1068,6 @@
 # /benchmarks/framework_overhead_benchmark/
 # /benchmarks/functional_autograd_benchmark/
 # /benchmarks/instruction_counts/
-# /benchmarks/operator_benchmark/
 # /benchmarks/overrides_benchmark/
 # /benchmarks/profiler_benchmark/
 # /benchmarks/record_function_benchmark/
