@@ -38,6 +38,7 @@ from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash, PyCodeCache
 from ..dependencies import MemoryDep, StarDep, WeakDep
+from .common import BackendFeature
 
 
 if TYPE_CHECKING:
@@ -726,7 +727,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         used in the fused kernel.
         """
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
+        if result_range is not None:
+            raise NotImplementedError("reduction result ranges are not supported")
         prior = self.inside_reduction
         self.inside_reduction = False
         try:
@@ -794,7 +804,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
 
-    def disable_reduction(self) -> contextlib.AbstractContextManager[None]:
+    def disable_reduction(
+        self, result_size: int = 1
+    ) -> contextlib.AbstractContextManager[None]:
+        if result_size != 1:
+            raise NotImplementedError(
+                "backend does not support ranked reduction results"
+            )
         should_flush = self.range_trees[-1].is_loop or self.cooperative_reduction
 
         @contextlib.contextmanager
@@ -1625,8 +1641,8 @@ class _DerivedIterationFamily:
     ) -> None:
         """Mark values as valid on their materialized derived-domain tiles.
 
-        The planner proves exact divisibility, so the target-family mask is
-        equivalent to projecting the source mask through every lane.
+        Callers must prove that values are valid throughout this family's
+        logical domain; the family masks exclude physical padding.
         """
         # Internal sources may materialize before epilogue activation. Their
         # parent body is still pending, so loop-local headers stay in that pass.
@@ -2284,7 +2300,16 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
             self._layout.output_shape,
         )
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
+        if result_range is not None:
+            raise NotImplementedError("grouped reductions require scalar results")
         remapped_index = self._family.remap_index(index)
         with self._family.ensure_active(self._kernel):
             self._inner.store(name, remapped_index, value)
@@ -2636,10 +2661,17 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         if mode is None:
             self._record(name, value, store=True)
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
         """Record an in-kernel reduction source after ordinary codegen emits it."""
         value = self._resolve_pending(value)
-        self._inner.store_reduction(name, index, value)
+        self._inner.store_reduction(name, index, value, result_range=result_range)
         self._record(name, value, store=True)
 
     def _materialize(self, value: CSEVariable) -> MaterializedSubParentValue | None:
@@ -2813,6 +2845,101 @@ class SIMDScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
+    @staticmethod
+    def _reduction_result_size(nodes: Sequence[BaseSchedulerNode]) -> int | None:
+        sizes = OrderedSet(
+            size for _, size in scheduler._reduction_result_ranges(nodes)
+        )
+        return next(iter(sizes), 1) if len(sizes) <= 1 else None
+
+    def can_fuse_reduction_pair(self, node1, node2) -> bool:
+        """Result-stage precondition; the ordinary fusion ladder still runs after it.
+
+        Dependency matching proves each fused read hits the position that was
+        written; these rules only keep nodes in stages that can hold their values.
+
+        Other passes decline ranked results at their own entry points rather
+        than here: the nested-reduction planners, foreach kernels, the loop
+        rewrites in Scheduler._can_fuse that re-express a consumer over the
+        candidate domain, coalescing analysis, and non-default tiling. A new
+        pass that assumes one result per row must add its own decline.
+        """
+        if not (node1.has_reduction_result() or node2.has_reduction_result()):
+            return super().can_fuse_reduction_pair(node1, node2)
+        why = WhyNoFuse(node1, node2)
+        nodes = [*node1.get_nodes(), *node2.get_nodes()]
+        if BackendFeature.REDUCTION_RESULT not in self.get_backend_features(
+            node1.get_device()
+        ):
+            why("backend does not support ranked reduction results")
+            return False
+        if any(
+            isinstance(n, scheduler.FusedStagedReduction) for n in (node1, node2)
+        ) or any(
+            not isinstance(n, scheduler.SchedulerNode) or n.is_template() for n in nodes
+        ):
+            why("ranked results require loop nodes without staged or template fusion")
+            return False
+        rank_size = self._reduction_result_size(nodes)
+        if rank_size is None:
+            why("ranked result sizes differ")
+            return False
+        reductions = [n for n in nodes if n.is_reduction()]
+        if not reductions:
+            why("ranked results require a reduction input domain")
+            return False
+        _, (numel, rnumel) = reductions[0].group
+        # The compact result lives in a persistent [rows, k] tile: split scans
+        # and multi-axis tilings such as native matmul cannot hold it. This is
+        # the same select_tiling call codegen makes later; only ranked pairs pay
+        # for it at fusion time.
+        if (
+            any(n.is_split_scan() for n in nodes)
+            or len(self.select_tiling(nodes, numel, rnumel)) != 2
+        ):
+            why("kernel layout does not support ranked reduction results")
+            return False
+        if any(n.group[1] != (numel, rnumel) for n in reductions):
+            why("ranked results require one reduction iteration space")
+            return False
+
+        result_numel = numel * rank_size
+        result_buffers = OrderedSet(
+            name
+            for n in nodes
+            if n.has_reduction_result() or n.group[1] == (result_numel, 1)
+            for name in n.get_buffer_names()
+        )
+        for n in nodes:
+            node_numel, node_rnumel = n.group[1]
+            in_result_stage = node_rnumel == 1 and node_numel == result_numel
+            if not in_result_stage and any(
+                dep.name in result_buffers for dep in n.read_writes.reads
+            ):
+                why("result-stage buffers are only readable in the result stage")
+                return False
+            if n.is_reduction():
+                continue
+            if in_result_stage:
+                stage = (numel, sympy.Integer(rank_size))
+            elif node_numel == numel * rnumel:
+                stage = (numel, rnumel)
+            elif node_numel == numel:
+                continue
+            else:
+                why(
+                    "numel mismatch (ranked) (%s, %s), (%s, %s)",
+                    numel,
+                    rnumel,
+                    node_numel,
+                    node_rnumel,
+                )
+                return False
+            if not SIMDKernel.is_compatible(stage, n.get_ranges()):
+                why("node ranges incompatible with its stage")
+                return False
+        return True
+
     def can_fuse(self, node1, node2):
         """
         Hook called by Scheduler to determine if the Triton backend
@@ -2977,9 +3104,18 @@ class SIMDScheduling(BaseScheduling):
                     f"got {rnumel1} and {rnumel2}"
                 )
             ordinary_fusion = False
-            if numel1 == numel2 * rnumel2:
+            # A pointwise node over rows*k is a valid partner for a ranked
+            # (rows, N) reduction: it runs in the k-wide result stage. The
+            # precondition above admits it; this keeps the ordinary numel
+            # check from rejecting it.
+            stage_rnumel = rnumel2
+            if node2.has_reduction_result():
+                result_size = self._reduction_result_size(node2.get_nodes())
+                if result_size is not None and numel1 == numel2 * result_size:
+                    stage_rnumel = sympy.Integer(result_size)
+            if numel1 == numel2 * stage_rnumel:
                 ordinary_fusion = all(
-                    SIMDKernel.is_compatible((numel2, rnumel2), n.get_ranges())
+                    SIMDKernel.is_compatible((numel2, stage_rnumel), n.get_ranges())
                     for n in node1.get_nodes()
                 )
                 if not ordinary_fusion:
@@ -2992,7 +3128,7 @@ class SIMDScheduling(BaseScheduling):
                         node1.get_tiling(numel1, sympy.S.One).values()
                     ) in (
                         (numel1, 1),
-                        (numel2, rnumel2, 1),
+                        (numel2, stage_rnumel, 1),
                     )
                     if not ordinary_fusion:
                         why("invalid tiling for reduction")
@@ -3180,6 +3316,10 @@ class SIMDScheduling(BaseScheduling):
         maybe_split_index: int | None = None
         current_loop_has_reduction = False
         completed_reduction_loop = False
+        result_size = self._reduction_result_size(nodes)
+        if result_size is None:
+            raise AssertionError("fused reductions must have compatible output ranges")
+        last_result_size = 1
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -3189,7 +3329,11 @@ class SIMDScheduling(BaseScheduling):
 
         def fits_outside_reduction(n):
             _, (node_numel, node_rnumel) = n.group
-            return node_numel == numel and node_rnumel == 1 and rnumel != 1
+            return (
+                node_numel in (numel, numel * result_size)
+                and node_rnumel == 1
+                and rnumel != 1
+            )
 
         def expect_improved_memory_usage(n):
             for read in n.read_writes.reads:
@@ -3217,20 +3361,25 @@ class SIMDScheduling(BaseScheduling):
                 current_loop_buffer_usage.update([x.name for x in n.read_writes.writes])
 
         @contextlib.contextmanager
-        def end_current_reduction_loop():
+        def end_current_reduction_loop(output_size=1):
             nonlocal completed_reduction_loop, current_loop_has_reduction
-            nonlocal maybe_split_index
+            nonlocal maybe_split_index, last_result_size
             completed_reduction_loop |= current_loop_has_reduction
-            if node_schedule and node_schedule[-1] is EnableReduction:
+            if (
+                node_schedule
+                and isinstance(node_schedule[-1], EnableReduction)
+                and last_result_size == output_size
+            ):
                 node_schedule.pop()
             else:
-                node_schedule.append(DisableReduction)
+                node_schedule.append(DisableReduction(output_size))
+                last_result_size = output_size
             if maybe_split_index:
-                node_schedule.insert(maybe_split_index, DisableReduction)
-                node_schedule.insert(maybe_split_index + 1, EnableReduction)
+                node_schedule.insert(maybe_split_index, DisableReduction())
+                node_schedule.insert(maybe_split_index + 1, EnableReduction())
                 maybe_split_index = None
             yield
-            node_schedule.append(EnableReduction)
+            node_schedule.append(EnableReduction())
             not_ready_yet_nodes.clear()
             current_loop_buffer_usage.clear()
             current_loop_has_reduction = False
@@ -3291,7 +3440,8 @@ class SIMDScheduling(BaseScheduling):
 
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
-                with end_current_reduction_loop():
+                output_size = 1 if node.group[1][0] == numel else result_size
+                with end_current_reduction_loop(output_size):
                     node_schedule.append(node)
             else:
                 raise NotImplementedError(
@@ -3874,7 +4024,7 @@ class SIMDScheduling(BaseScheduling):
         )
         parent_full_load_transform = _ParentFullLoadTransform(kernel, layout)
         for sn in grouped_schedule:
-            if sn in (DisableReduction, EnableReduction):
+            if isinstance(sn, NodeScheduleMarker):
                 # These markers only control standalone reduction-loop
                 # emission. Nested codegen lowers the grouped reduction as a
                 # local reshape+reduce inside the outer kernel, so there is no
@@ -4221,7 +4371,10 @@ class SIMDScheduling(BaseScheduling):
         if len(nodes) == 0:
             return
 
-        if torch._inductor.config.triton.coalesce_tiling_analysis:
+        if (
+            torch._inductor.config.triton.coalesce_tiling_analysis
+            and not node.has_reduction_result()
+        ):
             if len(nodes) != len(node.get_nodes()):
                 if not self.scheduler:
                     raise AssertionError("expected self.scheduler to be set")
@@ -4434,9 +4587,9 @@ class SIMDScheduling(BaseScheduling):
 
         # First pass to collect indexing and decide inplace updates
         for node in node_schedule:
-            if node is DisableReduction:
-                stack.enter_context(kernel.disable_reduction())
-            elif node is EnableReduction:
+            if isinstance(node, DisableReduction):
+                stack.enter_context(kernel.disable_reduction(node.result_size))
+            elif isinstance(node, EnableReduction):
                 stack.close()
             else:
                 node.decide_inplace_update()
@@ -4449,9 +4602,9 @@ class SIMDScheduling(BaseScheduling):
 
         # Second pass to do codegen
         for node in node_schedule:
-            if node is DisableReduction:
-                stack.enter_context(kernel.disable_reduction())
-            elif node is EnableReduction:
+            if isinstance(node, DisableReduction):
+                stack.enter_context(kernel.disable_reduction(node.result_size))
+            elif isinstance(node, EnableReduction):
                 stack.close()
             else:
                 # TODO - use split ranges ?
@@ -5991,6 +6144,12 @@ class SIMDScheduling(BaseScheduling):
                     tiling = cls.create_tiling(range_y_x, range_r)
                     return _TilingSelection(tiling, None, None)
 
+        if any(
+            node.has_reduction_result()
+            for node in NodeScheduleMarker.only_nodes(node_schedule)
+        ):
+            return _TilingSelection(default_tiling, None, None)
+
         # # TODO: enable by default
         if (
             torch._inductor.config.triton.coalesce_tiling_analysis
@@ -6125,6 +6284,7 @@ class SIMDScheduling(BaseScheduling):
             if (
                 coalesce_analysis is None
                 and torch._inductor.config.triton.coalesce_tiling_analysis
+                and not any(node.has_reduction_result() for node in nodes)
             ):
                 from torch._inductor.tiling_utils import (
                     analyze_memory_coalescing_for_nodes,

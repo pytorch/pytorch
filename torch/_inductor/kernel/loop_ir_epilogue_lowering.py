@@ -165,8 +165,15 @@ class _GemmEpilogueIRHandler(DefaultHandler):
         self.stores[name] = GemmEpilogueIRStore(index, value)
 
     def store_reduction(
-        self, name: str, index: sympy.Expr, value: GemmEpilogueIRExpression
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: GemmEpilogueIRExpression,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
     ) -> None:
+        if result_range is not None:
+            raise NotImplementedError("GEMM epilogues require scalar reduction results")
         self.stores[name] = GemmEpilogueIRStore(index, value)
 
 
