@@ -283,7 +283,11 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
     Tensor subclasses (e.g. DTensor) go through AOTAutograd's flatten path, so their
     outer shape is not the dense shape the inductor artifact bakes; record ``None`` and
-    skip them in the shape check.
+    skip them in the SHAPE check only -- dtype and device are still recorded and still
+    checked. Note this leaves a subclass's INNER shapes unguarded: an artifact captured
+    from one sharding silently runs a differently-sharded input against capture's baked
+    local shapes, and an empty inner leaf is worse than a wrong number. Recording the
+    dense-leaf shapes is the real fix and is not done here.
     """
     if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
         return tuple(t.shape)
@@ -291,26 +295,33 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
 
 def _dense_dtype(t: object) -> str | None:
-    """Return the dtype of a plain dense tensor as a string, else ``None``.
+    """Return a tensor's dtype as a string, else ``None`` for a non-tensor.
 
     Recorded as a string (e.g. ``"torch.float32"``) so it serializes into the artifact
-    metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime;
-    mirrors the _dense_shape convention (None for non-tensor / subclass leaves). The
+    metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime. The
     graph is specialized to the example dtype (invariant 6).
+
+    Unlike _dense_shape this DOES apply to a wrapper subclass: its outer dtype is the
+    one AOTAutograd specializes on, and skipping it let a float64 subclass reach a graph
+    built for float32 and come back as reinterpreted bytes with no error at all.
     """
-    if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
+    if isinstance(t, torch.Tensor):
         return str(t.dtype)
     return None
 
 
 def _dense_device(t: object) -> str | None:
-    """Return the device (as a string) of a plain dense tensor, else ``None``.
+    """Return a tensor's device as a string, else ``None`` for a non-tensor.
 
     Recorded as a string so it serializes into the artifact metadata as a literal and
-    compares cleanly at runtime; mirrors _dense_shape (None for non-tensor / subclass
-    leaves). The graph is specialized to the example device (invariant 6).
+    compares cleanly at runtime. The graph is specialized to the example device
+    (invariant 6).
+
+    Applies to a wrapper subclass for the same reason as _dense_dtype, and here the
+    stakes are memory safety rather than a wrong number: skipping it handed a CUDA
+    subclass to a graph built for CPU.
     """
-    if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
+    if isinstance(t, torch.Tensor):
         return str(t.device)
     return None
 
@@ -848,10 +859,17 @@ def _capture(
         captured_grad_param_indices = grad_param_indices
         return [*result_flat, *grad_flat]
 
-    # Trace with grad enabled so any backward in ``fn`` is built as graph ops; the
-    # forward graph is the same as under no_grad. Restore in finally so a make_fx
-    # failure (e.g. fn raising after running a backward) does not leave the user's
-    # example model with clobbered .grad fields.
+    # Trace with grad enabled, so a backward inside ``fn`` is built as graph ops. This
+    # DOES specialize a ``fn`` that reads torch.is_grad_enabled() and branches: it always
+    # captures the grad-enabled branch, which is documented alongside the other Python
+    # specializations. Tracing under the caller's ambient mode instead was tried and is
+    # worse: it makes the baked branch depend on ambient state that no stamp records, so
+    # a no_grad capture silently returns the wrong branch in every later process, and
+    # stamping it is not an option either -- capture-with-grad-on then call-under-no_grad
+    # is the ordinary inference pattern and a strict check would refuse it. A constant
+    # that is documented beats an ambient input that cannot be checked.
+    # Restore .grad in finally so a make_fx failure (e.g. fn raising after running a
+    # backward) does not leave the user's example model with clobbered .grad fields.
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
     tracing_mode = "symbolic" if fake_mode is not None else "real"
