@@ -6724,9 +6724,21 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # when rendering the runtime call.
         self.output_scale_node = output_scale_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
+        kernel_impl = getattr(kernel, "impl", None)
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
             "min_cc": kernel.designed_for_min_cc,
+            "supports_output_scale": getattr(kernel, "supports_output_scale", False),
+            "use_prefetch": getattr(
+                kernel_impl,
+                "use_prefetch",
+                getattr(kernel.metadata.design, "use_prefetch", False),
+            ),
+            "use_pdl": getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(kernel.metadata.design, "use_pdl", False),
+            ),
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6806,8 +6818,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
 
     def gemm_inputs(self) -> Sequence[IRNode]:
         inputs = cast(Sequence[IRNode], self.inputs)
-        if self.output_scale_node is not None:
-            return inputs[:-1]
+        num_auxiliary_inputs = int(self.bias_node is not None) + int(
+            self.output_scale_node is not None
+        )
+        if num_auxiliary_inputs:
+            return inputs[:-num_auxiliary_inputs]
         return inputs
 
 

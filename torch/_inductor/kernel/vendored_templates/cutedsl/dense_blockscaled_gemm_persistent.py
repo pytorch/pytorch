@@ -133,7 +133,8 @@ Constraints:
   see detailed valid dtype combinations in below Sm100BlockScaledPersistentDenseGemmKernel class documentation
 * A/B tensor must have the same data type, mixed data type is not supported (e.g., mxf8 x mxf4)
 * Mma tiler M must be 128 or 256(use_2cta_instrs)
-* Mma tiler N must be 64/128/192/256
+* Mma tiler N must be 8/16/32/64/128/192/256
+* Mma tiler N below 64 requires Mma tiler M = 128 and cluster shape N = 1
 * Cluster shape M/N must be positive and power of 2, total cluster size <= 16
 * Cluster shape M must be multiple of 2 if Mma tiler M is 256(use_2cta_instrs)
 * The contiguous dimension of A/B/C tensors must be at least 16 bytes aligned,
@@ -198,9 +199,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         cluster_shape_mn: Tuple[int, int],
         use_prefetch: bool = False,
         use_pdl: bool = False,
-        pdl_wait_before_loads: bool = False,
-        pdl_wait_on_a: bool = True,
-        pdl_release_k: int = 0,
+        late_pdl_wait: bool = False,
     ):
         """Initializes the configuration for a Blackwell dense GEMM kernel.
 
@@ -237,9 +236,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         # hide latency; helps small-M large-K.
         self.use_prefetch = use_prefetch
         self.use_pdl = use_pdl
-        self.pdl_wait_before_loads = pdl_wait_before_loads
-        self.pdl_wait_on_a = pdl_wait_on_a
-        self.pdl_release_k = pdl_release_k
+        self.late_pdl_wait = late_pdl_wait
 
         self.occupancy = 1
         # Set specialized warp ids
@@ -370,21 +367,21 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             if self.local_reduce_feeds_main and self.local_reduce_axis == 0
             else 3
         )
-        if cutlass.const_expr(self.has_cross_warp_local_reduce):
-            self.local_reduce_smem_shape = (
-                self.cta_tile_shape_mnk[1],
-                self.local_reduce_smem_cols,
-            )
-            self.local_reduce_smem_stride = (self.local_reduce_smem_cols, 1)
-            local_reduce_smem_layout = cute.make_layout(
-                self.local_reduce_smem_shape,
-                stride=self.local_reduce_smem_stride,
-            )
-            self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
-        else:
-            self.local_reduce_smem_shape = None
-            self.local_reduce_smem_stride = None
-            self.local_reduce_elements = 0
+        self.local_reduce_smem_shape = (
+            (self.cta_tile_shape_mnk[1], self.local_reduce_smem_cols)
+            if self.has_cross_warp_local_reduce
+            else 1
+        )
+        self.local_reduce_smem_stride = (
+            (self.local_reduce_smem_cols, 1)
+            if self.has_cross_warp_local_reduce
+            else None
+        )
+        local_reduce_smem_layout = cute.make_layout(
+            self.local_reduce_smem_shape,
+            stride=self.local_reduce_smem_stride,
+        )
+        self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
             self.mma_tiler,
@@ -855,10 +852,15 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         """
         GPU device kernel performing the Persistent batched GEMM computation.
         """
-        # Alpha is always supplied by the wrapper (one when output scaling is
-        # absent). Load it once so every epilogue subtile reuses the same FP32
-        # register instead of rebuilding the tensor load in the inner loop.
-        alpha_value = alpha_tensor[0].to(cutlass.Float32)
+        # Small decode kernels can overlap descriptor and layout setup with the
+        # preceding grid. Other kernels keep the conservative entry wait.
+        if cutlass.const_expr(self.use_pdl and not self.late_pdl_wait):
+            cute.arch.griddepcontrol_wait()
+
+        if cutlass.const_expr(not self.late_pdl_wait):
+            # Alpha is always supplied by the wrapper (one when output scaling
+            # is absent). Load it once for all epilogue subtiles.
+            alpha_value = alpha_tensor[0].to(cutlass.Float32)
 
         warp_idx = cute.arch.warp_idx()
         warp_idx = cute.arch.make_warp_uniform(warp_idx)
@@ -899,14 +901,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         #
         smem = utils.SmemAllocator()
         storage = smem.allocate(self.shared_storage)
-        if cutlass.const_expr(self.has_cross_warp_local_reduce):
-            local_reduce_smem_layout = cute.make_layout(
-                self.local_reduce_smem_shape,
-                stride=self.local_reduce_smem_stride,
-            )
-            sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
-        else:
-            sLocalReduce = None
+        local_reduce_smem_layout = cute.make_layout(
+            self.local_reduce_smem_shape,
+            stride=self.local_reduce_smem_stride,
+        )
+        sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
 
         # Initialize mainloop ab_pipeline (barrier) and states
         ab_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
@@ -1135,8 +1134,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         #
         pipeline_init_wait(cluster_shape_mn=self.cluster_shape_mn)
 
-        if cutlass.const_expr(self.use_pdl and self.pdl_wait_before_loads):
+        if cutlass.const_expr(self.use_pdl and self.late_pdl_wait):
             cute.arch.griddepcontrol_wait()
+        if cutlass.const_expr(self.late_pdl_wait):
+            alpha_value = alpha_tensor[0].to(cutlass.Float32)
 
         #
         # Specialized TMA load warp
@@ -1214,134 +1215,35 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         ab_producer_state, peek_ab_empty_status
                     )
 
-                    # PDL may start this grid before its predecessor completes.
-                    # Load the static weight side first, then wait only before
-                    # reading the dynamic activation side.
-                    if cutlass.const_expr(
-                        self.use_pdl
-                        and not self.pdl_wait_before_loads
-                        and self.pdl_wait_on_a
-                    ):
-                        cute.copy(
-                            tma_atom_b,
-                            tBgB_slice[(None, ab_producer_state.count)],
-                            tBsB[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=b_full_mcast_mask,
-                        )
-                        cute.copy(
-                            tma_atom_sfb,
-                            tBgSFB_slice[(None, ab_producer_state.count)],
-                            tBsSFB[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=sfb_full_mcast_mask,
-                        )
-                        if k_tile == 0:
-                            cute.arch.griddepcontrol_wait()
-                        cute.copy(
-                            tma_atom_a,
-                            tAgA_slice[(None, ab_producer_state.count)],
-                            tAsA[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=a_full_mcast_mask,
-                        )
-                        cute.copy(
-                            tma_atom_sfa,
-                            tAgSFA_slice[(None, ab_producer_state.count)],
-                            tAsSFA[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=sfa_full_mcast_mask,
-                        )
-                    elif cutlass.const_expr(
-                        self.use_pdl and not self.pdl_wait_before_loads
-                    ):
-                        cute.copy(
-                            tma_atom_a,
-                            tAgA_slice[(None, ab_producer_state.count)],
-                            tAsA[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=a_full_mcast_mask,
-                        )
-                        cute.copy(
-                            tma_atom_sfa,
-                            tAgSFA_slice[(None, ab_producer_state.count)],
-                            tAsSFA[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=sfa_full_mcast_mask,
-                        )
-                        if k_tile == 0:
-                            cute.arch.griddepcontrol_wait()
-                        cute.copy(
-                            tma_atom_b,
-                            tBgB_slice[(None, ab_producer_state.count)],
-                            tBsB[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=b_full_mcast_mask,
-                        )
-                        cute.copy(
-                            tma_atom_sfb,
-                            tBgSFB_slice[(None, ab_producer_state.count)],
-                            tBsSFB[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=sfb_full_mcast_mask,
-                        )
-                    else:
-                        cute.copy(
-                            tma_atom_a,
-                            tAgA_slice[(None, ab_producer_state.count)],
-                            tAsA[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=a_full_mcast_mask,
-                        )
-                        cute.copy(
-                            tma_atom_b,
-                            tBgB_slice[(None, ab_producer_state.count)],
-                            tBsB[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=b_full_mcast_mask,
-                        )
-                        cute.copy(
-                            tma_atom_sfa,
-                            tAgSFA_slice[(None, ab_producer_state.count)],
-                            tAsSFA[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=sfa_full_mcast_mask,
-                        )
-                        cute.copy(
-                            tma_atom_sfb,
-                            tBgSFB_slice[(None, ab_producer_state.count)],
-                            tBsSFB[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=sfb_full_mcast_mask,
-                        )
-
-                    if cutlass.const_expr(self.use_pdl and self.pdl_release_k >= 0):
-                        if k_tile == self.pdl_release_k:
-                            cute.arch.griddepcontrol_launch_dependents()
+                    # TMA load A/B/SFA/SFB
+                    cute.copy(
+                        tma_atom_a,
+                        tAgA_slice[(None, ab_producer_state.count)],
+                        tAsA[(None, ab_producer_state.index)],
+                        tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
+                        mcast_mask=a_full_mcast_mask,
+                    )
+                    cute.copy(
+                        tma_atom_b,
+                        tBgB_slice[(None, ab_producer_state.count)],
+                        tBsB[(None, ab_producer_state.index)],
+                        tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
+                        mcast_mask=b_full_mcast_mask,
+                    )
+                    cute.copy(
+                        tma_atom_sfa,
+                        tAgSFA_slice[(None, ab_producer_state.count)],
+                        tAsSFA[(None, ab_producer_state.index)],
+                        tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
+                        mcast_mask=sfa_full_mcast_mask,
+                    )
+                    cute.copy(
+                        tma_atom_sfb,
+                        tBgSFB_slice[(None, ab_producer_state.count)],
+                        tBsSFB[(None, ab_producer_state.index)],
+                        tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
+                        mcast_mask=sfb_full_mcast_mask,
+                    )
 
                     # Rolling prefetch: stay prefetch_dist tiles ahead each
                     # iteration to hide TMA latency
@@ -1376,8 +1278,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             #
             # Wait A/B buffer empty
             #
-            if cutlass.const_expr(self.use_pdl and self.pdl_release_k == -1):
-                cute.arch.griddepcontrol_launch_dependents()
             ab_pipeline.producer_tail(ab_producer_state)
 
         #
@@ -1687,6 +1587,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     cur_tile_coord[1],
                     cur_tile_coord[2],
                 )
+                mma_tile_offset_m = (
+                    mma_tile_coord_mnl[0] * self.mma_tiler[0]
+                    + mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                )
 
                 #
                 # Slice to per mma tile index
@@ -1772,11 +1676,25 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
                     # Fused global scale. Closure capture cannot read a runtime
                     # tensor here, so alpha is a kernel argument.
-                    # Apply in fp32 (acc_dtype) BEFORE the downcast to c_dtype so
-                    # low-range outputs (fp8/fp16) don't overflow/saturate on the
-                    # cast before alpha (typically < 1) restores range, and before
-                    # epilogue_op so the epilogue sees the true scaled value.
-                    acc_vec = alpha_value * acc_vec
+                    # Preserve ``scaled_mm(...).to(c_dtype) * alpha`` semantics:
+                    # first round the accumulator and zero-dimensional FP32
+                    # alpha to the requested output dtype. BF16/FP16 products
+                    # are rounded back to the same dtype before the epilogue, so
+                    # avoid promoting both operands to FP32 only to downcast the
+                    # product again. Keep the accumulator-typed path for FP8,
+                    # where doing arithmetic directly in the output dtype may
+                    # change overflow and saturation behavior.
+                    if cutlass.const_expr(
+                        self.c_dtype == cutlass.BFloat16
+                        or self.c_dtype == cutlass.Float16
+                    ):
+                        acc_vec = acc_vec.to(self.c_dtype)
+                        scaled_alpha = alpha_value.to(self.c_dtype)
+                        acc_vec = scaled_alpha * acc_vec
+                    else:
+                        acc_vec = acc_vec.to(self.c_dtype).to(self.acc_dtype)
+                        scaled_alpha = alpha_value.to(self.c_dtype).to(self.acc_dtype)
+                        acc_vec = scaled_alpha * acc_vec
                     has_epilogue_tensors = cutlass.const_expr(
                         len(epilogue_inputs.values) > 0
                     )
@@ -1820,10 +1738,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 row_idx = coord_flt[i][0]
                                 col_idx = coord_flt[i][1]
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + row_idx
-                                )
+                                global_m = mma_tile_offset_m + row_idx
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + col_idx
@@ -1915,10 +1830,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         ):
                             row_idx = coord_flt[i][0]
                             col_idx = coord_flt[i][1]
-                            global_m = (
-                                mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                + row_idx
-                            )
+                            global_m = mma_tile_offset_m + row_idx
                             global_n = (
                                 mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                 + col_idx
@@ -1949,10 +1861,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 row_idx = coord_flt[i][0]
                                 col_idx = coord_flt[i][1]
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + row_idx
-                                )
+                                global_m = mma_tile_offset_m + row_idx
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + col_idx
@@ -2003,10 +1912,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     init_val=self.local_reduce_init,
                                     reduction_profile=((None, 1, None), 1, 1),
                                 )
-                            if cutlass.const_expr(
-                                group <= fragment_n
-                                and not self.tensor_epilogue_returns_local_reduce
-                            ):
+                            if cutlass.const_expr(group <= fragment_n):
                                 reduced = self.local_reduce_finalize(reduced, group)
                             reduced = reduced.reshape(((1, 1, repeats), 1, 1))
                             reduced = reduced.broadcast_to(grouped.shape)
@@ -2044,20 +1950,19 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             )
                             gReduce = cute.local_tile(
                                 mReduce,
-                                (self.cta_tile_shape_mnk[0], groups_per_cta),
+                                (self.mma_tiler[0], groups_per_cta),
                                 mma_tile_coord_mnl[:2],
                             )
-                            limit_m = min(
-                                cute.size(local_reduce_tensor, mode=[1])
-                                - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
-                                self.cta_tile_shape_mnk[0],
-                            )
+                            row_offset = mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                            limit_m = cute.size(local_reduce_tensor, mode=[1])
                             limit_groups = cute.size(local_reduce_tensor, mode=[2])
                             for i in cutlass.range(
                                 cute.size(reduced_flt), unroll_full=True
                             ):
                                 row_idx = coord_flt[i][0]
                                 n_idx = coord_flt[i][1]
+                                output_row = row_idx + row_offset
+                                global_row = mma_tile_offset_m + row_idx
                                 group_idx = n_idx // group
                                 global_group_idx = (
                                     mma_tile_coord_mnl[1] * groups_per_cta + group_idx
@@ -2065,10 +1970,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 if (
                                     should_store
                                     and n_idx % group == store_offset
-                                    and row_idx < limit_m
+                                    and global_row < limit_m
                                     and global_group_idx < limit_groups
                                 ):
-                                    gReduce[row_idx, group_idx] = reduced_flt[i]
+                                    gReduce[output_row, group_idx] = reduced_flt[i]
                         else:
                             tDrReduce = cute.make_rmem_tensor_like(
                                 local_reduce_vec, self.acc_dtype
@@ -2257,11 +2162,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 ):
                                     row_idx = coord_flt[i][0]
                                     col_idx = coord_flt[i][1]
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + row_idx
-                                    )
+                                    global_m = mma_tile_offset_m + row_idx
                                     global_n = (
                                         mma_tile_coord_mnl[1]
                                         * self.cta_tile_shape_mnk[1]
@@ -2331,11 +2232,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             #
             c_pipeline.producer_tail()
 
-        # FlashInfer's conservative policy emits the PDL release at the common
-        # kernel tail rather than from the input-loading warp.  Keep this as a
-        # separate policy so graph-level measurements can compare it with the
-        # earlier release points above.
-        if cutlass.const_expr(self.use_pdl and self.pdl_release_k <= -2):
+        if cutlass.const_expr(self.use_pdl):
+            # Deliberately release while the epilogue's output stores are still
+            # draining so the next grid can launch concurrently. Every CTA
+            # reaches this call at least once; the dependent kernel's prologue
+            # wait supplies the completion and memory-visibility guarantee
+            # before any dependent read.
             cute.arch.griddepcontrol_launch_dependents()
 
     def mainloop_s2t_copy_and_partition(
@@ -2867,6 +2769,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             is_valid = False
         if mma_tiler_mn[1] not in [8, 16, 32, 64, 128, 192, 256]:
             is_valid = False
+        if mma_tiler_mn[1] < 64 and (
+            mma_tiler_mn[0] != 128 or cluster_shape_mn[1] != 1
+        ):
+            is_valid = False
         # Skip illegal cluster shape
         if cluster_shape_mn[0] % (2 if mma_tiler_mn[0] == 256 else 1) != 0:
             is_valid = False
@@ -3013,7 +2919,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         # support multicast along N.  They are nevertheless ideal for the
         # transposed small-M inference shape, where the swapped problem's N is
         # exactly the original token count (typically 8/16/32).
-        if mma_tiler_mn[1] < 64 and (n > mma_tiler_mn[1] or cluster_shape_mn[1] > 1):
+        if mma_tiler_mn[1] < 64 and n > mma_tiler_mn[1]:
             can_implement = False
         return can_implement
 

@@ -50,9 +50,6 @@ _ONES_ALPHA: dict = {}
 class InductorSm100DesignMetadata(Sm100DesignMetadata):
     use_prefetch: bool = False
     use_pdl: bool = False
-    pdl_wait_before_loads: bool = False
-    pdl_wait_on_a: bool = True
-    pdl_release_k: int = 0
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -214,6 +211,7 @@ except ImportError:
 class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
     """Wrapper for vendored dense blockscaled GEMM template for SM100 GPUs."""
 
+    supports_output_scale = True
     supported_args_type = GemmArguments
     designed_for_min_cc = 100
 
@@ -226,20 +224,40 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             metadata.design.cluster_shape[0],
             metadata.design.cluster_shape[1],
         )
-        self.impl = BlockScaledGemmKernelImpl(  # pyrefly: ignore[not-callable]
-            self.sf_vec_size,
-            mma_tiler_mn,
-            cluster_shape_mn,
-            use_prefetch=getattr(metadata.design, "use_prefetch", False),
-            use_pdl=getattr(metadata.design, "use_pdl", False),
-            pdl_wait_before_loads=getattr(
-                metadata.design, "pdl_wait_before_loads", False
-            ),
-            pdl_wait_on_a=getattr(metadata.design, "pdl_wait_on_a", True),
-            pdl_release_k=getattr(metadata.design, "pdl_release_k", 0),
-        )
+        self.use_prefetch = getattr(metadata.design, "use_prefetch", False)
+        self.use_pdl = getattr(metadata.design, "use_pdl", False)
         self.cluster_shape_mn = cluster_shape_mn
         self.mma_tiler_mn = mma_tiler_mn
+        self.impl = self._make_impl()
+
+    def _make_impl(self, *, late_pdl_wait: bool = False):
+        return BlockScaledGemmKernelImpl(  # pyrefly: ignore[not-callable]
+            self.sf_vec_size,
+            self.mma_tiler_mn,
+            self.cluster_shape_mn,
+            use_prefetch=self.use_prefetch,
+            use_pdl=self.use_pdl,
+            late_pdl_wait=late_pdl_wait,
+        )
+
+    def _use_late_pdl_wait(self, args: GemmArguments) -> bool:
+        # Descriptor/layout setup is a material fraction of small NVFP4 decode
+        # kernels. Keep the previously validated M<=32, K<=4096 scope, and use
+        # the same placement for the next decode bucket when K<=5120. The
+        # latter matches FlashInfer's prologue ordering and avoids giving up
+        # useful setup overlap on common batch-64 attention/MLP projections.
+        logical_m = getattr(args, "logical_m", None)
+        if logical_m is None:
+            logical_m = args.out.shape[-2]
+        logical_k = args.A.shape[-1]
+        return (
+            self.use_pdl
+            and self.sf_vec_size == 16
+            and (
+                (logical_m <= 32 and logical_k <= 4096)
+                or (32 < logical_m <= 64 and logical_k <= 5120)
+            )
+        )
 
     @staticmethod
     def _major_modes(args):
@@ -273,13 +291,16 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         max_active_clusters = cutedsl_utils.mma.get_max_active_clusters(
             self.cluster_shape_mn
         )
+        # Operators are shared across compiled shapes, so keep this shape policy
+        # on a fresh implementation instead of mutating the cached instance.
+        impl = self._make_impl(late_pdl_wait=self._use_late_pdl_wait(args))
 
         # Fused global scale: alpha is ALWAYS threaded as a trailing kernel arg
         # (ones when not fusing) so the kernel signature is consistent across all
         # compile/run paths -- a None alpha is not reliably dropped from the
-        # runtime signature. args.alpha (a TensorWrapper, len multiple-of-4) is
-        # applied elementwise in the epilogue; closure capture cannot read a
-        # runtime tensor there.
+        # runtime signature. args.alpha is a one-element FP32 TensorWrapper
+        # with 4-byte alignment, applied elementwise in the epilogue; closure
+        # capture cannot read a runtime tensor there.
         alpha = getattr(args, "alpha", None)
         if alpha is None:
             alpha = cute.runtime.make_fake_compact_tensor(
@@ -305,7 +326,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 reduction_args, cute
             )
             return self.cute_compile(
-                self.impl,
+                impl,
                 args.A.tensor,
                 args.B.tensor,
                 args.A.scale.tensor,
@@ -329,7 +350,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 target_sm=target_sm,
             )
         return self.cute_compile(
-            self.impl,
+            impl,
             args.A.tensor,
             args.B.tensor,
             args.A.scale.tensor,
@@ -739,30 +760,45 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         return True
 
     @classmethod
+    def generate_operators_for_policy(
+        cls,
+        metadata_filter: Callable[[OperatorMetadata], bool],
+        *,
+        prefetch_mode: str,
+        use_pdl: bool,
+    ) -> list[VendoredDenseBlockScaledGemmKernel]:
+        """Generate operators without consulting mutable process-wide config."""
+        return cls._generate_operators(
+            metadata_filter,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
+        )
+
+    @classmethod
     def _generate_operators(
         cls,
         metadata_filter: Callable[[OperatorMetadata], bool],
         epilogue_args=None,
         target_sm: TargetSm | None = None,
         args=None,
+        *,
+        prefetch_mode: str | None = None,
+        use_pdl: bool | None = None,
     ) -> list[VendoredDenseBlockScaledGemmKernel]:
         if target_sm is not None and target_sm.cc not in [100, 101, 103]:
             return []
         if epilogue_args is not None:
             return []
 
-        prefetch_mode = config.nvgemm_prefetch
+        if prefetch_mode is None:
+            prefetch_mode = config.nvgemm_prefetch
+        if use_pdl is None:
+            use_pdl = config.nvgemm_pdl == "1"
         prefetch_options = {
             "0": [False],
             "1": [True],
             "autotune": [False, True],
         }.get(prefetch_mode, [False])
-        pdl_wait_options = (
-            [True, False]
-            if config.nvgemm_pdl and not config.nvgemm_pdl_wait_before_loads
-            else [True]
-        )
-
         design_params: dict[str, list[Any]] = {
             "mma_instruction_type": [BlackwellTcgen05Mma],
             "use_2cta_mma": [True],
@@ -771,10 +807,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             "cluster_shape": [(M, N, 1) for M in [1, 2, 4] for N in [1, 2, 4]],
             "use_tma_store": [True],
             "use_prefetch": prefetch_options,
-            "use_pdl": [config.nvgemm_pdl],
-            "pdl_wait_before_loads": [config.nvgemm_pdl_wait_before_loads],
-            "pdl_wait_on_a": pdl_wait_options,
-            "pdl_release_k": [config.nvgemm_pdl_release_k],
+            "use_pdl": [use_pdl],
         }
 
         param_names = list(design_params.keys())
@@ -785,12 +818,6 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         for operands in cls._metadata_operand_combinations():
             for values in itertools.product(*param_values):
                 design = InductorSm100DesignMetadata(**dict(zip(param_names, values)))
-                pdl_wait = (
-                    "early"
-                    if design.pdl_wait_before_loads
-                    else ("a" if design.pdl_wait_on_a else "b")
-                )
-
                 operator_name = (
                     f"inductor_vendored.{cls.__name__}_sm100_"
                     "{layout}_A{A}_B{B}_out{out}_SFA{SFA}_SFB{SFB}_"
@@ -816,11 +843,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     tile=tuple_to_string(design.tile_shape),
                     _tma_store="_tma_store" if design.use_tma_store else "",
                     _prefetch="_prefetch" if design.use_prefetch else "",
-                    _pdl=(
-                        f"_pdl{pdl_wait}_release{design.pdl_release_k}"
-                        if design.use_pdl
-                        else ""
-                    ),
+                    _pdl="_pdl" if design.use_pdl else "",
                 )
 
                 metadata = OperatorMetadata(

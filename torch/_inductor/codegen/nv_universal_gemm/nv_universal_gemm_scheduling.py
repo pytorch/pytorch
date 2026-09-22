@@ -457,9 +457,22 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         except NotImplementedError as exc:
             log.debug("NVGEMM cannot orient fused reductions: %s", exc)
             return NVGemmVerticalFusionDecision.DEFER
+        if epilogue_program.has_composite_generated_reduction_plan:
+            log.debug("NVGEMM direct EFC supports one generated reduction")
+            return NVGemmVerticalFusionDecision.DEFER
         if reduction_plan is not None and not all(
             variant.supports_reduction(reduction_plan) for variant in variants
         ):
+            return NVGemmVerticalFusionDecision.DEFER
+        if isinstance(ir_node, MultiTemplateBuffer) and not any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.supports_epilogue_fusion
+            and self._supports_reduction_layout(choice, epilogue_program.min_tile_shape)
+            for choice in ir_node._choices
+        ):
+            log.debug(
+                "NVGEMM epilogue fusion: no EFC kernel supports the reduction layout"
+            )
             return NVGemmVerticalFusionDecision.DEFER
 
         for s_node in all_scheduler_nodes:
@@ -1097,7 +1110,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         precompile_dtypes = {}
 
         try:
-            for param_name, input_node in kernel._template_input_args:
+
+            def add_tensor_metadata(param_name, input_node):
                 size = input_node.get_size()
                 precompile_shapes[param_name] = [int(s) for s in size]
                 stride = input_node.get_stride()
@@ -1105,6 +1119,15 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 precompile_dtypes[param_name] = str(
                     input_node.get_dtype()
                 ).removeprefix("torch.")
+
+            for param_name, input_node in kernel._template_input_args:
+                add_tensor_metadata(param_name, input_node)
+
+            output_scale_name = kernel.epilogue.output_scale
+            if output_scale_name is not None:
+                add_tensor_metadata(
+                    output_scale_name, V.graph.get_buffer(output_scale_name)
+                )
 
             out_layout = cast(Layout, ctb.layout)
             precompile_shapes["output"] = [int(s) for s in out_layout.size]
