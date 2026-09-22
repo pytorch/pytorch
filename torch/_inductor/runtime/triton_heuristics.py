@@ -2486,6 +2486,19 @@ class CachingAutotuner(KernelInterface):
                 *args, stream=stream, benchmark_run=benchmark_run, **kwargs
             )
 
+        try:
+            return self._run(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
+        except MissingTritonKernelError:
+            self._post_launch()
+            if self._compile_kernel_from_src is None:
+                raise
+            return self._run_jit_fallback(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
+
+    def _run(self, *args, stream, benchmark_run=False, **kwargs):
         # --- FAST PATH ---
         # After the first successful launch in steady state, cache the launcher
         # and skip all preamble on subsequent calls (~2µs savings).
@@ -2505,14 +2518,7 @@ class CachingAutotuner(KernelInterface):
             and not autograd_profiler._is_profiler_enabled
             and not get_active_debug_mode()
         ):
-            try:
-                return fast(*args, stream=stream)
-            except MissingTritonKernelError:
-                if self._compile_kernel_from_src is None:
-                    raise
-                return self._run_jit_fallback(
-                    *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-                )
+            return fast(*args, stream=stream)
 
         debug_mode = get_active_debug_mode()
         if debug_mode:
@@ -2601,22 +2607,15 @@ class CachingAutotuner(KernelInterface):
                 self.save_gpu_kernel(stream, launcher)
 
         try:
+            self._pre_launch(launcher, *args, stream=stream, **kwargs)
             try:
-                self._pre_launch(launcher, *args, stream=stream, **kwargs)
-                try:
-                    result = launcher(*args, **kwargs, stream=stream)
-                except Exception as e:
-                    if isinstance(e, TypeError):
-                        self._check_launcher_call_args(launcher, args)
-                    raise
-            finally:
-                self._post_launch()
-        except MissingTritonKernelError:
-            if self._compile_kernel_from_src is None:
+                result = launcher(*args, **kwargs, stream=stream)
+            except Exception as e:
+                if isinstance(e, TypeError):
+                    self._check_launcher_call_args(launcher, args)
                 raise
-            return self._run_jit_fallback(
-                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-            )
+        finally:
+            self._post_launch()
 
         # Populate fast path: cache the launcher for future calls.  Static
         # conditions (interpret, dump flags) are pre-computed in _cache_eligible;
@@ -3158,15 +3157,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
             triton_hash_to_path_key(self.kernel.hash),
             f"{self.kernel.name}{binary_ext}",
         )
-        if not os.path.exists(cubin_location):
-            if self.kernel.cubin_raw is not None:
-                # We saved the raw cubin, so write it to he appropriate location
-                self.kernel.reload_cubin_from_raw(cubin_location)
-            else:
-                raise MissingTritonKernelError(
-                    f"Cubin file saved by TritonBundler not found at {cubin_location}"
-                )
-        self.kernel.cubin_path = cubin_location
+        self.kernel.reload_cubin_from_raw(cubin_location)
 
     def make_launcher(self) -> LauncherType:
         # If at least one static make_launcher call occurs,
@@ -3591,9 +3582,9 @@ class DebugAutotuner(CachingAutotuner):
         super().__init__(*args, **kwargs)
         self.cached = None
 
-    def run(self, *args, stream, **kwargs):
+    def _run(self, *args, stream, benchmark_run=False, **kwargs):
         if not self.with_bandwidth_info:
-            super().run(*args, stream=stream, **kwargs, benchmark_run=True)
+            super()._run(*args, stream=stream, **kwargs, benchmark_run=True)
             return
         else:
             possible_names = _find_names(self)

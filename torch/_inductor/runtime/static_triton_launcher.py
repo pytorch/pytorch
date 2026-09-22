@@ -231,20 +231,11 @@ class StaticallyLaunchedTritonKernel:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
         # Keep it available (the single-device path frees it after one load) and rewrite
         # from the retained raw bytes if the file was removed under us.
-        if self.cubin_path is not None and os.path.exists(self.cubin_path):
-            return self.cubin_path
         if self.cubin_path is None:
             raise AssertionError(
                 "device-agnostic kernel cannot reload its cubin for a new device"
             )
-        if self.cubin_raw is None:
-            raise MissingTritonKernelError(
-                f"Triton kernel binary not found at {self.cubin_path}"
-            )
-        os.makedirs(os.path.dirname(self.cubin_path), exist_ok=True)
-        with open(self.cubin_path, "wb") as f:
-            f.write(self.cubin_raw)
-        return self.cubin_path
+        return self.reload_cubin_from_raw(self.cubin_path)
 
     def load_kernel(self, device: int) -> None:
         if self.device_agnostic:
