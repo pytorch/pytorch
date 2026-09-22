@@ -32,6 +32,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestContinuous,
     get_devtype,
     subtest_name,
     TransformerWithSharedParams,
@@ -330,7 +331,7 @@ class TestFSDPMixedPrecision(FSDPTest):
             self.assertEqual(
                 expected_dtype,
                 t.dtype,
-                f"Expected to reduce in {expected_dtype} but got tensors in {t.dtype}",
+                lambda msg: f"{msg}\nExpected to reduce in {expected_dtype} but got tensors in {t.dtype}",
             )
 
         return orig_reduce_scatter(*args, **kwargs)
@@ -507,7 +508,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                             self.assertEqual(
                                 tensor.dtype,
                                 full_precision_param_dtype,
-                                f"{name}: {tensor.dtype} vs {full_precision_param_dtype}",
+                                lambda msg: f"{msg}\n{name}: {tensor.dtype} vs {full_precision_param_dtype}",
                             )
 
                     # After state_dict, buffer's dtype should have been restored
@@ -1134,7 +1135,7 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
             model(x).sum().backward()
 
 
-class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+class TestFSDPDifferentSubmodulePrecision(FSDPTestContinuous):
     @property
     def world_size(self):
         return 2

@@ -21,6 +21,8 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -205,10 +207,12 @@ class FSDPParamGroup:
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
         # specify it, possibly at construction time before lazy init
-        self._all_reduce_hook_stream: torch.cuda.Stream | None = None
+        self._all_reduce_hook_stream: torch.Stream | None = None
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
+        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
+        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -277,14 +281,19 @@ class FSDPParamGroup:
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
-        orig_dtypes = {p.orig_dtype for p in trainable_params}
-        reduce_dtypes = {p.reduce_dtype for p in trainable_params}
+        if trainable_params:
+            params_for_dtype = trainable_params
+        else:
+            params_for_dtype = [
+                p for p in self.fsdp_params if p.orig_dtype.is_floating_point
+            ]
+        orig_dtypes = {p.orig_dtype for p in params_for_dtype}
+        reduce_dtypes = {p.reduce_dtype for p in params_for_dtype}
         if len(trainable_params) > 0 and len(orig_dtypes) != 1:
             # Models may have no grad params
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
-        self._orig_dtype = next(iter(orig_dtypes)) if trainable_params else None
         if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
             # This can be relaxed if we issue one reduce-scatter per reduce
             # dtype (but we would need a way for users to specify multiple
@@ -292,7 +301,11 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
-        self._reduce_dtype = next(iter(reduce_dtypes)) if trainable_params else None
+        dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
+        self._orig_dtype = next(iter(orig_dtypes)) if dtype_sets_are_uniform else None
+        self._reduce_dtype = (
+            next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
+        )
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -455,8 +468,11 @@ class FSDPParamGroup:
                 tensor = fsdp_param.all_gather_outputs[0]
                 alloc_storage(tensor)
 
-                # find alternative way to check if tensor.is_inference
-                with torch.autograd._unsafe_preserve_version_counter(tensor):
+                with (
+                    torch.autograd._unsafe_preserve_version_counter(tensor)
+                    if not tensor.is_inference()
+                    else contextlib.nullcontext()
+                ):
                     tensor.copy_(all_gather_input)
 
         else:
@@ -465,6 +481,7 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
+                    all_gather_output_fn=self._all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -552,6 +569,8 @@ class FSDPParamGroup:
                 self._training_state = TrainingState.FORWARD
                 self.unshard(self.unshard_async_op)
                 self.wait_for_unshard()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
@@ -677,7 +696,7 @@ class FSDPParamGroup:
                     if isinstance(self.mesh_info, DDPMeshInfo)
                     else None
                 )
-                all_reduce_stream: torch.cuda.Stream
+                all_reduce_stream: torch.Stream
                 if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                     # this means the native HSDP is not enabled,
                     # but user may want to have a custom HSDP setup
@@ -723,6 +742,7 @@ class FSDPParamGroup:
                     self._partial_reduce_output,
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
+                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
@@ -1014,11 +1034,16 @@ class FSDPParamGroup:
             if existing is not None:
                 new_groups[ranks] = existing
             else:
-                new_groups[ranks] = dist.new_group(
+                new_group = dist.new_group(
                     list(ranks),
                     use_local_synchronization=True,
                     group_desc="fsdp_reduce_scatter",
                 )
+                if new_group == dist.GroupMember.NON_GROUP_MEMBER:
+                    raise AssertionError(
+                        f"Current rank was not included in process group {ranks}"
+                    )
+                new_groups[ranks] = new_group
         mesh_info.reduce_scatter_process_group = new_groups[ranks]
 
     @property
@@ -1151,3 +1176,9 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         # Drop the non-tensor param_group tangent. The output pre-backward hook
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs
+
+
+if dist._is_spmd_types_available():
+    import spmd_types
+
+    spmd_types.register_local_autograd_function(RegisterPostBackwardFunction)

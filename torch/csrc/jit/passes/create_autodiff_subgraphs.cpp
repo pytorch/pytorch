@@ -351,7 +351,7 @@ struct ContextMapping {
   }
 
   bool has(const Node* n) const {
-    return node_to_ctx_.find(n) != node_to_ctx_.end();
+    return node_to_ctx_.contains(n);
   }
 };
 

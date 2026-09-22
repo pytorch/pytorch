@@ -161,6 +161,10 @@ def all_types_complex_float8_and(*dtypes):
 _barebones_unsigned_types = _dispatch_dtypes((torch.uint16, torch.uint32, torch.uint64))
 
 
+def barebones_unsigned_types():
+    return _barebones_unsigned_types
+
+
 # Passthru ops (copy, fill, index, gather, scatter, flip, take, put, where, eq, ne)
 # move or select data without dtype-specific arithmetic, so they support the
 # largest common set of dtypes across CPU and CUDA. Mirrors

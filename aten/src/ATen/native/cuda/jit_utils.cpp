@@ -3,7 +3,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
 #include <optional>
-#include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
@@ -841,7 +840,7 @@ static void replace_all(std::string& s, const std::string& to_replace, const std
   }
 
   oss << s.substr(prev_pos);
-  s = oss.str();
+  s = std::move(oss).str();
 }
 
 // hipify replaces certain device math functions, e.g., std::max -> ::max
@@ -1590,7 +1589,7 @@ NvrtcFunction jit_pwise_function(
         return compiled_kernel_;
       } catch (const c10::Error& e) {
         if (compiled_kernel_.module != nullptr) {
-          nvrtc.cuModuleUnload(compiled_kernel_.module);
+          (void)nvrtc.cuModuleUnload(compiled_kernel_.module);
         }
         std::remove(file_path.c_str());
         TORCH_WARN_ONCE(
