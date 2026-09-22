@@ -137,11 +137,30 @@ class FSDPCommContext:
         self.all_gather_copy_in_stream.wait_event(event)
         self.all_gather_stream.wait_event(event)
 
-    def release_all_gather_state(self) -> None:
-        """Release deferred state after ordering streams that reuse its buffers."""
+    def release_all_gather_state_for_comm_reuse(self) -> None:
+        """Release deferred state before reuse by all-gather streams.
+
+        Forward prefetch may immediately reuse the retained buffers on either
+        all-gather stream, so both streams must follow the saved copy-out event
+        before ownership is released.
+        """
         if (all_gather_state := self.all_gather_state) is None:
             return
         self.wait_all_gather_streams_on_event(all_gather_state.event)
+        self.all_gather_state = None
+
+    def release_all_gather_state_on_current_stream(self) -> None:
+        """Release deferred state at a current-stream lifecycle boundary.
+
+        Post-backward and reset execute on the current stream. Ordering that
+        stream after copy-out avoids introducing reverse dependencies onto the
+        communication streams. Root pre-forward orders those streams after the
+        current stream before the next implicit all-gather.
+        """
+        if (all_gather_state := self.all_gather_state) is None:
+            return
+        if all_gather_state.event is not None and hasattr(self, "device_handle"):
+            self.device_handle.current_stream().wait_event(all_gather_state.event)
         self.all_gather_state = None
 
 
@@ -457,7 +476,7 @@ class FSDPParamGroup:
             return  # no preceding unshard
         async_op = self._all_gather_result.all_gather_work is not None
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
-            self.comm_ctx.release_all_gather_state()
+            self.comm_ctx.release_all_gather_state_for_comm_reuse()
         if isinstance(self.mesh_info, FSDPMeshInfo):
             world_size = self._all_gather_process_group.size()
         else:
