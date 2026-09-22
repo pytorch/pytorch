@@ -2353,6 +2353,60 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.wont_generalize, ("mode",))
         self.assertEqual(summary.capture_errors, ("boom",))
 
+    def test_precompile_session_captures_variants_and_renders(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0]
+
+        model = torch.nn.Linear(4, 4)
+        x2, x3 = torch.ones(2, 4), torch.ones(3, 4)
+        session = precompile_package.precompile_capture(step, backend="eager")
+        with session as call:
+            self.assertEqual(call(model, x2), step(model, x2))
+            self.assertEqual(call(model, x3), step(model, x3))
+            summary = session.summary()
+        # The entry and its continuation, recompiled for the second shape; the
+        # default filter's drops (the model's MODULE_MATCH) are reported.
+        self.assertTrue(summary.complete, str(summary))
+        self.assertEqual((summary.frames, summary.resume_functions), (2, 1))
+        self.assertGreaterEqual(summary.guarded_codes, 3)
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
+        self.assertIn(
+            ("CLOSURE_MATCH", "G['torch']._dynamo.graph_break"), summary.dropped_guards
+        )
+        self.assertTrue(summary.kept_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        python_code, cache = session.snapshot_artifact()
+        meta = _parse_artifact_metadata(python_code)
+        self.assertEqual(meta["TRACER"], "dynamo")
+        self.assertEqual(len(meta["FRAMES"]), 2)
+        self.assertEqual(
+            meta["DROPPED_GUARDS"], [list(s) for s in summary.dropped_guards]
+        )
+        with self.assertRaisesRegex(PackageError, "dropped .* guard"):
+            session.snapshot_artifact(require_no_dropped_guards=True)
+        with self.assertRaisesRegex(PackageError, "not active"):
+            call(model, x2)
+        # A second session on the same function compiles into its own cache
+        # region rather than serving the first one's entries.
+        second = precompile_package.precompile_capture(step, backend="eager")
+        with second as call:
+            call(model, x2)
+        self.assertGreaterEqual(second.summary().guarded_codes, 2)
+        # A session that never ran its callable has nothing to render.
+        empty = precompile_package.precompile_capture(step, backend="eager")
+        with empty:
+            pass
+        with self.assertRaisesRegex(PackageError, "no compiled code"):
+            empty.snapshot_artifact()
+        with self.assertRaisesRegex(PackageError, "partial"):
+            precompile_package.precompile_capture(functools.partial(step, model))
+        with self.assertRaisesRegex(PackageError, "CALLS the model"):
+            precompile_package.precompile_capture(model)
+
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
         from torch._dynamo.precompile_package import _capture_config
@@ -2375,17 +2429,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             torch._dynamo.config.patch(allow_empty_graphs=False),
         ):
             self.assertEqual(flags(), ambient)
-            with _capture_config(training=False):
-                self.assertEqual(flags(), (True, True, False, True))
-                # The inner scope's training wins while it is open, and the
-                # outer scope's setting comes back when it closes.
-                with _capture_config(training=True):
+            with _capture_config():
+                self.assertEqual(flags(), (True, True, True, True))
+                # A nested scope patches again and the outer one comes back
+                # when it closes.
+                with _capture_config():
                     self.assertEqual(flags(), (True, True, True, True))
-                self.assertEqual(flags(), (True, True, False, True))
+                self.assertEqual(flags(), (True, True, True, True))
             self.assertEqual(flags(), ambient)
 
             with self.assertRaisesRegex(RuntimeError, "boom"):
-                with _capture_config(training=True):
+                with _capture_config():
                     raise RuntimeError("boom")
             self.assertEqual(flags(), ambient)
 
@@ -2396,7 +2450,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
             def hold():
                 seen.append(flags())
-                with _capture_config(training=False):
+                with _capture_config():
                     seen.append(flags())
                     entered.set()
                     release.wait(10)
@@ -2409,7 +2463,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             release.set()
             worker.join(10)
             self.assertFalse(worker.is_alive())
-            self.assertEqual(seen[1], (True, True, False, True))
+            self.assertEqual(seen[1], (True, True, True, True))
             self.assertEqual(seen[0], seen[2])
             self.assertNotEqual(seen[0], seen[1])
 
@@ -2422,15 +2476,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # a capture with caches forced off would record nothing; say so up front.
         with torch.compiler.config.patch(force_disable_caches=True):
             with self.assertRaisesRegex(PackageError, "force_disable_caches"):
-                with _capture_config(training=False):
+                with _capture_config():
                     pass
 
         with functorch_config.patch(strict_autograd_cache=False):
             with torch._dynamo.config.patch(strict_precompile=False):
-                with _capture_config(training=False):
+                with _capture_config():
                     self.assertFalse(functorch_config.strict_autograd_cache)
             with torch._dynamo.config.patch(strict_precompile=True):
-                with _capture_config(training=False):
+                with _capture_config():
                     self.assertTrue(functorch_config.strict_autograd_cache)
             self.assertFalse(functorch_config.strict_autograd_cache)
 
