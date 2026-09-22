@@ -4,7 +4,6 @@ import enum
 import importlib
 import inspect
 import io
-import json
 import logging
 import os
 import pickle
@@ -215,9 +214,8 @@ class _GuardScope(enum.Enum):
 
 # Keep the format marker outside pickle so it is checked before the payload.
 _AOT_COMPILE_MAGIC = b"PT2AOT"
-# Bump for incompatible header changes or payload reducer changes.
+# Bump for incompatible payload reducer changes.
 _AOT_COMPILE_FORMAT_VERSION = 1
-_AOT_COMPILE_HEADER_LENGTH_BYTES = 8
 
 
 def bind_locals(
@@ -243,46 +241,12 @@ class CompileArtifacts:
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
-        _check_compatibility(self.system_info, self.device_type)
+        current_system = SystemInfo.current()
+        current_system.check_compatibility(self.system_info, self.device_type)
 
 
-def _check_compatibility(system_info: SystemInfo, device_type: str) -> None:
-    current_system = SystemInfo.current()
-    current_system.check_compatibility(system_info, device_type)
-
-
-def _write_aot_compile_header(
-    f: io.BytesIO, system_info: SystemInfo, device_type: str
-) -> None:
-    triton_version = system_info.triton_version
-    header = {
-        "system_info": {
-            "python_version": str(system_info.python_version),
-            "torch_version": str(system_info.torch_version),
-            "toolkit_version": (
-                None
-                if system_info.toolkit_version is None
-                else str(system_info.toolkit_version)
-            ),
-            "triton_version": (
-                None
-                if triton_version is None
-                else [int(triton_version[0]), int(triton_version[1])]
-            ),
-            "gpu_name": (
-                None if system_info.gpu_name is None else str(system_info.gpu_name)
-            ),
-        },
-        "device_type": str(device_type),
-    }
-    header_data = json.dumps(header, sort_keys=True, separators=(",", ":")).encode()
-    f.write(_AOT_COMPILE_MAGIC)
-    f.write(bytes([_AOT_COMPILE_FORMAT_VERSION]))
-    f.write(len(header_data).to_bytes(_AOT_COMPILE_HEADER_LENGTH_BYTES, "big"))
-    f.write(header_data)
-
-
-def _load_aot_compile_header(f: io.BytesIO) -> tuple[SystemInfo, str]:
+def _open_aot_compile_payload(data: bytes) -> io.BytesIO:
+    f = io.BytesIO(data)
     magic = f.read(len(_AOT_COMPILE_MAGIC))
     version = f.read(1)
     if magic != _AOT_COMPILE_MAGIC or version != bytes([_AOT_COMPILE_FORMAT_VERSION]):
@@ -290,44 +254,7 @@ def _load_aot_compile_header(f: io.BytesIO) -> tuple[SystemInfo, str]:
             "AOT compiled artifact has an unsupported serialization format. "
             "Recompile it with the current PyTorch version."
         )
-    header_length_data = f.read(_AOT_COMPILE_HEADER_LENGTH_BYTES)
-    if len(header_length_data) != _AOT_COMPILE_HEADER_LENGTH_BYTES:
-        raise RuntimeError("AOT compiled artifact has a truncated header")
-    header_length = int.from_bytes(header_length_data, "big")
-    header_start = f.tell()
-    f.seek(0, io.SEEK_END)
-    remaining = f.tell() - header_start
-    f.seek(header_start)
-    if header_length > remaining:
-        raise RuntimeError("AOT compiled artifact has a truncated header")
-    header_data = f.read(header_length)
-    if len(header_data) != header_length:
-        raise RuntimeError("AOT compiled artifact has a truncated header")
-    header = json.loads(header_data)
-    system_info_state = header["system_info"]
-    triton_version = system_info_state["triton_version"]
-    system_info = SystemInfo(
-        python_version=str(system_info_state["python_version"]),
-        torch_version=str(system_info_state["torch_version"]),
-        toolkit_version=(
-            None
-            if system_info_state["toolkit_version"] is None
-            else str(system_info_state["toolkit_version"])
-        ),
-        triton_version=(
-            None
-            if triton_version is None
-            else (int(triton_version[0]), int(triton_version[1]))
-        ),
-        gpu_name=(
-            None
-            if system_info_state["gpu_name"] is None
-            else str(system_info_state["gpu_name"])
-        ),
-    )
-    device_type = str(header["device_type"])
-    _check_compatibility(system_info, device_type)
-    return system_info, device_type
+    return f
 
 
 @dataclasses.dataclass
@@ -1245,10 +1172,9 @@ class AOTCompiledFunction:
             type(compiled_fn).serialize_compile_artifacts(compiled_fn),
         )
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
-        system_info = state.pop("system_info")
-        device_type = state.pop("device_type")
         buf = io.BytesIO()
-        _write_aot_compile_header(buf, system_info, device_type)
+        buf.write(_AOT_COMPILE_MAGIC)
+        buf.write(bytes([_AOT_COMPILE_FORMAT_VERSION]))
         pickler = AOTCompilePickler(external_data or {}, buf)
         try:
             pickler.dump(state)
@@ -1331,12 +1257,9 @@ class AOTCompiledFunction:
         against the scope rebuilt from the artifact, where a rebinding in this
         process is invisible.
         """
-        f = io.BytesIO(data)
-        system_info, device_type = _load_aot_compile_header(f)
+        f = _open_aot_compile_payload(data)
         return cls._deserialize_payload(
             f,
-            system_info,
-            device_type,
             f_globals,
             external_closure_data,
             guard_globals=guard_globals,
@@ -1347,8 +1270,6 @@ class AOTCompiledFunction:
     def _deserialize_payload(
         cls,
         f: io.BytesIO,
-        system_info: SystemInfo,
-        device_type: str,
         f_globals: dict[str, object] | None = None,
         external_closure_data: dict[str, Any] | None = None,
         *,
@@ -1358,8 +1279,6 @@ class AOTCompiledFunction:
         with f:
             unpickler = AOTCompileUnpickler(external_closure_data or {}, f)
             state = unpickler.load()
-        state["system_info"] = system_info
-        state["device_type"] = device_type
         state["runtime_env"] = dataclasses.replace(
             state["runtime_env"],
             bytecode=SerializedCode.to_code_object(state["runtime_env"].bytecode),
@@ -2615,13 +2534,9 @@ class AOTCompiledModel:
             scope, forward_not_resolved_reason = _resolve_guard_scope(model)
 
         results: list[bytes] = pickle.loads(data)
-        payloads = []
-        for result in results:
-            f = io.BytesIO(result)
-            system_info, device_type = _load_aot_compile_header(f)
-            payloads.append((f, system_info, device_type))
+        payloads = [_open_aot_compile_payload(result) for result in results]
         compiled_results = []
-        for f, system_info, device_type in payloads:
+        for f in payloads:
             with (
                 compile_context(CompileContext(convert_frame.get_compile_id({}))),
                 get_metrics_context(),
@@ -2629,8 +2544,6 @@ class AOTCompiledModel:
                 compiled_results.append(
                     AOTCompiledFunction._deserialize_payload(
                         f,
-                        system_info,
-                        device_type,
                         guard_globals=scope,
                         forward_not_resolved_reason=forward_not_resolved_reason,
                     )
