@@ -718,7 +718,6 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
 class TestFP8Matmul(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    @skipXPU
     def test_pack_uint4(self):
         """
         Verify that given a tensor with high precision values [val0, val1],
