@@ -682,7 +682,11 @@ class CachingAutotuner(KernelInterface):
         self._cached_launcher: LauncherType | None = None
         self._compile_kernel_from_src: Callable[[], CachingAutotuner] | None = None
         self._jit_fallback: CachingAutotuner | None = None
+        self._jit_fallback_condition = threading.Condition()
+        self._jit_fallback_active_runs = 0
         self._jit_fallback_pending = False
+        self._jit_fallback_released = False
+        self._jit_fallback_compiling = False
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -1213,6 +1217,7 @@ class CachingAutotuner(KernelInterface):
         return {
             **self.__dict__,
             "lock": None,
+            "_jit_fallback_condition": None,
             "_plugins": [],
         }
 
@@ -1222,7 +1227,11 @@ class CachingAutotuner(KernelInterface):
         self._plugins = get_caching_autotuner_plugins(self)
         self._compile_kernel_from_src = None
         self._jit_fallback = None
+        self._jit_fallback_condition = threading.Condition()
+        self._jit_fallback_active_runs = 0
         self._jit_fallback_pending = False
+        self._jit_fallback_released = False
+        self._jit_fallback_compiling = False
 
     def get_device_interface(self):
         # this code cannot run in compile workers, because it imports from torch
@@ -2461,20 +2470,91 @@ class CachingAutotuner(KernelInterface):
             debug_call.finalize(self.get_device_interface())
 
     def _run_jit_fallback(self, *args, stream, benchmark_run, **kwargs):
-        if self._compile_kernel_from_src is None:
-            raise AssertionError("JIT fallback callback is not set")
+        while True:
+            with self._jit_fallback_condition:
+                if self._jit_fallback is not None:
+                    fallback = self._jit_fallback
+                    break
+                if not self._jit_fallback_compiling:
+                    if self._compile_kernel_from_src is None:
+                        raise AssertionError("JIT fallback callback is not set")
+                    compile_kernel_from_src = self._compile_kernel_from_src
+                    self._jit_fallback_pending = True
+                    self._jit_fallback_compiling = True
+                    while self._jit_fallback_active_runs:
+                        self._jit_fallback_condition.wait()
+                    should_release = not self._jit_fallback_released
+                    break
+                self._jit_fallback_condition.wait()
+
+        if self._jit_fallback is not None:
+            return fallback.run(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
+
         log.warning(
             "Bundled Triton kernel disappeared after loading; "
             "falling back to JIT compilation"
         )
-        compile_kernel_from_src = self._compile_kernel_from_src
-        if not self._jit_fallback_pending:
-            self.release_benchmark_artifacts()
-            self._jit_fallback_pending = True
-        self._jit_fallback = compile_kernel_from_src()
-        self._compile_kernel_from_src = None
-        self._jit_fallback_pending = False
-        return self._jit_fallback.run(
+        try:
+            if should_release:
+                self.release_benchmark_artifacts()
+                with self._jit_fallback_condition:
+                    self._jit_fallback_released = True
+            fallback = compile_kernel_from_src()
+        except BaseException:
+            with self._jit_fallback_condition:
+                self._jit_fallback_compiling = False
+                self._jit_fallback_condition.notify_all()
+            raise
+
+        with self._jit_fallback_condition:
+            self._jit_fallback = fallback
+            self._compile_kernel_from_src = None
+            self._jit_fallback_pending = False
+            self._jit_fallback_released = False
+            self._jit_fallback_compiling = False
+            self._jit_fallback_condition.notify_all()
+        return fallback.run(*args, stream=stream, benchmark_run=benchmark_run, **kwargs)
+
+    def _run_with_jit_fallback(self, *args, stream, benchmark_run, **kwargs):
+        with self._jit_fallback_condition:
+            if self._jit_fallback is not None:
+                fallback = self._jit_fallback
+                run_static = False
+            elif self._jit_fallback_pending:
+                fallback = None
+                run_static = False
+            else:
+                fallback = None
+                run_static = True
+                self._jit_fallback_active_runs += 1
+
+        if fallback is not None:
+            return fallback.run(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
+        if not run_static:
+            return self._run_jit_fallback(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
+
+        try:
+            return self._run(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
+        except MissingTritonKernelError:
+            self._post_launch()
+            with self._jit_fallback_condition:
+                if self._compile_kernel_from_src is None:
+                    raise
+                self._jit_fallback_pending = True
+        finally:
+            with self._jit_fallback_condition:
+                self._jit_fallback_active_runs -= 1
+                self._jit_fallback_condition.notify_all()
+
+        return self._run_jit_fallback(
             *args, stream=stream, benchmark_run=benchmark_run, **kwargs
         )
 
@@ -2486,12 +2566,13 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):  # type:ignore[override]
         """Launch triton kernel call and return result."""
-        if self._jit_fallback is not None:
-            return self._jit_fallback.run(
+        if self._compile_kernel_from_src is not None or self._jit_fallback_pending:
+            return self._run_with_jit_fallback(
                 *args, stream=stream, benchmark_run=benchmark_run, **kwargs
             )
-        if self._jit_fallback_pending:
-            return self._run_jit_fallback(
+
+        if self._jit_fallback is not None:
+            return self._jit_fallback.run(
                 *args, stream=stream, benchmark_run=benchmark_run, **kwargs
             )
         try:
@@ -3181,15 +3262,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
             self.compile_meta.get("device"),
             self.compile_meta.get("device_type", "cuda"),
         )
-        cubin_path = self.kernel.cubin_path
-        try:
-            self.kernel.load_kernel(device)
-        except RuntimeError as e:
-            if cubin_path is not None and not os.path.exists(cubin_path):
-                raise MissingTritonKernelError(
-                    f"Triton kernel binary disappeared while loading {cubin_path}"
-                ) from e
-            raise
+        self.kernel.load_kernel(device)
         scope = {
             "runner": self.kernel.run,
         }

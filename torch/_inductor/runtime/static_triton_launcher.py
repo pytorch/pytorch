@@ -237,7 +237,7 @@ class StaticallyLaunchedTritonKernel:
             )
         return self.reload_cubin_from_raw(self.cubin_path)
 
-    def _load_device_agnostic_kernel_from_path(self, cubin_path: str, device: int):
+    def _load_kernel_from_path(self, cubin_path: str, device: int):
         try:
             return self.C_impl._load_kernel(cubin_path, self.name, self.shared, device)
         except RuntimeError as error:
@@ -248,9 +248,7 @@ class StaticallyLaunchedTritonKernel:
             raise
 
     def _load_device_agnostic_kernel(self, device: int):
-        return self._load_device_agnostic_kernel_from_path(
-            self._agnostic_cubin_path(), device
-        )
+        return self._load_kernel_from_path(self._agnostic_cubin_path(), device)
 
     def load_kernel(self, device: int) -> None:
         if self.device_agnostic:
@@ -271,7 +269,7 @@ class StaticallyLaunchedTritonKernel:
         if self.cubin_path is None:
             raise AssertionError("cubin_path must not be None before load_kernel")
         (self.module, self.function, self.n_regs, self.n_spills) = (
-            self.C_impl._load_kernel(self.cubin_path, self.name, self.shared, device)
+            self._load_kernel_from_path(self.cubin_path, device)
         )
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
@@ -588,8 +586,8 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
             raise AssertionError("expected cubin_path attribute to be set")
         if self.cubin_path is None:
             raise AssertionError("expected cubin_path to not be None")
-        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-            self.cubin_path, self.name, self.shared, device
+        (self.function, self.n_regs, self.n_spills) = self._load_kernel_from_path(
+            self.cubin_path, device
         )
         self.module = None
         self.cubin_path = None

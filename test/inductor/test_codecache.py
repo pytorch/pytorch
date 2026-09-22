@@ -1204,7 +1204,7 @@ class TestFxGraphCache(TestCase):
             with self.assertRaisesRegex(
                 MissingTritonKernelError, "disappeared while loading"
             ):
-                static_kernel._load_device_agnostic_kernel_from_path(cubin_path, 1)
+                static_kernel._load_kernel_from_path(cubin_path, 1)
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
         self.assertIsNotNone(cached_autotuner._jit_fallback)
 
@@ -1254,6 +1254,127 @@ class TestFxGraphCache(TestCase):
                     os.environ["TRITON_LIBDEVICE_PATH"] = old_libdevice_path
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
         self.assertIsNotNone(cached_autotuner._jit_fallback)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_concurrent_missing_bundled_cubin_fallback(self):
+        import sys
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        def fn(x):
+            return x.sin()
+
+        with torch.cuda.device(0):
+            x0 = torch.randn(32, device="cuda")
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
+
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        cached_autotuner = static_autotuner.kernel
+        static_kernel = cached_autotuner.launchers[0].__globals__["runner"].__self__
+        cubin_path = static_kernel._agnostic_cubin_path()
+
+        run_code = type(cached_autotuner)._run.__code__
+        fallback_code = type(cached_autotuner)._run_jit_fallback.__code__
+        compile_kernel_from_src = cached_autotuner._compile_kernel_from_src
+        if compile_kernel_from_src is None:
+            raise AssertionError("source compilation callback is not set")
+        compile_code = compile_kernel_from_src.__code__
+        active_paused = threading.Event()
+        release_active = threading.Event()
+        trace_condition = threading.Condition()
+        fallback_entries = 0
+        compile_calls = 0
+
+        def run_on_device(x, device, pause_static=False):
+            def trace(frame, event, arg):
+                nonlocal compile_calls, fallback_entries
+                if event != "call":
+                    return trace
+                if pause_static and frame.f_code is run_code:
+                    active_paused.set()
+                    if not release_active.wait(timeout=30):
+                        raise AssertionError("timed out waiting to release active run")
+                elif frame.f_code is fallback_code:
+                    with trace_condition:
+                        fallback_entries += 1
+                        trace_condition.notify_all()
+                elif frame.f_code is compile_code:
+                    with trace_condition:
+                        compile_calls += 1
+                        trace_condition.notify_all()
+                return trace
+
+            sys.settrace(trace)
+            try:
+                with torch.cuda.device(device):
+                    return graph.current_callable([x])[0]
+            finally:
+                sys.settrace(None)
+
+        with torch.cuda.device(1):
+            x1 = torch.randn(32, device="cuda")
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            first = pool.submit(run_on_device, x0.clone(), 0, True)
+            self.assertTrue(active_paused.wait(timeout=30))
+            os.remove(cubin_path)
+            second = pool.submit(run_on_device, x1.clone(), 1)
+            third = pool.submit(run_on_device, x1.clone(), 1)
+            try:
+                with trace_condition:
+                    self.assertTrue(
+                        trace_condition.wait_for(
+                            lambda: fallback_entries == 2,
+                            timeout=30,
+                        )
+                    )
+                with cached_autotuner._jit_fallback_condition:
+                    self.assertTrue(
+                        cached_autotuner._jit_fallback_condition.wait_for(
+                            lambda: cached_autotuner._jit_fallback_pending
+                            and cached_autotuner._jit_fallback_compiling,
+                            timeout=30,
+                        )
+                    )
+                    self.assertEqual(cached_autotuner._jit_fallback_active_runs, 1)
+                    self.assertTrue(cached_autotuner.launchers)
+            finally:
+                release_active.set()
+
+            self.assertEqual(first.result(timeout=30), fn(x0))
+            self.assertEqual(second.result(timeout=30), fn(x1))
+            self.assertEqual(third.result(timeout=30), fn(x1))
+            with trace_condition:
+                self.assertTrue(
+                    trace_condition.wait_for(
+                        lambda: compile_calls == 1,
+                        timeout=30,
+                    )
+                )
+        self.assertIsNotNone(cached_autotuner._jit_fallback)
+        self.assertEqual(fallback_entries, 2)
+        self.assertEqual(compile_calls, 1)
+        self.assertEqual(cached_autotuner._jit_fallback_active_runs, 0)
+        self.assertFalse(cached_autotuner._jit_fallback_pending)
+        self.assertFalse(cached_autotuner._jit_fallback_compiling)
+        self.assertIsNone(cached_autotuner._compile_kernel_from_src)
+        self.assertFalse(cached_autotuner.launchers)
+        self.assertFalse(cached_autotuner.compile_results)
 
     @requires_cuda_and_triton
     @config.patch(
