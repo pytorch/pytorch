@@ -88,8 +88,8 @@ it.
 #    "real" mode, so each size is baked as a constant).
 #    Capture also constrains the example INPUTS: a NESTED tensor (either layout) is
 #    refused on BOTH capture paths, as a restriction rather than a claim that it cannot be
-#    fakeified -- nothing downstream of the trace has a nested representation (the recorded
-#    dense shape/dtype/device the driver checks against is None for one). That refusal
+#    fakeified -- nothing downstream of the trace has a nested representation (there is
+#    no dense shape for the driver to check one against). That refusal
 #    applies to a traceable wrapper subclass's INNER tensors too, since a wrapper reports
 #    non-nested whatever it wraps.
 #    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
@@ -152,10 +152,13 @@ it.
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
-#    on input layout. Each dense user-input leaf's dtype and device are recorded at
-#    capture and checked at runtime (both backends): a dtype- or device-mismatched input
-#    is rejected with a PrecompileError rather than crashing deep in a kernel or reading
-#    a wrong value. The graph is specialized to the example input shapes (invariant 3);
+#    on input layout. Every tensor user-input leaf's dtype and device, tensor subclasses
+#    (e.g. DTensor) included, are recorded at capture and checked at runtime (both
+#    backends): a dtype- or device-mismatched input is rejected with a PrecompileError
+#    rather than crashing deep in a kernel or reading a wrong value. The recorded device
+#    includes its index, so a capture whose only tensor inputs are subclass leaves (e.g.
+#    a DTensor shard on cuda:0) is tied to that device index, as parameters already
+#    are. The graph is specialized to the example input shapes (invariant 3);
 #    tensor-subclass outputs in particular are rebuilt with constant outer sizes/strides,
 #    so a different runtime shape is undefined. The inductor backend ADDITIONALLY bakes
 #    each read input's stride / memory format (it emits assert_size_stride) -- and this
@@ -226,15 +229,18 @@ it.
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
 import errno
 import hashlib
 import inspect
 import io
 import logging
+import operator
 import os
 import pickle
 import stat
+import threading
 import types
 import uuid
 from types import MappingProxyType
@@ -250,6 +256,207 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 log = logging.getLogger(__name__)
+_CAPTURE_LOCK = threading.RLock()
+
+
+def _reinit_capture_lock_after_fork() -> None:
+    # A child that inherits this lock held by a thread the fork did not carry over
+    # would block on it forever; only the forking thread survives, so nothing that
+    # held it can still be running.
+    global _CAPTURE_LOCK
+    _CAPTURE_LOCK = threading.RLock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reinit_capture_lock_after_fork)
+
+
+def _capture_rng_devices(args: tuple[object, ...]) -> list[torch.device]:
+    # The accelerator generators worth saving, found the way torch.random.fork_rng
+    # finds them: devices of the current accelerator reachable from the arguments (at
+    # any pytree depth, modules included) plus its current device if already
+    # initialized. Probing an uninitialized one would initialize it.
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is None:
+        return []
+    devices: set[torch.device] = set()
+    for leaf in pytree.tree_leaves(args):
+        if isinstance(leaf, torch.nn.Module):
+            tensors = [*leaf.parameters(), *leaf.buffers()]
+        else:
+            tensors = [leaf] if isinstance(leaf, torch.Tensor) else []
+        devices.update(t.device for t in tensors if t.device.type == accelerator.type)
+    module = torch.get_device_module(accelerator.type)
+    if getattr(module, "is_initialized", lambda: True)():
+        index = torch.accelerator.current_device_index()
+        devices.add(torch.device(accelerator.type, index))
+    return sorted(devices, key=str)
+
+
+def _node_arg(node: torch.fx.Node, name: str) -> object:
+    schema_args = cast("torch._ops.OpOverload", node.target)._schema.arguments
+    for index, arg in enumerate(schema_args):
+        if arg.name == name:
+            if name in node.kwargs:
+                return node.kwargs[name]
+            return node.args[index] if index < len(node.args) else arg.default_value
+    return None
+
+
+def _op_can_draw(node: torch.fx.Node) -> bool:
+    target = node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    return torch.Tag.nondeterministic_seeded in target.tags
+
+
+def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
+    """Default generators, by device, that the captured graph can draw from.
+
+    This is how a restore decides what it has of its own to undo. The alternative --
+    diffing global generator state across capture -- cannot tell the capture's own
+    draws from a concurrent thread's, so it rewinds unrelated work. Per device rather
+    than a single flag for the same reason: a graph that draws only on CUDA must not
+    rewind the CPU generator a concurrent thread is drawing from. None means "could be
+    any of them". A draw through an explicit generator is not a default generator's.
+    """
+    devices: set[torch.device] = set()
+    for node in gm.graph.nodes:
+        if node.op in ("placeholder", "output", "get_attr"):
+            continue
+        target = node.target
+        if target is operator.getitem:
+            continue
+        if not (
+            isinstance(target, torch._ops.OpOverload)
+            and target.name().startswith("aten::")
+        ):
+            # Fail closed: an opaque op (a custom op, or a HOP such as a user Triton
+            # kernel) can draw inside its own kernel with nothing in the graph to say so.
+            return None
+        if not _op_can_draw(node) or _node_arg(node, "generator") is not None:
+            continue
+        val = node.meta.get("val")
+        if isinstance(val, (tuple, list)):
+            val = next((v for v in val if isinstance(v, torch.Tensor)), None)
+        if not isinstance(val, torch.Tensor):
+            return None
+        devices.add(val.device)
+    return devices
+
+
+def _rng_devices_indicate_a_draw(drawn: set[torch.device] | None) -> bool:
+    """None means "could be any generator"; a non-empty set names them."""
+    return drawn is None or bool(drawn)
+
+
+class _CaptureRngState:
+    """Generator state saved across capture, restored only if capture consumed it.
+
+    make_fx runs ``fn`` for real, so a traced ``torch.rand`` advances the very
+    generators the first real call is about to draw from; without a restore, capturing
+    would visibly change the numbers a first call produces. The restore is conditional
+    because it writes process-global state: rewinding when the capture drew nothing
+    would silently replay a concurrent thread's draws.
+    """
+
+    def __init__(self, args: tuple[object, ...]) -> None:
+        with self._raw():
+            self._cpu = torch.random.get_rng_state().clone()
+            self._devices = []
+            self._states = []
+            self._unsnapshotted: list[torch.device] = []
+            for device in _capture_rng_devices(args):
+                try:
+                    module = torch.get_device_module(device.type)
+                    state = module.get_rng_state(device).clone()
+                except Exception:
+                    # Reading a generator can fail (a fake tensor naming a device this
+                    # host does not have). Record it so settle can report it, rather
+                    # than dying with a bare driver error here or dropping it silently.
+                    self._unsnapshotted.append(device)
+                    continue
+                self._devices.append((module, device))
+                self._states.append(state)
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _raw():
+        # Reading generator state must not be intercepted by whatever mode stack the
+        # caller is under; a tracing mode would turn these reads into graph nodes, and
+        # a torch-function mode can reject or rewrite the read outright.
+        with (
+            torch.utils._python_dispatch._disable_current_modes(),
+            torch._C._DisableFuncTorch(),
+            torch._C.DisableTorchFunction(),
+        ):
+            yield
+
+    def settle(
+        self, gm: torch.fx.GraphModule, args: tuple[object, ...], fn: object
+    ) -> None:
+        """Restore what the real-traced ``gm`` could have drawn, and warn on the rest."""
+        drawn = _graph_rng_devices(gm)
+        if _rng_devices_indicate_a_draw(drawn):
+            self._restore(drawn)
+            # Devices live now, re-enumerated so one first initialized during capture
+            # counts; any the graph could have drawn on but that were not saved cannot
+            # be rewound, and the capturing run will not reproduce on load.
+            live = _capture_rng_devices(args) if drawn is None else drawn
+            saved = {device for _module, device in self._devices}
+            missed = sorted(
+                {d for d in live if d.type != "cpu" and d not in saved}
+                | set(self._unsnapshotted),
+                key=str,
+            )
+            if missed:
+                log.warning(
+                    "precompile: the captured graph may draw on %s, whose generator "
+                    "state was not saved and so could not be restored; this capturing "
+                    "run may return different random values than later runs load from "
+                    "the artifact. Precompile with an example tensor on that device, "
+                    "or make it current.",
+                    ", ".join(str(d) for d in missed),
+                )
+        elif self._changed():
+            # No graph op draws, yet the state moved: fn reseeded outside the trace,
+            # or another thread drew. Neither is the capture's to undo.
+            log.warning(
+                "precompile: generator state changed during capture although the "
+                "captured graph does not draw (%s reseeded, or another thread drew), "
+                "so it was left as-is.",
+                getattr(fn, "__name__", "fn"),
+            )
+        if any(
+            _op_can_draw(n) and _node_arg(n, "generator") is not None
+            for n in gm.graph.nodes
+        ):
+            # Its state could not be saved before capture named it, and rewinding the
+            # default generator of its device instead would replay unrelated draws.
+            log.warning(
+                "precompile: the captured graph draws from an explicit "
+                "torch.Generator, which capture cannot save, so it was left advanced."
+            )
+
+    def _changed(self) -> bool:
+        with self._raw():
+            if not torch.equal(torch.random.get_rng_state(), self._cpu):
+                return True
+            return any(
+                not torch.equal(module.get_rng_state(device), state)
+                for (module, device), state in zip(self._devices, self._states)
+            )
+
+    def _restore(self, drawn: set[torch.device] | None) -> None:
+        # Restore only the generators the capture could have drawn from. Writing back
+        # one it did not touch is not a no-op: it rewinds whatever another thread drew
+        # from that generator while capture ran.
+        with self._raw():
+            if drawn is None or any(d.type == "cpu" for d in drawn):
+                torch.random.set_rng_state(self._cpu)
+            for (module, device), state in zip(self._devices, self._states):
+                if drawn is None or device in drawn:
+                    module.set_rng_state(state, device)
 
 
 if TYPE_CHECKING:
@@ -384,7 +591,11 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
     Tensor subclasses (e.g. DTensor) go through AOTAutograd's flatten path, so their
     outer shape is not the dense shape the inductor artifact bakes; record ``None`` and
-    skip them in the shape check.
+    skip them in the shape check only; dtype and device are still recorded and checked.
+    A subclass's inner shapes are not recorded either: the default backend's baked
+    assert_size_stride rejects a differently-sharded input on every inner leaf the graph
+    reads, but with backend="eager", or for an inner leaf the graph never reads, it runs
+    against capture's local shapes unchecked.
     """
     if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
         return tuple(t.shape)
@@ -392,26 +603,32 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
 
 def _dense_dtype(t: object) -> str | None:
-    """Return the dtype of a plain dense tensor as a string, else ``None``.
+    """Return a tensor's dtype as a string, else ``None`` for a non-tensor.
 
     Recorded as a string (e.g. ``"torch.float32"``) so it serializes into the artifact
-    metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime;
-    mirrors the _dense_shape convention (None for non-tensor / subclass leaves). The
+    metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime. The
     graph is specialized to the example dtype (invariant 6).
+
+    Unlike _dense_shape this applies to a wrapper subclass too. The kernels are built
+    against the subclass's inner leaves, so the outer dtype is only a proxy for them; it
+    is a faithful one for the supported subclasses (DTensor copies its local shard's).
     """
-    if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
+    if isinstance(t, torch.Tensor):
         return str(t.dtype)
     return None
 
 
 def _dense_device(t: object) -> str | None:
-    """Return the device (as a string) of a plain dense tensor, else ``None``.
+    """Return a tensor's device as a string, else ``None`` for a non-tensor.
 
     Recorded as a string so it serializes into the artifact metadata as a literal and
-    compares cleanly at runtime; mirrors _dense_shape (None for non-tensor / subclass
-    leaves). The graph is specialized to the example device (invariant 6).
+    compares cleanly at runtime. The graph is specialized to the example device
+    (invariant 6).
+
+    Applies to a wrapper subclass too, as _dense_dtype does: a graph built for one
+    device must not be handed a subclass on another.
     """
-    if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
+    if isinstance(t, torch.Tensor):
         return str(t.device)
     return None
 
@@ -693,8 +910,8 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     either fake mode: the unbacked path's ShapeEnv could mint the symbolic nested int a
     jagged tensor's ragged dim needs (a static capture has none, so fakeifying one there
     dies on a raw internal assertion), but nothing downstream of the trace has a nested
-    representation either way -- the recorded dense shape/dtype/device the driver checks
-    against is None for one. Running ahead of every shape read also gets the STRIDED
+    representation either way -- there is no dense shape for the driver to check one
+    against. Running ahead of every shape read also gets the STRIDED
     layout, whose ``t.shape`` read raises inside NestedTensorImpl, this same named refusal.
     """
     if a.is_nested:
@@ -830,6 +1047,7 @@ def _capture(
     fn: Callable[..., object],
     args: tuple[object, ...],
     decompositions: dict | None = None,
+    rng: _CaptureRngState | None = None,
 ) -> _Capture:
     """Trace the computation ``fn(*args)`` to an ATen graph.
 
@@ -850,7 +1068,6 @@ def _capture(
     interning/order established here for params then buffers is the calling
     convention the runtime model must reproduce (invariant 2).
     """
-    import contextlib
 
     args = tuple(args)
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
@@ -910,7 +1127,7 @@ def _capture(
     # reject a shape (invariant 3) or dtype/device (invariant 6) mismatch up front; see
     # the inlined driver checks (torch._precompile_driver). Stride is NOT recorded --
     # memory-format mismatches are enforced by inductor's own (pinned-on)
-    # assert_size_stride. Subclasses -> None.
+    # assert_size_stride. Subclass shapes -> None.
     # Widened element type (a marked-dynamic dim becomes None within the tuple in the
     # unbacked path below); _dense_shape's static tuples conform to it.
     user_input_shapes: list[tuple[int | None, ...] | None] = [
@@ -981,9 +1198,11 @@ def _capture(
     # structure and the harvested-grad param indices into the _Capture result.
     captured_out_spec: pytree.TreeSpec | None = None
     captured_grad_param_indices: list[int] = []
+    # Raised after the trace, so the RNG restore has a graph to attribute draws to.
+    grad_rejection: str | None = None
 
     def flat_fn(flat: list[object]) -> list[object]:
-        nonlocal captured_out_spec, captured_grad_param_indices
+        nonlocal captured_out_spec, captured_grad_param_indices, grad_rejection
         # The pb region is entirely interned params/buffers (Tensors); the user region
         # (flat[num_pb:]) is arbitrary pytree leaves.
         pb = cast("list[Tensor]", flat[:num_pb])
@@ -1012,7 +1231,7 @@ def _capture(
             # buffer with requires_grad=True that received a gradient would be silently
             # dropped, so reject it -- a cheaply-knowable invariant-5 violation.
             if any(getattr(b, "grad", None) is not None for b in pb[num_params:]):
-                raise PrecompileError(
+                grad_rejection = (
                     "precompile: a registered buffer received a gradient (it has "
                     "requires_grad=True), but precompile only harvests gradients for "
                     "parameters. Register it as an nn.Parameter instead."
@@ -1021,8 +1240,8 @@ def _capture(
             # grads), so a requires_grad user input that received a gradient during the
             # traced backward would be silently dropped. Reject it, mirroring the buffer
             # case -- another cheaply-knowable invariant-5 violation.
-            if any(getattr(t, "grad", None) is not None for t in flat[num_pb:]):
-                raise PrecompileError(
+            elif any(getattr(t, "grad", None) is not None for t in flat[num_pb:]):
+                grad_rejection = (
                     "precompile: a user input received a gradient; precompile only "
                     "harvests gradients for parameters, so an input gradient would be "
                     "silently dropped. Pass the tensor as a module parameter if its "
@@ -1069,6 +1288,14 @@ def _capture(
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
                 a.grad = g
+    # Settled before any rejection below, which all have a complete graph to attribute
+    # draws to. A fake-traced capture (mark_unbacked) runs no real kernel, so nothing
+    # was consumed however the graph reads, and restoring could only rewind what
+    # another thread drew.
+    if rng is not None and fake_mode is None:
+        rng.settle(gm, args, fn)
+    if grad_rejection is not None:
+        raise PrecompileError(grad_rejection)
     _check_no_constant_tensors(gm)
     _assert_no_control_flow_subgraphs(gm)
     _assert_supported(gm)
@@ -1246,8 +1473,9 @@ def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -
     # driver validates against it when present, else skips the structure check).
     buf.writeline(f"IN_SPEC = {in_spec_str!r}")
     buf.writeline(f"OUT_SPEC = {out_spec_str!r}")
-    # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
-    # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
+    # Per user-input-leaf example shape / dtype / device (None for a non-tensor leaf,
+    # and shape None for a subclass leaf); the drivers reject a runtime mismatch
+    # (invariants 3 and 6).
     # Memory-format mismatches are caught by the inductor artifact's own
     # assert_size_stride (pinned on at capture).
     buf.writeline(f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}")
@@ -1804,8 +2032,8 @@ class PrecompiledModule(PrecompiledRunnable):
         # exactly the params that received one, leaving frozen / non-contributing
         # params' .grad as None.
         self._grad_param_indices: list[int] = []
-        # Per user-input-leaf example shape, dtype, and device (None for a subclass /
-        # non-tensor leaf; a marked-dynamic dim is None within the shape tuple); the drivers
+        # Per user-input-leaf example shape, dtype, and device (None for a non-tensor leaf,
+        # shape None for a subclass leaf; a marked-dynamic dim is None within the shape tuple); the drivers
         # reject a runtime mismatch (invariants 3 and 6). Stride / memory format is enforced
         # by the inductor artifact's own assert_size_stride, not recorded here. Populated by
         # _compile().
@@ -1853,7 +2081,11 @@ class PrecompiledModule(PrecompiledRunnable):
                 "precompile: mark_unbacked (dynamic shapes) is only supported with "
                 "backend='inductor'; eager + unbacked is not supported."
             )
-        capture = _capture(self._fn, args, self._decompositions)
+        with _CAPTURE_LOCK:
+            # Snapshotted here, before _capture, so the snapshot predates anything
+            # fn does; _capture settles it once the graph exists.
+            rng = _CaptureRngState(args)
+            capture = _capture(self._fn, args, self._decompositions, rng=rng)
         self._module_positions = capture.module_positions
         self._num_positional_args = capture.num_positional_args
         self._param_names = capture.param_names
@@ -2361,10 +2593,30 @@ class _PrecompileApi:
         contract; read Note [precompile programming model] before using it. The artifact
         faithfully reproduces ``fn`` only for callers that uphold that contract.
 
-        THREADING: the inductor lowering step drives process-global compiler state
-        and is serialized by an internal lock, so concurrent ``backend="inductor"``
-        calls lower one at a time. The make_fx capture phase and the ``backend="eager"``
-        path are NOT serialized.
+        THREADING: capture temporarily clears the example tensors' ``.grad`` and swaps
+        the example module's parameters in place, so two captures sharing a model would
+        corrupt each other. Capture is therefore serialized by one process-wide reentrant
+        lock, which also serializes captures of disjoint models; the inductor lowering
+        step has its own compiler lock. The lock orders precompile calls only: do not use
+        the example model from another thread while precompile runs. The capture lock is
+        held across ``fn`` itself, so an ``fn`` that blocks waiting on another thread's
+        precompile deadlocks.
+
+        Capture restores the generator state it consumed, and only that: a graph
+        containing no op that can draw leaves the generators untouched even if a
+        concurrent thread advanced them. Every op tagged ``nondeterministic_seeded``
+        counts as a draw on its output's device, even one configured not to draw, and an
+        op that is not an aten op (a custom op, a higher-order op) could draw from any
+        generator, so every saved one is restored. A draw through an explicit
+        ``torch.Generator`` is left advanced with a warning, and no default generator is
+        rewound for it. When a restore does happen it rewinds any draw a concurrent
+        thread made while capture ran, so precompile random computations before starting
+        threads that share the default generator. The restore happens once the graph is
+        traced, so a capture rejected after that still restores; one that fails
+        mid-trace has no graph to attribute draws to and restores nothing. The CPU
+        generator is always saved; of the current accelerator (CUDA, XPU, MPS, ...) only
+        an already-initialized current device and the devices reachable from the
+        arguments are, and a draw on any other device warns and is left as-is.
 
         ``backend`` selects how the captured graph is realized:
 
