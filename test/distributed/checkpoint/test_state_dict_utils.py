@@ -24,7 +24,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorContinuousTestBase,
+    DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -35,7 +35,6 @@ class TestStateDictUtils(DTensorTestBase):
         acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
     )
 
-   
     world_size = min(4, torch.accelerator.device_count())
 
     @with_comms

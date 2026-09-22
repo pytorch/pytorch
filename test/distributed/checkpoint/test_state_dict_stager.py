@@ -953,14 +953,15 @@ class TestReplicationStager(DTensorContinuousTestBase):
     Test suite for _ReplicationStager functionality.
     Tests replication of state_dict across training ranks using CPU tensors only.
     """
+
     world_size = NUM_DEVICES
 
     @classmethod
     def backend_str(cls) -> str:
-        if self.device_type == "cpu":
+        if device_type == "cpu":
             return "gloo"
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
-        return f"cpu:gloo,{self.device_type}:{curr_backend}"
+        curr_backend = dist.get_default_backend_for_device(device_type)
+        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """
