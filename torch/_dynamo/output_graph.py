@@ -2604,7 +2604,7 @@ class OutputGraph(OutputGraphCommon):
                 **kwargs,
             },
         )
-        self.package.bypass_current_compile(reason)
+        self.package.bypass_current_compile()
         self.package = None
 
     def get_graph_sizes_structured(self) -> dict[str, list[int | str]]:
