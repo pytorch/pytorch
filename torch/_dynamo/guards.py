@@ -3380,8 +3380,10 @@ class GuardBuilder(GuardBuilderBase):
 
         code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())}")
-        # The keys are snapshotted and compared as a list by value at run time.
-        self._compared_by_value(value)
+        # The keys, not the values: the leaf snapshots them and compares the
+        # list by value at run time.
+        for key in value:
+            self._compared_by_value(key)
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_mapping_keys_guard(
             value, code, guard.user_stack
@@ -4425,8 +4427,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(value, (dict, types.MappingProxyType)):
                 # Keys too: missing_values prunes hashable objects (a frozen
                 # dataclass), so a key can be one or hold one. A mappingproxy
-                # (MAPPING_KEYS_CHECK) is read the same way and its reducer
-                # pickles each key on its own.
+                # reached as a field is compared with == like a dict, and its
+                # reducer pickles each key on its own.
                 stack.extend(value)
                 stack.extend(value.values())
             elif isinstance(value, (list, tuple, set, frozenset, dict_keys)):
@@ -4590,7 +4592,7 @@ class GuardsStatePickler(FunctionPicklerBase):
     # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
     # records those tuples in value_guarded_containers, which the pickler takes
     # as a required argument. A non-const dict key, a *_CONTAINS comparand and
-    # a MAPPING_KEYS_CHECK proxy are recorded there too (_compared_by_value):
+    # a MAPPING_KEYS_CHECK key are recorded there too (_compared_by_value):
     # the key managers and those guards bake them and compare by value at run
     # time, and that comparison reads every field, so the protection extends
     # through the key's instance dict. Two known limits: a slotted key's slot
