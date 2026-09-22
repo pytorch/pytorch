@@ -662,6 +662,54 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
+    @patch.object(torch._dynamo.config, "use_recursive_dict_tags_for_guards", True)
+    def test_dict_tag_fast_path_tracks_current_device_under_coor(self):
+        # The recursive-dict-tag fast path snapshots tensor metadata itself, and an
+        # unchanged tag lets it answer without running the TENSOR_MATCH leaf. That
+        # snapshot has to record the relative device the leaf uses; pinning the
+        # compiling rank's index there makes the fast path accept a parameter left
+        # behind on another device, which the leaf rejects. Busting the tag (without
+        # changing contents) forces the leaf to run, which is the control.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.randn(4, device="cuda:0"))
+
+            def forward(self, x):
+                return x + self.p
+
+        mod = Mod()
+
+        def f(x):
+            return mod(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.randn(4, device="cuda:0"))
+
+        root = _debug_get_cache_entry_list(f)[0].guard_manager
+        with torch.cuda.device(0):
+            self.assertTrue(
+                root.check({"x": torch.randn(4, device="cuda:0"), "mod": mod})
+            )
+
+        with torch.cuda.device(1):
+            scope = {"x": torch.randn(4, device="cuda:1"), "mod": mod}
+            self.assertFalse(
+                root.check(scope),
+                "the dict-tag fast path accepted a parameter that is no longer on "
+                "the current device",
+            )
+            # Invalidate the tag without changing contents, so the leaf guards run.
+            mod._coor_tag_bust = 1
+            del mod._coor_tag_bust
+            self.assertFalse(root.check(scope))
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_cloned_tensor_guard_tracks_current_device_under_coor(self):
         from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 
@@ -1235,39 +1283,54 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_device_is_usable_as_a_dict_key_under_coor(self):
-        # Two reads of the current device are the same device, so they are one key.
-        # Equality already says so; hashing has to agree or the keys land in
-        # different buckets and never get compared. Sourceless tensors take the
-        # identity-hash fallback and silently produce two keys; a sourced one
-        # graph-breaks instead, so cover both.
+    def test_device_as_dict_key_is_an_error_under_coor(self):
+        # Hashing the current device cannot be made correct. Equality reports it
+        # equal to an explicit cuda:N, so any trace-time hash of the indexless
+        # device puts equal keys in different buckets --
+        # len({x.device: 1, torch.device("cuda:0"): 2}) would be 1 eagerly and 2
+        # compiled. Keying on a device is outside what compile_on_one_rank can
+        # express, so it raises. Deliberately not a graph break: that would drop
+        # the frame back to eager, which is what the feature is there to avoid.
+        from torch._dynamo.exc import CompileOnOneRankUnsupported
         from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
         def sourceless():
             x = torch.randn(4, device="cuda")
             y = torch.randn(4, device="cuda")
-            return len({x.device: 1, y.device: 2}), len(
-                _group_tensors_by_device_and_dtype([[x, y]])
-            )
+            return len({x.device: 1, y.device: 2})
 
         def sourced(x, y):
-            return len({x.device: 1, y.device: 2}), len(
-                _group_tensors_by_device_and_dtype([[x, y]])
-            )
+            return len({x.device: 1, y.device: 2})
 
-        torch._dynamo.reset()
-        self.assertEqual(
-            torch.compile(sourceless, backend="eager", fullgraph=True)(),
-            (1, 1),
-        )
+        def mixed(x):
+            return len({x.device: 1, torch.device("cuda:0"): 2})
 
-        torch._dynamo.reset()
+        def grouped(x, y):
+            return len(_group_tensors_by_device_and_dtype([[x, y]]))
+
         x = torch.randn(4, device="cuda")
         y = torch.randn(4, device="cuda")
-        self.assertEqual(
-            torch.compile(sourced, backend="eager", fullgraph=True)(x, y),
-            (1, 1),
+        cases = (
+            (sourceless, ()),
+            (sourced, (x, y)),
+            (mixed, (x,)),
+            (grouped, (x, y)),
         )
+        # Raises whether or not graph breaks are allowed -- there is no fallback.
+        for fullgraph in (True, False):
+            for fn, args in cases:
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    CompileOnOneRankUnsupported, "hash a rank-relative device"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=fullgraph)(*args)
+
+        # Without compile_on_one_rank the device is an ordinary constant again.
+        with compiler_config.patch(compile_on_one_rank=False):
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(mixed, backend="eager", fullgraph=True)(x), mixed(x)
+            )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -1678,13 +1741,19 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # an exact device guard, which would trade a wrong answer for a per-rank
         # artifact and give up what CooR is for.
         from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch._dynamo.testing import CompileCounter
 
         def f(x):
             y = x + 1 if origin == "intermediate" else x
             return y + y.get_device()
 
         torch._dynamo.reset()
-        compiled = torch.compile(f, backend="eager")
+        # fullgraph, and count frames rather than only f's own cache entries: a
+        # graph-breaking implementation compiles resume functions under their own
+        # code objects, which _debug_get_cache_entry_list(f) does not see, so the
+        # cache-entry assertion alone passes for an implementation that breaks.
+        cnt = CompileCounter()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
         with torch.cuda.device(0):
             compiled(torch.zeros(1, device="cuda:0"))
 
@@ -1696,12 +1765,13 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 "get_device() folded the tracing rank's index, so rank 1 was told "
                 "it is on cuda:0",
             )
-        self.assertLessEqual(
-            len(_debug_get_cache_entry_list(f)),
+        self.assertEqual(
+            cnt.frame_count,
             1,
-            "the traced frame must stay rank-portable; a second cache entry means a "
+            "the traced frame must stay rank-portable; a second compile means a "
             "device guard forced a per-rank recompile",
         )
+        self.assertLessEqual(len(_debug_get_cache_entry_list(f)), 1)
 
 
 instantiate_parametrized_tests(TestCompileOnOneRankDeviceAsParameter)
