@@ -213,11 +213,13 @@ class TestFullyShardConversion(TestCase):
         self.assertIsNotNone(model.weight.grad.unreduced)
         self.assertEqual(model.weight.grad.unreduced.placements, (Partial("avg"),))
         storage_size = param.unsharded_param.untyped_storage().nbytes()
-        pending_spec = param._pending_grad_spec
+        pending_component = model.weight.grad.unreduced
+        pending_spec = pending_component._spec
         self._assert_conversion_requires_clear(model, torch.bfloat16)
         self.assertTrue(group.is_unsharded)
         self.assertEqual(param.unsharded_param.untyped_storage().nbytes(), storage_size)
-        self.assertIs(param._pending_grad_spec, pending_spec)
+        self.assertIs(model.weight.grad.unreduced, pending_component)
+        self.assertIs(model.weight.grad.unreduced._spec, pending_spec)
 
         model.zero_grad(set_to_none=True)
         model.to(torch.bfloat16)

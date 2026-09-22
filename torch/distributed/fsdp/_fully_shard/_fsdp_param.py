@@ -243,12 +243,10 @@ class FSDPParam:
         )
         self.grad_offload_event: torch.Event | None = None
         self._grad_is_partial = False
-        self._pending_gradient: FSDPGrad | None = None
         self._partial_grad: DTensor | None = None
         self._grad_owner_hook: RemovableHandle | None = None
         self._pending_grad_reduce_op = "avg"
         self._pending_grad_divide_factor: float | None = None
-        self._pending_grad_spec: DTensorSpec | None = None
         self._pending_unsharded_grad_spec: DTensorSpec | None = None
         self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
         if self.post_forward_mesh_info:
@@ -1159,7 +1157,6 @@ class FSDPParam:
         pending = current if isinstance(current, FSDPGrad) else None
         if self._grad_is_partial and pending is None:
             self._partial_grad = None
-            self._pending_gradient = None
             self._grad_is_partial = False
             if current is not None:
                 current = self._reduced_replacement(current)
@@ -1217,16 +1214,17 @@ class FSDPParam:
             if unreduced is None:
                 unreduced = new_grad
             else:
-                self._pending_grad_spec = unreduced._spec
-                new_grad = self._normalize_pending_grad(new_grad)
+                new_grad = self._normalize_pending_grad(new_grad, unreduced._spec)
                 unreduced._local_tensor.add_(new_grad._local_tensor)
             if leaf is None:
                 raise AssertionError("Expected the autograd gradient owner")
+            # Transfer ownership to the public components. Leaving an alias on
+            # the leaf would make clearing/replacement ambiguous with a fresh
+            # gradient assigned by pipeline backward after the FSDP callback.
             leaf.grad = None
         if unreduced is None and partial is None:
             self.sharded_param.grad = reduced
             self._grad_is_partial = False
-            self._pending_gradient = None
             if reduced is not None:
                 self._setattr_on_modules(self.sharded_param)
             return
@@ -1250,18 +1248,28 @@ class FSDPParam:
             owner_spec=self._sharding_spec,
             owner_device=self.sharded_param.device,
         )
-        public = FSDPGrad(reduced, unreduced, partial, spec, materialize)
+        if (
+            pending is not None
+            and pending.reduced is reduced
+            and pending.unreduced is unreduced
+            and pending.partial is partial
+            and pending.sharded_spec == spec
+            and isinstance(previous := pending._materialize_fn, functools.partial)
+            and previous.func == materialize.func
+            and previous.args == materialize.args
+            and previous.keywords == materialize.keywords
+        ):
+            public = pending
+        else:
+            public = FSDPGrad(reduced, unreduced, partial, spec, materialize)
         self.sharded_param.grad = public
-        self._pending_gradient = public
-        self._pending_grad_spec = unreduced._spec if unreduced is not None else None
         self._grad_is_partial = True
         self._partial_grad = partial
         self._setattr_on_modules(self.sharded_param)
 
-    def _normalize_pending_grad(self, grad: DTensor) -> DTensor:
-        target_spec = self._pending_grad_spec
-        if target_spec is None:
-            raise AssertionError("Expected a saved pending gradient spec")
+    def _normalize_pending_grad(
+        self, grad: DTensor, target_spec: DTensorSpec
+    ) -> DTensor:
         source_spec = grad._spec
         if source_spec.mesh != target_spec.mesh:
             raise ValueError(
@@ -1340,8 +1348,6 @@ class FSDPParam:
                 reduced = self._reduced_replacement(public)
         self.sharded_param.grad = reduced
         self._grad_is_partial = False
-        self._pending_gradient = None
-        self._pending_grad_spec = None
         self._pending_unsharded_grad_spec = None
         if self.sharded_state == ShardedState.UNSHARDED:
             self._setattr_on_modules(self._unsharded_param)

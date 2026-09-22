@@ -573,7 +573,6 @@ class FSDPParamGroup:
             if leaf is not None:
                 leaf.grad = None
             fsdp_param._partial_grad = None
-            fsdp_param._pending_gradient = None
             fsdp_param._grad_is_partial = False
         self._post_forward_indices.clear()
         self._training_state = TrainingState.IDLE
@@ -1045,8 +1044,6 @@ class FSDPParamGroup:
             leaf = getattr(param, "_unsharded_param", None)
             if param._grad_is_partial and param.sharded_param.grad is None:
                 param._partial_grad = None
-                param._pending_gradient = None
-                param._pending_grad_spec = None
                 param._pending_unsharded_grad_spec = None
                 param._grad_is_partial = False
             if (

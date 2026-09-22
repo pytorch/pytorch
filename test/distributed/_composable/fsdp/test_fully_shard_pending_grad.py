@@ -143,6 +143,187 @@ class TestFullyShardPendingGrad(FSDPTest):
         self.assertEqual(actual, torch.full_like(actual, 3))
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("reshard_after_backward", [False, True])
+    def test_native_grad_storage_across_microbatches(
+        self, device, reshard_after_backward
+    ):
+        device = torch.device(device).type
+        model = nn.Linear(1, 2, bias=False, device=device)
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device, (self.world_size,)),
+            reshard_after_forward=False,
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        model.set_requires_gradient_sync(False)
+        model.set_reshard_after_backward(reshard_after_backward)
+        accumulated = 0
+        storage_owner = None
+        for value in (1, 2, 4):
+            model(
+                torch.full((1, 1), value, device=device, dtype=torch.bfloat16)
+            ).sum().backward()
+            accumulated += value
+            grad = model.weight.grad
+            self.assertIsInstance(grad, FSDPGrad)
+            local = grad.unreduced.to_local()
+            self.assertEqual(local.dtype, torch.bfloat16)
+            if storage_owner is None:
+                storage_owner = local
+            self.assertEqual(local.data_ptr(), storage_owner.data_ptr())
+            self.assertEqual(local, torch.full_like(local, accumulated))
+
+            # Repeated exposure of the same contribution must not add it again.
+            with torch.no_grad():
+                for _ in range(2):
+                    model(torch.ones(1, 1, device=device, dtype=torch.bfloat16))
+                    model.unshard()
+                    model.reshard()
+            local = model.weight.grad.unreduced.to_local()
+            self.assertEqual(local.data_ptr(), storage_owner.data_ptr())
+            self.assertEqual(local, torch.full_like(local, accumulated))
+
+        model.synchronize_gradients()
+        actual = model.weight.grad.full_tensor()
+        self.assertEqual(actual, torch.full_like(actual, accumulated))
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("reduce_dtype", [torch.bfloat16, torch.float32])
+    def test_pipeline_weight_backward_preserves_native_grad_storage(
+        self, device, reduce_dtype
+    ):
+        from torch.distributed.pipelining._backward import (
+            stage_backward_input,
+            stage_backward_weight,
+        )
+
+        device = torch.device(device).type
+        model = nn.Linear(1, 2, bias=False, device=device)
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device, (self.world_size,)),
+            reshard_after_forward=False,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=reduce_dtype
+            ),
+        )
+        model.set_reshard_after_backward(False)
+        model(
+            torch.full((1, 1), 8.0, device=device, dtype=torch.bfloat16)
+        ).sum().backward()
+        model.set_requires_gradient_sync(False)
+        group = model._get_fsdp_state()._fsdp_param_groups[0]
+        fsdp_param = group.fsdp_params[0]
+        accumulated = 0
+        storage_owner = None
+        for value in (1, 2, 4):
+            inp = torch.full(
+                (1, 1), value, device=device, dtype=torch.bfloat16, requires_grad=True
+            )
+            loss = model(inp).sum()
+            native_weight = fsdp_param.unsharded_param
+            _, param_groups = stage_backward_input(
+                [loss], None, [inp], iter((native_weight,))
+            )
+            stage_backward_weight(iter((native_weight,)), param_groups)
+            # Pipeline weight backward assigns/adds dW after autograd returns.
+            # Its FSDP reduction boundary runs post_backward separately.
+            group.post_backward()
+            group.post_backward()
+            accumulated += value
+            grad = model.weight.grad
+            self.assertIsInstance(grad, FSDPGrad)
+            local = grad.unreduced.to_local()
+            self.assertEqual(local.dtype, reduce_dtype)
+            if storage_owner is None:
+                storage_owner = local
+            self.assertEqual(local.data_ptr(), storage_owner.data_ptr())
+            self.assertEqual(local, torch.full_like(local, accumulated))
+            self.assertEqual(grad.reduced.dtype, torch.float32)
+            self.assertEqual(
+                grad.reduced.to_local(), torch.full_like(grad.reduced.to_local(), 8)
+            )
+        model.synchronize_gradients()
+        actual = model.weight.grad.full_tensor()
+        self.assertEqual(actual, torch.full_like(actual, 8 + accumulated))
+
+    @skip_if_lt_x_gpu(2)
+    def test_republished_grad_uses_current_reduction_policy(self, device):
+        device = torch.device(device).type
+        mesh = init_device_mesh(device, (self.world_size,))
+        source = nn.Linear(1, 2, bias=False, device=device)
+        target = nn.Linear(1, 2, bias=False, device=device)
+        for model, factor in ((source, 2), (target, 4)):
+            fully_shard(model, mesh=mesh)
+            model.set_gradient_divide_factor(factor)
+            model.set_requires_gradient_sync(False)
+            model(torch.ones(1, 1, device=device)).sum().backward()
+
+        original = source.weight.grad
+        source_param = source._get_fsdp_state()._fsdp_param_groups[0].fsdp_params[0]
+        for _ in range(2):
+            source_param.publish_unsharded_grad()
+            self.assertIs(source.weight.grad, original)
+
+        borrowed = source.weight.grad.clone()
+        target.weight.grad = borrowed
+        target_param = target._get_fsdp_state()._fsdp_param_groups[0].fsdp_params[0]
+        target_param.publish_unsharded_grad()
+        preview = target.weight.grad.full_tensor()
+        self.assertEqual(preview, torch.full_like(preview, 0.5))
+        target.synchronize_gradients()
+        self.assertEqual(target.weight.grad.full_tensor(), preview)
+        saved = borrowed.full_tensor()
+        self.assertEqual(saved, torch.ones_like(saved))
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("clear_after_forward", [False, True])
+    def test_clearing_pending_grad_preserves_saved_aliases(
+        self, device, clear_after_forward
+    ):
+        device = torch.device(device).type
+        model = nn.Linear(1, 2, bias=False, device=device)
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device, (self.world_size,)),
+            reshard_after_forward=False,
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        model.set_reshard_after_backward(False)
+        for sync, value in ((True, 8), (False, 2)):
+            model.set_requires_gradient_sync(sync)
+            model(
+                torch.full((1, 1), value, device=device, dtype=torch.bfloat16)
+            ).sum().backward()
+        saved_grad = model.weight.grad
+        saved_reduced = saved_grad.reduced
+        saved_unreduced = saved_grad.unreduced
+        reduced_value = saved_reduced.to_local().clone()
+        unreduced_value = saved_unreduced.to_local().clone()
+
+        if not clear_after_forward:
+            model.weight.grad = None
+        output = model(torch.full((1, 1), 4.0, device=device, dtype=torch.bfloat16))
+        if clear_after_forward:
+            model.weight.grad = None
+        output.sum().backward()
+        grad = model.weight.grad
+        self.assertIsInstance(grad, FSDPGrad)
+        self.assertIsNot(grad, saved_grad)
+        self.assertIsNone(grad.reduced)
+        self.assertNotEqual(
+            grad.unreduced.to_local().data_ptr(),
+            saved_unreduced.to_local().data_ptr(),
+        )
+        model.synchronize_gradients()
+        actual = model.weight.grad.full_tensor()
+        self.assertEqual(actual, torch.full_like(actual, 4))
+        self.assertIs(saved_grad.reduced, saved_reduced)
+        self.assertIs(saved_grad.unreduced, saved_unreduced)
+        self.assertEqual(saved_reduced.to_local(), reduced_value)
+        self.assertEqual(saved_unreduced.to_local(), unreduced_value)
+
+    @skip_if_lt_x_gpu(2)
     @parametrize(
         "consumer", ["zero", "zero_none", "scale", "clip", "clip_foreach", "unscale"]
     )
@@ -781,6 +962,7 @@ class TestFullyShardPendingGrad(FSDPTest):
         model.set_reshard_after_backward(False)
         model.set_requires_gradient_sync(False)
         fsdp_param = model._get_fsdp_state()._fsdp_param_groups[0].fsdp_params[0]
+
         for step in range(2):
             inp = torch.ones(2, 4, device=device) * (step + 1)
             output = model(inp)
