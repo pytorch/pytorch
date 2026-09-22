@@ -21,6 +21,7 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
+    _BYPASS_REASON_MAX_CHARS,
     _collapse_device_types,
     CompilePackage,
     DiskDynamoStore,
@@ -318,6 +319,67 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.backend_ids, [backend_id])
         self.assertTrue(package.cache_entry().source_info.inlined_sources)
 
+    def test_bypass_reason_is_recorded_only_while_the_entry_is_bypassed(self):
+        def fn(x):
+            return x + 1
+
+        code = compiled_region_with_backend_id_for_package_test.__code__
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.bypass_current_compile("")
+        entry = package.cache_entry().codes[0]
+        self.assertTrue(entry.bypassed)
+        self.assertIsNone(entry.bypass_reason)
+        with package.code_context(fn.__code__):
+            package.bypass_current_compile("x" * 3000)
+        self.assertEqual(len(entry.bypass_reason), _BYPASS_REASON_MAX_CHARS)
+        self.assertTrue(entry.bypass_reason.endswith(" ... (truncated)"))
+        # A recorded variant clears the reason with the flag.
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(b"", code)
+        self.assertFalse(entry.bypassed)
+        self.assertIsNone(entry.bypass_reason)
+        # A bypass that leaves that variant installable records no reason.
+        with package.code_context(fn.__code__):
+            package.bypass_current_compile("config cannot pickle")
+        self.assertFalse(entry.bypassed)
+        self.assertIsNone(entry.bypass_reason)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_bypass_reason_names_the_guard_that_could_not_serialize(self):
+        def fn(x, cfg=UnpicklableConfig()):
+            return x.sin() * cfg.scale
+
+        x = torch.randn(3)
+        with self.assertLogs("torch._dynamo", level="WARNING"):
+            self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertTrue(entry.codes[0].bypassed)
+        self.assertIn("config cannot pickle", entry.codes[0].bypass_reason)
+        # The reason is for whoever reads the saved artifact: it survives the
+        # write, the read and a package loaded from the read entry.
+        PrecompileContext.save_to_dynamo_cache()
+        loaded = DynamoCache.load(fn)
+        self.assertIn("config cannot pickle", loaded.dynamo.codes[0].bypass_reason)
+        reloaded = CompilePackage(fn, loaded.dynamo)
+        self.assertIn(
+            "config cannot pickle", reloaded._codes[fn.__code__].bypass_reason
+        )
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_save_time_bypass_names_the_missing_backend(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
+        (backend_id,) = live.codes[0].backend_ids
+        PrecompileContext._backend_artifacts_by_key.clear()
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertIn(backend_id, saved[key].dynamo.codes[0].bypass_reason)
+        self.assertIsNone(live.codes[0].bypass_reason)
+
     @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_bypassed_guards_keep_the_frames_earlier_variant(self, config_cls):
@@ -391,6 +453,34 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), mod(x))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_saving_does_not_bypass_the_live_entry(self):
+        # from_cache_entry marks a code whose backend it cannot find as bypassed
+        # on the entry it is handed. Saving must work on a copy: the live entry
+        # keeps serving this process, and a save that came up short on a
+        # backend must not flip it to bypassed.
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
+        self.assertTrue(live.codes[0].backend_ids)
+        artifacts = dict(PrecompileContext._backend_artifacts_by_key)
+        PrecompileContext._backend_artifacts_by_key.clear()
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertIsNot(saved[key].dynamo, live)
+        self.assertTrue(saved[key].dynamo.codes[0].bypassed)
+        self.assertFalse(live.codes[0].bypassed)
+        # Backend artifacts are recorded lazily (a backward's at its first
+        # compile), so a later save can find what an earlier one missed. It
+        # must then write an installable entry, and with every backend present
+        # the code passes through as the live object.
+        PrecompileContext._backend_artifacts_by_key.update(artifacts)
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertFalse(saved[key].dynamo.codes[0].bypassed)
+        self.assertIs(saved[key].dynamo.codes[0], live.codes[0])
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
