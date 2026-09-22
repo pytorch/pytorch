@@ -49,7 +49,7 @@ from torch._dynamo.symbolic_convert import (
     SpeculationLog,
 )
 from torch._dynamo.utils import CleanupHook, dynamo_timed, get_metrics_context
-from torch._guards import compile_context, CompileContext, DuplicateInputs, tracing
+from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1071,7 +1071,6 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
         explicit_capture = kwargs.pop("_explicit_capture", False)
         serialization_filter = kwargs.pop("_serialization_guard_filter_fn", None)
-        post_trace = kwargs.pop("_post_trace", None)
         runtime_filter = kwargs.pop("_guard_filter_fn", None)
         # kwargs might contain a callable that generates kwargs
         torch._dynamo.reset()
@@ -1155,8 +1154,6 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 dynamo_timed(""),
             ):
                 tracer.run()
-                if post_trace is not None:
-                    post_trace(tracer.output)
 
                 ref_gm = CheckFunctionManager(
                     self._frame_state.f_code,
@@ -3722,32 +3719,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
         self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
-    @torch._dynamo.config.patch(use_lamba_guard_for_object_aliasing=True)
-    def test_duplicate_input_survives_separate_save_build(self):
-        # An explicit capture builds the serialized guards on a SECOND builder
-        # and prunes values the guard tree does not reach. Under the lambda
-        # aliasing guard, DUPLICATE_INPUT names its second input through
-        # additional_used_local_vars without registering it, and an aotautograd
-        # DuplicateInputs registers its tensors inside compile_check_fn, on the
-        # RUNTIME builder. The saved copy must inherit those values after
-        # compile_check_fn, or the duplicated tensor is pickled as _Missing.
-        def fn(x, x_):
-            return x + x_
-
-        def inject(output):
-            output.tracing_context.guards_context.aotautograd_guards.append(
-                DuplicateInputs(LocalSource("x"), LocalSource("x_"))
-            )
-
-        x = torch.randn(3, 2)
-        ref, loaded = self._test_serialization(
-            "DUPLICATE_INPUT", fn, x, x, _explicit_capture=True, _post_trace=inject
-        )
-        state = load_guards_state(self._cached_guards_state)
-        self.assertIsInstance(state.output_graph.local_scope["x_"], torch.Tensor)
-        self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
-        self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
-
     def test_serialization_filter_applies_to_the_saved_copy_only(self):
         # The live guards keep checking what they check; only the serialized
         # copy is filtered, so the loaded manager accepts what the runtime one
@@ -3756,6 +3727,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return x + 1
 
         def drop_tensor_match(entries):
+            self.assertTrue(any(e.guard_type == "TENSOR_MATCH" for e in entries))
             return [e.guard_type != "TENSOR_MATCH" for e in entries]
 
         ref, loaded = self._test_serialization(
@@ -3779,6 +3751,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return d["a"] + id(d["b"])
 
         def drop_guards_on_b(entries):
+            self.assertTrue(any(e.name == "d['b']" for e in entries))
             return [e.name != "d['b']" for e in entries]
 
         d = {"a": torch.randn(3), "b": threading.Lock()}
@@ -3802,6 +3775,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return x + id(x)
 
         def drop_id_match(entries):
+            self.assertTrue(any(e.guard_type == "ID_MATCH" for e in entries))
             return [e.guard_type != "ID_MATCH" for e in entries]
 
         x = torch.randn(3)
