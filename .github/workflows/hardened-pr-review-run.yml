@@ -492,7 +492,9 @@ jobs:
             sts.us-east-1.amazonaws.com:443
             bedrock-runtime.us-east-1.amazonaws.com:443
             api.anthropic.com:443
+            claude.ai:443
             downloads.claude.ai:443
+            release-assets.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -709,16 +711,6 @@ jobs:
           fi
           echo "findings path OK: ${FINDINGS_FILE}"
 
-      - name: Install Claude Code 2.1.280
-        if: steps.diff.outputs.too_large == 'false'
-        run: |
-          curl --fail --silent --show-error --location --retry 3 \
-            https://downloads.claude.ai/claude-code-releases/2.1.280/linux-x64/claude \
-            --output "$RUNNER_TEMP/claude-code-2.1.280"
-          echo "1e08503dbdf3c2cb0d706d32f3408277388d1c76ef108673e8fe42c1b322925b  $RUNNER_TEMP/claude-code-2.1.280" | sha256sum --check
-          chmod +x "$RUNNER_TEMP/claude-code-2.1.280"
-          "$RUNNER_TEMP/claude-code-2.1.280" --version
-
       - name: Run the PR review
         id: claude
         if: steps.diff.outputs.too_large == 'false'
@@ -737,9 +729,8 @@ jobs:
           PR_REVIEW_FILES_FILE: /tmp/pr-files.txt
           PR_REVIEW_SCRIPTS_DIR: ${{ github.workspace }}/trusted/scripts/pr_review
           PR_REVIEW_HOOK_LOG: ${{ runner.temp }}/pr-review-hooks.log
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
-          path_to_claude_code_executable: ${{ runner.temp }}/claude-code-2.1.280
           use_bedrock: "true"
           settings: |
             {
