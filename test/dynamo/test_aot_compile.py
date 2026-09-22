@@ -4977,14 +4977,13 @@ from user code:
         self.assertEqual(len(logs.output), 2, warned)
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
-        # A tree that THROWS out of C++ returns through
-        # RootGuardManager::check_nopybind_template's non-RAII restore and leaves
-        # TorchFunction disabled on this thread. TENSOR_MATCH on a strided nested
-        # tensor is one such tree: reading its strides fires a TORCH_CHECK.
-        # GuardManagerWrapper.check puts the state back before dispatch reads the
-        # throw as no answer, so the report is about the raise and not about what
-        # the raise left behind -- with the wrapper's restore removed, [0]'s line
-        # reads "GLOBAL_STATE changed: torch_function" and the advice is to add a
+        # RootGuardManager disables TorchFunction while its accessors run and
+        # restores it on scope exit, so a tree that THROWS out of C++ leaves the
+        # state as it found it. TENSOR_MATCH on a strided nested tensor is one
+        # such tree: reading its strides fires a TORCH_CHECK. Dispatch reads the
+        # throw as no answer, so the report is about the raise and not about
+        # what the raise left behind: were the state leaked, [0]'s line would
+        # read "GLOBAL_STATE changed: torch_function" and advise adding a
         # ModelInput, both of them artifacts of our own leak.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
@@ -5018,7 +5017,7 @@ from user code:
     def test_aot_compile_module_restores_torch_function_after_the_report_throws(self):
         # The test above throws out of check() in both passes, so the report
         # quotes the dispatch record and never calls check_verbose, the module
-        # path's only direct call of it, which has the same non-RAII exit. Here
+        # path's only direct call of it and the other scope-exit restore. Here
         # check() refuses cleanly and the tree throws only when the report
         # describes it: TENSOR_MATCH's verbose failure branch calls is_parameter,
         # which runs the Parameter metaclass's __instancecheck__, patched to
@@ -5052,8 +5051,8 @@ from user code:
 
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
         # load_compiled_function returns an AOTCompiledFunction, whose guard
-        # check evaluates the same kind of tree through the same wrapper, so a
-        # C++ throw would otherwise leave TorchFunction disabled on this thread
+        # check evaluates the same kind of tree, so a C++ throw without the
+        # scope-exit restore would leave TorchFunction disabled on this thread
         # and silently stop a __torch_function__ subclass from dispatching
         # afterwards. The throw propagates; only the state it leaves is pinned.
         self._hide_leaked_dynamo_globals()

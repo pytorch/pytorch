@@ -4,6 +4,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -4391,13 +4392,18 @@ class RootGuardManager : public GuardManager {
     // Dynamo should only be adding guards on values without
     // torch function at this point, because if there
     // was a torch function, we should've traced through it
+    // Restored by scope exit so a C++ throw out of an accessor (a TORCH_CHECK
+    // in TENSOR_MATCH on a nested tensor, say) cannot leave the calling thread
+    // ALL_DISABLED.
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    auto restore_torch_function = c10::make_scope_exit([old_state] {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    });
 
     if (!GuardManager::check_accessors_nopybind(value)) {
-      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -4405,13 +4411,11 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
 
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -4454,16 +4458,19 @@ class RootGuardManager : public GuardManager {
       return debug_info_leaf;
     }
 
+    // Same scope-exit restore as check_nopybind_template above.
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    auto restore_torch_function = c10::make_scope_exit([old_state] {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    });
     const GuardDebugInfo& debug_info_accessors =
         GuardManager::check_accessors_verbose_nopybind(
             value, num_guards_executed);
 
     if (!debug_info_accessors.result) {
-      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return debug_info_accessors;
     }
@@ -4474,7 +4481,6 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
-        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false,
@@ -4483,7 +4489,6 @@ class RootGuardManager : public GuardManager {
             tmp_debug_info.user_stack);
       }
     }
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
