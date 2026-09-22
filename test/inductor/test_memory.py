@@ -1,15 +1,18 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
 from torch._C import FileCheck
 from torch._dynamo.utils import same
-from torch._inductor import config, memory
+from torch._inductor import config, ir, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -19,6 +22,120 @@ try:
     TRITON_AVAILABLE = True
 except ImportError:
     TRITON_AVAILABLE = False
+
+
+class TestMemoryPlanningAliases(TestCase):
+    def test_non_owning_layout_uses_owner_storage_and_lifetime(self):
+        class SizeVars:
+            @staticmethod
+            def optimization_hint(value, fallback=0):
+                return value
+
+        class Node:
+            def __init__(self, numel, layout):
+                self.numel = numel
+                self.layout = layout
+
+            def get_numel(self):
+                return self.numel
+
+            def get_dtype(self):
+                return torch.float32
+
+        class Buffer:
+            def __init__(self, name, numel, layout, aliases=()):
+                self.name = name
+                self.node = Node(numel, layout)
+                self.aliases = aliases
+
+            def get_name(self):
+                return self.name
+
+            def get_aliases(self):
+                return self.aliases
+
+        class Consumer:
+            unmet_dependencies = [
+                SimpleNamespace(name="slice2"),
+                SimpleNamespace(name="input_view"),
+            ]
+
+            @staticmethod
+            def get_outputs():
+                return []
+
+        class Producer:
+            def __init__(self, output):
+                self.output = output
+
+            def get_outputs(self):
+                return [self.output]
+
+        graph = SimpleNamespace(
+            sizevars=SizeVars(), scheduler=SimpleNamespace(mutation_real_name={})
+        )
+        consumer = Consumer()
+        owner = Buffer("owner", 1000, object())
+        alias1 = Buffer(
+            "slice1", 400, object.__new__(ir.NonOwningLayout), aliases=["owner"]
+        )
+        alias2 = Buffer(
+            "slice2", 100, object.__new__(ir.NonOwningLayout), aliases=["slice1"]
+        )
+        input_view = Buffer(
+            "input_view",
+            100,
+            object.__new__(ir.NonOwningLayout),
+            aliases=["graph_input"],
+        )
+        buffers = {
+            "owner": owner,
+            "slice1": alias1,
+            "slice2": alias2,
+            "input_view": input_view,
+        }
+        with V.set_graph_handler(graph):
+            memory.assign_memory_planning_info_for_scheduler_buffers(
+                [consumer], buffers
+            )
+
+        self.assertEqual(
+            (owner.mpi_buffer.size_alloc, owner.mpi_buffer.size_free), (4000, 4000)
+        )
+        self.assertEqual(
+            (alias1.mpi_buffer.size_alloc, alias1.mpi_buffer.size_free), (0, 0)
+        )
+        self.assertEqual(
+            (alias2.mpi_buffer.size_alloc, alias2.mpi_buffer.size_free), (0, 0)
+        )
+        self.assertEqual(
+            (input_view.mpi_buffer.size_alloc, input_view.mpi_buffer.size_free),
+            (400, 400),
+        )
+        self.assertEqual(owner.mpi_buffer.succ_nodes, {consumer})
+        self.assertEqual(input_view.mpi_buffer.succ_nodes, {consumer})
+        self.assertEqual(
+            memory._normalize_graph_outputs(OrderedSet(["slice2"]), buffers),
+            OrderedSet(["slice2", "owner"]),
+        )
+
+        # Direct timeline/peak-estimator callers must also retain the ultimate
+        # owner when only a transitive alias is a graph output.
+        graph_outputs = OrderedSet(["slice2"])
+        timeline_nodes = [
+            Producer(owner),
+            Producer(alias1),
+            Producer(alias2),
+            consumer,
+        ]
+        timeline, _, _ = memory.compute_memory_timeline(
+            timeline_nodes, {}, graph_outputs
+        )
+        self.assertEqual(graph_outputs, OrderedSet(["slice2", "owner"]))
+        owner_info = next(info for info in timeline if info.buffer is owner)
+        self.assertEqual(owner_info.end_step, -1)
+        peak, _ = memory.estimate_peak_memory(timeline_nodes, {}, graph_outputs)
+        self.assertEqual(peak, 4000)
 
 
 class Foo(torch.nn.Module):
