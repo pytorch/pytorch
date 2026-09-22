@@ -1051,8 +1051,10 @@ class TestSparse(TestSparseBase):
         b = a.to_sparse().to_dense()
         self.assertEqual(a, b)
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183891")
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/108667")
+    @skipIfTorchDynamo(
+        "https://github.com/pytorch/pytorch/issues/183891; "
+        "https://github.com/pytorch/pytorch/issues/108667"
+    )
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_scalar(self, device, dtype):
@@ -1388,35 +1390,37 @@ class TestSparse(TestSparseBase):
         self.assertEqual(None, x1.grad)
 
     @coalescedonoff
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
     @dtypes(torch.double, torch.cdouble)
-    def test_Sparse_to_Sparse_copy_multi_gpu(self, device, dtype, coalesced):
-        # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
+    def test_Sparse_to_Sparse_copy_multi_device(self, devices, dtype, coalesced):
+        # This is for testing torch.copy_(SparseTensor, SparseTensor) across accelerator devices
+        device, secondary_device = devices
         sparse_dims = 3
         nnz = 10
         sizes = [2, 3, 4, 5]  # hybrid sparse
         x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
         x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes, dtype, device, coalesced)
-        x1 = x1.to('cuda:0')
+        x1 = x1.to(device)
 
         def test_cross_device(x1, x2):
             x1_device = x1.device
             x1.copy_(x2)
-            self.assertEqual(x2.to('cuda:0').to_dense(), x1.to_dense())
+            self.assertEqual(x2.to(device).to_dense(), x1.to_dense())
             self.assertEqual(x1_device, x1.device)
 
-        test_cross_device(x1, x2.to('cuda:1'))  # test across gpu devices
-        test_cross_device(x1, x2.to('cpu'))  # test between cpu and gpu
+        test_cross_device(x1, x2.to(secondary_device))  # test across accelerator devices
+        test_cross_device(x1, x2.to('cpu'))  # test between accelerator and CPU
 
         # test autograd
-        x2 = x2.to('cuda:1')
+        x2 = x2.to(secondary_device)
         x2.requires_grad_(True)
         x1.copy_(x2)
         y = x1 * 2
-        x2_clone = x2.clone().to('cuda:0')
+        x2_clone = x2.clone().to(device)
         y.backward(x2_clone)
         expected_grad = x2_clone * 2
-        self.assertEqual(expected_grad.to_dense(), x2.grad.to('cuda:0').to_dense())
+        self.assertEqual(expected_grad.to_dense(), x2.grad.to(device).to_dense())
         self.assertEqual(None, x1.grad)
 
     @onlyAccelerator
@@ -3324,6 +3328,23 @@ class TestSparse(TestSparseBase):
             torch.sparse_coo_tensor(indices, values, sizes)
 
     @onlyAccelerator
+    @dtypes(torch.float16, torch.float32, torch.float64, torch.cfloat, torch.cdouble, torch.int64)
+    def test_factory_type_inference(self, device, dtype):
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=dtype))
+        self.assertEqual(dtype, t.dtype)
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1]))
+        self.assertEqual(torch.int64, t.dtype)
+
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.HalfTensor(1, 0))
+        self.assertEqual(torch.float16, t.dtype)
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.FloatTensor(1, 0))
+        self.assertEqual(torch.float32, t.dtype)
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.DoubleTensor(1, 0))
+        self.assertEqual(torch.float64, t.dtype)
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.LongTensor(1, 0))
+        self.assertEqual(torch.int64, t.dtype)
+
+    @onlyAccelerator
     def test_factory_device_type_inference(self, device):
         cpu_device = ('cpu', device)
         cpu_device_none = cpu_device + (None,)
@@ -3360,12 +3381,11 @@ class TestSparse(TestSparseBase):
         self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device=device))
         self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device=device))
 
-        if torch.cuda.is_available():
-            x = torch.sparse_coo_tensor(i, v, size, device=device)
-            self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
-            self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cpu'))
-            self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cpu'))
-            self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
+        x = torch.sparse_coo_tensor(i, v, size, device=device)
+        self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cpu'))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cpu'))
+        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
 
     def test_legacy_new(self, device):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
@@ -3379,11 +3399,9 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.sparse_coo, s.new(torch.Size([2, 3])).layout)
         self.assertRaises(TypeError, lambda: s.new([6]))
 
-    @onlyAccelerator
     @skipIfMPS
     def test_dtypes(self, device):
         all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
-        do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device(device))
 
     def _test_empty_full(self, device, dtype, requires_grad):
@@ -3415,7 +3433,6 @@ class TestSparse(TestSparseBase):
         check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                     dtype=int64_dtype, requires_grad=False)
 
-    @onlyAccelerator
     @skipIfMPS
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @parametrize('requires_grad', (True, False))
