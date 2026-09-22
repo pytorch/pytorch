@@ -3019,7 +3019,7 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
         # Unlike the other blockwise tests, this one also runs on CPU, which takes every recipe.
         if "cuda" in device:
-            if recipe == "nvfp4" and torch.version.hip:
+            if recipe == "nvfp4" and torch.version.rocm:
                 raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
             # TODO: the SM*OrLater checks are meaningless on ROCm; fix them in common_cuda.py
             if recipe == "mxfp4" and not torch.version.rocm and SM120OrLater:
@@ -3320,7 +3320,7 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("recipe", ["nvfp4", "mxfp4"])
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
-        if recipe == "nvfp4" and torch.version.hip:
+        if recipe == "nvfp4" and torch.version.rocm:
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         # TODO: the SM*OrLater checks are meaningless on ROCm; fix them in common_cuda.py
         if recipe == "mxfp4" and not torch.version.rocm and SM120OrLater:
