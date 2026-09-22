@@ -319,7 +319,6 @@ class TritonBundler:
                     for compile_result in result.kernel.compile_results:
                         kernel = compile_result.kernel
                         has_retained_cubin = kernel.cubin_raw is not None
-                        kernel._cubin_raw_authoritative = has_retained_cubin
                         kernel._use_stable_cubin_path = True
                         if has_retained_cubin:
                             compile_result.set_cubin_path()
@@ -344,23 +343,16 @@ class TritonBundler:
                             force_recompile = True
                             break
 
-                        local_cubin = None
-                        try:
-                            compile_result.reload_cubin_path()
-                            kernel.retain_cubin_from_path()
-                            local_cubin = kernel.cubin_raw
-                        except MissingTritonKernelError:
-                            if bundled_cubin is None:
-                                raise
-
-                        # The serialized bundle is the graph's primary source.
-                        # A merely loadable local binary cannot authenticate the
-                        # graph's semantics, so never use it after bundle failure.
+                        # Prefer the serialized bundle without reading the
+                        # canonical cache file. Only a bundle that omits this
+                        # binary may adopt a stable local snapshot.
                         if bundled_cubin is not None:
                             kernel.cubin_raw = bundled_cubin
                             compile_result.set_cubin_path()
-                        elif local_cubin is not None:
-                            kernel.cubin_raw = local_cubin
+                            continue
+
+                        compile_result.reload_cubin_path()
+                        kernel.retain_cubin_from_path()
                 except MissingTritonKernelError:
                     log.warning(
                         "Failed to reload cubin file statically launchable autotuner %s",
