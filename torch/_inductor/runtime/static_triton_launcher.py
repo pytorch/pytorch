@@ -1,6 +1,8 @@
 import functools
 import inspect
+import logging
 import os
+import tempfile
 from functools import cached_property
 from typing import Any
 from typing_extensions import Unpack
@@ -8,6 +10,9 @@ from typing_extensions import Unpack
 from ..utils import is_rocm
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
+
+
+log = logging.getLogger(__name__)
 
 
 class MissingTritonKernelError(RuntimeError):
@@ -259,6 +264,9 @@ class StaticallyLaunchedTritonKernel:
         # single-process multi-device path is sequential in practice); concurrent
         # first-launch on two new devices would need external locking.
         self.device_agnostic: bool = False
+        self._cubin_raw_authoritative: bool = False
+        self._fallback_cubin_raw: bytes | None = None
+        self._use_stable_cubin_path: bool = False
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
         num_ctas = 1
@@ -303,13 +311,12 @@ class StaticallyLaunchedTritonKernel:
             return
         if self.cubin_path is None:
             raise MissingTritonKernelError("Triton kernel binary path is not set")
-        try:
-            with open(self.cubin_path, "rb") as file:
-                self.cubin_raw = file.read()
-        except OSError as error:
+        snapshot = _read_cubin_snapshot(self.cubin_path)
+        if snapshot is None:
             raise MissingTritonKernelError(
                 f"Triton kernel binary not readable at {self.cubin_path}"
-            ) from error
+            )
+        self.cubin_raw = snapshot[1]
 
     def _agnostic_cubin_path(self) -> str:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
@@ -322,75 +329,100 @@ class StaticallyLaunchedTritonKernel:
         return self.reload_cubin_from_raw(self.cubin_path)
 
     def _load_kernel_from_path(self, cubin_path: str, device: int):
-        attempted_snapshot = (
-            _read_cubin_snapshot(cubin_path) if self.device_agnostic else None
-        )
+        stable_load = getattr(self, "_use_stable_cubin_path", False)
+        temporary_load_path = None
+        load_path = cubin_path
         try:
-            loaded_kernel = self.C_impl._load_kernel(
-                cubin_path, self.name, self.shared, device
-            )
-        except RuntimeError as error:
-            invalid_image = _is_invalid_kernel_image_error(error)
-            missing_file_error = _is_missing_kernel_file_error(error)
-            path_missing = _cubin_stat_identity(cubin_path) is None
-            failed_snapshot = (
-                _read_cubin_snapshot(cubin_path)
-                if self.cubin_raw is not None and invalid_image and not path_missing
-                else None
-            )
-            should_restore = (
-                path_missing
-                or missing_file_error
-                or (
-                    invalid_image
-                    and (
-                        attempted_snapshot is None
-                        or attempted_snapshot[1] != self.cubin_raw
-                        or failed_snapshot is None
-                        or failed_snapshot[1] != self.cubin_raw
+            if stable_load:
+                if self.cubin_raw is None:
+                    raise MissingTritonKernelError(
+                        f"Triton kernel binary not found at {cubin_path}"
                     )
-                )
-            )
-            if self.cubin_raw is not None and should_restore:
-                # A cache artifact can disappear or be truncated after its path
-                # was validated. Restore the retained bytes and retry once.
+                suffix = os.path.splitext(cubin_path)[1]
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    prefix="torchinductor-static-",
+                    suffix=suffix,
+                    delete=False,
+                ) as file:
+                    temporary_load_path = file.name
+                    file.write(self.cubin_raw)
+                load_path = temporary_load_path
+            elif getattr(self, "_cubin_raw_authoritative", False):
                 self.reload_cubin_from_raw(cubin_path, force=True)
+
+            candidate_restored = False
+            while True:
                 try:
-                    return self.C_impl._load_kernel(
-                        cubin_path, self.name, self.shared, device
+                    loaded_kernel = self.C_impl._load_kernel(
+                        load_path, self.name, self.shared, device
                     )
-                except RuntimeError as retry_error:
-                    invalid_image = _is_invalid_kernel_image_error(retry_error)
-                    missing_file_error = _is_missing_kernel_file_error(retry_error)
-                    if (
-                        not os.path.exists(cubin_path)
-                        or missing_file_error
-                        or invalid_image
-                    ):
-                        if invalid_image:
-                            raise InvalidTritonKernelArtifactError(
-                                f"Triton kernel binary is unusable at {cubin_path}"
-                            ) from retry_error
-                        raise MissingTritonKernelError(
+                    break
+                except RuntimeError as error:
+                    invalid_image = _is_invalid_kernel_image_error(error)
+                    missing_file_error = _is_missing_kernel_file_error(error)
+                    path_missing = _cubin_stat_identity(load_path) is None
+                    if not (path_missing or missing_file_error or invalid_image):
+                        raise
+
+                    restore_current = self.cubin_raw is not None and (
+                        not candidate_restored
+                        and (not stable_load or not invalid_image)
+                    )
+                    if restore_current:
+                        # A cache artifact can disappear after materialization.
+                        # Restore the current candidate at most once.
+                        self.reload_cubin_from_raw(load_path, force=True)
+                        candidate_restored = True
+                        continue
+
+                    fallback_cubin = self._fallback_cubin_raw if invalid_image else None
+                    if fallback_cubin is not None:
+                        # The primary payload is exact but unusable. Try the
+                        # distinct, stable local snapshot exactly once.
+                        self.cubin_raw = fallback_cubin
+                        self._fallback_cubin_raw = None
+                        self._cubin_raw_authoritative = True
+                        self.reload_cubin_from_raw(load_path, force=True)
+                        candidate_restored = True
+                        continue
+
+                    if invalid_image:
+                        raise InvalidTritonKernelArtifactError(
                             f"Triton kernel binary is unusable at {cubin_path}"
-                        ) from retry_error
-                    raise
-            if invalid_image:
-                raise InvalidTritonKernelArtifactError(
-                    f"Triton kernel binary is unusable at {cubin_path}"
-                ) from error
-            if path_missing or missing_file_error:
-                raise MissingTritonKernelError(
-                    f"Triton kernel binary is unusable at {cubin_path}"
-                ) from error
-            raise
-        if self.device_agnostic and attempted_snapshot is not None:
-            # Prefer bytes that the native loader just proved valid. Recheck
-            # identity so an atomic replacement cannot become our recovery
-            # payload accidentally.
-            if _cubin_stat_identity(cubin_path) == attempted_snapshot[0]:
-                self.cubin_raw = attempted_snapshot[1]
-        return loaded_kernel
+                        ) from error
+                    raise MissingTritonKernelError(
+                        f"Triton kernel binary is unusable at {cubin_path}"
+                    ) from error
+
+            if stable_load:
+                # Publish only the payload that the native loader accepted.
+                try:
+                    self.reload_cubin_from_raw(cubin_path, force=True)
+                except OSError:
+                    # The private payload remains authoritative for this
+                    # launcher. Do not leak/mask an already loaded module when
+                    # the shared cache is read-only or concurrently removed.
+                    log.warning(
+                        "Failed to publish validated Triton kernel %s",
+                        cubin_path,
+                        exc_info=True,
+                    )
+            self._fallback_cubin_raw = None
+            self._cubin_raw_authoritative = self.device_agnostic
+            return loaded_kernel
+        finally:
+            if temporary_load_path is not None:
+                try:
+                    os.remove(temporary_load_path)
+                except OSError:
+                    # Cleanup must not hide a successfully created native module
+                    # (some platforms may retain a handle to the load path).
+                    log.warning(
+                        "Failed to remove temporary Triton kernel %s",
+                        temporary_load_path,
+                        exc_info=True,
+                    )
 
     def load_kernel(self, device: int) -> None:
         if self.device_agnostic:
@@ -416,6 +448,9 @@ class StaticallyLaunchedTritonKernel:
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
         self.cubin_raw = None
+        self._fallback_cubin_raw = None
+        self._cubin_raw_authoritative = False
+        self._use_stable_cubin_path = False
 
     def _current_device(self) -> int:
         raise NotImplementedError
@@ -734,6 +769,9 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.module = None
         self.cubin_path = None
         self.cubin_raw = None
+        self._fallback_cubin_raw = None
+        self._cubin_raw_authoritative = False
+        self._use_stable_cubin_path = False
 
     def _current_device(self) -> int:
         import torch

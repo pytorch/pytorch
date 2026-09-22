@@ -487,6 +487,10 @@ class AsyncCompile:
         is_backward = getattr(V.graph, "is_backward", False)
 
         def compile_kernel_in_parent(force_recompile: bool = False) -> CachingAutotuner:
+            # This callback always loads and precompiles the generated module in
+            # this process, even when the original cache miss used the process
+            # pool. Invalid-artifact recovery therefore scopes Triton's force
+            # flag in the parent; it does not submit _worker_compile_triton.
             def compile_kernel() -> CachingAutotuner:
                 fail = None
                 try:
