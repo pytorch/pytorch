@@ -37,7 +37,7 @@ def set_deterministic() -> None:
 def clean_memory() -> None:
     """Clean memory to avoid OOM."""
     gc.collect()
-    torch.cuda.empty_cache()
+    torch.accelerator.empty_cache()
 
 
 # We compare the numerical results before and after pre/post grad fx passes
