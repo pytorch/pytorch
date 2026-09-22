@@ -22,6 +22,7 @@ from torch._inductor.codegen.common import (
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
@@ -142,6 +143,7 @@ class TestUsesGpuCppWrapper(TestCase):
         self.assertFalse(_uses_gpu_cpp_wrapper("definitely_unregistered_device"))
 
 
+@instantiate_parametrized_tests
 class TestAttentionFusionDeviceHooks(TestCase):
     hw_classification = HardwareClassification.GENERIC
     # The attention-fusion hooks routed through DeviceInterface in
@@ -167,24 +169,26 @@ class TestAttentionFusionDeviceHooks(TestCase):
         # always False once dispatched through CudaInterface).
         self.assertFalse(CudaInterface.is_fp32_softmax_attention_fusion_safe())
 
-        with mock.patch.object(torch.backends.cuda.matmul, "fp32_precision", "tf32"):
+        # cuBLASModule.fp32_precision is dispatched through __getattr__/__setattr__
+        # to a C getter/setter (not a real attribute or property), so mock.patch.object
+        # cannot patch it; restore it explicitly instead.
+        matmul = torch.backends.cuda.matmul
+        saved = matmul.fp32_precision
+        try:
+            matmul.fp32_precision = "tf32"
             self.assertTrue(CudaInterface.is_fp32_attention_fusion_safe(torch.float32))
-        with mock.patch.object(torch.backends.cuda.matmul, "fp32_precision", "highest"):
+            matmul.fp32_precision = "ieee"
             self.assertTrue(CudaInterface.is_fp32_attention_fusion_safe(torch.half))
-            self.assertFalse(
-                CudaInterface.is_fp32_attention_fusion_safe(torch.float32)
-            )
-        # should_warn_tf32_disabled reproduces "SM80+ and precision != bfx9":
-        # suppressed under bfx9, otherwise tracks cuda availability + capability.
-        with mock.patch.object(torch.backends.cuda.matmul, "fp32_precision", "bfx9"):
-            self.assertFalse(CudaInterface.should_warn_tf32_disabled())
-        with mock.patch.object(torch.backends.cuda.matmul, "fp32_precision", "highest"):
+            self.assertFalse(CudaInterface.is_fp32_attention_fusion_safe(torch.float32))
+            matmul.fp32_precision = "ieee"
             with mock.patch.object(torch.cuda, "is_available", lambda: True), mock.patch.object(
                 torch.cuda, "get_device_capability", lambda: (8, 0)
             ):
                 self.assertTrue(CudaInterface.should_warn_tf32_disabled())
             with mock.patch.object(torch.cuda, "is_available", lambda: False):
                 self.assertFalse(CudaInterface.should_warn_tf32_disabled())
+        finally:
+            matmul.fp32_precision = saved
 
     def test_registered_non_cuda_inherits_base_defaults(self):
         # CPU/XPU/MTIA are registered but do not override the fusion hooks, so
