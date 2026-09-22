@@ -173,7 +173,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28_aarch64-builder:cpu-aarch64${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
-      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
+      DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cpu-aarch64"
     steps:
@@ -204,11 +204,6 @@ jobs:
           bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
-        with:
-          name: manywheel-py3_10-cpu-aarch64
-          if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cpu-aarch64/*
       - uses: actions/upload-artifact@v4.4.0
         with:
           name: manywheel-py3_11-cpu-aarch64
@@ -261,7 +256,7 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinuxaarch64-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
-      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
+      DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_0"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
@@ -293,11 +288,6 @@ jobs:
           bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
-        with:
-          name: manywheel-py3_10-cuda-aarch64-13_0
-          if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_0/*
       - uses: actions/upload-artifact@v4.4.0
         with:
           name: manywheel-py3_11-cuda-aarch64-13_0
@@ -350,10 +340,10 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinuxaarch64-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
-      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
+      DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_2"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -382,11 +372,6 @@ jobs:
           bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
-        with:
-          name: manywheel-py3_10-cuda-aarch64-13_2
-          if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_2/*
       - uses: actions/upload-artifact@v4.4.0
         with:
           name: manywheel-py3_11-cuda-aarch64-13_2
@@ -439,10 +424,10 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinuxaarch64-builder:cuda13.4${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
-      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
+      DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_4"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -471,11 +456,6 @@ jobs:
           bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
-        with:
-          name: manywheel-py3_10-cuda-aarch64-13_4
-          if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_4/*
       - uses: actions/upload-artifact@v4.4.0
         with:
           name: manywheel-py3_11-cuda-aarch64-13_4
@@ -521,14 +501,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu-aarch64"
-            docker_image: "manylinux2_28_aarch64-builder"
-            docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_10-cpu-aarch64"
-            runs_on: "l-arm64g3-16-62"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -613,14 +585,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cu130"
-            gpu_arch_version: "13.0-aarch64"
-            gpu_arch_type: "cuda-aarch64"
-            docker_image: "manylinuxaarch64-builder"
-            docker_image_tag_prefix: "cuda13.0"
-            build_name: "manywheel-py3_10-cuda-aarch64-13_0"
-            runs_on: "l-arm64g3-16-62"
           - desired_python: "3.11"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0-aarch64"
@@ -705,14 +669,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cu132"
-            gpu_arch_version: "13.2-aarch64"
-            gpu_arch_type: "cuda-aarch64"
-            docker_image: "manylinuxaarch64-builder"
-            docker_image_tag_prefix: "cuda13.2"
-            build_name: "manywheel-py3_10-cuda-aarch64-13_2"
-            runs_on: "l-arm64g3-16-62"
           - desired_python: "3.11"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2-aarch64"
@@ -797,14 +753,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cu134"
-            gpu_arch_version: "13.4-aarch64"
-            gpu_arch_type: "cuda-aarch64"
-            docker_image: "manylinuxaarch64-builder"
-            docker_image_tag_prefix: "cuda13.4"
-            build_name: "manywheel-py3_10-cuda-aarch64-13_4"
-            runs_on: "l-arm64g3-16-62"
           - desired_python: "3.11"
             desired_cuda: "cu134"
             gpu_arch_version: "13.4-aarch64"
@@ -892,13 +840,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu-aarch64"
-            docker_image: "manylinux2_28_aarch64-builder"
-            docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_10-cpu-aarch64"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -976,13 +917,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cu130"
-            gpu_arch_version: "13.0-aarch64"
-            gpu_arch_type: "cuda-aarch64"
-            docker_image: "manylinuxaarch64-builder"
-            docker_image_tag_prefix: "cuda13.0"
-            build_name: "manywheel-py3_10-cuda-aarch64-13_0"
           - desired_python: "3.11"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0-aarch64"
@@ -1060,13 +994,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cu132"
-            gpu_arch_version: "13.2-aarch64"
-            gpu_arch_type: "cuda-aarch64"
-            docker_image: "manylinuxaarch64-builder"
-            docker_image_tag_prefix: "cuda13.2"
-            build_name: "manywheel-py3_10-cuda-aarch64-13_2"
           - desired_python: "3.11"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2-aarch64"
@@ -1144,13 +1071,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cu134"
-            gpu_arch_version: "13.4-aarch64"
-            gpu_arch_type: "cuda-aarch64"
-            docker_image: "manylinuxaarch64-builder"
-            docker_image_tag_prefix: "cuda13.4"
-            build_name: "manywheel-py3_10-cuda-aarch64-13_4"
           - desired_python: "3.11"
             desired_cuda: "cu134"
             gpu_arch_version: "13.4-aarch64"
