@@ -72,7 +72,7 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_root_move_forward_input_to_device(self):
-        device = torch.device(device_type.type, 0)
+        device = torch.device(device_type.type, self.rank)
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
@@ -105,7 +105,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
-        device = torch.device(device_type.type, 0)
+        device = torch.device(device_type.type, self.rank)
         # Single Replicate group
         torch.manual_seed(42)
         model = MLP(3, device)
@@ -154,7 +154,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
-        device = torch.device(device_type.type, 0)
+        device = torch.device(device_type.type, self.rank)
         # Single Replicate group
         model = MLP(8, device)
         replicate(model)  # root only
@@ -368,7 +368,12 @@ class TestReplicate1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        if test_device_type not in ("cuda", "hpu", "xpu", "cpu"):
+        valid_device_types = ("cuda", "hpu", "xpu", "cpu")
+        if hasattr(torch._C, "_get_privateuse1_backend_name"):
+            backend_name = torch._C._get_privateuse1_backend_name()
+            if backend_name != "privateuseone":
+                valid_device_types = valid_device_types + (backend_name,)
+        if test_device_type not in valid_device_types:
             raise AssertionError(f"Unexpected device type: {test_device_type}")
         torch.manual_seed(42)
         vocab_size = 1024
@@ -407,13 +412,13 @@ class TestReplicate1DTrainingCore(FSDPTest):
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
-                int(delay_in_ms * get_cycles_per_ms())
+                int(delay_in_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_all_gather(*args, **kwargs)
 
         def delayed_reduce_scatter(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
-                int(delay_in_ms * get_cycles_per_ms())
+                int(delay_in_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -436,12 +441,12 @@ class TestReplicate1DTrainingCore(FSDPTest):
                     losses.append(_model(inp).sum())
                     if _model is model and delay_after_forward:
                         torch.get_device_module(device_type)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms())
+                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
                         )
                     losses[-1].backward()
                     if _model is model and delay_before_optim:
                         torch.get_device_module(device_type)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms())
+                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
                         )
 
                 for param in ref_model.parameters():
@@ -489,7 +494,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
 
         root_loss = model(inp).sum()
         root_loss.backward()
-        torch.get_device_module(device_type)._sleep(int(100 * get_cycles_per_ms()))
+        torch.get_device_module(device_type)._sleep(
+            int(100 * get_cycles_per_ms(device_type.type))
+        )
         optim.step()
         optim.zero_grad()
         nonroot_loss = model[0](inp).sum()
@@ -643,7 +650,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
             optim.step()
             # Sleep after the optimizer step to allow CPU to run ahead into the
             # next iteration's forward, exercising the post-optim stream sync
-            torch.get_device_module(device_type)._sleep(int(25 * get_cycles_per_ms()))
+            torch.get_device_module(device_type)._sleep(
+                int(25 * get_cycles_per_ms(device_type.type))
+            )
         for ref_loss, loss in zip(ref_losses, losses):
             self.assertEqual(ref_loss, loss)
 
