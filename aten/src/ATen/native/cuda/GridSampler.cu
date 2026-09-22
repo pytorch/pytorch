@@ -386,10 +386,16 @@ namespace {
   }
 
 // ROCm-specific 2D backward kernel for grid_sample
-// - The default kernel launches N*H*W threads and loops over C.
-// - On MI300X / MI325X that "the loop over C + 4 atomics per C" is the bottleneck.
-// - Here we launch N*C*H*W threads, give each thread exactly 1 channel, and let channel-0 do the grid-gradient reduction, so we keep semantics and try to avoid accuracy issues.
-// - Lane-major loop over channels; one block per (n, h, w).
+// - The generic kernel launches N*H*W threads, each looping over C and issuing
+//   four atomics per channel.
+// - Here one block handles one (n, h, w) and its lanes stride over the channel
+//   dimension, so the per-channel gathers and atomics are issued in parallel
+//   and, for channels-last tensors, coalesce across the wave.
+// - Each lane accumulates the grad_grid contribution of the channels it owns;
+//   the block reduces those once, after the channel loop, and lane 0 stores it.
+// - Eligibility -- channel count, layout and launch extent -- lives in the
+//   shared predicate; see Note [ROCm grid_sampler_2d backward channel-lane
+//   eligibility] in GridSampler.h.
 #ifdef USE_ROCM
   // Note [ROCm grid_sampler_2d backward wide offset arithmetic]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -438,10 +444,11 @@ namespace {
   //
   // Same work decomposition as grid_sampler_2d_backward_kernel_rocm_channel_lane
   // -- one block per (n, h, w), lanes striding over channels -- with the
-  // grad_grid reduction fixed. Measured on gfx1250, the v1 kernel spends
-  // 6.27 ms of its 9.84 ms in that reduction because lane 0 gathers four input
-  // neighbours for every channel serially while the other lanes idle, and
-  // repeats the whole thing once per channel-loop iteration when C > blockDim.
+  // grad_grid reduction fixed. In that earlier revision lane 0 gathered four
+  // input neighbours for every channel serially while the other lanes idled,
+  // and repeated the whole gather once per channel-loop iteration when
+  // C > blockDim. On gfx1250 it measured slower than the generic kernel on the
+  // recorded workload; this revision measured faster than both.
   //
   // Here each lane accumulates the grad_grid contribution for the channels it
   // already owns -- reusing the neighbour coordinates and weights it computed
@@ -1437,11 +1444,6 @@ void launch_grid_sampler_2d_backward_kernel(
   // eligible anyway. C >= 4 is the loosest threshold the predicate can use, so
   // anything below it skips the stride inspection entirely.
   //
-  // The channel-lane kernel also needs one block per (n, h, w), which can exceed
-  // the grid-dimension limit on shapes the generic kernel handles; and with
-  // C == 0 it would launch no work at all and leave grad_grid (allocated with
-  // empty_like) uninitialised, where the generic kernel still runs and writes
-  // zeros.
   // Every eligibility condition lives in the shared predicate, including the
   // launch-extent test -- see Note [ROCm grid_sampler_2d backward channel-lane
   // eligibility]. The allocation in GridSampler.cpp already made the same call,
