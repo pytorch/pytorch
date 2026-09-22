@@ -53,7 +53,7 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
     dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
-        id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+        auto computeEncoder = mpsStream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, result, y_stride, x_stride);
 
@@ -73,7 +73,7 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
     dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
-        id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+        auto computeEncoder = mpsStream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, result, diag_stride);
         mtl_dispatch1DJob(computeEncoder, pso, sz);

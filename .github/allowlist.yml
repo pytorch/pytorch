@@ -43,10 +43,17 @@ L1:
   - Isalia20/pytorch-mps-ci
 
 L2:
-  - NVIDIA/pytorch-windows-ci
-  - TorchedHat/pytorch-redhat-ci
+  - NVIDIA/pytorch-windows-ci:
+      events:
+        - nightly
+  - TorchedHat/pytorch-redhat-ci:
+      events:
+        - nightly
   - torch-spyre/torch-spyre
-  - vllm-project/vllm
+  # vLLM reports its scheduled nightly results directly through CRCR.
+  - vllm-project/vllm:
+      events:
+        - nightly
 
 L3:
   # Canonical test repos for CRCR.
