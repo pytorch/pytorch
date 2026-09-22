@@ -1831,6 +1831,14 @@ class PrecompiledModule(PrecompiledRunnable):
         # ``fn`` is the whole computation: an nn.Module, or a callable that closes
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
         # step that computes a loss and torch.autograd.grad).
+        if backend not in ("inductor", "eager"):
+            raise ValueError(
+                f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
+            )
+        if tracer not in ("make_fx", "dynamo"):
+            raise ValueError(
+                f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
+            )
         self._fn = fn
         self._backend = backend
         self._tracer = tracer
