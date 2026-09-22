@@ -392,6 +392,8 @@ class Capture:
     and a block that made no call raises ``PrecompileError`` on exit rather
     than writing an empty artifact. A capture is single-use: once its block
     exits it cannot be entered again, so call ``capture()`` again to retry.
+    That includes a failed write at exit: the spent capture does not keep its
+    pair, so fix the path and capture again.
     """
 
     def __enter__(self) -> Self:
@@ -404,7 +406,10 @@ class Capture:
         raise NotImplementedError
 
     def save(self) -> None:
-        """Write everything captured so far to the artifact files without ending the capture."""
+        """Write everything captured so far to the artifact files without ending the capture.
+
+        Raises ``PrecompileError`` outside the capture's ``with`` block.
+        """
         raise NotImplementedError
 
 
@@ -440,9 +445,12 @@ class _MakeFxCapture(Capture):
         self._entered = False
         self._exited = False
         self._rendered: tuple[str, bytes] | None = None
+        self._called = False
 
     def __enter__(self) -> Self:
-        if self._entered or self._exited:
+        if self._exited:
+            raise PrecompileError(_SPENT_CAPTURE)
+        if self._entered:
             raise PrecompileError(
                 "this capture has already been entered; capture() returns a "
                 "fresh capture per call."
@@ -476,16 +484,20 @@ class _MakeFxCapture(Capture):
         self._write()
 
     def _write(self) -> None:
+        if self._rendered is None and self._called:
+            raise PrecompileError(
+                "nothing was captured: the capture's call raised, so there is no "
+                "pair to write."
+            )
         if self._rendered is None:
             raise PrecompileError(
                 "nothing was captured: call the capture with your example "
-                "arguments inside the `with` block (a call whose serve raised "
-                "captured nothing)."
+                "arguments inside the `with` block."
             )
         try:
             _write_artifact(self._artifact_path, self._cache_path, *self._rendered)
         except OSError as e:
-            # _write_artifact leaves the previous pair in place.
+            # _write_artifact restores the previous pair on a best-effort basis.
             raise PrecompileError(
                 f"precompile could not write the artifact: {e}"
             ) from e
@@ -509,6 +521,7 @@ class _MakeFxCapture(Capture):
                 "traced; a make_fx trace records one execution, so a second call "
                 "has nothing to add."
             )
+        self._called = True
         # make_fx traces one execution of fn and lowers it to the artifact; we then
         # serve that artifact on the real args through the SAME load() path a caller
         # would take, so the value handed back is exactly what serving produces
