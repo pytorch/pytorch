@@ -647,6 +647,15 @@ print(t.is_pinned())
         device_properties_no_argument = torch.cuda.get_device_properties()
         self.assertEqual(current_device_properties, device_properties_no_argument)
 
+    @skipIfRocmVersionLessThan((6, 0))
+    def test_cuda_shared_memory_per_block_optin(self):
+        props = torch.cuda.get_device_properties()
+        self.assertTrue(hasattr(props, "shared_memory_per_block_optin"))
+        # The opt-in limit can never be below the default one.
+        self.assertGreaterEqual(
+            props.shared_memory_per_block_optin, props.shared_memory_per_block
+        )
+
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
