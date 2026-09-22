@@ -8,9 +8,11 @@ from unittest import mock
 import torch
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor import config
+from torch._inductor.codegen.common import device_codegens, init_backend_registration
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -85,7 +87,13 @@ class TestReadableWrapperCodegen(TestCase):
         x = torch.randn(64, 128, device="cuda")
         _, code = _code_for(fn, p, x, readable_wrapper=True)
         self.assertNotIn("async_compile.triton", code)
-        self.assertTrue(re.search(r"^def triton_\w+\(", code, re.MULTILINE))
+        # each branch's kernel is emitted by its subgraph wrapper, and both are code
+        for op in ("sin", "cos"):
+            pattern = rf"^def triton_\w+_{op}_\d+\("
+            self.assertTrue(re.search(pattern, code, re.MULTILINE), op)
+        for pred in (True, False):
+            p = torch.tensor(pred, device="cuda")
+            self.assertEqual(self._run_standalone(code, [p, x])[0], fn(p, x))
 
     @requires_cuda_and_triton
     @parametrize("autotune_at_compile_time", [None, True])
@@ -145,22 +153,33 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
 
     @requires_cuda_and_triton
-    def test_same_named_helpers_do_not_shadow(self):
-        # Scan helpers are named by op sequence and numbered per kernel, so these two
-        # combine_fns emit the same helper name with different constants.
-        def fn(x, y):
-            kw = {"dim": 0, "combine_mode": "pointwise"}
-            a = associative_scan(lambda p, q: p + q + 1, x, **kw)
-            return a, associative_scan(lambda p, q: p + q + 2, y, **kw)
+    @parametrize("case", ["scan", "flex_attention"])
+    def test_same_named_helpers_do_not_shadow(self, case):
+        # Kernels define @triton.jit helpers under names unique only per kernel: scan
+        # combine_fns are named by op sequence, and flex attention's template defines
+        # forward_inner & co. Both kernels here define the same names, different bodies.
+        if case == "scan":
 
-        x, y = torch.randn(64, device="cuda"), torch.randn(64, device="cuda")
-        result, code = _code_for(fn, x, y, readable_wrapper=True)
-        helpers = re.findall(r"^def (_triton_helper_fn\w*)\(", code, re.MULTILINE)
-        self.assertEqual(len(helpers), 2)
-        self.assertEqual(len(helpers), len(set(helpers)), helpers)
-        expected = fn(x, y)
-        self.assertEqual(result, expected)
-        self.assertEqual(self._run_standalone(code, [x, y]), expected)
+            def fn(x, y):
+                kw = {"dim": 0, "combine_mode": "pointwise"}
+                a = associative_scan(lambda p, q: p + q + 1, x, **kw)
+                return a, associative_scan(lambda p, q: p + q + 2, y, **kw)
+
+            args = [torch.randn(64, device="cuda"), torch.randn(64, device="cuda")]
+        else:
+            # one tensor as q, k and v: _run_standalone passes args in graph order
+            def fn(x):
+                a = flex_attention(x, x, x, score_mod=lambda s, b, h, m, n: s * 2)
+                return a, flex_attention(x, x, x, score_mod=lambda s, b, h, m, n: s + m)
+
+            args = [torch.randn(1, 2, 128, 64, device="cuda")]
+        result, code = _code_for(fn, *args, readable_wrapper=True)
+        defs = re.findall(r"^def (\w+)\(", code, re.MULTILINE)
+        self.assertEqual(len(defs), len(set(defs)), defs)
+        expected = fn(*args)
+        tol = {"atol": 2e-2, "rtol": 2e-2}
+        self.assertEqual(result, expected, **tol)
+        self.assertEqual(self._run_standalone(code, args), expected, **tol)
 
     @requires_cuda_and_triton
     def test_preamble_binds_only_what_the_graph_uses(self):
@@ -239,6 +258,8 @@ class TestReadableWrapperCodegen(TestCase):
             "del async_compile",
         ):
             self.assertEqual(code.count(line), 1, line)
+        # with its two blank separator lines, exactly as the default wrapper writes it
+        self.assertIn("\n\n\nasync_compile.wait(globals())\ndel async_compile\n", code)
 
     def test_cpp_kernels_in_root_and_subgraphs_run_standalone(self):
         # A subgraph's C++ kernel binds through the root's async_compile, and only the
@@ -250,8 +271,9 @@ class TestReadableWrapperCodegen(TestCase):
 
         x = torch.randn(64, 128)
         expected, code = _code_for(fn, x, readable_wrapper=True, cpu_backend="cpp")
+        self.assertEqual(expected, fn(x))
         # one kernel in the root and one per branch
-        self.assertGreaterEqual(code.count("= async_compile.cpp_pybinding("), 3)
+        self.assertEqual(code.count("= async_compile.cpp_pybinding("), 3)
         self.assertEqual(code.count("async_compile.wait(globals())"), 1)
         self.assertEqual(self._run_standalone(code, [x])[0], expected)
 
@@ -290,6 +312,21 @@ class TestReadableWrapperCodegen(TestCase):
                 self.assertIn("math as tl_math", code)
                 self.assertNotIn("\nimport math\n", code)
                 self.assertNotIn("from torch import device, empty_strided", code)
+
+    @requires_cuda_and_triton
+    def test_names_the_wrapper_uses_are_kept(self):
+        # The other direction: extern calls name `device(...)` and `inf` in the
+        # wrapper's own code, so their imports must survive the trim.
+        def fn(x):
+            perm = torch.randperm(x.shape[0], device=x.device)
+            return torch.cdist(x, x * 2, p=float("inf")).sum() + perm.sum()
+
+        x = torch.randn(8, 4, device="cuda")
+        expected, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertIn("device=device(type='cuda'", code)
+        self.assertIn("from torch import device, empty_strided", code)
+        self.assertIn("from math import inf, nan", code)
+        self.assertEqual(self._run_standalone(code, [x])[0], expected)
 
     @requires_cuda_and_triton
     def test_no_stale_pointer_to_a_cache_file(self):
@@ -361,6 +398,18 @@ class TestReadableWrapperCodegen(TestCase):
 
         with self.assertRaisesRegex(Exception, "cpp_wrapper and fx_wrapper"):
             _code_for(fn, torch.randn(256), readable_wrapper=True, **{flag: True})
+
+    def test_non_stock_python_wrapper_is_refused(self):
+        # MTIA and out-of-tree backends register their own python wrapper, which this
+        # mode cannot replace; keeping it would silently ignore the flag.
+        class OutOfTreeWrapper(PythonWrapperCodegen):
+            pass
+
+        init_backend_registration()
+        cpu = device_codegens["cpu"]
+        with mock.patch.object(cpu, "wrapper_codegen", OutOfTreeWrapper):
+            with self.assertRaisesRegex(Exception, "OutOfTreeWrapper"):
+                _code_for(torch.relu, torch.randn(8), readable_wrapper=True)
 
     def test_profile_bandwidth_output_is_refused(self):
         # profile_bandwidth_output runs the benchmark harness, which this mode drops.
