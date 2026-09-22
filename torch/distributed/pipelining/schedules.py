@@ -364,7 +364,8 @@ class _PipelineSchedule(ABC):
         batched P2P. Setup then preconnects either the shared parent's raw path
         or the directed children created from the final stage-to-rank
         assignment. This is independent of static or dynamic metadata and
-        distinct from a runtime's model warmup.
+        distinct from a runtime's model warmup. Multiple logical stages may be
+        local to one rank, but they must all execute on one device.
 
         Args:
             stages: The pipeline stages owned by this rank.
@@ -380,7 +381,6 @@ class _PipelineSchedule(ABC):
             )
         use_per_edge = next(iter(per_edge))
         stage_index_to_group_rank = stages[0].stage_index_to_group_rank
-        stage_device = torch.device(stages[0].device)
         if any(
             stage.stage_index_to_group_rank != stage_index_to_group_rank
             for stage in stages
@@ -388,12 +388,13 @@ class _PipelineSchedule(ABC):
             raise ValueError(
                 "All local pipeline stages must share one stage-to-rank assignment"
             )
-        if use_per_edge and any(
-            torch.device(stage.device) != stage_device for stage in stages
-        ):
+        stage_devices = {torch.device(stage.device) for stage in stages}
+        if len(stage_devices) != 1:
             raise ValueError(
-                "All local pipeline stages must use one device with per-edge P2P"
+                "All local pipeline stages must use one device, but found "
+                f"{sorted(map(str, stage_devices))}"
             )
+        stage_device = next(iter(stage_devices))
 
         stage_rank_assignment = _stage_rank_assignment(
             stage_index_to_group_rank,
@@ -485,7 +486,6 @@ class _PipelineSchedule(ABC):
             _preconnect_shared_p2p_edges(
                 parent,
                 stage_index_to_group_rank,
-                {stage.stage_index: torch.device(stage.device) for stage in stages},
                 stage_device,
             )
 
