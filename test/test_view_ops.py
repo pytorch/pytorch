@@ -1175,7 +1175,7 @@ class TestOldViewOps(TestCase):
 class TestOldViewOpsDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-     @skipXPUIf(
+    @skipXPUIf(
         True,
         "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/5317",
     )
@@ -1340,7 +1340,7 @@ class TestOldViewOpsDeviceType(TestCase):
 
     @skipXPUIf(
         True,
-        "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/5317",
+        "NotImplementedError with test_flatten, https://github.com/intel/torch-xpu-ops/issues/5317",
     )
     def test_flatten(self, device):
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
