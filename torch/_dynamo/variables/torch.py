@@ -260,6 +260,80 @@ if torch.distributed.is_available():
 constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need_guards)
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
+# Third-party backends (e.g. PrivateUse1 devices) register after torch is
+# imported, so the module-level sets above cannot contain their entries.
+# Backends extend them through the register_* functions below at import time.
+# Lazy queries make registrations take effect regardless of import order.
+
+_extra_ctx_manager_classes: dict[Any, None] = {}
+
+_constant_fold_extra: dict[Any, None] = {}
+_constant_fold_extra_need_guards: dict[Any, None] = {}
+
+_autocast_entries: dict[Any, str | None] = {
+    torch.amp.autocast_mode.autocast: None,
+    torch.cuda.amp.autocast: "cuda",
+    torch.cpu.amp.autocast: "cpu",
+}
+
+
+def register_ctx_manager_class(cls: Any) -> None:
+    """Register a context manager class that Dynamo can inline through.
+
+    Third-party device backends use this to make e.g.
+    ``torch.<backend>.amp.autocast`` traceable without graph breaks.
+    """
+    if not callable(cls):
+        raise TypeError(f"expected a callable context manager class, got {cls!r}")
+    _extra_ctx_manager_classes[cls] = None
+
+
+def register_constant_fold_function(fn: Any, *, needs_guard: bool = False) -> None:
+    """Register a function Dynamo may constant-fold during tracing.
+
+    Third-party device backends register e.g. ``torch.<backend>.is_available``
+    so guard-style branches do not graph break.
+    """
+    if not callable(fn):
+        raise TypeError(f"expected a callable, got {fn!r}")
+    if needs_guard:
+        _constant_fold_extra_need_guards[fn] = None
+    else:
+        _constant_fold_extra[fn] = None
+
+
+def register_device_autocast_entry(fn: Any, device_type: str) -> None:
+    """Register a device-specific autocast entry point, e.g.
+    ``torch.npu.amp.autocast``. The function must accept the same
+    (device_type, dtype, enabled, cache_enabled) signature family."""
+    if not callable(fn):
+        raise TypeError(f"expected a callable autocast function, got {fn!r}")
+    if not isinstance(device_type, str) or not device_type:
+        raise TypeError(f"expected a non-empty device_type, got {device_type!r}")
+    _autocast_entries[fn] = device_type
+
+
+def _get_supported_ctx_manager_classes() -> dict[Any, None]:
+    """supported_ctx_manager_classes plus late registrations."""
+    if not _extra_ctx_manager_classes:
+        return supported_ctx_manager_classes
+    return {**supported_ctx_manager_classes, **_extra_ctx_manager_classes}
+
+
+def _is_constant_foldable(fn: Any, *, needs_guard: bool = False) -> bool:
+    # constant_fold_functions already contains the need_guards entries; the
+    # extras mirror that so needs_guard registrations fold too.
+    if needs_guard:
+        return (
+            fn in constant_fold_functions_need_guards
+            or fn in _constant_fold_extra_need_guards
+        )
+    return (
+        fn in constant_fold_functions
+        or fn in _constant_fold_extra
+        or fn in _constant_fold_extra_need_guards
+    )
+
 # Ops that consume scalar values from 0-d tensors (via .item()) for computation
 # only, not for output shapes. When capture_scalar_outputs is enabled, these ops
 # create unbacked symbols that don't affect the outputs, causing
@@ -653,7 +727,7 @@ class BaseTorchVariable(VariableTracker):
         return VariableTracker.build(tx, result)
 
     def can_constant_fold_through(self) -> bool:
-        if self.value in constant_fold_functions:
+        if _is_constant_foldable(self.value):
             return True
 
         if (
@@ -696,7 +770,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             callable(value)
             and (
                 hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
+                and value in _get_supported_ctx_manager_classes()
             )
         )
 
@@ -832,11 +906,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in (
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ):
+        elif self.value in _autocast_entries:
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
@@ -3667,7 +3737,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             args, kwargs
         ):
             # constant fold functions need to be guarded.
-            if self.value in constant_fold_functions_need_guards:
+            if _is_constant_foldable(self.value, needs_guard=True):
                 if self.source is None:
                     raise AssertionError(
                         "Expected source to be set for constant fold function needing guards"
