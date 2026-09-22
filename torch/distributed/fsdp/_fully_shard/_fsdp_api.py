@@ -31,18 +31,18 @@ class MixedPrecisionPolicy:
             uses the sharded parameter in the original dtype. (Default:
             ``None``)
         reduce_dtype (Optional[torch.dtype]): The dtype for unsharded gradients
-            and gradient reduction (reduce-scatter or all-reduce). FSDP sets
-            the unsharded parameter's ``grad_dtype`` to this dtype, so autograd
-            produces and accumulates gradients in this dtype regardless of
-            whether gradient synchronization is enabled. FSDP packs these
-            gradients without casting before reduction. If ``None``, FSDP
-            preserves each parameter's explicitly configured ``grad_dtype``,
-            including ``None`` to allow any incoming gradient dtype. Parameters
-            without an explicit gradient policy use the compute dtype.
-            Gradients with different dtypes are reduced separately. Reduced
-            sharded gradients use each parameter's ``grad_dtype`` as specified before calling
-            :func:`fully_shard`. Changing this policy afterward is unsupported,
-            including before the first forward. (Default: ``None``)
+            and gradient reduction (reduce-scatter or all-reduce). If ``None``,
+            this uses ``param_dtype`` when set, otherwise the original parameter
+            dtype. FSDP sets the unsharded parameter's ``grad_dtype`` to this
+            resolved dtype, so autograd produces and accumulates gradients in
+            this dtype regardless of whether gradient synchronization is
+            enabled. FSDP packs these gradients without casting before reduction.
+            The parameter's ``grad_dtype`` configured before :func:`fully_shard`
+            only controls reduced sharded gradient storage; it does not affect
+            unsharded accumulation or reduction. An explicit input
+            ``grad_dtype=None`` leaves reduced shards in the reduction dtype.
+            Changing the input gradient policy after :func:`fully_shard` is
+            unsupported, including before the first forward. (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed
