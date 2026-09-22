@@ -1405,9 +1405,10 @@ class TritonOverrides(OpOverrides):
         else:
             out_dtype = triton_store_type(dtype)
 
+        # Triton cannot cast integers to any fp8 type directly, so go through float32.
         if (
             src_dtype is not None
-            and dtype in fp8_dtypes
+            and dtype in TRITON_FLOAT8_DTYPES
             and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
@@ -8714,6 +8715,11 @@ class TritonScheduling(SIMDScheduling):
 
         compile_wrapper = IndentedBuffer()
 
+        # The wrapper literal below is the dedented, stripped source; the eager
+        # submission must be the same bytes so CompiledTritonKernels (keyed on the
+        # exact string) hits at wrapper time instead of compiling the kernel twice
+        # and overwriting the same cache file.
+        src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
         if async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,

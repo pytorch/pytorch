@@ -379,15 +379,25 @@ inline bool only_sparse_compressed_binary_op_trivial_cases(
   if (self.is_same(other)) {
     auto [compressed_indices, plain_indices] =
         at::sparse_csr::getCompressedPlainIndices(self);
+    // Clone so out does not share index storage with self; a later
+    // out-of-place op writing into out would otherwise corrupt self.
     static_cast<SparseCsrTensorImpl*>(out.unsafeGetTensorImpl())
         ->set_member_tensors(
-            compressed_indices,
-            plain_indices,
+            compressed_indices.clone(),
+            plain_indices.clone(),
             binary_op(self.values(), other.values(), alpha),
             self.sizes());
     return true;
   }
   return false;
+}
+
+// True if any member tensor of a shares storage with the same member of b.
+inline bool sparse_compressed_members_alias(const Tensor& a, const Tensor& b) {
+  auto [a_compressed, a_plain] = at::sparse_csr::getCompressedPlainIndices(a);
+  auto [b_compressed, b_plain] = at::sparse_csr::getCompressedPlainIndices(b);
+  return a_compressed.is_alias_of(b_compressed) ||
+      a_plain.is_alias_of(b_plain) || a.values().is_alias_of(b.values());
 }
 
 inline bool only_sparse_compressed_add_trivial_cases(
