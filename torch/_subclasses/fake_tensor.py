@@ -951,7 +951,10 @@ class FakeTensor(Tensor):
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
         """Normalize device by initializing GPU context and setting device index."""
-        if device.type in ("cuda", "xpu"):
+        if (
+            device.type in ("cuda", "xpu")
+            or device.type == torch._C._get_privateuse1_backend_name()
+        ):
             init_gpu_context(device)
 
         return _pin_device_index(device)
