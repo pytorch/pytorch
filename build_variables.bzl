@@ -807,6 +807,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/nccl_extension.cu",
@@ -924,7 +925,6 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
-    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
     "torch/csrc/xpu/memory_snapshot.cpp",
     "torch/csrc/xpu/MemPool.cpp",
     "torch/csrc/xpu/Graph.cpp",
@@ -932,7 +932,9 @@ libtorch_python_xpu_sources = [
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
 
-libtorch_xpu_sources = libtorch_python_xpu_sources
+libtorch_xpu_sources = libtorch_python_xpu_sources + [
+    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
+]
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
