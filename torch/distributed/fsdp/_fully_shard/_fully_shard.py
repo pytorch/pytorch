@@ -130,6 +130,13 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
+    Configure parameter dtypes before the first forward. A module conversion
+    that conflicts with existing gradients requires clearing those gradients
+    first. Complete pending reductions, reshard each FSDP module, and call
+    ``module.zero_grad(set_to_none=True)`` before such a conversion. Device
+    conversions also require clearing gradients whose dtype differs from the
+    converted parameter dtype.
+
     Since grouping multiple tensors together for one collective is critical for
     communication efficiency, this implementation makes this grouping first
     class. Calling :meth:`fully_shard` on ``module`` constructs one group that
@@ -419,6 +426,32 @@ class FSDPModule:
         both reduce-scatter and all-reduce together. This is the equivalence of
         `no_sync` in FSDP1.
 
+        Without synchronization, gradients accumulate on the native unsharded
+        parameters using ``MixedPrecisionPolicy.reduce_dtype`` when set,
+        otherwise their pre-FSDP ``grad_dtype`` policy. Parameters without an
+        explicit gradient policy accumulate in the compute dtype.
+        Previously reduced gradients remain on the sharded parameters in their
+        configured ``grad_dtype``. HSDP may also retain reduce-scattered gradients
+        that still require all-reduce. These contributions remain separate.
+
+        In the sharded state, ``model.parameters()`` exposes the sharded
+        parameters and their reduced ``grad``. In the unsharded state, it exposes
+        the unsharded parameters and their accumulated ``grad``. HSDP partial
+        reduction buffers remain internal. With CPU offload, unreduced gradients
+        stay on the compute device; fully reduced sharded gradients are offloaded.
+        When ``reshard_after_forward`` is an integer, the temporary post-forward
+        shards have no gradient; unsharding or fully resharding restores the
+        corresponding parameter owners.
+
+        Ordinary ``nn.Module.zero_grad()`` clears only the currently registered
+        parameters: sharded gradients while sharded, or unsharded gradients while
+        unsharded. Gradients on other parameter owners and HSDP partial buffers
+        are unchanged.
+        Reduction consumes the unsharded ``grad`` and sets it to ``None``; HSDP
+        partial buffers are consumed when all-reduce completes. Synchronize
+        pending gradients before global gradient clipping or an optimizer step,
+        and reshard parameters before updating them.
+
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
                 module's parameters.
@@ -449,6 +482,34 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
+
+    def synchronize_gradients(self, *, recurse: bool = True) -> None:
+        """Complete pending gradient reductions without running another backward.
+
+        Call this method on all participating ranks after backward. It consumes
+        pending contributions, adds them to any previously reduced gradients,
+        and stores sharded DTensor gradients in each parameter's sharded
+        ``grad_dtype``. Custom communication hooks execute as part of
+        this reduction. Future backward synchronization settings are unchanged.
+
+        Call this method before global gradient clipping or an optimizer step
+        when gradients still contain pending contributions. When retaining
+        unsharded parameters, also call :meth:`reshard` on each FSDP module before
+        reading or updating the sharded parameters and their gradients.
+
+        Args:
+            recurse (bool): Whether to synchronize all FSDP submodules or only
+                this module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = self_module.modules() if recurse else (self_module,)
+        seen_groups: set[FSDPParamGroup] = set()
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                for group in module._get_fsdp_state()._fsdp_param_groups:
+                    if group not in seen_groups:
+                        group.synchronize_gradients()
+                        seen_groups.add(group)
 
     def set_reshard_after_forward(
         self, reshard_after_forward: bool, recurse: bool = True
@@ -495,6 +556,9 @@ class FSDPModule:
         be used during gradient accumulation to trade off higher memory for
         reduced communication since the unsharded parameters do not need to be
         re-all-gathered before the next forward.
+
+        When retaining unsharded parameters, call :meth:`reshard` on each FSDP
+        module on every rank before updating its sharded parameters.
 
         Args:
             reshard_after_backward (bool): Whether to reshard parameters after
@@ -575,6 +639,8 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
+        Complete pending gradient reductions before changing the communication.
+
         Args:
             comm (ReduceScatter): Custom reduce_scatter communication.
         """
@@ -586,6 +652,9 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
+            if fsdp_param_group._reduce_scatter_comm is not comm:
+                fsdp_param_group.check_pending_reduction_policy()
+        for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._reduce_scatter_comm = comm
 
     def set_all_reduce_hook(
@@ -595,6 +664,8 @@ class FSDPModule:
         stream: torch.cuda.Stream | None = None,
     ):
         """
+        Complete pending gradient reductions before changing the hook or stream.
+
         Args:
             hook (Callable[[torch.Tensor], None]): User-defined all-reduce hook
                 with expected signature ``hook(reduce_output: torch.Tensor) -> None``
@@ -612,6 +683,12 @@ class FSDPModule:
                 "groups (from per-param mesh via shard_placement_fn). "
                 "The hook would be ambiguous across groups with different meshes."
             )
+        for fsdp_param_group in state._fsdp_param_groups:
+            if fsdp_param_group._all_reduce_hook is not hook or (
+                stream is not None
+                and fsdp_param_group._all_reduce_hook_stream is not stream
+            ):
+                fsdp_param_group.check_pending_reduction_policy()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._all_reduce_hook = hook
             if stream is not None:
@@ -649,10 +726,15 @@ class FSDPModule:
         a custom reduce op using NCCL's PreMulSum, which allows multiplying by
         the factor before reduction.
 
+        Complete pending gradient reductions before changing the factor.
+
         Args:
             factor (float): Custom divide factor.
         """
         state = self._get_fsdp_state()
+        for fsdp_param_group in state._fsdp_param_groups:
+            if fsdp_param_group.gradient_divide_factor != factor:
+                fsdp_param_group.check_pending_reduction_policy()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.gradient_divide_factor = factor
 
@@ -670,10 +752,15 @@ class FSDPModule:
         to ensure the custom all-reduce across FSDP units follow this strategy
         as well, as FSDP can no longer automatically handle that.
 
+        Complete pending gradient reductions before changing this setting.
+
         Args:
             enable (bool): Whether to only ever use ReduceOp.SUM for comms.
         """
         state = self._get_fsdp_state()
+        for fsdp_param_group in state._fsdp_param_groups:
+            if fsdp_param_group.force_sum_reduction_for_comms != enable:
+                fsdp_param_group.check_pending_reduction_policy()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
@@ -688,6 +775,10 @@ class FSDPModule:
         reduce-scatter collectives. Similar to DDP's
         ``find_unused_parameters``.
 
+        Zero gradients must have the same dtype on every rank. If a parameter
+        has an explicit ``grad_dtype=None`` policy, set ``reduce_dtype`` in the
+        mixed precision policy before enabling this option.
+
         Args:
             reduce_scatter_unused_params (bool): Whether to include zero
                 gradients for unused parameters in gradient reduction.
@@ -696,13 +787,25 @@ class FSDPModule:
         """
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group.reduce_scatter_unused_params = (
-                        reduce_scatter_unused_params
+        groups = [
+            group
+            for module in modules
+            if isinstance(module, FSDPModule)
+            for group in module._get_fsdp_state()._fsdp_param_groups
+        ]
+        if reduce_scatter_unused_params:
+            for group in groups:
+                if group.mp_policy.reduce_dtype is None and any(
+                    param._has_sharded_grad_dtype_override
+                    and param.sharded_grad_dtype is None
+                    for param in group.fsdp_params
+                ):
+                    raise ValueError(
+                        "Reducing unused parameters with grad_dtype=None requires "
+                        "an explicit MixedPrecisionPolicy.reduce_dtype"
                     )
+        for group in groups:
+            group.reduce_scatter_unused_params = reduce_scatter_unused_params
 
     def set_reduce_scatter_max_input_buffers(
         self, max_input_buffers: int, *, recurse: bool = True
@@ -883,11 +986,47 @@ class FSDPModule:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
 
-    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+    def _apply(
+        self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True
+    ) -> Any:
+        modules = set(cast(nn.Module, self).modules()) if recurse else {self}
+        checked_params = set()
+        converted_options = {}
+
+        def converted_dtype(tensor: torch.Tensor) -> torch.dtype:
+            key = (tensor.device, tensor.dtype)
+            if key not in converted_options:
+                # Probe dtype conversions without copying parameter/gradient storage.
+                with torch.no_grad():
+                    converted = fn(
+                        torch.empty(0, device=tensor.device, dtype=tensor.dtype)
+                    )
+                    converted_options[key] = (converted.dtype, converted.device)
+            return converted_options[key][0]
+
+        def converted_device(tensor: torch.Tensor) -> torch.device:
+            converted_dtype(tensor)
+            return converted_options[(tensor.device, tensor.dtype)][1]
+
+        # Check the whole subtree before _apply converts any child parameters.
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                for group in module._get_fsdp_state()._fsdp_param_groups:
+                    for param in group.fsdp_params:
+                        if param not in checked_params and (
+                            param._module_info.module in modules
+                            or any(
+                                m in modules for m in param._module_info.shared_modules
+                            )
+                        ):
+                            param.check_gradient_conversion(
+                                converted_dtype, converted_device
+                            )
+                            checked_params.add(param)
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
-        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         state = self._get_fsdp_state()
+        ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
         if not state._fsdp_param_groups:
             return ret
         # TODO: Remove this padding logic once DTensor pads the local tensor:
