@@ -5952,12 +5952,13 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
+    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
+    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
-        not (
-            input.ndim == 5
-            and interpolation_mode == GridSamplerInterpolation.BICUBIC.value
-        ),
-        lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
+        interpolation_mode != GridSamplerInterpolation.BICUBIC.value
+        or device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
+        f"on {device_hint(input)}",
     )
 
 
@@ -9397,6 +9398,9 @@ def activate_meta():
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
                 "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
+                "aten::arange",  # use the symint-aware C++ meta kernel (arange_meta)
+                "aten::arange.start",
+                "aten::arange.start_step",
             }
         ):
             pass
