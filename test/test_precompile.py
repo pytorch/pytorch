@@ -4300,8 +4300,10 @@ class TestPrecompileCapture(TestCase):
         # Outside the block nothing would be written at exit, so the call is
         # refused rather than running the whole trace for a missing artifact.
         cap = self._capture(backend="eager")
-        with self.assertRaisesRegex(PrecompileError, "not active"):
+        with self.assertRaisesRegex(PrecompileError, "before calling it"):
             cap(self.model, self.x)
+        with self.assertRaisesRegex(PrecompileError, "before calling save"):
+            cap.save()
         self.assertFalse(os.path.exists(self.artifact))
 
     def test_decompositions_forward_through_the_tracer(self):
@@ -4352,9 +4354,9 @@ class TestPrecompileCapture(TestCase):
     def test_a_swallowed_serve_failure_is_named_at_exit(self):
         serve = RuntimeError("serve failed")
         patch = mock.patch("torch._precompile._runnable_from_pair", side_effect=serve)
-        with self.assertRaisesRegex(PrecompileError, "whose serve raised"):
+        with self.assertRaisesRegex(PrecompileError, "capture's call raised"):
             with self._capture(backend="eager") as cap:
-                with patch, self.assertRaises(RuntimeError):
+                with patch, self.assertRaisesRegex(RuntimeError, "serve failed"):
                     cap(self.model, self.x)
         self.assertFalse(os.path.exists(self.artifact))
 
@@ -4368,9 +4370,11 @@ class TestPrecompileCapture(TestCase):
         ) as cap:
             cap(self.model, self.x)
         self.assertEqual(load(artifact, cache)(self.model, self.x), self.model(self.x))
+        backend = inspect.signature(capture).parameters["backend"].default
+        self.assertEqual(backend, "inductor")
 
     def test_a_block_without_a_call_or_that_raises_writes_nothing(self):
-        with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
+        with self.assertRaisesRegex(PrecompileError, "call the capture with"):
             with self._capture(backend="eager"):
                 pass
         self.assertFalse(os.path.exists(self.artifact))
@@ -4392,6 +4396,7 @@ class TestPrecompileCapture(TestCase):
             self.assertEqual(
                 load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
             )
+            os.unlink(self.artifact)
         with open(self.artifact, "rb") as f:
             self.assertEqual(f.read(), saved)
 
@@ -4412,7 +4417,7 @@ class TestPrecompileCapture(TestCase):
                 with cap:
                     pass
             cap(self.model, self.x)
-        with self.assertRaisesRegex(PrecompileError, "already been entered"):
+        with self.assertRaisesRegex(PrecompileError, "already exited"):
             with cap:
                 pass
 
