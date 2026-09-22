@@ -392,7 +392,9 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ accelerators"
+    )
     def test_nccl_watchdog_cudagraph(self):
         # test that the watchdog does not crash graphs with disallowed event query
         pg = self.pg
