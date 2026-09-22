@@ -3136,6 +3136,22 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile(op, torch.empty(4), backend="eager")
         self.assertEqual(torch.random.get_rng_state(), before)
 
+    def test_capture_drawing_from_an_explicit_generator_rewinds_no_default(self):
+        # The named generator cannot be saved before capture names it, and rewinding
+        # its device's default generator instead would replay unrelated draws.
+        gen = torch.Generator().manual_seed(0)
+
+        def reseed_then_draw(a):
+            torch.random.default_generator.manual_seed(7)
+            return a + torch.rand(a.shape, generator=gen)
+
+        gen_before = gen.get_state()
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            torch.compiler.precompile(reseed_then_draw, torch.empty(4), backend="eager")
+        self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+        self.assertNotEqual(gen.get_state(), gen_before)
+
     def test_concurrent_captures_are_serialized(self):
         # Capture clears the example tensors' .grad and reparametrizes the example
         # module in place, so two captures of a shared model in flight at once would
