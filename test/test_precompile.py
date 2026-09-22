@@ -1699,6 +1699,18 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "tracer='dynamo'"):
             _precompile_pair(lambda model, xx: model(xx), m, x, tracer="dynamo")
 
+    def test_backend_invalid_raises(self):
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        with self.assertRaisesRegex(
+            ValueError, "backend must be 'inductor' or 'eager'"
+        ):
+            _precompile_pair(lambda x, y: x + y, a, b, backend="nope")
+
+    def test_tracer_invalid_raises(self):
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        with self.assertRaisesRegex(ValueError, "tracer must be 'make_fx' or 'dynamo'"):
+            _precompile_pair(lambda x, y: x + y, a, b, tracer="nope")
+
     def test_backend_default_is_inductor(self):
         # The default lowers through Inductor: the generated code inlines the Inductor
         # output module. Use a graph_partition-agnostic marker (the ``call = runner.call``
@@ -4181,16 +4193,6 @@ class TestPrecompileLoad(TestCase):
         with open(path, "rb") as f:
             return f.read().decode()
 
-    def test_load_refuses_a_pair_from_two_captures_or_a_missing_half(self):
-        self._write(self.artifact, self.cache)
-        other_artifact = os.path.join(self.dir, "other.py")
-        other_cache = os.path.join(self.dir, "other.cache")
-        self._write(other_artifact, other_cache, x=torch.randn(3, 4))
-        with self.assertRaisesRegex(PrecompileError, "does not match"):
-            load(self.artifact, other_cache)
-        with self.assertRaisesRegex(PrecompileError, "could not read"):
-            load(self.artifact, os.path.join(self.dir, "missing.cache"))
-
     def test_load_pairs_the_cache_on_its_tracer_tag(self):
         # The envelope names the tracer that produced it; a tag that differs from
         # the python_code's is a wrong pairing, and a pair written before the tag
@@ -4215,6 +4217,16 @@ class TestPrecompileLoad(TestCase):
         self.assertEqual(
             load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
         )
+
+    def test_load_refuses_a_pair_from_two_captures_or_a_missing_cache(self):
+        self._write(self.artifact, self.cache)
+        other_artifact = os.path.join(self.dir, "other.py")
+        other_cache = os.path.join(self.dir, "other.cache")
+        self._write(other_artifact, other_cache, x=torch.randn(3, 4))
+        with self.assertRaisesRegex(PrecompileError, "does not match"):
+            load(self.artifact, other_cache)
+        with self.assertRaisesRegex(PrecompileError, "could not read"):
+            load(self.artifact, os.path.join(self.dir, "missing.cache"))
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
@@ -4272,6 +4284,29 @@ class TestPrecompileCapture(TestCase):
             load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
         )
 
+    def test_a_capture_must_be_entered_before_it_is_called(self):
+        # Outside the block nothing would be written at exit, so the call is
+        # refused rather than running the whole trace for a missing artifact.
+        cap = self._capture(backend="eager")
+        with self.assertRaisesRegex(PrecompileError, "not active"):
+            cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+
+    def test_decompositions_forward_through_the_tracer(self):
+        called = []
+
+        def my_relu_decomp(x):
+            called.append(True)
+            return (x > 0) * x
+
+        tracer = MakeFxTracer(
+            decompositions={torch.ops.aten.relu.default: my_relu_decomp}
+        )
+        with self._capture(backend="eager", tracer=tracer) as cap:
+            y = cap(self.model, self.x)
+        self.assertTrue(called)
+        self.assertEqual(y, self.model(self.x))
+
     def test_a_block_without_a_call_or_that_raises_writes_nothing(self):
         with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
             with self._capture(backend="eager"):
@@ -4303,17 +4338,18 @@ class TestPrecompileCapture(TestCase):
             self._capture(backend="nope")
         with self.assertRaisesRegex(TypeError, "MakeFxTracer"):
             self._capture(tracer="make_fx")
-        with self.assertRaisesRegex(PrecompileError, "partial"):
+        with self.assertRaisesRegex(TypeError, "partial"):
             self._capture(functools.partial(_files_fn, self.model))
 
-    def test_training_capture_scatters_grads_onto_the_runtime_model(self):
+    @parametrize("backend", ["inductor", "eager"])
+    def test_a_backward_step_scatters_grads_onto_the_runtime_model(self, backend):
         def train_step(model, x):
             model(x).sum().backward()
 
         expected = _FilesModel()
         expected.load_state_dict(self.model.state_dict())
         expected(self.x).sum().backward()
-        with self._capture(train_step, backend="eager", training=True) as cap:
+        with self._capture(train_step, backend=backend) as cap:
             self.assertIsNone(cap(self.model, self.x))
         self.assertEqual(self.model.lin.weight.grad, expected.lin.weight.grad)
         runtime = _FilesModel()
@@ -4380,7 +4416,7 @@ print("served")
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileDynamoCapture(TestCase):
-    """capture() with the default DynamoTracer: the multi-graph standalone artifact."""
+    """capture() with the DynamoTracer: the multi-graph standalone artifact."""
 
     def setUp(self):
         super().setUp()
@@ -4476,7 +4512,7 @@ class TestPrecompileDynamoCapture(TestCase):
         expected = self.mod.Model()
         expected.load_state_dict(self.model.state_dict())
         expected(self.x2).sum().backward()
-        with self._capture(self.mod.train_step, backend="eager", training=True) as cap:
+        with self._capture(self.mod.train_step, backend="eager") as cap:
             self.assertIsNone(cap(self.model, self.x2))
         self.assertEqual(self.model.lin.weight.grad, expected.lin.weight.grad)
         self.assertEqual(self.model.lin.bias.grad, expected.lin.bias.grad)
@@ -4542,7 +4578,7 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, "closes over"):
             with self._capture(closure, backend="eager") as cap:
                 cap(self.model, self.x2)
-        with self.assertRaisesRegex(PrecompileError, "partial"):
+        with self.assertRaisesRegex(TypeError, "partial"):
             self._capture(functools.partial(self.mod.single, self.model))
 
     def test_a_dynamo_pair_does_not_mix_with_a_make_fx_pair(self):
