@@ -1729,6 +1729,69 @@ def add(x, y):
         self.assertEqual(len(pkg.cache_entry().codes[0].guarded_codes), 1)
         self.assertFalse(pkg.cache_entry().codes[0].bypassed)
 
+    def test_uncovered_frames_follows_the_entries(self):
+        # A frame that entered Dynamo without producing guarded code is a gap
+        # only while that stays true: a later variant that compiles covers it,
+        # whichever order the variants ran in.
+        def fn(x):
+            return x
+
+        code = fn.__code__
+        location = f"fn ({code.co_filename}:{code.co_firstlineno})"
+        pkg = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=pkg)(fn)(torch.randn(3))
+        self.assertEqual(pkg.uncovered_frames, frozenset({location}))
+        with pkg.code_context(fn.__code__):
+            pkg.add_guarded_code(b"", fn.__code__)
+        self.assertEqual(pkg.uncovered_frames, frozenset())
+
+    def test_uncovered_frames_distinguish_frames_that_share_a_name(self):
+        # Two frames that happen to share a co_name are two gaps a reader must
+        # be able to tell apart; keyed on the bare name they would be two
+        # indistinguishable entries. Register the entries directly so the two
+        # code objects differ only in filename, isolating the key from the
+        # compile path.
+        from torch._dynamo.package import _DynamoCodeCacheEntry, SerializedCode
+
+        def fn(x):
+            return x
+
+        def one(x):
+            return x
+
+        def two(x):
+            return x + 0
+
+        code_a = one.__code__.replace(co_name="frame", co_filename="a.py")
+        code_b = two.__code__.replace(co_name="frame", co_filename="b.py")
+        pkg = CompilePackage(fn)
+        for code in (code_a, code_b):
+            pkg._codes[code] = _DynamoCodeCacheEntry(
+                python_code=SerializedCode.from_code_object(code),
+                python_module="m",
+                function_names=[],
+                guarded_codes=[],
+                import_sources={},
+                backend_ids=[],
+                code_source=None,
+                install_to_global=False,
+                has_compile_id=True,
+            )
+        self.assertEqual(
+            pkg.uncovered_frames,
+            frozenset(
+                {
+                    f"frame (a.py:{code_a.co_firstlineno})",
+                    f"frame (b.py:{code_b.co_firstlineno})",
+                }
+            ),
+        )
+        # A bypassed entry is re-traced by install(), not skipped: not a gap.
+        pkg._codes[code_b].bypassed = True
+        self.assertEqual(
+            pkg.uncovered_frames, frozenset({f"frame (a.py:{code_a.co_firstlineno})"})
+        )
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
