@@ -21,6 +21,7 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
+    _BYPASS_REASON_MAX_CHARS,
     _collapse_device_types,
     CompilePackage,
     DiskDynamoStore,
@@ -325,10 +326,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
         code = compiled_region_with_backend_id_for_package_test.__code__
         package = CompilePackage(fn)
         with package.code_context(fn.__code__):
-            package.bypass_current_compile("x" * 3000)
+            package.bypass_current_compile("")
         entry = package.cache_entry().codes[0]
         self.assertTrue(entry.bypassed)
-        self.assertEqual(len(entry.bypass_reason), 2048 + len(" ... (truncated)"))
+        self.assertIsNone(entry.bypass_reason)
+        with package.code_context(fn.__code__):
+            package.bypass_current_compile("x" * 3000)
+        self.assertEqual(len(entry.bypass_reason), _BYPASS_REASON_MAX_CHARS)
         self.assertTrue(entry.bypass_reason.endswith(" ... (truncated)"))
         # A recorded variant clears the reason with the flag.
         with package.code_context(fn.__code__):
@@ -352,6 +356,29 @@ class TestPackage(torch._inductor.test_case.TestCase):
         (entry,) = PrecompileContext._dynamo_cache_entries.values()
         self.assertTrue(entry.codes[0].bypassed)
         self.assertIn("config cannot pickle", entry.codes[0].bypass_reason)
+        # The reason is for whoever reads the saved artifact: it survives the
+        # write, the read and a package loaded from the read entry.
+        PrecompileContext.save_to_dynamo_cache()
+        loaded = DynamoCache.load(fn)
+        self.assertIn("config cannot pickle", loaded.dynamo.codes[0].bypass_reason)
+        reloaded = CompilePackage(fn, loaded.dynamo)
+        self.assertIn(
+            "config cannot pickle", reloaded._codes[fn.__code__].bypass_reason
+        )
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_save_time_bypass_names_the_missing_backend(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
+        (backend_id,) = live.codes[0].backend_ids
+        PrecompileContext._backend_artifacts_by_key.clear()
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertIn(backend_id, saved[key].dynamo.codes[0].bypass_reason)
+        self.assertIsNone(live.codes[0].bypass_reason)
 
     @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
@@ -440,11 +467,20 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
         ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
         self.assertTrue(live.codes[0].backend_ids)
+        artifacts = dict(PrecompileContext._backend_artifacts_by_key)
         PrecompileContext._backend_artifacts_by_key.clear()
         saved, _ = PrecompileContext.create_cache_entries()
         self.assertIsNot(saved[key].dynamo, live)
         self.assertTrue(saved[key].dynamo.codes[0].bypassed)
         self.assertFalse(live.codes[0].bypassed)
+        # Backend artifacts are recorded lazily (a backward's at its first
+        # compile), so a later save can find what an earlier one missed. It
+        # must then write an installable entry, and with every backend present
+        # the code passes through as the live object.
+        PrecompileContext._backend_artifacts_by_key.update(artifacts)
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertFalse(saved[key].dynamo.codes[0].bypassed)
+        self.assertIs(saved[key].dynamo.codes[0], live.codes[0])
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
