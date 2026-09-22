@@ -35,7 +35,8 @@ class GuardFact:
         enforced: Whether the artifact still checks this guard (it was serialized).
     """
 
-    # source is GuardFilterEntry.name: Guard.name with the local scope stripped.
+    # source is GuardFilterEntry.name (torch._dynamo.types): Guard.name with the
+    # local scope stripped.
 
     guard_type: str
     source: str
@@ -137,9 +138,12 @@ class PrecompileSummary:
             does not count as serving other values of it.
         dropped_guards: Slots the serialized copy's guard filter rejected; a
             variant that dropped a slot does not check it, so a load through
-            that variant cannot notice whatever it checked. Which guards a
-            filter rejects is that filter's own contract and not repeated here;
-            a caller-supplied filter decides its own set. A slot is listed under
+            that variant cannot notice whatever it checked. The default filter
+            drops the guards the serializer cannot save: the identity guards
+            (``ID_MATCH``, ``FUNCTION_MATCH``, ``NN_MODULE`` and the like),
+            ``DICT_VERSION`` and ``WEAKREF_ALIVE``, so a load cannot notice that
+            an object they checked was rebound, mutated or collected; a
+            caller-supplied filter decides its own set. A slot is listed under
             the guard's own type whatever the reason for the drop, so a
             ``TENSOR_MATCH`` rejected for what its check derives is a dropped
             ``TENSOR_MATCH``.
@@ -150,9 +154,9 @@ class PrecompileSummary:
             configuration-chosen binding.
         policy_dropped_guards: Slots the filter kept that the invariance policy
             then dropped because they held identically across every captured
-            variant (only guard types from a fixed set are eligible).
-            Reported apart from ``dropped_guards`` because the remedy differs,
-            and reported at all because a capture that discards a precondition
+            variant (only guard types from a fixed set are eligible). Reported
+            apart from ``dropped_guards`` because the remedy differs, and
+            reported at all because a capture that discards a precondition
             should not look like one that had none.
         dropped_guard_code: ``(guard_type, source, rendered_check)``, one per
             slot of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
