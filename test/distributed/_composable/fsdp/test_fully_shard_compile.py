@@ -28,7 +28,6 @@ from torch.testing._internal.common_utils import HardwareClassification, run_tes
 from torch.utils._triton import has_triton
 
 
-
 class Mod(torch.nn.Module):
     def __init__(self, device):
         super().__init__()
