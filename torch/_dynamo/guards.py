@@ -5215,6 +5215,26 @@ class CheckFunctionManager:
                     True,
                     guard_filter_fn=serialization_filter,
                 )
+                # aotautograd guards are subject to neither filter:
+                # compile_check_fn installs them on the runtime build
+                # unconditionally and load rebuilds them unconditionally. The
+                # saved copy has to keep the tensors they name, and its own leaf
+                # and accessor guards may not reach them, so their sources are
+                # registered on the serialization builder here. Value pruning
+                # keys off guard_tree_values, so nothing else is inherited: a
+                # value only the live guards reach stays prunable.
+                for guard_expr in output_graph.aotautograd_guards:
+                    if isinstance(guard_expr, DuplicateInputs):
+                        sources = (guard_expr.input_source_a, guard_expr.input_source_b)
+                    elif isinstance(guard_expr, StorageOverlap):
+                        sources = (
+                            *guard_expr.overlapping_sources,
+                            *guard_expr.non_overlapping_sources,
+                        )
+                    else:
+                        continue
+                    for source in sources:
+                        serialization_builder.get_guard_manager_from_source(source)
             self.guard_manager = guard_manager
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
 
