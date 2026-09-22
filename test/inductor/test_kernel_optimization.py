@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
-class TestEinsumtoPointwise(torch.nn.Module):
+class _TestEinsumtoPointwise(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -67,7 +67,7 @@ class TestKernelOptimization(TestCase):
     @serialTest()  # Needs slightly more memory on GPUs
     def test_einsum_to_pointwise(self):
         counters.clear()
-        module = TestEinsumtoPointwise().to(GPU_TYPE)
+        module = _TestEinsumtoPointwise().to(GPU_TYPE)
         input = [
             torch.randn(4096, 9, 512, device=GPU_TYPE, requires_grad=True),
             torch.randn(9, 512, 96, device=GPU_TYPE, requires_grad=True),

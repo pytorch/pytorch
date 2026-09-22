@@ -6,7 +6,7 @@ arbitrary ONNX operators.
 The operators are called "symbolic" because they don't do any actual computation
 but instead serve as placeholders in the computation graph.
 
-Each implementation contains two parts: A "real" implementation that produce all
+Each implementation contains two parts: A "real" implementation that produces all
 zeros based on the input shape and dtype, and a "fake" implementation that does more
 or less the same thing but is required by the `torch.library.custom_op` interface.
 """

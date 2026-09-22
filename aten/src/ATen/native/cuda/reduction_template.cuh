@@ -604,9 +604,12 @@ struct ReduceJitOp {
         if constexpr (wait_for_commit)
         {
           __atomic_signal_fence(__ATOMIC_SEQ_CST);
-  #ifdef __gfx1250__
-          asm volatile("s_wait_loadcnt(0)" ::: "memory");
+  #if defined(__GFX12__)
+          asm volatile("s_wait_storecnt(0)" ::: "memory");
+  #elif defined(__GFX10__) || defined(__GFX11__)
+          asm volatile("s_waitcnt_vscnt null, 0" ::: "memory");
   #else
+          // Older architectures have only 'vmcnt' counter.
           asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   #endif
           __atomic_signal_fence(__ATOMIC_SEQ_CST);
@@ -650,8 +653,16 @@ struct ReduceJitOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
-  #ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
-      __threadfence(); //complete acquire pattern
+  #ifndef USE_ROCM
+      __threadfence(); // complete the acquire pattern after atomic
+  #else
+      // complete the acquire pattern after atomic
+      // On ROCm, committed stores [CMTSTRS] ensure the producer block's writes are visible to global memory.
+      // But the last block (consumer) still needs an acquire fence to invalidate its (non-coherent) L1,
+      // before reading the staging buffer. An acquire-only fence at agent scope is sufficient
+      // (and cheaper than a full seq_cst __threadfence()) since it pairs with the agent-scope
+      // committed stores above.
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   #endif
       value = ident;
       if (config.should_block_x_reduce()) {
