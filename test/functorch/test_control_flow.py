@@ -5303,12 +5303,10 @@ class AssociativeScanTestsDevice(TestCase):
                 "The number of elements requiring gradients is different for the results and the expected results"
             )
 
-        # Seed the upstream gradients with distinct pseudo-random values rather than
-        # ones. With an all-ones cotangent every output leaf carries the same weight,
-        # which makes a backward that sums over output leaves instead of contracting
-        # them leaf-by-leaf indistinguishable from a correct one, and silently hid a
-        # wrong multi-leaf gradient. Derive the values from a local generator so the
-        # comparison stays deterministic and independent of the global RNG state.
+        # The upstream gradients must differ per output leaf: an all-ones cotangent
+        # weights every leaf equally, which makes a backward that sums over the output
+        # leaves agree with one that contracts them leaf by leaf. The local generator
+        # keeps the comparison deterministic and independent of the global RNG state.
         gen = torch.Generator(device="cpu").manual_seed(1234)
         grad_init = [
             torch.rand(el.shape, generator=gen, dtype=el.dtype).to(el.device) + 0.5
@@ -6153,12 +6151,11 @@ class AssociativeScanTestsDevice(TestCase):
             autograd_param=None if not autograd else elements,
         )
 
-    # combine_mode=pointwise needs scan codegen (CUDA/XPU) to be *lowered*, but in eager
-    # it dense-decomposes on any device while still routing autograd through
-    # AssociativeScanAutogradOp -- which is the only path this test can regress on.
-    # So only the compiled pointwise variants are skipped here, not all of CPU:
-    # compile_dynamic_shape does not support lifted arguments, and CPU has no scan
-    # lowering for compile.
+    # combine_mode=pointwise only needs scan codegen (CUDA/XPU) once it is lowered; in
+    # eager it dense-decomposes on any device and still routes autograd through
+    # AssociativeScanAutogradOp, which is the path this test covers. Hence only the
+    # compiled pointwise variants are skipped: compile_dynamic_shape does not support
+    # lifted arguments, and CPU has no scan lowering for compile.
     @decorateIf(
         unittest.skip,
         lambda params: (
@@ -6179,13 +6176,10 @@ class AssociativeScanTestsDevice(TestCase):
         # A linear recurrence y[t] = a[t] * y[t-1] + b[t] expressed as the scan of the
         # composition of the affine maps y -> a*y + b. Only the accumulated addend (the
         # second leaf) is the recurrence output; the accumulated multiplier is discarded,
-        # as any user of this scan would do.
-        #
-        # This makes the gradient of the first leaf flow *exclusively* through the second
-        # output leaf, so a backward that treats each leaf in isolation returns exactly
-        # zero for ``a`` instead of the true gradient. Regression test for the wrong
-        # multi-leaf gradients reported in
-        # https://github.com/pytorch/pytorch/issues/172568.
+        # as any user of this scan would do. The gradient of ``a`` therefore flows
+        # exclusively through the second output leaf, and a backward that treats each
+        # leaf in isolation returns exactly zero for it.
+        # Regression test for https://github.com/pytorch/pytorch/issues/172568.
         def affine_compose(left, right):
             a_l, b_l = left
             a_r, b_r = right
@@ -6201,7 +6195,7 @@ class AssociativeScanTestsDevice(TestCase):
                 out.reverse()
             return torch.stack(out, 0)
 
-        # Keep ``a`` away from 0 so the recurrence does not decay to a regime where a
+        # Keep ``a`` away from 0 so the recurrence does not decay into a regime where a
         # zero gradient for ``a`` is numerically indistinguishable from the truth.
         a = (torch.rand(7, 3, device=device, dtype=torch.double) + 0.5).requires_grad_(
             True
@@ -6216,14 +6210,13 @@ class AssociativeScanTestsDevice(TestCase):
         y_ref = linear_recurrence_ref(a_ref, b_ref)
         self.assertEqual(y, y_ref)
 
-        # A non-uniform upstream gradient is essential: with an all-ones cotangent the
-        # incorrect and the correct backward can agree.
+        # The upstream gradient must be non-uniform, see ``_check_autograd`` above.
         gy = torch.randn(7, 3, device=device, dtype=torch.double)
         grads = torch.autograd.grad(y, [a, b], gy)
         expected_grads = torch.autograd.grad(y_ref, [a_ref, b_ref], gy)
 
-        # The gradient of ``a`` is the one the leaf-independent backward zeroed out, so
-        # assert it is actually non-trivial before comparing.
+        # Check that the gradient of ``a`` is non-trivial, otherwise a backward that
+        # zeroes it out would compare equal.
         self.assertTrue(expected_grads[0].abs().max() > 1e-3)
         self.assertEqual(grads, expected_grads)
 
