@@ -152,7 +152,10 @@ class CommonTemplate:
 
         x = torch.randn(1024, 1024 + 16, device=self.device)
 
-        expected_error = "Expect the tensor to be 16 bytes aligned. Got data_ptr="
+        expected_error = (
+            "Expect the tensor to be 16 bytes aligned. "
+            "Fail due to storage_offset=1 itemsize=4"
+        )
         with self.assertRaisesRegex((AssertionError, RuntimeError), expected_error):
             self.common(fn, (x,), check_lowp=False)
 
@@ -183,9 +186,7 @@ class CommonTemplate:
         ).run(code)
 
     @parametrize("wrapper", ("python", "fx", "custom_partition"))
-    @parametrize("use_dlpack", (False, True))
-    @functorch_config.patch(fake_tensor_allow_unsafe_data_ptr_access=False)
-    def test_input_alignment_assert_fires_instead_of_clone(self, wrapper, use_dlpack):
+    def test_input_alignment_assert_fires_instead_of_clone(self, wrapper):
         if not torch._inductor.utils.is_gpu(self.device):
             raise unittest.SkipTest("alignment asserts are GPU-only")
 
@@ -216,10 +217,6 @@ class CommonTemplate:
         # storage_offset is not guarded on, so a misaligned input hits the
         # same graph; in strict mode it errors instead of being cloned
         y = torch.randn(2, device=self.device)[1:]
-        if use_dlpack:
-            y = torch.from_dlpack(y)
-            self.assertEqual(y.storage_offset(), 0)
-        self.assertNotEqual(y.data_ptr() % 16, 0)
         with self.assertRaisesRegex(AssertionError, "bytes aligned"):
             fn_c(y)
 

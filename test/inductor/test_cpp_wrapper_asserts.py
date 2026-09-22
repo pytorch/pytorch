@@ -149,7 +149,10 @@ class CppWrapperAssertTests(InductorTestCase):
             return torch.cos(b)
 
         compiled = torch.compile(fn)
-        expected_error = "Expect the tensor to be 16 bytes aligned. Got data_ptr="
+        expected_error = (
+            "Expect the tensor to be 16 bytes aligned. "
+            "Fail due to storage_offset=1 itemsize=4"
+        )
         with self.assertRaisesRegex(RuntimeError, expected_error):
             compiled(torch.randn(8, 24))
 
@@ -159,7 +162,7 @@ class CppWrapperAssertTests(InductorTestCase):
         implicit_fallbacks=True,
         alignment_asserts=True,
     )
-    def test_fallback_output_alignment_assert_uses_data_ptr(self):
+    def test_fallback_output_alignment_assert_uses_storage_offset(self):
         def misaligned_base(x):
             storage = bytearray(x.numel() * x.element_size() + GPU_ALIGN_BYTES)
             base = torch.frombuffer(storage, dtype=torch.uint8)
@@ -187,8 +190,7 @@ class CppWrapperAssertTests(InductorTestCase):
             return torch.cos(getattr(torch.ops.test, op_name)(a))
 
         compiled = torch.compile(fn)
-        with self.assertRaisesRegex(RuntimeError, "bytes aligned. Got data_ptr="):
-            compiled(sample)
+        self.assertEqual(compiled(sample), fn(sample))
 
 
 if __name__ == "__main__":

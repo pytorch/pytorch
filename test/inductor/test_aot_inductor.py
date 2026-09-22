@@ -8846,8 +8846,7 @@ class AOTInductorTestsTemplate:
 
     @config.patch({"alignment_asserts_inputs": True, "size_asserts": False})
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "0"})
-    @parametrize("use_dlpack", (False, True))
-    def test_input_alignment_asserts_without_runtime_checks(self, use_dlpack):
+    def test_input_alignment_asserts_without_runtime_checks(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("GPU alignment checks only")
 
@@ -8861,10 +8860,6 @@ class AOTInductorTestsTemplate:
         optimized = torch._inductor.aoti_load_package(package_path)
         optimized(x)
         misaligned = torch.randn(2, device=self.device)[1:]
-        if use_dlpack:
-            misaligned = torch.from_dlpack(misaligned)
-            self.assertEqual(misaligned.storage_offset(), 0)
-        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
         with self.assertRaisesRegex(RuntimeError, "bytes aligned"):
             optimized(misaligned)
 
