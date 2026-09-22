@@ -345,6 +345,17 @@ class MakeFxTracer:
     the programming-model contract). Part of the prototype ``torch.compiler.precompile``
     API, so it may change without a deprecation cycle.
 
+    The contract in brief (Note [precompile programming model] in
+    ``torch/_precompile.py`` has the full list): every tensor ``fn`` reads is an
+    argument or a registered parameter/buffer of an ``nn.Module`` argument, and
+    shapes are static unless a dim is marked with ``mark_unbacked``
+    (``torch._dynamo.decorators``, inductor backend only) before the call: a
+    marked dim is captured as an unbacked symint, so one artifact serves any
+    runtime size of it, and a graph that needs to guard on it fails at capture.
+    Each input's dtype and device are specialized too (a runtime mismatch is
+    rejected), the inductor backend additionally specializes on memory format,
+    and a nested-tensor example input is refused.
+
     ``decompositions`` is an optional decomposition table (a dict mapping each
     ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
     ``decomposition_table``; it is specific to this tracer (Dynamo lowers through the
@@ -390,14 +401,16 @@ class PrecompiledRunnable:
 
     A callable with the captured ``fn``'s calling convention that can also be
     entered as a context manager and unloaded. A standalone artifact installs
-    nothing, so for it ``__enter__``/``__exit__``/:meth:`unload` are no-ops;
-    ``installed`` is ``True`` on the shape that installs onto the captured code
-    objects. Part of the prototype ``torch.compiler.precompile`` API, so it may
-    change without a deprecation cycle.
+    nothing, so for it ``__enter__``/``__exit__``/:meth:`unload` are no-ops.
+    Part of the prototype ``torch.compiler.precompile`` API, so it may change
+    without a deprecation cycle.
+
+    Attributes:
+        installed: Whether calling this handle installs onto the captured code
+            objects; ``False`` for a standalone artifact.
     """
 
     installed: bool = False
-    """Whether calling this handle installs onto the captured code objects."""
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         raise NotImplementedError
