@@ -556,6 +556,7 @@ class MetalOverrides(OpOverrides):
 
         # Unary special ops with forward in method name
         for name in [
+            "airy_ai",
             "bessel_j0",
             "bessel_j1",
             "bessel_y0",
