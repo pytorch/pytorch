@@ -2376,6 +2376,10 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
     The with_effects node returns a tuple (token, result). We recursively find all
     leaf outputs extracted via getitem and mark them as MUST_SAVE. Since these are
     saved, the with_effects op doesn't need to be recomputed in backward.
+
+    AOTAutograd cannot rematerialize a forward effect because the backward token
+    chain is established before partitioning. Reject an explicit MUST_RECOMPUTE
+    policy instead of emitting an invalid saved-token calling convention.
     """
 
     def mark_getitem_outputs(node: fx.Node) -> None:
@@ -2386,12 +2390,15 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
                     user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
     for node in joint_module.graph.nodes:
-        if (
-            is_with_effects(node)
-            and not must_recompute(node)
-            and not _has_tag_is_backward(node)
-        ):
-            mark_getitem_outputs(node)
+        if not is_with_effects(node) or _has_tag_is_backward(node):
+            continue
+        if node.meta.get("recompute") == CheckpointPolicy.MUST_RECOMPUTE:
+            raise RuntimeError(
+                "AOTAutograd does not support MUST_RECOMPUTE for effectful "
+                "operations because forward effects cannot join the backward "
+                "effect-token chain."
+            )
+        mark_getitem_outputs(node)
 
 
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
