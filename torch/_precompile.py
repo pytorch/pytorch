@@ -565,8 +565,10 @@ class _DynamoCapture(Capture):
 
     Enter the ``with`` block, call it as many times as you need to exercise the
     graph breaks and recompiled variants you want captured; the artifact is
-    rendered and written to disk when the block exits. Calls are serialized
-    under one lock.
+    rendered and written to disk when the block exits. Call :meth:`save` inside
+    the block to checkpoint everything captured so far to the same files without
+    ending the capture. Calls and saves are serialized under one lock, so a
+    save() never snapshots the capture mid-compile.
     """
 
     def __init__(
@@ -592,6 +594,10 @@ class _DynamoCapture(Capture):
         self._exited = False
         self._in_call = False
         self._calls = 0
+        # The call count the last save() wrote. -1, not 0, so a block that never
+        # called the capture is still "dirty" at exit and raises the
+        # nothing-captured error rather than writing an empty artifact.
+        self._saved_calls = -1
         self._lock = threading.RLock()
 
     def _map(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
@@ -656,15 +662,45 @@ class _DynamoCapture(Capture):
             raise PrecompileError(
                 f"precompile could not write the artifact: {e}"
             ) from e
+        self._saved_calls = self._calls
+
+    def save(self) -> None:
+        r"""save() -> None
+
+        Checkpoint everything captured so far to the ``artifact_path`` /
+        ``cache_path`` files, without ending the capture. Each call re-renders
+        and rewrites both files, so a job that dies between saves leaves the
+        last checkpoint loadable. A gate refusal (``require_*``) or a write
+        failure raises but writes nothing partial, and the capture stays open.
+        """
+        with self._lock:
+            if self._call is None or self._exited:
+                raise PrecompileError(
+                    "capture is not active: enter it with a `with` block before "
+                    "calling save()."
+                )
+            if self._in_call:
+                raise PrecompileError(
+                    "save() was called from inside fn while the capture is "
+                    "running it; save after the call returns."
+                )
+            if self._calls == 0:
+                raise PrecompileError(
+                    "nothing was captured: call the capture with your example "
+                    "arguments before calling save()."
+                )
+            self._write()
 
     def __exit__(self, *exc: object) -> None:
         with self._lock:
             error: BaseException | None = None
             try:
-                # A clean block writes the artifact while the compiles are still
-                # recorded; a block that raised writes nothing here. A gate
-                # refusal is held and re-raised after teardown.
-                if exc[0] is None:
+                # A clean block with calls the last save() did not cover writes a
+                # final checkpoint while the compiles are still recorded; a block
+                # that raised, or whose last save() covered every call, writes
+                # nothing here. A gate refusal is held and re-raised after
+                # teardown so summary() stays readable.
+                if exc[0] is None and self._calls > self._saved_calls:
                     try:
                         if self._calls == 0:
                             raise PrecompileError(
@@ -682,6 +718,14 @@ class _DynamoCapture(Capture):
                     self._fresh_cache = None
         if exc[0] is None and error is not None:
             raise error
+
+    def summary(self) -> PrecompileSummary:
+        r"""summary() -> PrecompileSummary
+
+        Coverage, recompilation, failure and guard information for everything
+        captured so far.
+        """
+        return self._map(self._session.summary)
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -2962,7 +3006,7 @@ def capture(
     the entry cannot reach through a graph-break continuation -- a graph break
     inside a child module's forward -- is refused at write time. It is locked
     to the producing Python version and torch build. The guards that could not
-    be serialized are listed in the artifact (``DROPPED_GUARDS``) rather than checked,
+    be serialized are reported in :meth:`Capture.summary` rather than checked,
     and the :class:`DynamoTracer` ``require_*`` gates refuse the risky ones by
     default.
 
