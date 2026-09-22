@@ -617,7 +617,11 @@ def register_statically_launched_kernel(
         raise ValueError(
             "device_type must be a non-empty string matching torch.device.type"
         )
-    if not issubclass(kernel_cls, StaticallyLaunchedTritonKernel):
+    # Guard against non-class inputs before issubclass (its native TypeError
+    # message "must be a class" doesn't say whether the value is a valid class).
+    if not isinstance(kernel_cls, type) or not issubclass(
+        kernel_cls, StaticallyLaunchedTritonKernel
+    ):
         raise TypeError(
             "kernel_cls must be a StaticallyLaunchedTritonKernel subclass, "
             "got " + str(kernel_cls)

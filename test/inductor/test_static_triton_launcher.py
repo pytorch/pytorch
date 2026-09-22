@@ -258,10 +258,7 @@ class TestStaticTritonLauncherUnit(TestCase):
             self.assertIsInstance(launcher, FakeNpuKernel)
         finally:
             # Un-register so the fixture does not leak into other tests.
-            register_statically_launched_kernel(
-                "npu", FakeNpuKernel, override=True
-            )
-            del _STATIC_LAUNCHER_REGISTRY["npu"]
+            _STATIC_LAUNCHER_REGISTRY.pop("npu", None)
 
     def test_register_statically_launched_kernel_validation(self):
         with self.assertRaisesRegex(
@@ -273,10 +270,11 @@ class TestStaticTritonLauncherUnit(TestCase):
             register_statically_launched_kernel(
                 "cuda", StaticallyLaunchedCudaKernel
             )
-        with self.assertRaises(TypeError):
-            register_statically_launched_kernel(
-                "npu", object,
-            )
+        # Non-class inputs (the per-device launcher argument) must raise a clear
+        # TypeError before issubclass can produce its native "must be a class".
+        for bad in (None, object(), object):
+            with self.assertRaises(TypeError):
+                register_statically_launched_kernel("npu", bad)
         registry = dict(_STATIC_LAUNCHER_REGISTRY)
         try:
             register_statically_launched_kernel(
