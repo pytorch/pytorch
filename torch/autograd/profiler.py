@@ -757,7 +757,6 @@ class profile:
                 is_user_annotation=kineto_event.is_user_annotation(),
                 is_python_function=kineto_event.is_python_function(),
                 activity_type=kineto_event.activity_type(),
-                metadata_json=kineto_event.metadata_json(),
                 extra_meta=kineto_event.extra_meta() or None,
                 typed_metadata=kineto_event.typed_metadata() or None,
                 flow_id=kineto_event.flow_id(),

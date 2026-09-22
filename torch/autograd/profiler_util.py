@@ -716,7 +716,6 @@ class FunctionEvent(FormattedTimesMixin):
             used in exported traces. Use
             ``_ExperimentalConfig(expose_kineto_event_metadata=True)`` to expose
             Kineto activity metadata. Available fields vary by activity and backend.
-        metadata_json (str): Deprecated. Use event_metadata instead.
         event_metadata (EventMetadata): Additional metadata in structured format.
         structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
             but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
@@ -773,7 +772,6 @@ class FunctionEvent(FormattedTimesMixin):
         is_user_annotation=False,
         is_python_function=False,
         activity_type=None,
-        metadata_json=None,
         flow_id=None,
         flow_type=None,
         flow_start=None,
@@ -830,7 +828,6 @@ class FunctionEvent(FormattedTimesMixin):
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
-        self._metadata_json = metadata_json
         self.flow_id: int | None = flow_id
         self.flow_type: int | None = flow_type
         self.flow_start: bool | None = flow_start
@@ -901,14 +898,6 @@ class FunctionEvent(FormattedTimesMixin):
         return self.device_memory_usage - sum(
             child.device_memory_usage for child in self.cpu_children
         )
-
-    @property
-    @deprecated(
-        "`metadata_json` is deprecated. Use `event_metadata` instead.",
-        category=FutureWarning,
-    )
-    def metadata_json(self):
-        return self._metadata_json
 
     @property
     @deprecated(
