@@ -370,7 +370,7 @@ class Capture:
     Part of the prototype ``torch.compiler.precompile`` API, so it may change
     without a deprecation cycle. Enter it as a context manager to arm the
     capture, call it exactly as you would ``fn`` inside the block -- each call
-    runs for real, is folded into the capture, and returns what ``fn`` returned
+    runs for real, is folded into the capture, and returns that run's result
     -- and the artifact is written to the ``artifact_path`` / ``cache_path``
     files when the block exits. How many calls a capture takes is the tracer's:
     :class:`MakeFxTracer` takes exactly one. Call :meth:`save` inside the block
@@ -418,9 +418,15 @@ class _MakeFxCapture(Capture):
         self._artifact_path = artifact_path
         self._cache_path = cache_path
         self._entered = False
+        self._exited = False
         self._rendered: tuple[str, bytes] | None = None
 
     def __enter__(self) -> Self:
+        if self._entered or self._exited:
+            raise PrecompileError(
+                "this capture has already been entered; capture() returns a "
+                "fresh capture per call."
+            )
         self._entered = True
         return self
 
@@ -430,21 +436,36 @@ class _MakeFxCapture(Capture):
         # call; a block that raised, or one that never called the capture,
         # leaves the files untouched.
         self._entered = False
+        self._exited = True
         if exc[0] is not None:
             return
-        self.save()
+        self._write()
 
     def save(self) -> None:
         r"""Write the captured artifact to disk. A make_fx capture records a single
         call, so there is nothing further to fold in; save() and block exit
         write the same files.
         """
+        if not self._entered:
+            raise PrecompileError(
+                "capture is not active: enter it with a `with` block before "
+                "calling save()."
+            )
+        self._write()
+
+    def _write(self) -> None:
         if self._rendered is None:
             raise PrecompileError(
                 "nothing was captured: call the capture with your example "
                 "arguments inside the `with` block."
             )
-        _write_artifact(self._artifact_path, self._cache_path, *self._rendered)
+        try:
+            _write_artifact(self._artifact_path, self._cache_path, *self._rendered)
+        except OSError as e:
+            # _write_artifact leaves the previous pair in place.
+            raise PrecompileError(
+                f"precompile could not write the artifact: {e}"
+            ) from e
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         if not self._entered:
@@ -2549,7 +2570,7 @@ def capture(
     Capture is caller-driven: this returns a capture object rather than running
     anything. Enter it as a context manager, call it exactly as you would ``fn``
     inside the block -- each call runs for real, folds what it exercised into the
-    capture, and returns what ``fn`` returned -- and the ``(python_code, cache)``
+    capture, and returns that run's result -- and the ``(python_code, cache)``
     artifact is written to ``artifact_path`` / ``cache_path`` when the block
     exits::
 
