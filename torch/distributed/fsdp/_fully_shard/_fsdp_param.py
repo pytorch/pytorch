@@ -211,7 +211,6 @@ class FSDPParam:
     )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
     _all_gather_num_prefixes: tuple[int, ...] | None
-    _post_forward_all_gather_num_prefixes: tuple[int, ...]
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
@@ -242,7 +241,6 @@ class FSDPParam:
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
-        self._post_forward_all_gather_num_prefixes = (1,)
         self.all_gather_outputs: list[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
         self._param_fqn: str | None = None  # prefixed from root module
@@ -982,7 +980,7 @@ class FSDPParam:
     @property
     def all_gather_num_prefixes(self) -> tuple[int, ...]:
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            return self._post_forward_all_gather_num_prefixes
+            return (1,)
         if self._all_gather_num_prefixes is not None:
             return self._all_gather_num_prefixes
         extensions_data = self._extensions_data
