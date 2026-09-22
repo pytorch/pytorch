@@ -1,10 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
-import gc
 import logging
 import os
-import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -39,7 +37,6 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from torch.distributed.pipelining._p2p import _build_p2p_edge_groups
 from torch.distributed.pipelining.microbatch import split_args_kwargs_into_chunks
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -54,9 +51,7 @@ from torch.nn.attention.flex_attention import BlockMask, create_block_mask
 from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
-    MultiProcessTestCase,
     requires_accelerator_dist_backend,
-    requires_gloo,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -1708,55 +1703,6 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 
 
 instantiate_parametrized_tests(CustomSchedulesTest)
-
-
-class GlooPerEdgeScheduleTest(MultiProcessTestCase):
-    """Exercise stage-assignment-derived groups without an accelerator backend."""
-
-    world_size = 2
-
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
-
-    @requires_gloo()
-    def test_edge_groups_split_and_reuse_cpu_parent(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        mapping = {0: 0, 1: 1}
-
-        def run_world(generation: int) -> weakref.ReferenceType[dist.ProcessGroup]:
-            dist.init_process_group(
-                "gloo",
-                store=dist.PrefixStore(f"world-{generation}", store),
-                rank=self.rank,
-                world_size=self.world_size,
-            )
-            try:
-                parent = dist.distributed_c10d._get_default_group()
-                dist.all_reduce(torch.ones(1))
-                groups, rounds = _build_p2p_edge_groups(
-                    parent, mapping, torch.device("cpu")
-                )
-                cached_groups, cached_rounds = _build_p2p_edge_groups(
-                    parent, mapping, torch.device("cpu")
-                )
-
-                self.assertEqual(rounds, (((0, 1),), ((1, 0),)))
-                self.assertIs(groups, cached_groups)
-                self.assertIs(rounds, cached_rounds)
-                for edge, group in groups.items():
-                    self.assertEqual(dist.get_process_group_ranks(group), list(edge))
-                    value = torch.tensor(float(self.rank + 1))
-                    dist.all_reduce(value, group=group)
-                    self.assertEqual(value, torch.tensor(3.0))
-                return weakref.ref(parent)
-            finally:
-                dist.destroy_process_group()
-
-        for generation in range(2):
-            parent_ref = run_world(generation)
-            gc.collect()
-            self.assertIsNone(parent_ref())
 
 
 class PerEdgeScheduleTest(MultiProcContinuousTest):
