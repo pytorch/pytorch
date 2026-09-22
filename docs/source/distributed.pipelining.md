@@ -464,6 +464,88 @@ to `stage.forward_one_chunk()`.
 .. automethod:: torch.distributed.pipelining.PipelineStage.register_forward_context
 ```
 
+### Controlling FSDP Unshard Lookahead
+
+Multi-stage runtime schedules lower a compute-only schedule into explicit FSDP
+`UNSHARD` and `RESHARD` actions. Two parameters control different parts of
+that lowering:
+
+- `max_active_stages` is the target parameter-residency window. It determines
+  which stages remain unsharded and where `RESHARD` actions are inserted.
+- `unshard_lookahead` is the issue-distance window. It determines how many
+  upcoming distinct logical stages may begin unsharding.
+
+Separating these windows allows a schedule to issue fewer all-gathers early
+without evicting parameters sooner or adding another unshard/reshard cycle.
+An asynchronous unshard is still real GPU work:
+
+```text
+pre-all-gather cast or quantization
+  -> copy-in and packing
+  -> all-gather
+  -> copy-out
+  -> post-all-gather quantization or layout preparation
+  -> parameter ready
+```
+
+`async_op=True` avoids a host-side wait, but these kernels, copies, collective
+traffic, allocations, and stream dependencies can still contend with the
+forward. Issuing the entire residency window at once can therefore put
+non-critical parameter preparation ahead of useful compute.
+
+The `"auto"` policy estimates how much of this work fits into each rank's
+pipeline startup bubble. Let a balanced stage forward take `F`, and let the
+composite critical-path cost of preparing one stage's unsharded parameters be
+`U`. Ignoring pipeline transfer latency, rank `r` waits approximately
+`U + rF` before its first useful forward. This can complete approximately
+`floor((U + rF) / U)` unshards; issuing one more allows the next unshard to
+overlap that first forward. With the simplifying assumption `F = U = T`, the
+lookahead is `r + 2`, capped by `max_active_stages`.
+
+For PP4 with `max_active_stages=4`, `"auto"` resolves to `(2, 3, 4, 4)`:
+
+```text
+interval           | 0..T    | T..2T   | 2T..3T  | 3T..4T  | 4T..5T
+-------------------+---------+----------+----------+----------+---------
+rank 0 forward     | blocked | F(first) |          |          |
+rank 0 preparation | U0      | U1       |          |          |  => 2
+-------------------+---------+----------+----------+----------+---------
+rank 1 forward     | blocked | blocked  | F(first) |          |
+rank 1 preparation | U0      | U1       | U2       |          |  => 3
+-------------------+---------+----------+----------+----------+---------
+rank 2 forward     | blocked | blocked  | blocked  | F(first) |
+rank 2 preparation | U0      | U1       | U2       | U3       |  => 4
+-------------------+---------+----------+----------+----------+---------
+rank 3 forward     | blocked | blocked  | blocked  | blocked  | F(first)
+rank 3 preparation | U0      | U1       | U2       | U3       |  => 4
+```
+
+The diagram is an analytical starting point, not an exact CUDA-stream model.
+`Uk` denotes preparation of the kth upcoming rank-local stage, not a global
+stage index. Vertically aligned preparation and forward cells are intended to
+overlap.
+Real stages may be unbalanced, unshard phases may overlap only partially, and
+network or memory-bandwidth contention may change the best distance. Choose a
+policy accordingly:
+
+| Policy | Per-rank issue distance | Intended use |
+| --- | --- | --- |
+| `"full"` | `max_active_stages` | Compatibility default matching the original full-window behavior. |
+| `"auto"` | `min(pp_rank + 2, max_active_stages)` | Deterministic startup-bubble estimate that avoids recipe-level tuning; not a universal optimum. |
+| Tuple | The corresponding positive integer for each PP rank | Expert tuning for measured model, topology, and fabric behavior. |
+
+A custom compute-only schedule may be combined with a tuple before lowering.
+For exact `UNSHARD` and communication placement, supply an already lowered
+`compute_comms` schedule; `unshard_lookahead` cannot retune actions that are
+already present.
+
+An atomic compound action remains indivisible, so it may extend either window
+by up to the action's number of stages minus one. Non-full policies can also
+move absolute P2P action positions because unshards consume lowering rounds.
+They do not change compute order, `RESHARD` placement, residency episodes, or
+collective counts. Applications should benchmark an explicit tuple when stage
+costs differ materially from the balanced model.
+
 ## Logging
 
 You can turn on additional logging using the `TORCH_LOGS` environment variable from [torch.\_logging](https://pytorch.org/docs/main/logging.html#module-torch._logging):

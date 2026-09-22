@@ -24,6 +24,8 @@ from schedule_registry import (
 import torch
 import torch.distributed as dist
 import torch.distributed.config as dist_config
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard
 from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
     pipeline,
@@ -45,6 +47,7 @@ from torch.distributed.pipelining.schedules import (
     _wait_batch_p2p,
     FORWARD,
     OVERLAP_F_B,
+    UNSHARD,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.nn.attention.flex_attention import BlockMask, create_block_mask
@@ -1488,6 +1491,95 @@ class ScheduleTest(MultiProcContinuousTest):
         check_gradients(
             self.config, stage_modules, ref_mod, submod_names, rtol=1e-5, atol=1e-5
         )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_unshard_lookahead_fsdp_parity(self):
+        # Bind each worker before the 2D mesh creates its NCCL process groups.
+        torch.accelerator.set_device_index(self.rank)
+        mesh = init_device_mesh(device_type, (2, 2), mesh_dim_names=("dp", "pp"))
+        pp_mesh = mesh["pp"]
+        dp_mesh = mesh["dp"]
+        pp_group = pp_mesh.get_group()
+        pp_rank = pp_mesh.get_local_rank()
+        pp_size = pp_mesh.size()
+        config = PipelineTestConfig(pp_size, self.device, pp_rank)
+        num_stages = 2 * pp_size
+        base_mod, _, x, target, loss_fn = setup_models_and_data(
+            config, n_layers=num_stages
+        )
+        # Static receive metadata must preserve activation gradients across PP
+        # boundaries, so its input exemplar must require gradients.
+        x.requires_grad_(True)
+        results = []
+
+        for lookahead in ("full", (1,) * pp_size):
+            mod = copy.deepcopy(base_mod)
+            stage_indices = [pp_rank + i * pp_size for i in range(2)]
+            stage_modules = [mod.layers[index] for index in stage_indices]
+            microbatch = x.chunk(2 * pp_size)[0]
+            stages = []
+            for module, stage_index in zip(stage_modules, stage_indices, strict=True):
+                example_output = module(microbatch)
+                stages.append(
+                    PipelineStage(
+                        module,
+                        stage_index,
+                        num_stages,
+                        self.device,
+                        group=pp_group,
+                        input_args=microbatch,
+                        output_args=example_output,
+                    )
+                )
+            for stage_module in stage_modules:
+                fully_shard(stage_module, mesh=dp_mesh)
+            schedule = ScheduleInterleaved1F1B(
+                stages,
+                2 * pp_size,
+                loss_fn=loss_fn,
+                scale_grads=False,
+                max_active_stages=2,
+                unshard_lookahead=lookahead,
+            )
+            unshard_positions = tuple(
+                index
+                for index, action in enumerate(
+                    schedule.pipeline_order_with_comms[pp_rank]
+                )
+                if action.computation_type == UNSHARD
+            )
+
+            losses = []
+            if pp_rank == 0:
+                output = schedule.step(x)
+            elif pp_rank == pp_size - 1:
+                output = schedule.step(target=target, losses=losses)
+            else:
+                output = schedule.step()
+            grads = []
+            for module in stage_modules:
+                for parameter in module.parameters():
+                    grad = parameter.grad
+                    if grad is None:
+                        raise AssertionError("FSDP parameter gradient is missing")
+                    grads.append(grad.to_local().clone())
+            results.append((output, list(losses), grads, unshard_positions))
+
+        full_output, full_losses, full_grads, full_unshards = results[0]
+        limited_output, limited_losses, limited_grads, limited_unshards = results[1]
+        self.assertNotEqual(limited_unshards, full_unshards)
+        self.assertTrue(any(torch.count_nonzero(grad).item() for grad in full_grads))
+        if pp_rank == pp_size - 1:
+            torch.testing.assert_close(limited_output, full_output)
+            torch.testing.assert_close(
+                torch.stack(limited_losses), torch.stack(full_losses)
+            )
+        for limited_grad, full_grad in zip(limited_grads, full_grads, strict=True):
+            torch.testing.assert_close(limited_grad, full_grad)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
