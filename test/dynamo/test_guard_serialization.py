@@ -1213,6 +1213,11 @@ if torch.distributed.is_available():
             self.calls = []
 
 
+class _AssertingGetstate:
+    def __getstate__(self):
+        raise AssertionError("mid-iteration")
+
+
 class _HolderWithGenerator:
     def __init__(self):
         self.it = (i for i in range(3))
@@ -1983,6 +1988,112 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         GuardsStatePickler({id(c): c}, {}, {}, {}, buf).dump({"c": c})
         self.assertEqual(load_guards_state(buf.getvalue())["c"], c)
+
+    def test_unpicklable_guarded_attribute_names_its_path(self):
+        # A type alone ("cannot pickle 'generator' object") is not actionable in
+        # a model with a thousand-frame guard tree; the path is.
+        from torch._dynamo.guards import pickle_guards_state
+
+        h = _HolderWithGenerator()
+        graph = types.SimpleNamespace(
+            guards=[], local_scope={"h": h}, global_scope={}, guard_on_key_order=set()
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(h): h, id(h.it): h.it}, value_guarded_containers={}
+        )
+        with self.assertRaisesRegex(
+            PackageError,
+            r"cannot pickle 'generator' object\n  reached via: local_scope\['h'\]\.it",
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_offending_value_path_is_found_by_identity(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        holder = types.SimpleNamespace(deep=types.SimpleNamespace())
+        # A same-typed decoy a type-based search would have reported instead.
+        holder.deep.decoy = (n for n in range(3))
+        holder.deep.it = (n for n in range(3))
+        graph = types.SimpleNamespace(local_scope={"p": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "local_scope['p'].deep.it", _offending_value_path(state, holder.deep.it)
+        )
+        self.assertEqual(_offending_value_path(state, object()), "")
+
+    def test_offending_value_path_names_a_value_inside_a_container(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        lock, tag = threading.Lock(), threading.Lock()
+        member = _HolderWithGenerator()  # hashable, unlike SimpleNamespace
+        member.it = tag
+        holder = types.SimpleNamespace(cfg={"a": [1, (2, lock)]}, tags={member})
+        graph = types.SimpleNamespace(local_scope={"h": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "local_scope['h'].cfg['a'][1][1]", _offending_value_path(state, lock)
+        )
+        # A set has no index; the placeholder composes with what hangs below it.
+        self.assertIn(
+            "local_scope['h'].tags[<a member>].it", _offending_value_path(state, tag)
+        )
+        # One budget bounds everything queued: past it a value is not named.
+        far = threading.Lock()
+        graph.local_scope["big"] = [0] * 30000 + [far]
+        self.assertEqual(_offending_value_path(state, far), "")
+        graph.local_scope["big"] = [[0] * 200 for _ in range(200)] + [[far]]
+        self.assertEqual(_offending_value_path(state, far), "")
+        graph.local_scope["big"] = [0] * 30 + [far]
+        self.assertIn("local_scope['big'][30]", _offending_value_path(state, far))
+
+    def test_a_reducer_refusal_names_its_path_too(self):
+        # A PackageError the reducer raises itself (a guard reads a weakref) is
+        # re-raised with the path appended: there last_reduced is exact.
+        referent = _HolderWithGenerator()
+        ref = weakref.ref(referent)
+        graph = types.SimpleNamespace(
+            guards=[], local_scope={"w": ref}, global_scope={}, guard_on_key_order=set()
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(ref): ref}, value_guarded_containers={}
+        )
+        with self.assertRaisesRegex(
+            PackageError,
+            r"a guard reads a ReferenceType.*\n  reached via: local_scope\['w'\]$",
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_an_object_whose_getstate_raises_is_named_itself(self):
+        # The C pickler consults reducer_override for the object right before
+        # calling its __reduce_ex__, so a __getstate__ that asserts (GradScaler
+        # mid-iteration) is attributed to that object, not to a sibling.
+        bystander, bad = _HolderWithGenerator(), _AssertingGetstate()
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"ok": bystander, "bad": bad},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(bystander): bystander, id(bad): bad},
+            value_guarded_containers={},
+        )
+        with self.assertRaisesRegex(
+            PackageError, r"mid-iteration\n  reached via: local_scope\['bad'\]$"
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_offending_value_path_never_masks_the_real_error(self):
+        # It is a diagnostic appended to an error already being raised, so any
+        # failure inside it must stay silent.
+        from torch._dynamo.guards import _offending_value_path
+
+        class _Exploding:
+            @property
+            def output_graph(self):
+                raise RuntimeError("boom")
+
+        self.assertEqual(_offending_value_path(_Exploding(), object()), "")
 
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
