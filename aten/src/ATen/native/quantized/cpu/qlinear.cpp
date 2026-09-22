@@ -865,15 +865,21 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   PrimitiveCacheKey cache_key = std::make_tuple(
       input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads, /*accum scale*/1.0, /*accum zero point*/0);
   c10::call_once(*cache_initialized_flag, [&](){
+      // Prepacking does not know the output dtype. Select the layout for this
+      // invocation before preparing the cached primitive.
+      auto expected_w = w.reorder_if_differ_in(
+          ideep::matmul_forward::expected_weights_desc(
+              w.get_dims(), input_dims, w.get_data_type(), input_data_type,
+              output_ideep_data_type, op_attr));
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/false>(
-          params, x, w, b, y,
+          params, x, expected_w, b, y,
           src_scales, weights_scales, dst_scales,
           src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr,
           output_ideep_data_type,
           ideep_lowp_kind);
       get_cache() = LinearPrimitiveCache(cache_key, params);
-      w = w.reorder_if_differ_in(params.pd.weights_desc());
+      w = expected_w.reorder_if_differ_in(params.pd.weights_desc());
   });
   if (get_cache().hit(cache_key)) {
     LinearParams& params = get_cache().get_param();
