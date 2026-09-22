@@ -1561,6 +1561,28 @@ def add(x, y):
             x = self.instance_method_with_args(x)
             return x
 
+    def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
+        # The serialization filter and the capture mode are independent: a
+        # package can carry a filter without being an explicit capture, and be
+        # an explicit capture without one. Neither is on by default.
+        def fn(x):
+            return x + 1
+
+        def keep_all(entries):
+            return [True] * len(entries)
+
+        ambient = CompilePackage(fn)
+        self.assertFalse(ambient.explicit_capture)
+        self.assertFalse(ambient.serving)
+        self.assertIsNone(ambient.serialization_guard_filter_fn)
+        filtered = CompilePackage(fn, serialization_guard_filter_fn=keep_all)
+        self.assertFalse(filtered.explicit_capture)
+        self.assertIs(filtered.serialization_guard_filter_fn, keep_all)
+        explicit = CompilePackage(fn, explicit_capture=True)
+        self.assertTrue(explicit.explicit_capture)
+        self.assertIsNone(explicit.serialization_guard_filter_fn)
+        self.assertTrue(CompilePackage(fn, serving=True).serving)
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
