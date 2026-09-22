@@ -607,6 +607,22 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return True
         return False
 
+    def _copy_writes_back_result_of(copy_node, node):
+        # copy_(input, src): does src carry node's result (possibly through views)?
+        src = copy_node.args[1]
+        return isinstance(src, torch.fx.Node) and (
+            src is node or _get_view_base(src) is node
+        )
+
+    def _result_observed_after(node, loc):
+        # Is node's result (or a view of it) used by any node placed after loc?
+        for user in node.users:
+            if node_order[user] > loc:
+                return True
+            if _is_view_op(user.target) and _result_observed_after(user, loc):
+                return True
+        return False
+
     def can_inplace(node, mutated_arg):
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
@@ -651,6 +667,19 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return False
             if any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg
+            ):
+                return False
+
+            # If the copy_ epilogue writes something *other* than this node's
+            # result back into the input, the input buffer is overwritten by an
+            # unrelated value after this op. Reinplacing into the input is then
+            # only safe if nothing observes this node's result after that copy_,
+            # e.g. as a graph output:
+            #     y = torch.slice_scatter(x, src, ...)   # would be reinplaced into x
+            #     x.zero_()                               # copy_(x, zeros) epilogue
+            #     return y                                # must not see the zeros
+            if not _copy_writes_back_result_of(copy_node, node) and _result_observed_after(
+                node, node_order[copy_node]
             ):
                 return False
 
