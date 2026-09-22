@@ -360,6 +360,33 @@ class TestFP8Types(TestCase):
         self.assertEqual(actual.dtype, dst_dtype)
         torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
 
+    @onlyCUDA
+    @skipCUDAIf(not torch.version.hip, "fnuz fp8 Triton types are only used on ROCm")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize(
+        "src_dtype",
+        (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+    )
+    @parametrize("dst_dtype", (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz))
+    def test_int_to_float8_fnuz_cast(
+        self, src_dtype: torch.dtype, dst_dtype: torch.dtype, device: torch.device
+    ):
+        def fp8_cast(x):
+            return x.to(dtype=dst_dtype)
+
+        if src_dtype == torch.bool:
+            x = torch.tensor([False, True, False, True], device=device)
+        elif src_dtype == torch.uint8:
+            x = torch.tensor([0, 1, 2, 16], dtype=src_dtype, device=device)
+        else:
+            x = torch.tensor([-16, -2, 0, 16], dtype=src_dtype, device=device)
+
+        expected = fp8_cast(x)
+        actual = torch.compile(fp8_cast, backend="inductor", fullgraph=True)(x)
+
+        self.assertEqual(actual.dtype, dst_dtype)
+        torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_bad_cast(self, device):
         def fp8_cast(x, dtype):
@@ -983,6 +1010,63 @@ class TestFP8Lowering(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "DeepSeek scale|expect_true"):
             torch.compile(fn, fullgraph=True, dynamic=False)(a, b, sa, sb)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not has_triton_tma_device(), "Requires device-side TMA")
+    @parametrize("use_out", [False, True])
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+            "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
+            "test_configs.max_mm_configs": 1,
+            "force_disable_caches": True,
+        }
+    )
+    def test_deepseek_v2_single_k_block(self, device, use_out):
+        m, n, k = 80, 112, 128
+        a = (torch.randint(-4, 5, (m, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        b = (torch.randint(-4, 5, (n, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        sa = torch.randint(1, 5, (m, 1), device=device).float()
+        sb = torch.full((1, 1), 3.0, device=device)
+        # Dyadic values keep FP32 accumulation exact against this FP64 reference.
+        reference = ((a.double() * sa.double()) @ (b.double() * sb.double()).t()) * 6
+        out = torch.empty(m, n, device=device, dtype=torch.float32)
+        op = (
+            torch.ops.aten._scaled_mm_v2.out
+            if use_out
+            else torch.ops.aten._scaled_mm_v2.default
+        )
+
+        def fn(a, b, sa, sb, out):
+            sa, sb = sa * 2, sb * 3
+            return op(
+                a,
+                b,
+                [sa],
+                [ScalingType.BlockWise1x128.value],
+                [0],
+                [sb],
+                [ScalingType.BlockWise128x128.value],
+                [0],
+                None,
+                torch.float32,
+                **({"out": out} if use_out else {}),
+            )
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), a, b.t(), sa, sb, out
+        )
+        self.assertEqual(actual.double(), reference, atol=0, rtol=0)
+        if use_out:
+            self.assertIs(actual, out)
+        self.assertIn("def blockwise128x128_scaling", code[0])
 
     @onlyCUDA
     @skipIfRocm

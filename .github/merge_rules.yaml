@@ -495,6 +495,7 @@
   - ngimel
   - dolpm
   - sanrise
+  - NicolasHug
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -602,8 +603,8 @@
   approved_by:
   - aditvenk
   - AmesingFlank
-  - amirafzali
   - angelayi
+  - anshul-si
   - aorenste
   - atalman
   - blaine-rister
@@ -642,7 +643,6 @@
   - sanketpurandare
   - sanrise
   - scotts
-  - seemethere
   - sevenEng
   - SherlockNoMad
   - slayton58
