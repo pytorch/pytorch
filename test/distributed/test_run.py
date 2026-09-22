@@ -18,11 +18,14 @@ import torch.distributed.run as run
 from torch.distributed.launcher.api import launch_agent, LaunchConfig
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
 )
 
 
+@instantiate_parametrized_tests
 class RunTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -68,19 +71,46 @@ class RunTest(TestCase):
         self.assertEqual(args.training_script, "dummy_script.py")
         self.assertEqual(args.training_script_args, ["--r=16", "--standalone"])
 
-    def test_own_flag_abbreviation_still_works(self):
+    @parametrize("launcher_args", [["--nnod=2"], ["--nnod", "2"]])
+    @parametrize("script_args", [[], ["--r=16"], ["--nnod=16"]])
+    def test_own_flag_abbreviation_still_works(self, launcher_args, script_args):
         """Test abbreviating one of torchrun's flags (before the script)"""
-        args = run.parse_args(["--nnod=2", "dummy_script.py"])
+        args = run.parse_args([*launcher_args, "dummy_script.py", *script_args])
         self.assertEqual(args.nnodes, "2")
         self.assertEqual(args.training_script, "dummy_script.py")
-        args = run.parse_args(["--nnod=2", "dummy_script.py", "--r=16"])
-        self.assertEqual(args.nnodes, "2")
+        self.assertEqual(args.training_script_args, script_args)
+
+    @parametrize(
+        "argv, expected",
+        [
+            (["dummy_script.py", "--", "--r=16"], ["--r=16"]),
+            (["--", "dummy_script.py", "--", "--r=16"], ["--", "--r=16"]),
+            (["dummy_script.py", "--", "--", "--r=16"], ["--", "--r=16"]),
+            (
+                ["dummy_script.py", "value", "--", "--r=16"],
+                ["value", "--", "--r=16"],
+            ),
+        ],
+    )
+    def test_training_script_args_separator(self, argv, expected):
+        args = run.parse_args(argv)
+        self.assertEqual(args.training_script, "dummy_script.py")
+        self.assertEqual(args.training_script_args, expected)
+
+    @parametrize("launcher_arg", ["-r3", "-mr3"])
+    def test_short_options_with_ambiguous_script_args(self, launcher_arg):
+        args = run.parse_args([launcher_arg, "dummy_script.py", "--r=16"])
+        self.assertEqual(args.redirects, "3")
+        if launcher_arg == "-mr3":
+            self.assertTrue(args.module)
         self.assertEqual(args.training_script, "dummy_script.py")
         self.assertEqual(args.training_script_args, ["--r=16"])
-        args = run.parse_args(["--nnod=2", "dummy_script.py", "--nnod=16"])
-        self.assertEqual(args.nnodes, "2")
-        self.assertEqual(args.training_script, "dummy_script.py")
-        self.assertEqual(args.training_script_args, ["--nnod=16"])
+
+    @parametrize("launcher_args", [["--r=16"], ["--r", "16"]])
+    def test_ambiguous_launcher_option_rejected(self, launcher_args):
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            run.parse_args([*launcher_args, "dummy_script.py"])
+        self.assertEqual(error.exception.code, 2)
 
     def test_config_from_args_signals_to_handle(self):
         """Test that the signals_to_handle argument is correctly passed to LaunchConfig."""

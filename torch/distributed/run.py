@@ -455,6 +455,14 @@ from torch.utils.backend_registration import _get_custom_mod_func
 logger = get_logger(__name__)
 
 
+class _TorchrunArgumentParser(ArgumentParser):
+    """Let REMAINDER capture ambiguous options; reject them otherwise."""
+
+    def _get_option_tuples(self, option_string):
+        matches = super()._get_option_tuples(option_string)
+        return matches if len(matches) <= 1 else []
+
+
 class _PrintCompletionAction(_Action):
     """Print a shell completion script for ``torchrun`` and exit.
 
@@ -482,7 +490,9 @@ class _PrintCompletionAction(_Action):
 
 def get_args_parser() -> ArgumentParser:
     """Parse the command line options."""
-    parser = ArgumentParser(description="Torch Distributed Elastic Training Launcher")
+    parser = _TorchrunArgumentParser(
+        description="Torch Distributed Elastic Training Launcher"
+    )
 
     def comma_separated_list(value):
         placeholder = "<COMMA_PLACEHOLDER>"
@@ -831,55 +841,9 @@ def get_args_parser() -> ArgumentParser:
     return parser
 
 
-def _resolve_flag(parser: ArgumentParser, opt: str):
-    """Resolve ``opt`` to a registered flag, by exact name or unambiguous abbreviation.
-
-    Returns None if ``opt`` is unknown or ambiguous; those cases are left for
-    parser.parse_args() to error on as usual.
-    """
-    option_strings = parser._option_string_actions
-    action = option_strings.get(opt)
-    if action is not None:
-        return action
-    if not (parser.allow_abbrev and opt.startswith("--")):
-        return None
-    matches = {name for name in option_strings if name.startswith(opt)}
-    return option_strings[matches.pop()] if len(matches) == 1 else None
-
-
-def _find_training_script_index(parser: ArgumentParser, args: list[str]) -> int:
-    """Return the index of the training_script positional in ``args``.
-
-    Used to split off the script's own args before argparse sees them, so they
-    can never be misparsed as an abbreviated torchrun flag (gh-120601). Bails
-    out (returns len(args)) on anything ambiguous or unrecognized, deferring to
-    parser.parse_args() on the full list as before.
-    """
-    i, n = 0, len(args)
-    while i < n:
-        token = args[i]
-        if token == "--":
-            return i + 1
-        if not token.startswith("-") or token == "-":
-            return i
-        opt, sep, _ = token.partition("=")
-        action = _resolve_flag(parser, opt if sep else token)
-        if action is None or (sep and action.nargs == 0):
-            return n  # unresolved or malformed option: defer to normal parsing
-        i += 2 if (action.nargs is None and not sep) else 1
-    return n
-
-
 def parse_args(args):
     parser = get_args_parser()
-    if args is None:
-        args = sys.argv[1:]
-    split = _find_training_script_index(parser, args)
-    namespace = parser.parse_args(args[: split + 1])
-    if split < len(args):
-        namespace.training_script = args[split]
-        namespace.training_script_args = args[split + 1 :]
-    return namespace
+    return parser.parse_args(args)
 
 
 def parse_min_max_nnodes(nnodes: str):
