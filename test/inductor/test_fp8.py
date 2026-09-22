@@ -1276,7 +1276,6 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(expected, actual, rtol=1e-2, atol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
     @onlyOn(["cuda", "xpu"])
     def test_scaled_mm_rejects_high_rank_scale_b(self, device):
         M = N = K = 64
