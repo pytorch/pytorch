@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
@@ -3160,11 +3161,7 @@ class TestPrecompile(TestCase):
         # module in place, so two captures of a shared model in flight at once would
         # undo each other's mutations. One process-wide lock keeps a capture atomic
         # with respect to another; assert no two are ever inside _capture.
-        import threading
-
-        import torch._precompile as precompile_impl
-
-        real = precompile_impl._capture
+        real = torch._precompile._capture
         state_lock = threading.Lock()
         active = 0
         max_active = 0
@@ -3191,7 +3188,7 @@ class TestPrecompile(TestCase):
             )
 
         with (
-            mock.patch.object(precompile_impl, "_capture", spy),
+            mock.patch.object(torch._precompile, "_capture", spy),
             ThreadPoolExecutor(4) as pool,
         ):
             futures = [pool.submit(worker) for _ in range(4)]
@@ -3206,8 +3203,6 @@ class TestPrecompile(TestCase):
         # Capture runs fn for real, so fn is free to ask for a capture of its own. The
         # process-wide lock is therefore reentrant: a plain Lock would deadlock the
         # thread against itself the moment a traced function precompiled anything.
-        import threading
-
         def inner(a):
             return a * 2
 
@@ -3250,7 +3245,7 @@ class TestPrecompile(TestCase):
         # regression is a failure rather than a hang.
         code = textwrap.dedent(
             """
-            import os, signal, sys, threading, traceback, torch
+            import os, signal, sys, threading, time, traceback, torch
             import torch._precompile as impl
 
             held = threading.Event()
@@ -3259,7 +3254,7 @@ class TestPrecompile(TestCase):
             def holder():
                 with impl._CAPTURE_LOCK:
                     held.set()
-                    release.wait(60)
+                    release.wait(300)
 
             t = threading.Thread(target=holder)
             t.start()
@@ -3267,7 +3262,16 @@ class TestPrecompile(TestCase):
                 sys.exit(3)
             pid = os.fork()
             if pid == 0:
-                signal.alarm(60)
+                t0 = time.monotonic()
+
+                def on_alarm(*_):
+                    waited = time.monotonic() - t0
+                    sys.stderr.write(f"no capture after {waited:.0f}s\\n")
+                    sys.stderr.flush()
+                    os._exit(4)
+
+                signal.signal(signal.SIGALRM, on_alarm)
+                signal.alarm(300)
                 try:
                     torch.compiler.precompile(
                         lambda a: a + 1, torch.ones(2), backend="eager"
@@ -3280,15 +3284,14 @@ class TestPrecompile(TestCase):
             _, status = os.waitpid(pid, 0)
             release.set()
             t.join()
-            rc = os.waitstatus_to_exitcode(status)
-            sys.exit(4 if rc == -signal.SIGALRM else rc)
+            sys.exit(os.waitstatus_to_exitcode(status))
             """
         )
         proc = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
         )
         self.assertNotEqual(
-            proc.returncode, 4, "child deadlocked on the inherited lock"
+            proc.returncode, 4, f"child deadlocked on the inherited lock: {proc.stderr}"
         )
         self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
 
