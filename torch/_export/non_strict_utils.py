@@ -262,10 +262,12 @@ def _create_symbolic_context_for_tensor(
     mode: FakeTensorMode,
 ) -> "SymbolicContext":
     """Helper function to create symbolic context for a tensor."""
+    from torch._dynamo.decorators import _dim_range_to_value_ranges, _get_dim_range
     from torch._dynamo.source import AttrSource
     from torch.fx.experimental.symbolic_shapes import (
         DimDynamic,
         RelaxedUnspecConstraint,
+        StrictMinMaxConstraint,
         SubclassSymbolicContext,
     )
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -278,12 +280,27 @@ def _create_symbolic_context_for_tensor(
     for i in range(n_dims):
         if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
             dynamic_sizes.append(DimDynamic.DYNAMIC)
+            # maybe_mark_dynamic ranges are advisory, the dim may still be
+            # specialized or narrowed, hence warn_only.
+            dim_range = _get_dim_range(t, i)
+            if dim_range is not None:
+                constraint_sizes[i] = StrictMinMaxConstraint(  # type: ignore[call-overload]
+                    vr=_dim_range_to_value_ranges(dim_range),
+                    warn_only=True,
+                )
         elif i in getattr(t, "_dynamo_dynamic_indices", {}):
             # bit annoying, but we need to replicate process in _dynamo/variables/builder.py
             # where a RelaxedUnspecConstraint is created for Dim.DYNAMIC, so constraint violations
             # are raised when specializing.
             dynamic_sizes.append(DimDynamic.DYNAMIC)
-            constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
+            dim_range = _get_dim_range(t, i)
+            if dim_range is None:
+                constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
+            else:
+                constraint_sizes[i] = StrictMinMaxConstraint(  # type: ignore[call-overload]
+                    vr=_dim_range_to_value_ranges(dim_range),
+                    warn_only=False,
+                )
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
 
@@ -1246,6 +1263,10 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
             def is_scalar_tensor_index(item: object) -> TypeGuard[torch.Tensor]:
                 if not isinstance(item, torch.Tensor) or item.ndim != 0:
+                    return False
+                # vmap BatchedTensor scalar indices must remain tensor indices;
+                # calling item() on them is unsupported.
+                if torch._C._functorch.is_batchedtensor(item):
                     return False
 
                 from torch._prims_common import is_integer_dtype

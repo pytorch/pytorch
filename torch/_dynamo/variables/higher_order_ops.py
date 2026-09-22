@@ -35,10 +35,10 @@ import torch._C
 import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import get_fake_value
+from torch._dynamo.utils import constants_identical, get_fake_value
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
-from torch._dynamo.variables.functions import UserFunctionVariable
+from torch._dynamo.variables.functions import UserFunctionVariable, UserMethodVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
@@ -67,7 +67,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
-from .sets import SetVariable
+from .sets import DictKeySetVariable, FrozensetVariable, OrderedSetVariable, SetVariable
 
 
 if TYPE_CHECKING:
@@ -249,7 +249,9 @@ def find_mismatched_vars(
     elif isinstance(var, ConstDictVariable):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
-    elif isinstance(var, SetVariable):
+    elif isinstance(
+        var, (SetVariable, FrozensetVariable, DictKeySetVariable, OrderedSetVariable)
+    ):
         for key in var.items:
             mismatched_vars.update(find_mismatched_vars(key.vt, types, allow_none))
     else:
@@ -1045,10 +1047,12 @@ def are_same_graph_modules(
                     (arg_b.start, arg_b.stop, arg_b.step),
                 ):
                     return False
-            elif arg_a != arg_b:
+            elif not constants_identical(arg_a, arg_b):
                 # This is a catch-all for everything else. `slice` was a
                 # surprise but can there be other data structures that can
-                # contain fx.Nodes in them?
+                # contain fx.Nodes in them? Float constants are compared
+                # bitwise: two graphs differing only by 0.0 vs -0.0 must not
+                # be deduplicated, and identical nan constants should be.
                 return False
         return True
 
@@ -1988,7 +1992,8 @@ def speculate_subgraph_with_auto_output_flattening(
             )
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
-        if isinstance(f, UserFunctionVariable):
+        # functions and methods both reach this path
+        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -2188,7 +2193,8 @@ def speculate_subgraph(
 
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
-        if isinstance(f, UserFunctionVariable):
+        # functions and methods both reach this path
+        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -2306,7 +2312,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
@@ -2360,12 +2366,16 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
     ) -> VariableTracker:
         if self.source is None:
             raise AssertionError("source must not be None")
+        call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            self.value.__call__.__func__,
+            torch._dynamo.variables.UserFunctionVariable(
+                self.value.__call__.__func__,
+                source=AttrSource(call_source, "__func__"),
+            ),
             torch._dynamo.variables.UserDefinedObjectVariable(
                 self.value, source=self.source
             ),
-            source=AttrSource(self.source, "__call__"),
+            source=call_source,
         ).call_function(tx, args, kwargs)
 
 
@@ -4119,6 +4129,14 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def _guard_dict_keys(vt: VariableTracker) -> None:
+    """DICT_KEYS_MATCH is shallow; nested option dicts need it too."""
+    if isinstance(vt, ConstDictVariable):
+        vt.install_dict_keys_match_guard()
+        for value in vt.items.values():
+            _guard_dict_keys(value)
+
+
 class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_gemm"
     _ALLOW_FALLBACK_TO_EAGER = False
@@ -4157,6 +4175,10 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
+        # as_python_constant guards the present values only; an option added
+        # later (fast_math, backend, a config knob) must recompile.
+        _guard_dict_keys(args[3])
+        _guard_dict_keys(args[4])
         fn_kwargs = args[3].as_python_constant()
         kernel_options = args[4].as_python_constant()
         if self._HOP_NAME is None:
@@ -4352,7 +4374,16 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
             if isinstance(
-                arg, (ListVariable, TupleVariable, ConstDictVariable, SetVariable)
+                arg,
+                (
+                    ListVariable,
+                    TupleVariable,
+                    ConstDictVariable,
+                    SetVariable,
+                    FrozensetVariable,
+                    DictKeySetVariable,
+                    OrderedSetVariable,
+                ),
             ):
                 unimplemented(
                     gb_type="strict_mode: improper args",
@@ -4446,6 +4477,25 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
                 context_fn = ctx.guard_as_python_constant()
+            elif isinstance(ctx, torch._dynamo.variables.UserMethodVariable):
+                # Binding the method needs its receiver as a real object. When
+                # the receiver was built inside the region that is impossible,
+                # so graph break with the reason rather than the generic one.
+                try:
+                    context_fn = ctx.guard_as_python_constant()
+                except Unsupported as e:
+                    unimplemented(
+                        gb_type="checkpoint context_fn bound to a non-constant receiver",
+                        context=f"context_fn={ctx}",
+                        explanation="checkpoint needs context_fn as a Python callable, "
+                        "but the receiver of this bound method cannot be resolved to "
+                        "a constant object at trace time.",
+                        hints=[
+                            "Bind context_fn to an object created outside the compiled "
+                            "region, or pass a function or functools.partial instead.",
+                        ],
+                        from_exc=e,
+                    )
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
@@ -4503,6 +4553,8 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
         if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
             func = func_var.fn
+        elif isinstance(func_var, torch._dynamo.variables.UserMethodVariable):
+            func = func_var.guard_as_python_constant()
         elif isinstance(
             func_var, torch._dynamo.variables.functions.FunctoolsPartialVariable
         ):
@@ -5120,7 +5172,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -5531,7 +5583,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
-                        autograd_function_backward_rewritten(self.bwd_fn.__func__),
+                        torch._dynamo.variables.UserFunctionVariable(
+                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
+                        ),
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
@@ -5961,7 +6015,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                fn.__func__,
+                torch._dynamo.variables.UserFunctionVariable(
+                    fn.__func__,
+                    source=source and AttrSource(source, "__func__"),
+                ),
                 cls_vt,
                 source=source,
             )
