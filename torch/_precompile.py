@@ -2154,6 +2154,7 @@ class PrecompiledModule(PrecompiledRunnable):
                 "format": _CACHE_FORMAT,
                 "version": _CACHE_VERSION,
                 "backend": self._backend,
+                "tracer": self._tracer,
                 "code_hash": code_hash,
                 "artifact": self._artifact_bytes,
             },
@@ -2478,6 +2479,9 @@ def _runnable_from_pair(
     # artifact and to read BACKEND for the cache-pairing check below.
     meta = _parse_artifact_metadata(python_code)
     backend = cast(str, meta["BACKEND"])
+    # TRACER is absent on make_fx artifacts predating the tag; the cache envelope
+    # defaults the same way, so an older pair still matches.
+    tracer = cast(str, meta.get("TRACER", "make_fx"))
 
     # weights_only=True is safe (plain str/int/bytes dict). The cache is acceleration
     # only, so an unreadable envelope or a FORMAT / VERSION mismatch degrades to JIT'ing
@@ -2505,6 +2509,12 @@ def _runnable_from_pair(
                 raise PrecompileError(
                     f"cache backend {blob.get('backend')!r} does not match the "
                     f"python_code backend {backend!r}; the cache and python_code "
+                    "came from different precompile captures."
+                )
+            if blob.get("tracer", "make_fx") != tracer:
+                raise PrecompileError(
+                    f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
+                    f"the python_code tracer {tracer!r}; the cache and python_code "
                     "came from different precompile captures."
                 )
             # See Note [precompile programming model], invariant 7.
@@ -2657,8 +2667,8 @@ def load(
     :class:`torch.compiler.precompile.PrecompiledRunnable`.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
-    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend`` or
-    ``code_hash`` does not match ``python_code`` -- the pair came from different
+    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
+    ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
