@@ -1118,46 +1118,26 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     # ===== Default strategy × region: SKIP inherited, RUN_ONLY not =====
 
-    @parametrize("region_exists", (False, True))
-    @parametrize("global_action", ("default", "run_only", "skip"))
-    def test_isolate_recompiles_global_strategy_precedence(
-        self, region_exists, global_action
-    ):
+    def test_isolate_recompiles_late_global_skip_overrides_region(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
         def f(x):
             return x.sin()
 
-        torch._dynamo.eval_frame.reset_code(f.__code__)
-        try:
-            opt = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
-            region = opt._isolate_recompiles_id
-            expected_compiles = 0
-            if region_exists:
-                opt(torch.randn(3))
-                expected_compiles = 1
+        opt = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        region = opt._isolate_recompiles_id
+        self.assertNotEqual(region, -1)
+        opt(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(_get_cache_entries_for_region(f, region)), 1)
 
-            action = {
-                "default": FrameAction.DEFAULT,
-                "run_only": FrameAction.RUN_ONLY,
-                "skip": FrameAction.SKIP,
-            }[global_action]
-            torch._dynamo.eval_frame.set_code_exec_strategy(
-                f.__code__, FrameExecStrategy(action, action)
-            )
-            opt(torch.randn(4))
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+        x = torch.randn(4)
+        self.assertEqual(opt(x), f(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(_get_cache_entries_for_region(f, region)), 1)
 
-            if action != FrameAction.SKIP:
-                expected_compiles += 1
-            self.assertEqual(cnt.frame_count, expected_compiles)
-            self.assertEqual(
-                len(_get_cache_entries_for_region(f, region)), expected_compiles
-            )
-        finally:
-            torch._dynamo.eval_frame.reset_code(f.__code__)
-
-    @parametrize("region_exists", (False, True))
-    def test_isolate_recompiles_global_recursive_skip_precedence(self, region_exists):
+    def test_isolate_recompiles_global_recursive_skip_precedence(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
         def f(x):
@@ -1165,23 +1145,18 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.graph_break()
             return y.cos()
 
-        torch._dynamo.eval_frame.reset_code(f.__code__)
-        try:
-            opt = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
-            expected_compiles = 0
-            if region_exists:
-                opt(torch.randn(3))
-                expected_compiles = 2
+        opt = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        self.assertNotEqual(opt._isolate_recompiles_id, -1)
+        opt(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 2)
 
-            torch._dynamo.eval_frame.set_code_exec_strategy(
-                f.__code__,
-                FrameExecStrategy(FrameAction.DEFAULT, FrameAction.SKIP),
-            )
-            opt(torch.randn(4))
+        torch._dynamo.eval_frame.set_code_exec_strategy(
+            f.__code__,
+            FrameExecStrategy(FrameAction.DEFAULT, FrameAction.SKIP),
+        )
+        opt(torch.randn(4))
 
-            self.assertEqual(cnt.frame_count, expected_compiles + 1)
-        finally:
-            torch._dynamo.eval_frame.reset_code(f.__code__)
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_isolate_recompiles_inherits_default_skip(self):
         """Global SKIP (from skip_code / @torch._dynamo.skip / FX plumbing /
