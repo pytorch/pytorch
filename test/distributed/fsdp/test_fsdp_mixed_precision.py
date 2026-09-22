@@ -32,6 +32,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestContinuous,
     get_devtype,
     subtest_name,
     TransformerWithSharedParams,
@@ -1134,7 +1135,7 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
             model(x).sum().backward()
 
 
-class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+class TestFSDPDifferentSubmodulePrecision(FSDPTestContinuous):
     @property
     def world_size(self):
         return 2

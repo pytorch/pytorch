@@ -135,7 +135,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const Stream& stream,
       const DeviceIndex device_index,
       const EventFlag flag) const override {
-    namespace syclex = sycl::ext::oneapi::experimental;
     TORCH_CHECK(
         device_index == -1 || device_index == stream.device_index(),
         "Event device index ",
@@ -147,22 +146,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto* xpu_event = reinterpret_cast<sycl::event*>(*event);
     const XPUStream xpu_stream{stream};
 
-    bool reusable = false;
-#if SYCL_COMPILER_VERSION >= 20260200
-    reusable = c10::xpu::get_raw_device(stream.device_index())
-                   .has(sycl::aspect::ext_oneapi_per_event_profiling);
-#endif
-    if (reusable) {
-#if SYCL_COMPILER_VERSION >= 20260200
-      if (!xpu_event) {
-        createEvent(&xpu_event, flag);
-      }
-      syclex::enqueue_signal_event(xpu_stream.queue(), *xpu_event);
-#endif
-    } else {
-      // Delete the event previously recorded.
-      if (xpu_event)
-        delete xpu_event;
+    // Delete the event previously recorded.
+    if (xpu_event)
+      delete xpu_event;
 
       if (flag & EventFlag::TIMING) {
         // Use the profiling tag to record the event to enable timing feature.
@@ -188,23 +174,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return;
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
+    std::vector<sycl::event> event_list{*xpu_event};
     const XPUStream xpu_stream(stream);
-
-    bool reusable = false;
-#if SYCL_COMPILER_VERSION >= 20260200
-    reusable = c10::xpu::get_raw_device(stream.device_index())
-                   .has(sycl::aspect::ext_oneapi_per_event_profiling);
-#endif
-    if (reusable) {
-#if SYCL_COMPILER_VERSION >= 20260200
-      sycl::ext::oneapi::experimental::enqueue_wait_event(
-          xpu_stream.queue(), *xpu_event);
-#endif
-    } else {
-      std::vector<sycl::event> event_list{*xpu_event};
-      xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
-    }
-
+    xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_wait(

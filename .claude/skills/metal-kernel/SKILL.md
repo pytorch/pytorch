@@ -280,6 +280,19 @@ When migrating from MPSGraph, also remove the old implementation:
    - Add the static kernel function
    - Add the `REGISTER_DISPATCH` call
 
+### Boolean Kernel Parameters
+
+- **Type booleans as `bool`.** Metal's `bool` is one byte, one-byte aligned,
+  matching the host (`bool2` is 2/2; `bool3` and `bool4` are both 4/4). Never
+  widen a flag to `uint32_t` so the kernel can test `!= 0u`. A pair of flags
+  packs into `constant bool2&`, fed by `std::array<bool, 2>`.
+
+- **Put the `bool` members last in a shared params struct.** `kernels/<Op>.h` is
+  compiled by both the Metal and the host compiler; a `bool` wedged between
+  wider members costs padding and invites doubt about where the next field
+  starts. Reorder the host aggregate initializer along with the struct --
+  brace initialization is positional.
+
 ## Step 4: Compile
 
 After making changes, compile to verify everything builds correctly:
@@ -435,10 +448,12 @@ directly. The non-obvious rules:
   mtl_dispatch1DJob(computeEncoder, pso, threads);
   ```
 
-- **Prefer `mtl_setArgs<N>` over chained `mtl_setBytes`.**
-  `mtl_setArgs<1>(encoder, a, b, c)` binds `a`/`b`/`c` at slots 1/2/3 with the
-  same overload resolution as the macros (`std::array<long,2>` →
-  `constant long2&`).
+- **Prefer `mtl_setArgs<N>` over chained `mtl_setBytes`, and pack same-typed
+  scalars into one vector argument.** `mtl_setArgs<1>(encoder, a, b, c)` binds
+  `a`/`b`/`c` at slots 1/2/3 with the same overload resolution as the macros, so
+  a `std::array<T, N>` arrives as a single `constant T2&`/`T3&` binding
+  (`std::array<long,2>` → `constant long2&`) rather than N of them. Two ints are
+  an `int2`, not two buffer slots.
 
 - **Use `ceil_div`.** Host: `at::ceil_div` from `<ATen/ceil_div.h>`. Metal:
   `c10::metal::ceil_div` from `<c10/metal/common.h>` (unqualified after
@@ -547,6 +562,7 @@ are kept for debugging but the `AcceleratorError` carries `msg[0]`.
 - [ ] Added MPS dispatch to `native_functions.yaml`
 - [ ] Implemented Metal kernel in `kernels/`
 - [ ] Implemented host-side operator in `operations/`
+- [ ] Scalar params packed into vector args; booleans typed `bool` and placed last in shared structs
 - [ ] Handles empty tensors
 - [ ] Handles non-contiguous tensors
 - [ ] Supports required dtypes (float32, float16, bfloat16, and often complex types via float2/half2)
