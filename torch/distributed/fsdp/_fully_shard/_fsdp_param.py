@@ -841,6 +841,8 @@ class FSDPParam:
             )
         if has_fsdp_pre_all_gather:
             self._extensions_data = ExtensionsData()
+            # Payloads are unknown until fsdp_pre_all_gather runs; all_gather_inputs
+            # populates their layouts before copy-out.
             self._all_gather_outer_sizes = ()
         else:
             self._all_gather_outer_sizes = (
