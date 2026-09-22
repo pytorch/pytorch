@@ -692,7 +692,7 @@ class FSDPModule:
         Each parameter's ``all_gather_copy_layouts`` describes its payloads in
         order: ``input_size`` and ``dim`` specify concatenation across ranks,
         ``output_size`` specifies the gathered view passed to an extension,
-        and ``num_prefixes`` gives the product of input sizes before ``dim``
+        and ``outer_size`` gives the product of input sizes before ``dim``
         (1 for empty payloads).
         The function initializes and allocates each parameter's final
         ``all_gather_outputs`` and owns copying and any reordering into them,

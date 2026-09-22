@@ -178,7 +178,7 @@ class _AllGatherOutputLayout:
     input_size: torch.Size
     dim: int
     output_size: torch.Size
-    num_prefixes: int
+    outer_size: int
 
 
 class FSDPParam:
@@ -1402,8 +1402,8 @@ def _get_all_gather_output_layout(
             f"All-gather output size {output_size} must contain "
             f"{input_numel * world_size} elements"
         )
-    num_prefixes = math.prod(input_size[:dim]) if input_numel else 1
-    return _AllGatherOutputLayout(input_size, dim, output_size, num_prefixes)
+    outer_size = math.prod(input_size[:dim]) if input_numel else 1
+    return _AllGatherOutputLayout(input_size, dim, output_size, outer_size)
 
 
 def _normalize_all_gather_inputs(
@@ -1439,7 +1439,7 @@ def _normalize_all_gather_inputs(
         and any(numel != padded_numel for numel in legacy_numels)
         and (not all_gather_outputs or len(all_gather_outputs) == len(gather_inputs))
     )
-    legacy_prefixes = math.prod(padded_sharded_size[:legacy_dim]) if legacy_dim else 1
+    legacy_outer_size = math.prod(padded_sharded_size[:legacy_dim]) if legacy_dim else 1
     layouts: list[_AllGatherOutputLayout] = []
     for i, (inp, input_size) in enumerate(zip(gather_inputs, input_sizes)):
         if isinstance(inp, AllGatherInput):
@@ -1478,7 +1478,7 @@ def _normalize_all_gather_inputs(
                 padded_sharded_size if dim else torch.Size(input_size or (1,)),
                 dim,
                 output_size,
-                legacy_prefixes if dim else 1,
+                legacy_outer_size if dim else 1,
             )
         layouts.append(layout)
     return tensors, tuple(layouts)
