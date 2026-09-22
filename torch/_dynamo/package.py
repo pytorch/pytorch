@@ -1091,6 +1091,10 @@ class CompilePackage:
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
+        # Frames whose capture was cut short by the recompile limit. Deliberately
+        # runtime-only and NOT serialized: it describes this capture session, not
+        # the artifact, and it must not affect what install() serves.
+        self._truncated_frames: set[str] = set()
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -1305,6 +1309,35 @@ class CompilePackage:
         # break adds a resume code), so accumulate: a cpu-only resume frame
         # must not erase the accelerator an earlier frame named.
         self._device_types |= _graph_device_types(graph)
+
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
+        return self._current_entry
+
+    def mark_current_entry_truncated(self) -> None:
+        """
+        Record that this frame hit the recompile limit, so callers building an
+        artifact can tell the capture is missing variants. Unlike bypassing, the
+        variants already captured stay installable -- a truncated frame still
+        serves what it covers and recompiles for the rest.
+
+        Only the frame that hit the limit lands here, so ``truncated_frames`` is
+        a LOWER BOUND: the limit also puts everything called beneath this frame
+        into run-only mode, and those frames stop capturing without ever
+        re-entering Dynamo to report it.
+        """
+        if self._current_entry is None:
+            raise AssertionError(
+                "_current_entry is not set in mark_current_entry_truncated"
+            )
+        code = self._current_entry.python_code
+        self._truncated_frames.add(
+            f"{code.co_name} ({code.co_filename}:{code.co_firstlineno})"
+        )
+
+    @property
+    def truncated_frames(self) -> frozenset[str]:
+        return frozenset(self._truncated_frames)
 
     def bypass_current_compile(self, reason: str | None = None) -> None:
         """Drop the backend ids the current compile registered on its entry.
