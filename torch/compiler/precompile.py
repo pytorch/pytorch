@@ -30,6 +30,8 @@ from torch.compiler._precompile_types import PrecompileSummary
 # decorating, so a class body cannot name a module that is still being imported).
 # Declare this module their home so introspection (pickle, test_public_bindings,
 # Sphinx) resolves them under torch.compiler.precompile, where they are re-exported.
+# Their attributes are documented in the class docstring: Sphinx reads a bare
+# attribute docstring from the source of sys.modules[cls.__module__], now this file.
 # load is re-homed where it is defined: a function's annotations resolve through
 # its own globals, not its __module__.
 for _t in (Capture, MakeFxTracer, PrecompiledRunnable, PrecompileSummary):
