@@ -473,8 +473,8 @@ def should_run() -> bool:
             return False
         if len(archs) > 1:
             # Supported (export nests one tree per arch and the generated stub
-            # selects per capability); reported because it multiplies embedded
-            # bytes, one full set per arch.
+            # selects a compatible target at runtime); reported because it embeds
+            # one full kernel set per arch.
             _report(f"multi-arch: {' '.join(archs)}")
     elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")

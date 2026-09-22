@@ -15,9 +15,9 @@ DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "cutedsl_kernels.py"
 # Stated rather than defaulted: the declared ranges and work rungs are measured
 # against aten on Hopper and Blackwell.
-# The family target is the standard build; exact targets remain available for
-# deliberate architecture-specific builds.
-ARCHS = ("sm_90", "sm_90a", "sm_100f", "sm_100a", "sm_103a", "sm_107a")
+# These kernels require no architecture-conditional instructions. Explicit exports
+# may specialize these targets, while standard builds use them directly.
+ARCHS = ("sm_90", "sm_100f")
 
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}
 _RADIX_KS = (64, 128, 256, 512, 1024)

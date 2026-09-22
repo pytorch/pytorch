@@ -60,16 +60,14 @@ loud "'empty' is not a member of 'at'" at build time, not a silent one.
 
 Optional exports:
 
-  ARCHS: tuple[str, ...]      architectures the op's kernels are valid
-                              on (sm strings). An ``a`` target is exact-only;
-                              an ``f`` target serves itself and later members of
-                              its declared CUDA family. Defaults to all known
-                              sm90+ targets.
-                              Export skips arches outside it; codegen
-                              emits a runtime device gate from
-                              ARCHS intersect shipped-arches, so
-                              declarations never hand-write arch
-                              checks.
+  ARCHS: tuple[str, ...]      canonical compile targets the op supports (sm
+                              strings). An explicit target may specialize a
+                              baseline target for the same device or an ``f``
+                              target for a later family member; an ``a`` target
+                              is exact-only. Defaults to all known sm90+ targets.
+                              Codegen derives runtime device gates from the
+                              targets actually shipped, so declarations never
+                              hand-write architecture checks.
   cpp_dispatch_prelude() -> str | None
                               shared front half of the dispatch chain:
                               cheap universal rejects and setup (locals,

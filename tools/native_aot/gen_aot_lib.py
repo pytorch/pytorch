@@ -13,10 +13,10 @@ covering every arch the op shipped for, containing:
   * a launch_<prefix>() marshalling helper per exported kernel, emitted by the
     sidecar kind's Toolchain. Every toolchain produces the same launcher signature,
     so cpp_launch and the guard chain are toolchain-blind.
-  * the stub kernel: an early-out over the shipped compute capabilities, then helpers
-    and prelude, then one cond chain per capability -- an
+  * the stub kernel: an early-out over devices covered by the shipped targets, then
+    helpers and prelude, then one condition chain per compile target -- an
     `if (cpp_dispatch(spec)) { cpp_launch; return true; }` per precompile point, and
-    `return false` at the end. A device runs only kernels built for its capability.
+    `return false` at the end. Exact targets run before compatible family fallbacks.
   * registration on the generated at::native DispatchStub (<op>_aot_stub) at
     static-init time.
 
@@ -372,16 +372,22 @@ def gen_op(
     # than gate on kernels the op does not claim to support. Over EVERY exported
     # tree, ahead of the tie-break below: a disowned tree of the same capability as
     # a claimed one loses that tie-break, and would pass unnoticed.
-    if unclaimed := {sc["arch"] for sc in sidecars} - set(decl.archs_of(d)):
-        # Name the directories and say DELETE: export skips arches outside ARCHS,
-        # so it never prunes these trees and every later build fails identically.
+    declared_archs = decl.archs_of(d)
+    if unclaimed := {
+        sc["arch"]
+        for sc in sidecars
+        if not decl.declaration_accepts_compile_target(declared_archs, sc["arch"])
+    }:
+        # Name the directories and say DELETE: export skips targets the declaration
+        # does not permit, so it never prunes these trees and every later build fails
+        # identically.
         # .get because gen_op is also called directly, with no generation-time _dir.
         trees = sorted(
             {sc.get("_dir", "?") for sc in sidecars if sc["arch"] in unclaimed}
         )
         raise RuntimeError(
             f"{op}: artifacts exported for {sorted(unclaimed)} but the "
-            f"declaration supports only {decl.archs_of(d)}. Delete "
+            f"declaration supports only {declared_archs}. Delete "
             f"{', '.join(trees) or 'those arch trees'} -- export.py skips "
             f"unsupported arches, so it will not remove them -- then re-export. "
             f"A bare re-export will NOT clear this; only deleting the tree does. "
@@ -462,7 +468,7 @@ def gen_op(
     if covers is not None:
         covers_params, covers_schema, covers_body = covers
         # Coverage must be no wider than the stub's acceptance, or gated calls
-        # lose their JIT route -- hence the same arch gate here. It reads the
+        # lose their JIT route -- hence the same target gate here. It reads the
         # TENSOR's device, not the current one: covers runs before any device
         # guard, so on a mixed-capability host they can differ.
         _cov_t = _first_tensor_name(covers_params)
@@ -1063,7 +1069,7 @@ def main(argv: list[str] | None = None) -> None:
         # An arch tree this build did not ask for is left alone: nothing prunes trees,
         # so an incremental build whose TORCH_CUDA_ARCH_LIST changed still holds the
         # tree for the dropped arch. Generating from it would ship an unrequested
-        # capability, and judging its staleness would demand re-exporting that arch.
+        # target, and judging its staleness would demand re-exporting that arch.
         if children and args.archs and entry not in args.archs:
             print(f"{entry}: not in this build's arch list, ignoring its artifacts")
             continue

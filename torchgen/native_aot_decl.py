@@ -30,11 +30,10 @@ class AotDeclaration(Protocol):
     ATEN_OP: str
     DISPATCH_KEY: str
     KERNEL_MODULE: str
-    # Architectures this op's kernels are valid on (sm strings, e.g.
+    # Canonical compile targets this op supports (sm strings, e.g.
     # ("sm_90", "sm_100f")). OPTIONAL in source declarations, so read it
-    # through archs_of(d), never d.ARCHS. Export skips (declaration x
-    # arch) pairs outside it; gen_aot_lib emits a runtime gate from the
-    # intersection with the arches actually shipped.
+    # through archs_of(d), never d.ARCHS. Explicit compatible targets may
+    # specialize these; gen_aot_lib gates on the artifacts actually shipped.
     ARCHS: tuple[str, ...]
 
     def kernel_precompile_grid(self) -> list[dict]: ...
@@ -92,16 +91,18 @@ class ArchFamily:
 ARCH_FAMILIES = (ArchFamily("sm_100f", ((10, 0), (10, 3), (10, 7)), "sm_100f"),)
 
 
-# Every sm spelling this tooling can target. This is wider than
-# EXPORTABLE_ARCHES: an explicit --arch requests a target the standard build omits.
+# Every compiler target this tooling accepts. Runtime-only family members need not
+# appear here. This is wider than EXPORTABLE_ARCHES because an explicit --arch can
+# request a target the standard build omits.
 KNOWN_ARCHES = (
     "sm_90",
     "sm_90a",
+    "sm_100",
     "sm_100f",
     "sm_100a",
+    "sm_103",
     "sm_103f",
     "sm_103a",
-    "sm_107a",
 )
 
 # Which targets the standard build ships. archs_from_cuda_arch_list() maps each
@@ -113,9 +114,8 @@ if not set(EXPORTABLE_ARCHES) <= set(KNOWN_ARCHES):
         f"{sorted(set(EXPORTABLE_ARCHES) - set(KNOWN_ARCHES))}"
     )
 
-# Default ARCHS: every current kernel requires sm90+ features (TMA,
-# clusters, cp.async.bulk); Blackwell variants included. Declarations
-# override to narrow (e.g. a Blackwell-only kernel pins ("sm_100a",)).
+# Default ARCHS covers every compiler target known to native-AOT. Declarations
+# override it to state their own ISA and tuning constraints.
 # The same tuple as KNOWN_ARCHES today, named separately because "the tooling can
 # target this arch" is not "every declaration's kernels work on it".
 _DEFAULT_ARCHS = KNOWN_ARCHES
@@ -165,7 +165,7 @@ def cc_of(arch: str) -> tuple[int, int]:
     """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103f" -> (10, 3).
 
     Shared, because the exporter (matching a detected arch against ARCHS) and the
-    generator (grouping sidecars by capability) must agree what an sm string
+    generator (routing sidecars by compatible target) must agree what an sm string
     means: they disagreed while one compared capabilities and the other strings,
     and a declaration pinning ('sm_100a',) disowned the 'sm_100' its own on-device
     export produced.
@@ -232,6 +232,33 @@ def target_devices(target: str) -> tuple[tuple[int, int], ...]:
 def target_can_run_on(target: str, device_cc: tuple[int, int]) -> bool:
     """Whether ``target``'s cubin can run on a device compute capability."""
     return device_cc in target_devices(target)
+
+
+def compile_target_satisfies(compile_target: str, declared_target: str) -> bool:
+    """Whether an explicit compile target can specialize a declared target."""
+    if compile_target == declared_target:
+        return True
+    declared_suffix = suffix_of(declared_target)
+    compile_suffix = suffix_of(compile_target)
+    if declared_suffix == "a":
+        return False
+    if declared_suffix == "":
+        return cc_of(compile_target) == cc_of(declared_target) and compile_suffix in (
+            "a",
+            "f",
+        )
+    return cc_of(compile_target) in target_devices(
+        declared_target
+    ) and compile_suffix in ("a", "f")
+
+
+def declaration_accepts_compile_target(
+    declared_targets: tuple[str, ...] | list[str], compile_target: str
+) -> bool:
+    """Whether any target in a declaration permits ``compile_target``."""
+    return any(
+        compile_target_satisfies(compile_target, target) for target in declared_targets
+    )
 
 
 def portable_target_for(device_cc: tuple[int, int]) -> str | None:

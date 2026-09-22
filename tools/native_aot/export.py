@@ -316,10 +316,10 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     at <out-root>/<decl_id>/, covering all of them."""
     jobs = []
     # Declarations that matched NO requested arch, reported at the end: an ARCHS
-    # of only conditional spellings ships nothing for a release list of plain ones,
-    # and with several declarations the result is partial but looks healthy -- the
-    # matched ops embed and pass the post-relink check while the rest are simply
-    # absent, with no tree for generation to complain about.
+    # of only conditional spellings ships nothing when the standard build requests
+    # portable targets, and with several declarations the result is partial but looks
+    # healthy -- the matched ops embed and pass the post-relink check while the rest
+    # are simply absent, with no tree for generation to complain about.
     skipped: dict[str, list[str]] = {}
     declared: dict[str, tuple[str, ...]] = {}
     for entry in sorted(os.listdir(OPS_DIR)):
@@ -344,22 +344,21 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                 # Two paths, because this name is also what generation filters trees
                 # by (--archs, from the same list stage 2 passed here):
                 #
-                #   * an EXPLICIT arch is used verbatim, and a declaration not
-                #     claiming it is skipped. Resolving it to another spelling would
-                #     name the tree something generation was never told about, and
-                #     nothing would be embedded.
+                #   * an EXPLICIT arch is used verbatim when it satisfies a declared
+                #     target. It is never replaced by that target, preserving the
+                #     caller's request for an architecture-specific compile.
                 #   * an ON-DEVICE arch adopts the best compatible target the
                 #     declaration claims, matching the generator's tie-break. It
                 #     passes no --archs, so it cannot desynchronize. This is also how
                 #     an SM103 device selects a family-portable sm_100f target.
                 if arch is not None:
                     # main() has already refused an --arch outside KNOWN_ARCHES, so
-                    # the string comparison below is against a spelling that parses.
+                    # the compatibility check below receives a compiler target.
                     claims = decl.archs_of(d)
-                    if layout_arch not in claims:
-                        # REPORTED, not refused: explicit --arch names a compile
-                        # target, so a compatible but differently named declaration
-                        # target is not silently substituted.
+                    if not decl.declaration_accepts_compile_target(claims, layout_arch):
+                        # REPORTED, not refused: an explicit target may specialize a
+                        # declared baseline or family target, but cannot weaken one or
+                        # substitute for an exact architecture-conditional target.
                         # Per arch, because the whole-declaration misses below are
                         # suppressed once anything ships -- which hid this case.
                         other = _claimed_spelling(layout_arch, claims)
@@ -367,9 +366,9 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                             print(
                                 f"{did}: declares kernels but none for this build -- "
                                 f"requested {layout_arch}, and the declaration's "
-                                f"ARCHS ({' '.join(claims)}) has compatible target "
-                                f"{other}, so this explicit target exports nothing. "
-                                f"Pass --arch {other} to export it."
+                                f"ARCHS ({' '.join(claims)}) has runtime-compatible "
+                                f"target {other}, but {layout_arch} cannot specialize "
+                                f"it. Pass --arch {other} to export it."
                             )
                         else:
                             skipped.setdefault(did, []).append(layout_arch)
@@ -401,8 +400,9 @@ def _collect_jobs(ops_filter, out_root: str, archs):
             print(
                 f"{did}: declares kernels but none for this build -- requested "
                 f"{' '.join(missed)}, and the declaration's ARCHS "
-                f"({' '.join(declared[did])}) names none of them, so this op falls back "
-                f"to aten. Explicit compile targets must match exactly."
+                f"({' '.join(declared[did])}) permits none of them, so this op falls "
+                f"back to aten. Explicit compile targets must satisfy a declared "
+                f"target."
             )
     return jobs
 
@@ -610,8 +610,8 @@ def _run_job(job) -> str:
 def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
     """TORCH_CUDA_ARCH_LIST -> portable native-AOT compile targets.
 
-    The result is order-preserving and deduplicated. Exact targets from the main
-    build are mapped onto a compatible standard target, so "9.0a;10.0a" becomes
+    The result is order-preserving and deduplicated. Architecture entries from the
+    main build are mapped onto compatible standard targets, so "9.0a;10.0a" becomes
     ["sm_90", "sm_100f"]. Family compatibility comes from ARCH_FAMILIES; no
     compute-capability major is treated specially.
 

@@ -624,8 +624,8 @@ class TestArch(unittest.TestCase):
                 self.assertFalse(export._job_needed(job, force=False))
 
     def test_cc_of_reads_the_capability_all_feature_sets_name(self):
-        # The exporter matches ARCHS by string while the generator groups by
-        # capability, so both spellings of one piece of hardware must parse equal.
+        # The exporter matches ARCHS by string while the generator routes compatible
+        # targets, so all spellings of one piece of hardware must parse equal.
         self.assertEqual(native_aot_decl.cc_of("sm_90"), (9, 0))
         self.assertEqual(native_aot_decl.cc_of("sm_103a"), (10, 3))
         self.assertEqual(
@@ -671,6 +671,20 @@ class TestArch(unittest.TestCase):
         self.assertTrue(native_aot_decl.target_can_run_on("sm_100f", (10, 7)))
         self.assertFalse(native_aot_decl.target_can_run_on("sm_100f", (10, 1)))
 
+    def test_compile_targets_can_specialize_portable_declarations(self):
+        satisfies = native_aot_decl.compile_target_satisfies
+        self.assertTrue(satisfies("sm_90a", "sm_90"))
+        self.assertTrue(satisfies("sm_100a", "sm_100f"))
+        self.assertTrue(satisfies("sm_103f", "sm_100f"))
+        self.assertTrue(satisfies("sm_103a", "sm_100f"))
+        self.assertFalse(satisfies("sm_100", "sm_100f"))
+
+    def test_arch_conditional_declarations_are_exact_only(self):
+        satisfies = native_aot_decl.compile_target_satisfies
+        self.assertTrue(satisfies("sm_100a", "sm_100a"))
+        self.assertFalse(satisfies("sm_100f", "sm_100a"))
+        self.assertFalse(satisfies("sm_103a", "sm_100a"))
+
     def test_family_logic_does_not_depend_on_a_shared_major(self):
         future = native_aot_decl.ArchFamily(
             "future", ((11, 0), (12, 0), (12, 2)), "sm_110f"
@@ -684,6 +698,9 @@ class TestArch(unittest.TestCase):
                 ((11, 0), (12, 0), (12, 2)),
             )
             self.assertTrue(native_aot_decl.target_can_run_on("sm_110f", (12, 2)))
+            self.assertTrue(
+                native_aot_decl.compile_target_satisfies("sm_120a", "sm_110f")
+            )
             match = gen_aot_lib._device_match("sm_110f")
             self.assertEqual(export.archs_from_cuda_arch_list("12.2a"), ["sm_110f"])
         self.assertIn("major == 11", match)
@@ -798,7 +815,7 @@ class TestArch(unittest.TestCase):
         self.assertEqual(os.path.basename(os.path.dirname(sj[3])), "sm_100f")
         self.assertEqual(sj[4], "sm_100f")
 
-    def test_by_arch_groups_and_orders_by_capability(self):
+    def test_by_arch_groups_and_orders_by_target(self):
         scs = [
             {"prefix": "k__sm100a", "arch": "sm_100a"},
             {"prefix": "k__sm90a", "arch": "sm_90a"},
@@ -812,8 +829,8 @@ class TestArch(unittest.TestCase):
         )
 
     def test_by_arch_prefers_the_arch_conditional_build(self):
-        # Both are valid on 10.0 hardware, and the conditional build is what the
-        # kernels were written against; otherwise directory order would decide.
+        # Both are valid on 10.0 hardware; the stronger conditional target wins
+        # independently of directory order.
         for order in (
             [("sm_100", "p"), ("sm_100a", "c")],
             [("sm_100a", "c"), ("sm_100", "p")],
@@ -834,15 +851,15 @@ class TestArch(unittest.TestCase):
     def test_by_arch_orders_exact_then_nearest_family_target(self):
         scs = [
             {"prefix": "base_family", "arch": "sm_100f"},
-            {"prefix": "exact", "arch": "sm_107a"},
+            {"prefix": "exact", "arch": "sm_103a"},
             {"prefix": "near_family", "arch": "sm_103f"},
         ]
         groups = gen_aot_lib._by_arch(scs)
-        self.assertEqual(list(groups), ["sm_107a", "sm_103f", "sm_100f"])
+        self.assertEqual(list(groups), ["sm_103a", "sm_103f", "sm_100f"])
 
     def test_by_arch_rejects_an_arch_less_sidecar(self):
         # Export names the arch of everything it writes, so this is an older tree.
-        # Rejected rather than grouped: an unmatchable capability declines silently.
+        # Rejected rather than grouped: an unmatchable target declines silently.
         with self.assertRaisesRegex(RuntimeError, "records no arch"):
             gen_aot_lib._by_arch([{"prefix": "old", "arch": None}])
 
@@ -1889,12 +1906,12 @@ class TestAbiValidation(unittest.TestCase):
         toolchains.CuteDslToolchain().validate_abi(dict(SIDECAR, _dir="/nonexistent"))
 
 
-class TestMultiCapabilitySelector(unittest.TestCase):
+class TestMultiTargetSelector(unittest.TestCase):
     """One generated .cpp serves every arch an op shipped for, so its selector
-    is what keeps each artifact on its own hardware. _by_arch's grouping and
-    the absence of dead launchers are covered above; this pins the SHAPE of
-    what gen_op emits from those groups, which an inverted or misplaced gate
-    passes through unchanged."""
+    is what keeps each artifact on compatible hardware in preference order.
+    _by_arch's grouping and the absence of dead launchers are covered above; this
+    pins the SHAPE of what gen_op emits from those groups, which an inverted or
+    misplaced gate passes through unchanged."""
 
     def _body(self):
         # Deliberately passed newest-first: the emitted order must come from
@@ -1955,7 +1972,7 @@ class TestMultiCapabilitySelector(unittest.TestCase):
         )
 
         class _FamilyDecl(_FakeDecl):
-            ARCHS = ("sm_100a", "sm_100f")
+            ARCHS = ("sm_100f",)
 
         src = gen_aot_lib.gen_op(
             "fakeop",
@@ -3167,8 +3184,8 @@ class TestShouldRun(unittest.TestCase):
             )
 
     def test_skips_when_arch_list_has_no_exportable_arch(self):
-        # 8.0 and 7.5 are below the kernels' floor (TMA, clusters), so nothing
-        # to export. 9.0a IS exportable now, hence not in this list.
+        # 8.0 and 7.5 are below the kernels' SM90 floor, so there is nothing to
+        # export. 9.0 is supported and therefore not in this list.
         self.assertFalse(self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "7.5;8.0"}))
 
     def test_multi_exportable_arch_runs(self):
@@ -4200,8 +4217,8 @@ class TestExportMain(unittest.TestCase):
 
     def test_an_explicit_arch_wins_over_the_arch_list(self):
         seen = []
-        self._main(["--arch", "sm_107a"], {"TORCH_CUDA_ARCH_LIST": "10.0a"}, seen)
-        self.assertEqual(seen, [["sm_107a"]])
+        self._main(["--arch", "sm_103a"], {"TORCH_CUDA_ARCH_LIST": "10.0a"}, seen)
+        self.assertEqual(seen, [["sm_103a"]])
 
     def test_no_arch_list_means_on_device(self):
         # archs [None] is what makes _collect_jobs resolve from the device.
@@ -4289,7 +4306,14 @@ class TestCollectJobsRefusals(unittest.TestCase):
         ):
             with mock.patch.object(export, "OPS_DIR", ops):
                 self.assertEqual(os.listdir(ops), [], "no declaration on disk")
-                for bad in ("sm100a", "SM_100", "sm_1000", "sm_86", "90"):
+                for bad in (
+                    "sm100a",
+                    "SM_100",
+                    "sm_1000",
+                    "sm_86",
+                    "sm_107a",
+                    "90",
+                ):
                     with self.subTest(arch=bad):
                         with self.assertRaisesRegex(RuntimeError, "not an arch"):
                             export.main(["--arch", bad, "--out-dir", out])
@@ -4332,11 +4356,10 @@ class TestCollectJobsRefusals(unittest.TestCase):
                             export._collect_jobs(None, out, [bad])
 
     def test_a_declaration_that_ships_nothing_says_so(self):
-        # ARCHS spelling is load-bearing on the explicit path: a declaration pinning
-        # ('sm_100a',) ships nothing for a release list of plain spellings, and with
-        # several declarations that is partial -- the matched ops embed and pass the
-        # post-relink check while the others are absent, with no tree to complain
-        # about.
+        # The ARCHS feature set is load-bearing: a declaration pinning
+        # ('sm_100a',) ships nothing for an explicit sm_100 request, and with several
+        # declarations that is partial -- the matched ops embed and pass the post-link
+        # check while the others are absent, with no tree to complain about.
         with (
             tempfile.TemporaryDirectory() as ops,
             tempfile.TemporaryDirectory() as out,
@@ -4376,7 +4399,7 @@ class TestCollectJobsRefusals(unittest.TestCase):
         self.assertEqual(len(jobs), 1, "the arch that DID match must still export")
         said = printed.getvalue()
         self.assertIn("requested sm_100", said)
-        self.assertIn("compatible target sm_100a", said)
+        self.assertIn("runtime-compatible target sm_100a", said)
 
     def test_an_arch_the_declaration_does_not_target_stays_quiet(self):
         # The other half: a capability the declaration claims under no spelling is not

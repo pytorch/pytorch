@@ -4,7 +4,7 @@ name: CI for native-AOT embedded DSL kernels
 # Exercises the full native-AOT path: stage 2 of the build exports the DSL kernels and
 # embeds them in libtorch_cuda, then the test job asserts the wheel carries them and
 # runs the python_native suites on the GPU they were exported for. One build+test pair
-# per capability the topk declaration claims (its ARCHS): Blackwell and Hopper.
+# covers each standard compile target: sm_90 on Hopper and sm_100f on Blackwell.
 
 on:
   pull_request:
@@ -62,9 +62,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-native-aot-h100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
-      # The main build uses its architecture-specific target; native-AOT maps this
-      # to the portable sm_90 target declared by topk.
-      cuda-arch-list: '9.0a'
+      cuda-arch-list: '9.0'
       # Same reason as the B200 build below.
       allow-reuse-old-whl: false
       test-matrix: |
@@ -102,7 +100,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-native-aot-b200
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11
-      cuda-arch-list: '10.0a'
+      cuda-arch-list: '10.0'
       # Never reuse a prebuilt wheel here: reuse_old_whl.ok_changed_file() treats
       # every torch/**.py outside torch/csrc/ as needing no rebuild, but
       # torch/_native/ops/ is a compile-time input to libtorch_cuda. A reused wheel

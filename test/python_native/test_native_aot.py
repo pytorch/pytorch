@@ -118,12 +118,12 @@ def _run_probe(cases, extra_env):
 
 
 class TestNativeAotTopKDeclaration(TestCase):
-    def test_archs_keep_portable_and_exact_targets(self):
+    def test_archs_are_canonical_portable_targets(self):
         from torch._native.ops.topk import aot
 
         self.assertEqual(
             aot.ARCHS,
-            ("sm_90", "sm_90a", "sm_100f", "sm_100a", "sm_103a", "sm_107a"),
+            ("sm_90", "sm_100f"),
         )
 
     def test_dispatch_alignment_is_radix_only(self):
