@@ -922,7 +922,7 @@ def run_test_retries(
     return ret_code, any(x > 0 for x in num_failures.values())
 
 
-def run_gloo_test(test_module, test_directory, options):
+def run_test_with_class_supervisors(test_module, test_directory, options, classes):
     args = options.additional_args
     if (
         not options.pytest
@@ -938,11 +938,6 @@ def run_gloo_test(test_module, test_directory, options):
     ):
         return run_test_with_subprocess(test_module, test_directory, options)
 
-    classes = (
-        "ProcessGroupGlooTest",
-        "ProcessGroupGlooLazyInitTest",
-        "ProcessGroupGlooFRTest",
-    )
     selected = " or ".join(classes)
     for expression, handler in (
         *((name, run_test) for name in classes),
@@ -954,6 +949,32 @@ def run_gloo_test(test_module, test_directory, options):
         if result:
             return result
     return 0
+
+
+def run_gloo_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        (
+            "ProcessGroupGlooTest",
+            "ProcessGroupGlooLazyInitTest",
+            "ProcessGroupGlooFRTest",
+        ),
+    )
+
+
+def run_common_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        (
+            "PythonProcessGroupExtensionTest",
+            "ProcessGroupWithDispatchedCollectivesTests",
+            "LocalRankTest",
+        ),
+    )
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
@@ -1449,7 +1470,7 @@ CUSTOM_HANDLERS = {
     "distributed/test_c10d_nccl": run_test_with_subprocess,
     "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
-    "distributed/test_c10d_common": run_test_with_subprocess,
+    "distributed/test_c10d_common": run_common_test,
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
     "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
     "distributed/test_pg_wrapper": run_test_with_subprocess,
