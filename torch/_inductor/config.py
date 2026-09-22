@@ -759,6 +759,9 @@ nvgemm_autotune_cold_cache: bool = (
 # does not double compile cost for every selected tile.
 nvgemm_prefetch: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0")
 
+# Generated NVGEMM variants may specialize on programmatic dependent launch.
+nvgemm_pdl: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PDL", "0")
+
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
 

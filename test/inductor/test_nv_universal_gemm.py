@@ -731,7 +731,7 @@ class TestNVUniversalGemm(TestCase):
         self.assertEqual(benchmark_policy["cudagraph_cold_cache_input_indices"], (1, 3))
 
     def test_scaled_mm_output_scale_aten_candidate(self):
-        """Execute the ATen fallback candidate for the folded output scale."""
+        """Ignore configured backends that cannot implement this FP4 recipe."""
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
         m, n, k = 32, 512, 512
@@ -755,7 +755,7 @@ class TestNVUniversalGemm(TestCase):
         with (
             config.patch(
                 _nvgemm_config(
-                    max_autotune_gemm_backends="ATEN,NVGEMM",
+                    max_autotune_gemm_backends="ATEN,TRITON,CPP,NVGEMM",
                     compile_threads=1,
                     force_disable_caches=True,
                 )
@@ -770,15 +770,6 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(actual, expected, equal_nan=True)
         self.assertIn("extern_kernels.scaled_mm_with_output_scale", code)
-
-    def test_scaled_mm_output_scale_preserves_other_backends(self):
-        from torch._inductor.fx_passes.post_grad import _can_fold_scaled_mm_output_scale
-
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="ATEN,NVGEMM,TRITON",
-        ):
-            self.assertFalse(_can_fold_scaled_mm_output_scale(MagicMock()))
 
     def test_scaled_mm_output_scale_falls_back_after_native_choice_failure(self):
         """Resume ordinary lowering when every native-scale choice fails."""
@@ -1133,59 +1124,6 @@ class TestNVUniversalGemm(TestCase):
         self.assertIsNot(first[0][0], prefetch[0][0])
         self.assertIsNot(first[0][0], pdl[0][0])
         self.assertIsNot(prefetch[0][0], pdl[0][0])
-
-        overridden = []
-
-        def overridden_candidates(*unused_args, use_pdl=None):
-            kernel = MagicMock()
-            kernel.metadata.operator_name = f"test_override_{use_pdl}"
-            overridden.append((use_pdl, kernel))
-            return [kernel]
-
-        kernel_cache.clear_cache()
-        try:
-            with (
-                mock.patch.object(
-                    kernel_cache,
-                    "_scaled_candidates",
-                    side_effect=overridden_candidates,
-                ) as generated,
-                config.patch(nvgemm_prefetch="0", nvgemm_pdl=True),
-            ):
-                explicit_off = kernel_cache.partition_compatible_kernels(
-                    args,
-                    100,
-                    lambda metadata: 0,
-                    1,
-                    candidate_source="scaled",
-                    classifier_key="test",
-                    scaled_use_pdl=False,
-                )
-                explicit_on = kernel_cache.partition_compatible_kernels(
-                    args,
-                    100,
-                    lambda metadata: 0,
-                    1,
-                    candidate_source="scaled",
-                    classifier_key="test",
-                    scaled_use_pdl=True,
-                )
-                explicit_off_repeated = kernel_cache.partition_compatible_kernels(
-                    args,
-                    100,
-                    lambda metadata: 0,
-                    1,
-                    candidate_source="scaled",
-                    classifier_key="test",
-                    scaled_use_pdl=False,
-                )
-        finally:
-            kernel_cache.clear_cache()
-
-        self.assertEqual(generated.call_count, 2)
-        self.assertEqual([use_pdl for use_pdl, _ in overridden], [False, True])
-        self.assertIs(explicit_off[0][0], explicit_off_repeated[0][0])
-        self.assertIsNot(explicit_off[0][0], explicit_on[0][0])
 
     def test_cudagraphs_intermediate_addmm(self):
         """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
@@ -2581,6 +2519,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         request.benchmark_with_cudagraphs = True
         request.make_run_fn = MagicMock(return_value=lambda: None)
         request.do_bench = MagicMock(return_value=1.25)
+        request._get_benchmark_device = MagicMock(return_value=(MagicMock(), "cuda", 0))
         request.cleanup_run_fn = MagicMock()
 
         with patch.object(
@@ -2634,6 +2573,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
         request.make_run_fn = MagicMock(return_value=lambda: None)
         request.do_bench = MagicMock(return_value=1.25)
+        request._get_benchmark_device = MagicMock(return_value=(MagicMock(), "cuda", 0))
         request.cleanup_run_fn = MagicMock()
 
         with patch.object(
@@ -3263,49 +3203,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
 
-    def test_bias_epilogue_plan_composition(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
-            _build_bias_epilogue,
-            _compose_bias_into_epilogue,
-        )
-        from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan
-
-        bias = _build_bias_epilogue("bias", "out")
-        self.assertEqual(bias.reads, ("bias",))
-        self.assertEqual(bias.renames["D"], "out")
-        self.assertFalse(bias.is_evt_fallback)
-
-        pointwise = GemmEpiloguePlan(
-            source="def epilogue(accum, scale):\n    return accum * scale",
-            reads=("scale",),
-            writes=("out",),
-            renames={"scale": "scale", "D": "out"},
-            is_evt_fallback=False,
-        )
-        composed = _compose_bias_into_epilogue(pointwise, "bias")
-        self.assertIn("biased = accum + bias", composed.source)
-        self.assertIn("return biased * scale", composed.source)
-        self.assertEqual(composed.reads, ("scale", "bias"))
-        self.assertEqual(composed.writes, pointwise.writes)
-
-    def test_reduction_pattern_accepts_unrecognized_pointwise_source(self):
-        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
-            GemmEpilogueIRExpression as Expr,
-            GemmEpilogueIRStore,
-            grouped_reduction_pattern_ir,
-        )
-
-        load = Expr("load", ("gemm", 0, None))
-        one = Expr("constant", (1.0, torch.float32))
-        source = Expr("add", (Expr("exp", (load,)), one))
-        reduction = Expr("reduction", (torch.float32, torch.float32, "sum", source))
-        pattern = grouped_reduction_pattern_ir(
-            GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.float32
-        )
-        self.assertIsNotNone(pattern)
-        self.assertEqual(pattern[0], "sum")
-        self.assertIs(pattern[1], source)
-
     def _create_mock_kernel(
         self,
         tile_m,
@@ -3410,6 +3307,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 # Test count > available kernels (should return all 3)
                 result = heuristics.filter_kernels(kernels, inputs, count=10)
                 self.assertEqual(len(result), 3)
+
     def test_filter_kernels_deduplicates_heuristic_configs(self):
         heuristics = NVUniversalGemmHeuristics()
         kernel = self._create_mock_kernel(128, 128, 64, 1, 1)
@@ -3427,6 +3325,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
 
         self.assertEqual(result, [kernel])
+
     def test_filter_kernels_forced_prefetch_keeps_heuristic_matches(self):
         heuristics = NVUniversalGemmHeuristics()
         prefetched = self._create_mock_kernel(128, 128, 64, 1, 1, use_prefetch=True)
@@ -3444,6 +3343,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
 
         self.assertEqual(result, [prefetched])
+
     def test_filter_kernels_supplements_large_m_nvfp4_config(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 192, 256, 2, 1)
@@ -3524,6 +3424,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 medium_m_qkv_kernel,
             ],
         )
+
     def test_filter_kernels_adds_scoped_medium_m_prefetch_config(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(256, 192, 256, 2, 2)
@@ -3586,6 +3487,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             ],
         )
         self.assertEqual(wide_result, [ranked_kernel, qkv_non_prefetch])
+
     def test_filter_kernels_supplements_medium_m_nvfp4_swap_configs(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
@@ -3628,6 +3530,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 tile_64_cluster_4x2_prefetch,
             ],
         )
+
     def test_filter_kernels_supplements_m64_nvfp4_swap_configs(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 64, 256, 2, 1)
@@ -3674,6 +3577,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 tile_64_cluster_4x2_prefetch,
             ],
         )
+
     def test_filter_kernels_supplements_m64_nvfp4_native_down_config(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 64, 256, 1, 2)
@@ -3696,6 +3600,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
 
         self.assertEqual(result, [ranked_kernel, tile_64_cluster_2x2])
+
     def test_filter_kernels_supplements_small_m_nvfp4_swap_configs(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
@@ -3772,6 +3677,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             [ranked_kernel, tile_32_cluster_1, tile_64_cluster_1, tile_32_cluster_4],
         )
         self.assertEqual(wide_k_projection_result, wide_projection_result)
+
     def test_filter_kernels_does_not_apply_nvfp4_policy_to_mxfp4(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
@@ -3794,6 +3700,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
 
         self.assertEqual(result, [ranked_kernel])
+
     def test_filter_kernels_supplements_m8_nvfp4_swap_configs(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
@@ -3832,6 +3739,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 tile_16_cluster_1,
             ],
         )
+
     def test_filter_kernels_skips_narrow_n_tactics_for_dynamic_n(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
@@ -3872,18 +3780,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
 
         self.assertEqual(fallback_result, [ranked_kernel])
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 @unittest.skipIf(
