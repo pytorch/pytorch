@@ -83,6 +83,7 @@ u8 = torch.uint8
 u16 = torch.uint16
 u32 = torch.uint32
 u64 = torch.uint64
+f8e4m3fn = torch.float8_e4m3fn
 
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
@@ -676,7 +677,7 @@ meta_function_expected_failures = {
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
-    torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c32, c64, bf16, b8, i8, f32},
+    torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c32, c64, bf16, b8, i8, f32, f8e4m3fn},
     torch.bincount : {i32, i64, u8, i16, i8},
     torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32, u16, u32, u64},
     torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32, u16, u32, u64},
@@ -849,7 +850,7 @@ meta_dispatch_expected_failures = {
     aten._histogramdd_bin_edges.default : {f32, f64},
     aten._histogramdd_from_bin_cts.default : {f32, f64},
     aten._histogramdd_from_bin_tensors.default : {f32, f64},
-    aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
+    aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8, f8e4m3fn},
     aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -2000,7 +2001,6 @@ class TestMeta(TestCase):
         self.assertEqual(ref_out.stride(), meta_out.stride())
 
     @onlyCUDA
-    @unittest.skipIf(torch.version.hip, "cuFFT-specific stride behavior")
     def test_fft_multi_dim_cufft_stride_matches_meta(self, device):
         self._assert_fft_meta_stride_matches_eager(
             aten._fft_c2c.default,
@@ -2289,6 +2289,64 @@ class TestMetaKernelConv(TestCase):
 
 @instantiate_parametrized_tests
 class TestMetaKernelRegistrations(TestCase):
+    @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
+    def test_arange_meta_barebones_unsigned(self, dtype):
+        result = torch.arange(256, dtype=dtype, device="meta")
+        self.assertEqual(result.shape, (256,))
+
+    @parametrize("dtype", [torch.int64, torch.float32])
+    def test_arange_symbolic_fake_tensor(self, dtype):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            size = shape_env.create_unbacked_symint()
+            results = (
+                torch.arange(size, dtype=dtype),
+                torch.arange(2, size + 2, dtype=dtype),
+                torch.arange(0, 2 * size, 2, dtype=dtype),
+                torch.arange(size, 0, -1, dtype=dtype),
+            )
+
+        for result in results:
+            self.assertEqual(result.shape, (size,))
+
+    @parametrize("backed", [False, True])
+    def test_arange_symbolic_float_arguments(self, backed):
+        import math
+
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        if backed:
+            source = ConstantSource("size")
+            symbol = shape_env.create_symbol(
+                8,
+                source=source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            size = shape_env.create_symintnode(symbol, hint=8, source=source)
+        else:
+            size = shape_env.create_unbacked_symint()
+
+        with FakeTensorMode(shape_env=shape_env):
+            results = (
+                torch.arange(0.5, size),
+                torch.arange(0, size, 0.5),
+                torch.arange(size * 0.5),
+            )
+
+        expected_sizes = (
+            math.ceil((size - 0.5) / 1.0),
+            math.ceil(size / 0.5),
+            math.ceil((size * 0.5) / 1.0),
+        )
+        for result, expected_size in zip(results, expected_sizes):
+            self.assertEqual(result.shape, (expected_size,))
+
     @parametrize("shift", ["lshift", "rshift"])
     @parametrize("other_kind", ["Scalar", "Tensor"])
     def test_shift_out_symbolic_fake_tensor(self, shift, other_kind):
