@@ -1027,6 +1027,7 @@ def _capture(
     fn: Callable[..., object],
     args: tuple[object, ...],
     decompositions: dict | None = None,
+    rng: _CaptureRngState | None = None,
 ) -> _Capture:
     """Trace the computation ``fn(*args)`` to an ATen graph.
 
@@ -1177,9 +1178,11 @@ def _capture(
     # structure and the harvested-grad param indices into the _Capture result.
     captured_out_spec: pytree.TreeSpec | None = None
     captured_grad_param_indices: list[int] = []
+    # Raised after the trace, so the RNG restore has a graph to attribute draws to.
+    grad_rejection: str | None = None
 
     def flat_fn(flat: list[object]) -> list[object]:
-        nonlocal captured_out_spec, captured_grad_param_indices
+        nonlocal captured_out_spec, captured_grad_param_indices, grad_rejection
         # The pb region is entirely interned params/buffers (Tensors); the user region
         # (flat[num_pb:]) is arbitrary pytree leaves.
         pb = cast("list[Tensor]", flat[:num_pb])
@@ -1208,7 +1211,7 @@ def _capture(
             # buffer with requires_grad=True that received a gradient would be silently
             # dropped, so reject it -- a cheaply-knowable invariant-5 violation.
             if any(getattr(b, "grad", None) is not None for b in pb[num_params:]):
-                raise PrecompileError(
+                grad_rejection = (
                     "precompile: a registered buffer received a gradient (it has "
                     "requires_grad=True), but precompile only harvests gradients for "
                     "parameters. Register it as an nn.Parameter instead."
@@ -1217,8 +1220,8 @@ def _capture(
             # grads), so a requires_grad user input that received a gradient during the
             # traced backward would be silently dropped. Reject it, mirroring the buffer
             # case -- another cheaply-knowable invariant-5 violation.
-            if any(getattr(t, "grad", None) is not None for t in flat[num_pb:]):
-                raise PrecompileError(
+            elif any(getattr(t, "grad", None) is not None for t in flat[num_pb:]):
+                grad_rejection = (
                     "precompile: a user input received a gradient; precompile only "
                     "harvests gradients for parameters, so an input gradient would be "
                     "silently dropped. Pass the tensor as a module parameter if its "
@@ -1265,6 +1268,14 @@ def _capture(
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
                 a.grad = g
+    # Settled before any rejection below, which all have a complete graph to attribute
+    # draws to. A fake-traced capture (mark_unbacked) runs no real kernel, so nothing
+    # was consumed however the graph reads, and restoring could only rewind what
+    # another thread drew.
+    if rng is not None and fake_mode is None:
+        rng.settle(gm, args, fn)
+    if grad_rejection is not None:
+        raise PrecompileError(grad_rejection)
     _check_no_constant_tensors(gm)
     _assert_no_control_flow_subgraphs(gm)
     _assert_supported(gm)
@@ -2051,15 +2062,10 @@ class PrecompiledModule(PrecompiledRunnable):
                 "backend='inductor'; eager + unbacked is not supported."
             )
         with _CAPTURE_LOCK:
+            # Snapshotted here, before _capture, so the snapshot predates anything
+            # fn does; _capture settles it once the graph exists.
             rng = _CaptureRngState(args)
-            # Nothing is restored if _capture raises, including a rejection after the
-            # trace completed.
-            capture = _capture(self._fn, args, self._decompositions)
-            # A fake-traced capture (mark_unbacked) runs no real kernel, so nothing was
-            # consumed however the graph reads, and restoring could only rewind what
-            # another thread drew.
-            if capture.fake_mode is None:
-                rng.settle(capture.gm, args, self._fn)
+            capture = _capture(self._fn, args, self._decompositions, rng=rng)
         self._module_positions = capture.module_positions
         self._num_positional_args = capture.num_positional_args
         self._param_names = capture.param_names
@@ -2586,11 +2592,12 @@ class _PrecompileApi:
         default generator is restored and the named one is left advanced. When a restore
         does happen it rewinds any draw a concurrent thread made while capture ran, so
         precompile random computations before starting threads that share the default
-        generator. A capture that raises restores nothing, including one rejected after
-        tracing. The CPU generator is always saved; of the current accelerator (CUDA,
-        XPU, MPS, ...) only an already-initialized current device and the devices
-        reachable from the arguments are, and a draw on any other device warns and is
-        left as-is.
+        generator. The restore happens once the graph is traced, so a capture rejected
+        after that still restores; one that fails mid-trace has no graph to attribute
+        draws to and restores nothing. The CPU generator is always saved; of the current
+        accelerator (CUDA, XPU, MPS, ...) only an already-initialized current device and
+        the devices reachable from the arguments are, and a draw on any other device
+        warns and is left as-is.
 
         ``backend`` selects how the captured graph is realized:
 
