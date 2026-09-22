@@ -139,14 +139,15 @@ class PrecompileSummary:
         dropped_guards: Slots the serialized copy's guard filter rejected; a
             variant that dropped a slot does not check it, so a load through
             that variant cannot notice whatever it checked. The default filter
-            drops the guards the serializer cannot save: the identity guards
-            (``ID_MATCH``, ``FUNCTION_MATCH``, ``NN_MODULE`` and the like),
-            ``WEAKREF_ALIVE`` and most ``DICT_VERSION`` guards, so a load cannot
-            notice that an object they checked was rebound, mutated or
-            collected; a caller-supplied filter decides its own set. A slot is
-            listed under the guard's own type whatever the reason for the drop,
-            so a ``TENSOR_MATCH`` rejected for what its check derives is a
-            dropped ``TENSOR_MATCH``.
+            drops a guard when the serializer refuses its type or a type its
+            check derives: the identity guards (``ID_MATCH``,
+            ``FUNCTION_MATCH``, ``NN_MODULE`` and the like), ``WEAKREF_ALIVE``
+            and most ``DICT_VERSION`` guards, so a load cannot notice that the
+            objects they checked were rebound, mutated or collected. Passing it
+            does not make a guard serializable; a caller-supplied filter decides
+            its own set. A slot is listed under the guard's own type whatever
+            the reason for the drop, so a ``TENSOR_MATCH`` rejected for what its
+            check derives is a dropped ``TENSOR_MATCH``.
         kept_guards: Slots the serialized copy's guard filter kept and the
             invariance policy left in place.
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
@@ -160,19 +161,19 @@ class PrecompileSummary:
             should not look like one that had none.
         dropped_guard_code: ``(guard_type, source, rendered_check)``, one per
             slot of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
-            rendered a check (how the check is installed does not predict that,
-            and a slot whose guard rendered none has no entry). One rendering
-            however many variants dropped the slot: where the check embeds the
-            guarded value (``EQUALS_MATCH`` renders ``L['n'] == 3``) it is one
-            variant's, the producer's pick rather than a merge, so it tells the
-            form of the check and not the value; that the slot varied at all is
-            what ``risky_dropped_guards`` records. Carried because a slot alone
-            can be ambiguous: a dropped ``('HASATTR', "counts['pixel']")`` is
-            either the benign companion of a kept ``TENSOR_MATCH`` on the same
-            source or the only guard on an optional attribute, and only the
-            rendered check tells them apart. Kept beside the slot lists so the
-            slots stay the identity the policy compares on; for programmatic
-            consumers, not the digest.
+            rendered a check (how a guard is installed does not predict whether
+            it renders one, and a slot whose guard rendered none has no entry).
+            One rendering however many variants dropped the slot: where the
+            check embeds the guarded value (``EQUALS_MATCH`` renders
+            ``L['n'] == 3``) it is one variant's, the producer's pick rather
+            than a merge, so it tells the form of the check and not the value;
+            that the slot varied at all is what ``risky_dropped_guards``
+            records. Carried because a slot alone can be ambiguous: a dropped
+            ``('HASATTR', "counts['pixel']")`` is either the benign companion of
+            a kept ``TENSOR_MATCH`` on the same source or the only guard on an
+            optional attribute, and only the rendered check tells them apart.
+            Kept beside the slot lists so the slots stay the identity the policy
+            compares on; for programmatic consumers, not the digest.
         capture_errors: One message per distinct exception a capture call raised
             (repeats of the same type and message collapse), the exception type
             first (``"RuntimeError: boom"``), so the digest's first line is
