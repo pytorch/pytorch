@@ -12461,17 +12461,20 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
                 self.assertEqual(resource.wqConfig.wqConcurrencyLimit, 1)
         self._check_disjoint_sm_ids(contexts, device)
 
-    def test_greencontext_split_discovery(self, device):
+    @parametrize("backfill", [False, True])
+    def test_greencontext_split_discovery(self, device, backfill):
         from torch.cuda.green_contexts import SMPartition
 
         self._require_sm_splitting(device)
         source = SMPartition.from_device(torch.device(device).index)
-        (first, rest), empty = source.split(num_sms=(4, 0), coscheduled_sm_count=2)
+        (first, rest), empty = source.split(
+            num_sms=(4, 0), coscheduled_sm_count=2, backfill=backfill
+        )
         self.assertEqual(first.sm_count, 4)
         self.assertEqual(rest.sm_count, source.sm_count - 4)
         self.assertIsNone(empty)
 
-        (whole,), empty = source.split(coscheduled_sm_count=2)
+        (whole,), empty = source.split(coscheduled_sm_count=2, backfill=backfill)
         self.assertEqual(whole.sm_count, source.sm_count)
         self.assertIsNone(empty)
 
@@ -12517,6 +12520,14 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
             ({"num_sms": True}, "nonnegative integers"),
             ({"num_sms": "4"}, "nonnegative integers"),
             ({"backfill": 1}, "bool"),
+            (
+                {"num_sms": 0, "coscheduled_sm_count": (2, 2), "backfill": True},
+                "Split group 0.*Only the last group",
+            ),
+            (
+                {"num_sms": (4, 0, 4), "backfill": (False, True, False)},
+                "Split group 1.*Only the last group",
+            ),
         ],
     )
     def test_greencontext_split_invalid_arguments(self, device, kwargs, message):

@@ -169,6 +169,8 @@ class SMPartition:
         same nonzero length; scalars are broadcast to that length. If every
         option is scalar, the split has one group. An early discovery group can
         exhaust the SMs needed by later groups.
+        A group with both ``num_sms=0`` and ``backfill=True`` consumes all
+        remaining SMs and must be the last group.
         Returns ``(partitions, remainder)``, with ``None`` for an empty remainder.
         The remainder does not inherit the requested alignment.
 
@@ -230,6 +232,12 @@ class SMPartition:
             raise ValueError("backfill entries must be bool values")
         params = []
         for index, count in enumerate(counts):
+            if count == 0 and backfills[index] and index < len(counts) - 1:
+                raise ValueError(
+                    f"Split group {index} has num_sms=0 and backfill=True, which "
+                    "consumes all remaining SMs. Only the last group may use this "
+                    "combination; move it last or specify a positive num_sms."
+                )
             # pyrefly: ignore [missing-attribute]
             param = _drv.CU_DEV_SM_RESOURCE_GROUP_PARAMS()
             param.smCount = count

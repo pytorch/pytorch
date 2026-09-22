@@ -475,6 +475,8 @@ have the same nonzero length; scalars are broadcast to that length. With scalars
 only, one group is created. The default `num_sms=0` discovers the largest group
 satisfying its constraints. Groups are evaluated in order, so an early discovery
 group can exhaust the SMs needed by later groups.
+A group with both `num_sms=0` and `backfill=True` consumes all remaining SMs,
+so it must be the last group. Otherwise, specify a positive SM count.
 CUDA validates hardware constraints without PyTorch rounding the requested sizes.
 CUDA permits kernels to use additional SMs in some configurations involving MPS
 or dynamic parallelism; see the
