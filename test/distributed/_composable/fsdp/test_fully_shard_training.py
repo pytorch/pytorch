@@ -1728,7 +1728,10 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         # Defer all gradient reduction until finalization.
         with CommDebugMode() as comm_mode:
             model.set_requires_gradient_sync(False)
-            for input_tensor in inputs:
+            for index, input_tensor in enumerate(inputs):
+                # Manual finalization owns completion even when this is the
+                # last backward.
+                model.set_is_last_backward(index == len(inputs) - 1)
                 model(input_tensor).sum().backward()
             model.set_requires_gradient_sync(True)
             model.set_reshard_after_backward(True)
@@ -1746,13 +1749,215 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             self.assertIsNotNone(param.grad)
             self.assertEqual(ref_param.grad, param.grad.full_tensor())
 
-        # Manual finalization also works without gradient accumulation.
+        # Manual finalization also works without gradient accumulation and
+        # preserves unsharded parameters when resharding is disabled.
         model.zero_grad(set_to_none=True)
+        model.set_reshard_after_backward(False)
         with CommDebugMode() as comm_mode:
             model(inputs[0]).sum().backward()
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_ops._reduce_scatter_base_], 1
+            )
             model.finalize_backward()
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 2)
+        state = model._get_fsdp_state()
+        for fsdp_state in state._state_ctx.all_states:
+            for group in fsdp_state._fsdp_param_groups:
+                self.assertTrue(group.is_unsharded)
+
+        # The already-reduced group takes the reshard-only finalization path.
+        model.zero_grad(set_to_none=True)
+        model(inputs[0]).sum().backward()
+        model.set_reshard_after_backward(True)
+        model.finalize_backward()
+        for fsdp_state in state._state_ctx.all_states:
+            for group in fsdp_state._fsdp_param_groups:
+                self.assertFalse(group.is_unsharded)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_respects_gradient_sync(self):
+        torch.manual_seed(42)
+        model = nn.Linear(8, 8, bias=False).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, reshard_after_forward=False)
+        model.set_manual_backward_finalization(True)
+
+        torch.manual_seed(42 + self.rank)
+        inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(2)]
+        model.set_requires_gradient_sync(False)
+        model(inputs[0]).sum().backward()
+        model.finalize_backward()
+        model.set_requires_gradient_sync(True)
+        model(inputs[1]).sum().backward()
+        model.finalize_backward()
+
+        for input_tensor in inputs:
+            ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_requires_root(self):
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        fully_shard(model[0])
+        fully_shard(model[1])
+        fully_shard(model)
+        model[0].set_manual_backward_finalization(True)
+        with self.assertRaisesRegex(RuntimeError, "must be called on the root"):
+            model(torch.randn(4, 8, device=device_type.type))
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_call_order(self):
+        model = nn.Linear(8, 8, bias=False).to(device_type)
+        fully_shard(model, reshard_after_forward=False)
+        model.set_manual_backward_finalization(True)
+        errors = []
+        model.finalize_backward()
+
+        def finalize_in_backward(grad):
+            try:
+                model.finalize_backward()
+            except RuntimeError as error:
+                errors.append(str(error))
+            return grad
+
+        output = model(torch.randn(4, 8, device=device_type.type))
+        output.register_hook(finalize_in_backward)
+        output.sum().backward()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("must be called after backward completes", errors[0])
+        model.finalize_backward()
+        model.finalize_backward()
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_partial_group(self):
+        dim, vocab_size, num_chunks = 32, 128, 2
+        torch.manual_seed(42)
+        model = ChunkedHeadModel(dim, vocab_size, tie=False).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model.embed, reshard_after_forward=False)
+        fully_shard(model.body, reshard_after_forward=False)
+        fully_shard([model.norm, model.head], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        torch.manual_seed(42 + self.rank)
+        tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+        model.set_manual_backward_finalization(True)
+        model.set_requires_gradient_sync(False)
+        model.set_reshard_after_backward(False)
+        hidden = model(tokens, skip_head=True)
+        for chunk in torch.chunk(hidden.detach(), num_chunks, dim=1):
+            model.head(chunk).sum().backward()
+        hidden.sum().backward()
+        model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
+        model.finalize_backward()
+
+        ref_hidden = ref_model(tokens, skip_head=True)
+        for chunk in torch.chunk(ref_hidden.detach(), num_chunks, dim=1):
+            ref_model.head(chunk).sum().backward()
+        ref_hidden.sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            if ref_param.grad is None:
+                self.assertIsNone(param.grad)
+                continue
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_with_reshard_after_backward(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model[0])
+        fully_shard(model[1])
+        fully_shard(model)
+
+        torch.manual_seed(42 + self.rank)
+        inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(2)]
+        model.set_manual_backward_finalization(True)
+        model.set_requires_gradient_sync(False)
+        for input_tensor in inputs:
+            model(input_tensor).sum().backward()
+        model.set_requires_gradient_sync(True)
+        model.finalize_backward()
+        state = model._get_fsdp_state()
+        for fsdp_state in state._state_ctx.all_states:
+            for group in fsdp_state._fsdp_param_groups:
+                self.assertFalse(group.is_unsharded)
+
+        for input_tensor in inputs:
+            ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_backward_finalization_mixed_precision_accumulation(self):
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        for target_model in (model, ref_model):
+            fully_shard(
+                target_model[0],
+                reshard_after_forward=False,
+                mp_policy=mp_policy,
+            )
+            fully_shard(
+                target_model[1],
+                reshard_after_forward=False,
+                mp_policy=mp_policy,
+            )
+            fully_shard(
+                target_model,
+                reshard_after_forward=False,
+                mp_policy=mp_policy,
+            )
+
+        torch.manual_seed(42 + self.rank)
+        inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(3)]
+        model.set_manual_backward_finalization(True)
+        model.set_requires_gradient_sync(False)
+        for input_tensor in inputs:
+            model(input_tensor).sum().backward()
+        state = model._get_fsdp_state()
+        for fsdp_state in state._state_ctx.all_states:
+            for group in fsdp_state._fsdp_param_groups:
+                for fsdp_param in group.fsdp_params:
+                    accumulated_grad = fsdp_param.unsharded_accumulated_grad
+                    self.assertIsNotNone(accumulated_grad)
+                    self.assertEqual(
+                        accumulated_grad.dtype,
+                        torch.float32,
+                    )
+        model.set_requires_gradient_sync(True)
+        model.finalize_backward()
+
+        for index, input_tensor in enumerate(inputs):
+            ref_model.set_requires_gradient_sync(index == len(inputs) - 1)
+            ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertIsNotNone(ref_param.grad)
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(ref_param.grad, param.grad)
 
     @skip_if_lt_x_gpu(4, allow_cpu=True)
     def test_manual_backward_finalization_rejects_partial_all_reduce(self):
@@ -1765,12 +1970,26 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         fully_shard(model, mesh=mesh)
         model.set_manual_backward_finalization(True)
         model.set_requires_all_reduce(False)
-        model(torch.randn(4, 8, device=device_type.type)).sum().backward()
+        input_tensor = torch.randn(4, 8, device=device_type.type, requires_grad=True)
+        model(input_tensor).sum().backward()
         with self.assertRaisesRegex(
             RuntimeError,
-            "does not support HSDP accumulation with all-reduce disabled",
+            "does not support partial gradient reductions",
         ):
             model.finalize_backward()
+        model.reset_iter_state()
+
+        model.set_manual_backward_finalization(True)
+        model.set_requires_gradient_sync(False)
+        model(torch.randn(4, 8, device=device_type.type)).sum().backward()
+        model.set_requires_gradient_sync(True)
+        model.set_requires_all_reduce(False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "manual backward finalization requires all-reduce",
+        ):
+            model.finalize_backward()
+        model.reset_iter_state()
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_gradient_accumulation(self):
@@ -2804,6 +3023,7 @@ class TestFullyShardCudaGraph(FSDPTest):
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(device_type.type != "cuda", "CUDA graph test requires CUDA")
     def test_manual_backward_finalization_cudagraph(self):
         torch.cuda.set_device(self.rank)
         device = torch.device("cuda", self.rank)
@@ -2814,9 +3034,13 @@ class TestFullyShardCudaGraph(FSDPTest):
         ).to(device)
         for param in model.parameters():
             dist.broadcast(param, src=0)
-        fully_shard(model[0], reshard_after_forward=False)
-        fully_shard(model[1], reshard_after_forward=False)
-        fully_shard(model, reshard_after_forward=False)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+        fully_shard(model[0], reshard_after_forward=False, mp_policy=mp_policy)
+        fully_shard(model[1], reshard_after_forward=False, mp_policy=mp_policy)
+        fully_shard(model, reshard_after_forward=False, mp_policy=mp_policy)
 
         static_inputs = [torch.randn(4, 8, device=device) for _ in range(3)]
 
@@ -2840,14 +3064,15 @@ class TestFullyShardCudaGraph(FSDPTest):
         with torch.cuda.graph(graph, stream=stream):
             graph_grads = run_accumulation()
 
-        for _ in range(2):
-            model.zero_grad(set_to_none=False)
-            for input_tensor in static_inputs:
-                input_tensor.copy_(torch.randn_like(input_tensor))
-            ref_grads = run_accumulation()
-            graph.replay()
-            for graph_grad, ref_grad in zip(graph_grads, ref_grads):
-                self.assertEqual(graph_grad, ref_grad)
+        with torch.cuda.stream(stream):
+            for _ in range(2):
+                model.zero_grad(set_to_none=True)
+                for input_tensor in static_inputs:
+                    input_tensor.copy_(torch.randn_like(input_tensor))
+                ref_grads = run_accumulation()
+                graph.replay()
+                for graph_grad, ref_grad in zip(graph_grads, ref_grads):
+                    self.assertEqual(graph_grad, ref_grad)
 
 
 if __name__ == "__main__":
