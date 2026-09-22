@@ -17,6 +17,9 @@ from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
 
 log = logging.getLogger(__name__)
 
+_BinaryArtifactIdentity = tuple[int | None, str, str]
+_BinaryPayloads = dict[_BinaryArtifactIdentity, OrderedSet[bytes]]
+
 
 @dataclasses.dataclass(frozen=True)
 class TritonBundleEntry:
@@ -221,12 +224,65 @@ class TritonBundler:
             counters["inductor"]["triton_bundler_save_static_autotuner"] += 1
             return cls._static_autotuners, static_autotuner_names
 
+    @staticmethod
+    def _matching_binary_payloads(
+        identity: _BinaryArtifactIdentity,
+        binary_payloads: _BinaryPayloads,
+    ) -> OrderedSet[bytes]:
+        device, kernel_hash, filename = identity
+        if device is not None:
+            return binary_payloads.get(identity, OrderedSet()).copy()
+
+        matches: OrderedSet[bytes] = OrderedSet()
+        for (
+            _,
+            candidate_hash,
+            candidate_filename,
+        ), candidates in binary_payloads.items():
+            if candidate_hash == kernel_hash and candidate_filename == filename:
+                matches.update(candidates)
+        return matches
+
+    @classmethod
+    def _ambiguous_binary_artifact_groups(
+        cls,
+        static_autotuners: list[StaticallyLaunchedAutotuner] | None,
+        binary_payloads: _BinaryPayloads,
+    ) -> OrderedSet[tuple[int | None, str]]:
+        """Find bundle cache groups that cannot be emitted unambiguously."""
+        ambiguous_groups: OrderedSet[tuple[int | None, str]] = OrderedSet()
+        for result in static_autotuners or ():
+            for compile_result in result.kernel.compile_results:
+                device, kernel_hash, filename = (
+                    compile_result.bundled_artifact_identity()
+                )
+                if (
+                    len(
+                        cls._matching_binary_payloads(
+                            (device, kernel_hash, filename), binary_payloads
+                        )
+                    )
+                    <= 1
+                ):
+                    continue
+                for (
+                    candidate_device,
+                    candidate_hash,
+                    candidate_filename,
+                ) in binary_payloads:
+                    if (
+                        candidate_hash == kernel_hash
+                        and candidate_filename == filename
+                        and (device is None or candidate_device == device)
+                    ):
+                        ambiguous_groups.add((candidate_device, candidate_hash))
+        return ambiguous_groups
+
     @classmethod
     def load_autotuners(
         cls,
         static_autotuners: list[StaticallyLaunchedAutotuner] | None,
-        binary_payloads: dict[tuple[int | None, str, str], OrderedSet[bytes]]
-        | None = None,
+        binary_payloads: _BinaryPayloads | None = None,
     ) -> list[str]:
         """
         Load statically launchable CachingAutotuners into async_compile.CompiledTritonKernels
@@ -251,25 +307,13 @@ class TritonBundler:
                         device, kernel_hash, filename = (
                             compile_result.bundled_artifact_identity()
                         )
-                        matches: OrderedSet[bytes] = OrderedSet()
-                        if binary_payloads is not None:
-                            if device is None:
-                                for (
-                                    _,
-                                    candidate_hash,
-                                    candidate_filename,
-                                ), candidates in binary_payloads.items():
-                                    if (
-                                        candidate_hash == kernel_hash
-                                        and candidate_filename == filename
-                                    ):
-                                        matches.update(candidates)
-                            else:
-                                matches.update(
-                                    binary_payloads.get(
-                                        (device, kernel_hash, filename), OrderedSet()
-                                    )
-                                )
+                        matches = (
+                            cls._matching_binary_payloads(
+                                (device, kernel_hash, filename), binary_payloads
+                            )
+                            if binary_payloads is not None
+                            else OrderedSet()
+                        )
                         if len(matches) > 1:
                             raise MissingTritonKernelError(
                                 "static kernel has ambiguous bundled binaries"
@@ -391,8 +435,8 @@ class TritonBundler:
                 )
             return TritonBundle([], []), None
 
-    @staticmethod
-    def read_and_emit(bundle: TritonBundle) -> TritonBundlerMetadata | None:
+    @classmethod
+    def read_and_emit(cls, bundle: TritonBundle) -> TritonBundlerMetadata | None:
         """
         This is the main function called when a cache read happens. This function
         converts the bundled format back into individual files and writes them
@@ -414,7 +458,7 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
-            binary_payloads: dict[tuple[int | None, str, str], OrderedSet[bytes]] = {}
+            binary_payloads: _BinaryPayloads = {}
             for artifacts in bundle.kernel_artifacts:
                 for artifact in artifacts.artifacts:
                     if (
@@ -430,7 +474,20 @@ class TritonBundler:
                             artifact.payload
                         )
 
+            ambiguous_artifact_groups = cls._ambiguous_binary_artifact_groups(
+                bundle.static_autotuners, binary_payloads
+            )
+
             for artifacts in bundle.kernel_artifacts:
+                if (
+                    artifacts.device,
+                    artifacts.kernel_hash,
+                ) in ambiguous_artifact_groups:
+                    log.warning(
+                        "Skipping ambiguous bundled Triton cache group %s",
+                        artifacts.kernel_hash,
+                    )
+                    continue
                 basedir = triton_cache_dir(artifacts.device)
                 directory = os.path.join(basedir, artifacts.kernel_hash)
 
