@@ -36,6 +36,43 @@ class TestCompilerBisectorGeneric(TestCase):
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.bisector_ns), name).default
 
+    def test_pre_grad(self):
+        import operator
+
+        from torch._inductor import config
+
+        class CustomPrePass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.Graph):
+                nodes = graph.find_nodes(op="call_function", target=operator.add)
+                if len(nodes) != 1:
+                    raise AssertionError(f"Expected 1 node, got {len(nodes)}")
+                args = list(nodes[0].args)
+                args[1] = 2
+                nodes[0].args = tuple(args)
+
+            def uuid(self):
+                return hash("TestCompilerBisector.test_pre_grad.pass_class")
+
+        def foo(x):
+            return x + 1
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            inp = torch.rand([10])
+
+            out = foo(inp)
+            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
+
+            return torch.allclose(out, out_c)
+
+        with config.patch(pre_grad_custom_pass=CustomPrePass()):
+            out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "pre_grad_passes")
+        self.assertEqual(out.bisect_number, 3)
+        self.assertTrue("pre_grad_custom_pass" in out.debug_info)
+
     def test_eager_backend(self):
         # should indicate problem with first backend
         def test_fn():
@@ -303,15 +340,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "lowerings")
         self.assertEqual(out.bisect_number, 2)
         self.assertTrue("relu" in out.debug_info)
-
-    def test_eager_backend(self):
-        # should indicate problem with first backend
-        def test_fn():
-            return False
-
-        out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "eager")
-        self.assertEqual(out.subsystem, None)
 
     @unittest.skipIf(not has_triton(), "requires Triton")
     @config.patch(
