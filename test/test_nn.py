@@ -4678,30 +4678,31 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                             with cudnn.flags(enabled=False):
                                 test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
-    # gradcheck only exercises the analytical-vs-numerical gradient formula, which is a
-    # CPU-only concern, so this stays device-agnostic instead of being instantiated per
-    # accelerator (see test_grid_sample_3d in TestNNDeviceType for the CPU-vs-device checks).
+    # gradcheck validates whichever device the tensors are on, so it isn't inherently
+    # CPU-only. This stays CPU-only because nn.functional.grid_sample's OpInfo entry
+    # already gradchecks the accelerator kernels (test_ops_gradients.py); see
+    # test_grid_sample_3d in TestNNDeviceType for the CPU-vs-device numerics checks.
     @set_default_dtype(torch.double)
-    @parametrize_test('align_corners', [True, False])
-    @parametrize_test('padding_mode', ['zeros', 'border', 'reflection'])
-    @parametrize_test('mode', ['bilinear', 'nearest'])
-    def test_grid_sample_3d_gradcheck(self, mode, padding_mode, align_corners):
-        N = random.randint(2, 5)
-        C = random.randint(2, 4)
-        D = random.randint(2, 5)
-        H = random.randint(2, 5)
-        W = random.randint(2, 5)
-        input = torch.randn(N, C, D, H, W, requires_grad=True)
-        grid = torch.randn(N, D, H, W, 3, requires_grad=True)
-        self.assertTrue(gradcheck(
-            lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
-                                            align_corners=align_corners),
-            (input, grid)))
-        input = input.requires_grad_(False)
-        self.assertTrue(gradcheck(
-            lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                       align_corners=align_corners),
-            (grid,)))
+    def test_grid_sample_3d_gradcheck(self):
+        for mode in ('bilinear', 'nearest', 'bicubic'):
+            for padding_mode in ('zeros', 'border', 'reflection'):
+                for align_corners in (True, False):
+                    N = random.randint(2, 5)
+                    C = random.randint(2, 4)
+                    D = random.randint(2, 5)
+                    H = random.randint(2, 5)
+                    W = random.randint(2, 5)
+                    input = torch.randn(N, C, D, H, W, requires_grad=True)
+                    grid = torch.randn(N, D, H, W, 3, requires_grad=True)
+                    self.assertTrue(gradcheck(
+                        lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
+                                                        align_corners=align_corners),
+                        (input, grid)))
+                    input = input.requires_grad_(False)
+                    self.assertTrue(gradcheck(
+                        lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
+                                                   align_corners=align_corners),
+                        (grid,)))
 
     @set_default_dtype(torch.double)
     def test_affine_grid(self):
@@ -6720,11 +6721,7 @@ class TestNNDeviceType(NNTestCase):
 
     @skipMPS  # MPS does not support double dtype, which this test relies on via set_default_dtype
     @set_default_dtype(torch.double)
-    @parametrize_test('input_requires_grad', [False, True])
-    @parametrize_test('align_corners', [True, False])
-    @parametrize_test('padding_mode', ['zeros', 'border', 'reflection'])
-    @parametrize_test('mode', ['bilinear', 'nearest'])
-    def test_grid_sample_3d(self, device, mode, padding_mode, align_corners, input_requires_grad):
+    def test_grid_sample_3d(self, device):
         # Backward pass of native C++ and CUDA/accelerator kernels branch depending on whether input
         # requires gradient, so we test both cases.
         def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners):
@@ -6763,76 +6760,80 @@ class TestNNDeviceType(NNTestCase):
                                            align_corners=align_corners)
                 self.assertEqual(out_cpu, out_device)
 
-        N = random.randint(2, 5)
-        C = random.randint(2, 4)
-        D = random.randint(2, 5)
-        H = random.randint(2, 5)
-        W = random.randint(2, 5)
+        for mode in ('bilinear', 'nearest', 'bicubic'):
+            for padding_mode in ('zeros', 'border', 'reflection'):
+                for align_corners in (True, False):
+                    for input_requires_grad in [False, True]:
+                        N = random.randint(2, 5)
+                        C = random.randint(2, 4)
+                        D = random.randint(2, 5)
+                        H = random.randint(2, 5)
+                        W = random.randint(2, 5)
 
-        # test same size output
-        test_shape(N, C, D, H, W, D, H, W, mode, padding_mode, align_corners)
+                        # test same size output
+                        test_shape(N, C, D, H, W, D, H, W, mode, padding_mode, align_corners)
 
-        # test larger output
-        N = random.randint(2, 7)
-        C = random.randint(2, 5)
-        ID = random.randint(2, 7)
-        IH = random.randint(2, 7)
-        IW = random.randint(2, 7)
-        D = random.randint(ID + 1, 10)
-        H = random.randint(IH + 1, 10)
-        W = random.randint(IW + 1, 10)
-        test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+                        # test larger output
+                        N = random.randint(2, 7)
+                        C = random.randint(2, 5)
+                        ID = random.randint(2, 7)
+                        IH = random.randint(2, 7)
+                        IW = random.randint(2, 7)
+                        D = random.randint(ID + 1, 10)
+                        H = random.randint(IH + 1, 10)
+                        W = random.randint(IW + 1, 10)
+                        test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
 
-        # test smaller output
-        N = random.randint(2, 7)
-        C = random.randint(2, 5)
-        ID = random.randint(2, 7)
-        IH = random.randint(2, 7)
-        IW = random.randint(2, 7)
-        D = random.randint(2, ID)
-        H = random.randint(2, IH)
-        W = random.randint(2, IW)
-        test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+                        # test smaller output
+                        N = random.randint(2, 7)
+                        C = random.randint(2, 5)
+                        ID = random.randint(2, 7)
+                        IH = random.randint(2, 7)
+                        IW = random.randint(2, 7)
+                        D = random.randint(2, ID)
+                        H = random.randint(2, IH)
+                        W = random.randint(2, IW)
+                        test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
 
-        # test 1x1 inpput
-        N = random.randint(2, 7)
-        C = random.randint(2, 7)
-        ID = 1
-        IH = 1
-        IW = 1
-        H = random.randint(2, 5)
-        W = random.randint(2, 5)
-        test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+                        # test 1x1 inpput
+                        N = random.randint(2, 7)
+                        C = random.randint(2, 7)
+                        ID = 1
+                        IH = 1
+                        IW = 1
+                        H = random.randint(2, 5)
+                        W = random.randint(2, 5)
+                        test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
 
-        # testing empty grid
-        N = random.randint(2, 7)
-        C = random.randint(2, 5)
-        ID = random.randint(2, 7)
-        IH = random.randint(2, 7)
-        IW = random.randint(2, 7)
-        D = random.randint(3, ID + 2)
-        W = random.randint(3, IW + 2)
-        test_shape(N, C, ID, IH, IW, D, 0, W, mode, padding_mode, align_corners)
+                        # testing empty grid
+                        N = random.randint(2, 7)
+                        C = random.randint(2, 5)
+                        ID = random.randint(2, 7)
+                        IH = random.randint(2, 7)
+                        IW = random.randint(2, 7)
+                        D = random.randint(3, ID + 2)
+                        W = random.randint(3, IW + 2)
+                        test_shape(N, C, ID, IH, IW, D, 0, W, mode, padding_mode, align_corners)
 
-        # testing empty channel
-        N = random.randint(2, 7)
-        ID = random.randint(2, 5)
-        IH = random.randint(2, 7)
-        IW = random.randint(2, 7)
-        D = random.randint(3, ID + 2)
-        H = random.randint(3, IH + 2)
-        W = random.randint(3, IW + 2)
-        test_shape(N, 0, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+                        # testing empty channel
+                        N = random.randint(2, 7)
+                        ID = random.randint(2, 5)
+                        IH = random.randint(2, 7)
+                        IW = random.randint(2, 7)
+                        D = random.randint(3, ID + 2)
+                        H = random.randint(3, IH + 2)
+                        W = random.randint(3, IW + 2)
+                        test_shape(N, 0, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
 
-        # testing empty batch
-        C = random.randint(2, 5)
-        ID = random.randint(2, 7)
-        IH = random.randint(2, 7)
-        IW = random.randint(2, 7)
-        D = random.randint(3, ID + 2)
-        H = random.randint(3, IH + 2)
-        W = random.randint(3, IW + 2)
-        test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+                        # testing empty batch
+                        C = random.randint(2, 5)
+                        ID = random.randint(2, 7)
+                        IH = random.randint(2, 7)
+                        IW = random.randint(2, 7)
+                        D = random.randint(3, ID + 2)
+                        H = random.randint(3, IH + 2)
+                        W = random.randint(3, IW + 2)
+                        test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
 
     def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self, device):
         def normalize_indices(indices_unnormalized: torch.Tensor, dim_size: int, align_corners: bool):
