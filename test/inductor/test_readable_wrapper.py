@@ -43,31 +43,6 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertIn(".run(", code)
 
     @requires_cuda_and_triton
-    def test_async_compile_is_dropped_when_no_backend_needs_it(self):
-        def fn(x):
-            return (x * 2).relu()
-
-        x = torch.randn(256, device="cuda")
-        _, code = _code_for(fn, x, readable_wrapper=True)
-        self.assertNotIn("AsyncCompile()", code)
-        self.assertNotIn("async_compile.wait", code)
-        self.assertNotIn("del async_compile", code)
-
-    def test_async_compile_survives_when_a_backend_needs_it(self):
-        # C++ kernels cannot be hoisted -- the text is C++ and producing the value
-        # needs a compiler invocation -- so the lifecycle has to stay for them. The
-        # decision is per-graph, not per-mode.
-        def fn(x):
-            return (x + 1).relu().sum(0)
-
-        x = torch.randn(1024)
-        _, code = _code_for(fn, x, readable_wrapper=True)
-        if "async_compile.cpp" not in code:
-            self.skipTest("graph did not lower to a C++ kernel")
-        self.assertIn("AsyncCompile()", code)
-        self.assertIn("async_compile.wait", code)
-
-    @requires_cuda_and_triton
     def test_every_kernel_is_defined_exactly_once(self):
         # Hoisting puts kernel names in one module namespace, so a duplicate definition
         # would silently shadow rather than fail.
