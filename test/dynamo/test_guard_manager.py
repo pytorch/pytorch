@@ -17,8 +17,6 @@ from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
@@ -524,6 +522,38 @@ user_stack=None)
         self.assertTrue(
             "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
         )
+
+    def test_tensor_match_guard_throw_restores_torch_function(self):
+        # The root disables the TorchFunction TLS while its accessors run and
+        # restores it on scope exit, so a C++ throw out of an accessor leaves
+        # the state as it found it. TENSOR_MATCH on a strided nested tensor is
+        # such a throw: it fires a TORCH_CHECK reading the strides (check) or
+        # sizes (check_verbose). The guard is built from explicit size and
+        # stride lists because building it from the tensor reads the same
+        # strides, and the accessor is the root's own so nothing else can
+        # reject the input first.
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager("x", "L['x']", nested, default_mgr_enum)
+        manager.add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "x",
+            ["check_tensor(x)"],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        state = torch._C._get_torch_function_state()
+        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
+            root.check({"x": nested})
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
+            root.check_verbose({"x": nested})
+        self.assertEqual(torch._C._get_torch_function_state(), state)
 
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
@@ -2439,41 +2469,6 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
 
         expected = handler.get_metadata_fn(guard, {float("nan"): None})
         self.assertTrue(handler.eval_fn({float("nan"): None}, expected))
-
-
-class RootGuardManagerTorchFunctionTests(torch._dynamo.test_case.TestCase):
-    @parametrize("method", ["check", "check_verbose"])
-    def test_restores_torch_function_after_the_tree_throws(self, method):
-        # The root disables the TorchFunction TLS while its accessors run and
-        # restores it on scope exit, so a C++ throw out of an accessor leaves
-        # the state as it found it. TENSOR_MATCH on a strided nested tensor is
-        # such a throw: it fires a TORCH_CHECK reading the strides (check) or
-        # sizes (check_verbose). The guard is built from explicit size and
-        # stride lists because building it from the tensor reads the same
-        # strides, and the accessor is the root's own so nothing else can
-        # reject the input first.
-        nested = torch.nested.nested_tensor(
-            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
-        )
-        root = RootGuardManager()
-        manager = root.dict_getitem_manager("x", "L['x']", nested, default_mgr_enum)
-        manager.add_tensor_match_guard(
-            nested,
-            [None] * 3,
-            [None] * 3,
-            "x",
-            ["check_tensor(x)"],
-            None,
-            type(nested),
-            torch._C._dispatch_keys(nested),
-        )
-        state = torch._C._get_torch_function_state()
-        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
-            getattr(root, method)({"x": nested})
-        self.assertEqual(torch._C._get_torch_function_state(), state)
-
-
-instantiate_parametrized_tests(RootGuardManagerTorchFunctionTests)
 
 
 if __name__ == "__main__":

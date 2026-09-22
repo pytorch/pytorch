@@ -777,11 +777,9 @@ class GuardManagerWrapper:
             return body.getvalue()
 
     def check(self, x: Any) -> bool:
-        # Only needed for debugging purposes.
         return self.root.check(x)
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
-        # Only needed for debugging purposes.
         return self.root.check_verbose(x)
 
     def populate_code_parts_for_debugging(self) -> None:
