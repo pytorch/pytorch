@@ -1106,8 +1106,15 @@ class TestPrecompile(TestCase):
 
             # A subclass input's outer dtype is checked like a dense one (invariant 6).
             x64 = distribute_tensor(torch.randn(5, 4).double(), mesh, [Replicate()])
-            with self.assertRaisesRegex(PrecompileError, "dtype"):
+            with self.assertRaisesRegex(PrecompileError, "runtime input has dtype"):
                 f_c(m, x64)
+            code_e, cache_e = torch.compiler.precompile(
+                lambda model, x: model(x), m, x, backend="eager"
+            )
+            f_e = torch.compiler.precompile.load(code_e, cache_e)
+            self.assertEqual(f_e(m, x).to_local(), ref.to_local())
+            with self.assertRaisesRegex(PrecompileError, "runtime input has dtype"):
+                f_e(m, x64)
         finally:
             dist.destroy_process_group()
             for k, v in saved_env.items():
@@ -3042,8 +3049,6 @@ class TestPrecompile(TestCase):
         # undo each other's mutations. One process-wide lock keeps a capture atomic
         # with respect to another; assert no two are ever inside _capture.
         import threading
-        import time
-        from unittest.mock import patch
 
         import torch._precompile as precompile_impl
 
@@ -3051,14 +3056,18 @@ class TestPrecompile(TestCase):
         state_lock = threading.Lock()
         active = 0
         max_active = 0
+        all_in = threading.Event()
 
         def spy(*args, **kwargs):
             nonlocal active, max_active
             with state_lock:
                 active += 1
                 max_active = max(max_active, active)
+                if active == 4:
+                    all_in.set()
             try:
-                time.sleep(0.02)
+                # Without the lock all four workers meet here; with it this times out.
+                all_in.wait(timeout=0.5)
                 return real(*args, **kwargs)
             finally:
                 with state_lock:
@@ -3073,7 +3082,7 @@ class TestPrecompile(TestCase):
                 lambda a: a + 1, torch.ones(2), backend="eager"
             )
 
-        with patch.object(precompile_impl, "_capture", spy):
+        with mock.patch.object(precompile_impl, "_capture", spy):
             threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
             for thread in threads:
                 thread.start()
@@ -3108,7 +3117,10 @@ class TestPrecompile(TestCase):
         )
         thread.start()
         thread.join(120)
-        self.assertFalse(thread.is_alive(), "nested precompile deadlocked")
+        if thread.is_alive():
+            # The wedged thread holds the lock forever; free it for the later tests.
+            torch._precompile._CAPTURE_LOCK = threading.RLock()
+            self.fail("nested precompile deadlocked")
         code, _cache = results[0]
         self.assertIn("def forward", code)
 
