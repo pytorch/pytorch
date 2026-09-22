@@ -236,7 +236,6 @@ TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_META_FUNC(func) (const Tensor& self) {        \
     build_borrowing_unary_op(maybe_get_output(), self);   \
   }
-CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(round)
 CREATE_UNARY_META_FUNC(sgn)
@@ -249,6 +248,15 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
   TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  build_borrowing_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(bitwise_not) (const Tensor& self) {
+  const auto st = self.scalar_type();
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      st == kBool || st == kByte || st == kChar || st == kInt ||
+          st == kLong || st == kShort,
+      "bitwise_not is only supported for boolean and integral dtypes.");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 

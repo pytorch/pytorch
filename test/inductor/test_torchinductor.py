@@ -9838,6 +9838,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    def test_bitwise_not_unsupported_dtype_matches_eager(self):
+        def fn(x):
+            return torch.bitwise_not(x)
+
+        for dtype in (torch.float32, torch.float64, torch.complex64):
+            x = torch.randn(8).to(dtype)
+            with self.assertRaises(NotImplementedError):
+                fn(x)
+            torch._dynamo.reset()
+            with self.assertRaises(NotImplementedError):
+                torch.compile(fn)(x)
+
+    def test_bitwise_binary_unsupported_dtype_matches_eager(self):
+        for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
+
+            def fn(x, y, op=op):
+                return op(x, y)
+
+            for dtype in (torch.float32, torch.float64, torch.complex64):
+                x = torch.randn(8).to(dtype)
+                y = torch.randn(8).to(dtype)
+                with self.assertRaises(NotImplementedError):
+                    fn(x, y)
+                torch._dynamo.reset()
+                with self.assertRaises(NotImplementedError):
+                    torch.compile(fn)(x, y)
+
     def test_inf(self):
         def fn(a):
             return a + float("inf"), a + float("-inf"), a * -float("inf")

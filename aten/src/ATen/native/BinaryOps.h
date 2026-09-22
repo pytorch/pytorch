@@ -43,6 +43,13 @@ inline void sub_check(const TensorBase& self, const Scalar& scalar) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
+inline void bitwise_check(const TensorBase& self, const TensorBase& other) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) &&
+          c10::isIntegralType(other.scalar_type(), /*includeBool=*/true),
+      "bitwise operations are only supported for boolean and integral dtypes.");
+}
+
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
 using structured_binary_fn_double = void(*)(TensorIteratorBase&, double);
 using structured_binary_fn = void(*)(TensorIteratorBase&);
