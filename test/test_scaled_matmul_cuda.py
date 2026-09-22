@@ -2662,7 +2662,7 @@ class TestFP8MatmulDevice(TestCase):
         self.assertEqual(actual, expected)
 
 
-class TestFP8MatmulCuda(TestCase):
+class TestFP8MatmulCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
@@ -3653,7 +3653,7 @@ class TestFP8MatmulCuda(TestCase):
 
 
 instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestFP8MatmulCuda, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestFP8MatmulCUDA, globals(), only_for=("cuda",))
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
