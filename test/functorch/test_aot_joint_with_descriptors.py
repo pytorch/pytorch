@@ -116,9 +116,9 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(tangents_1, [1, 0])
         mm_1: "f32[2, 3]" = torch.ops.aten.mm.default(transpose_1, primals_3);  transpose_1 = primals_3 = None
         transpose_2: "f32[3, 2]" = torch.ops.prims.transpose.default(mm_1, [1, 0]);  mm_1 = None
@@ -370,9 +370,9 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, primals_4);  add = None
         mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, primals_4);  tangents_1 = primals_4 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(mul_3, [1, 0])
@@ -452,15 +452,15 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_5, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         transpose_1: "f32[3, 4]" = torch.ops.prims.transpose.default(primals_3, [1, 0]);  primals_3 = None
         mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(primals_5, transpose_1);  transpose_1 = None
         mul_2: "f32[4, 4]" = torch.ops.prims.mul.default(mm_1, 1.0);  mm_1 = None
-        mul_3: "f32[4]" = torch.ops.prims.mul.default(primals_4, 1.0);  primals_4 = None
-        broadcast_in_dim_1: "f32[4, 4]" = torch.ops.prims.broadcast_in_dim.default(mul_3, [4, 4], [1]);  mul_3 = None
-        add_1: "f32[4, 4]" = torch.ops.prims.add.default(mul_2, broadcast_in_dim_1);  mul_2 = broadcast_in_dim_1 = None
+        broadcast_in_dim_1: "f32[4, 4]" = torch.ops.prims.broadcast_in_dim.default(primals_4, [4, 4], [1]);  primals_4 = None
+        mul_3: "f32[4, 4]" = torch.ops.prims.mul.default(broadcast_in_dim_1, 1.0);  broadcast_in_dim_1 = None
+        add_1: "f32[4, 4]" = torch.ops.prims.add.default(mul_2, mul_3);  mul_2 = mul_3 = None
         transpose_2: "f32[4, 4]" = torch.ops.prims.transpose.default(tangents_2, [1, 0])
         mm_2: "f32[4, 3]" = torch.ops.aten.mm.default(transpose_2, primals_5);  transpose_2 = None
         transpose_3: "f32[3, 4]" = torch.ops.prims.transpose.default(mm_2, [1, 0]);  mm_2 = None
@@ -1301,8 +1301,12 @@ class TestAOTJointWithDescriptorsFlexAttention(TestCase):
                     )
                 return output
 
+        # Model configuration
         n_heads = 4
         head_dim = 64
+
+        # Create input tensors in the shape expected by FlexAttentionModule
+        # Shape: (bs, n_heads, seqlen, head_dim)
         xq = torch.randn(
             batch_size, n_heads, seqlen, head_dim, requires_grad=True, device=device
         )
@@ -1315,11 +1319,14 @@ class TestAOTJointWithDescriptorsFlexAttention(TestCase):
 
         model = FlexAttentionModule().to(device)
         inputs = (xq, xk, xv)
+
         gm = graph_capture(model, inputs, with_export=True)
+
         custom_metadata = fx_traceback._get_custom_metadata(gm)
 
         # not using assertExpectedInline because some CI runs has fewer detach nodes in graph
         # than other CI runs, so we can't use a fixed string to compare against
+
         self.assertTrue(
             "('get_attr', 'sdpa_score0', {'compile_with_inductor': 'flex_attention'})"
             in custom_metadata
@@ -1332,6 +1339,7 @@ class TestAOTJointWithDescriptorsFlexAttention(TestCase):
             "('call_function', 'flex_attention', {'compile_with_inductor': 'flex_attention'})"
             in custom_metadata
         )
+
         self.assertTrue(
             "('get_attr', 'fw_graph0', {'compile_with_inductor': 'flex_attention'})"
             in custom_metadata
