@@ -4299,7 +4299,10 @@ _REFUSED_METHODS = frozenset({"__del__", "__getattr__", "__getattribute__"})
 def _pickles_by_default(cls: type) -> bool:
     """Whether an instance of ``cls`` round-trips as ``cls.__new__(cls)`` plus its
     ``__dict__``, judged from the type: its own hooks, its copyreg registration
-    and its instance layout. A hook set on the instance itself is not seen.
+    and its instance layout. Judging from the type is complete but for one
+    hole: an instance-dict __reduce_ex__ or __reduce__ is not seen (pickle
+    resolves those two on the real object), while the other hooks pickle looks
+    up on the type, and __setstate__ on an instance whose dict is still empty.
 
     Attribute pruning is only sound for that protocol. A custom __reduce_ex__
     (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
@@ -4314,7 +4317,7 @@ def _pickles_by_default(cls: type) -> bool:
     A copyreg registration means someone declared the default protocol wrong
     for the type. The explicit __slots__ scan covers 3.10 and 3.11, where
     ``("a", "__dict__")`` has the plain size; an EMPTY __slots__ (abc.ABC,
-    typing.Generic, Protocol) adds no state and does not count. A __new__ of
+    Protocol) adds no state and does not count. A __new__ of
     the class's own is refused as well: the load side calls ``cls.__new__(cls)``
     with no arguments, which a __new__ that takes any fails. So is a class
     declaring __getattr__ or __getattribute__: pickle resolves __setstate__ on
