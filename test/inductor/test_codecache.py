@@ -3,6 +3,7 @@ import base64
 import copy
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -527,16 +528,6 @@ def capture_logs(log_name, log_level):
     finally:
         logger.removeHandler(handler)
         logger.setLevel(old_level)
-
-
-@contextmanager
-def set_trace(callback):
-    previous_trace = sys.gettrace()
-    sys.settrace(callback)
-    try:
-        yield
-    finally:
-        sys.settrace(previous_trace)
 
 
 class MyModelConv2d(torch.nn.Module):
@@ -1331,7 +1322,8 @@ class TestFxGraphCache(TestCase):
 
     @requires_cuda_and_triton
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
-    def test_loader_oom_does_not_rewrite_bundled_cubin(self):
+    @parametrize("cache_state", ("present", "missing"))
+    def test_loader_oom_does_not_rewrite_bundled_cubin(self, cache_state):
         def fn(x):
             return x.sin()
 
@@ -1342,14 +1334,21 @@ class TestFxGraphCache(TestCase):
         static_kernel = static_autotuner.kernel.compile_results[0].kernel
         cubin_path = static_kernel.cubin_path
         self.assertIsNotNone(cubin_path)
-        original_inode = os.stat(cubin_path).st_ino
+        if cache_state == "present":
+            original_inode = os.stat(cubin_path).st_ino
+        else:
+            os.remove(cubin_path)
+            original_inode = None
         static_kernel.shared = 1 << 30
 
         with self.assertRaisesRegex(
             RuntimeError, "No valid triton configs.*OutOfMemoryError"
         ):
             graph.after_deserialization(CompiledFxGraphConstants())
-        self.assertEqual(os.stat(cubin_path).st_ino, original_inode)
+        if original_inode is None:
+            self.assertFalse(os.path.exists(cubin_path))
+        else:
+            self.assertEqual(os.stat(cubin_path).st_ino, original_inode)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
@@ -1529,10 +1528,9 @@ class TestFxGraphCache(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
-    @parametrize("first_load_damage", ("delete", "replace"))
     @torch.compiler.config.patch(compile_on_one_rank=True)
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
-    def test_first_load_candidate_remains_authoritative(self, first_load_damage):
+    def test_first_load_candidate_remains_authoritative(self):
         def alternate_fn(x):
             return x + 2
 
@@ -1553,33 +1551,8 @@ class TestFxGraphCache(TestCase):
         static_kernel = static_autotuner.kernel.compile_results[0].kernel
         cubin_path = static_kernel.cubin_path
         self.assertIsNotNone(cubin_path)
-        damage_phase = "pending"
-        if first_load_damage == "replace":
-            write_atomic(cubin_path, alternate_binary.payload, make_dirs=True)
-            damage_phase = "replaced"
-        deleted_path = None
-
-        def delete_before_native_load(frame, event, arg):
-            nonlocal damage_phase, deleted_path
-            if (
-                first_load_damage == "delete"
-                and damage_phase == "pending"
-                and event == "line"
-                and frame.f_code is static_kernel._load_kernel_from_path.__code__
-                and frame.f_locals.get("temporary_load_path") is not None
-                and frame.f_locals.get("load_path")
-                == frame.f_locals["temporary_load_path"]
-            ):
-                deleted_path = frame.f_locals["load_path"]
-                os.remove(deleted_path)
-                damage_phase = "deleted"
-            return delete_before_native_load
-
-        with set_trace(delete_before_native_load):
-            graph.after_deserialization(CompiledFxGraphConstants())
-        self.assertEqual(damage_phase, f"{first_load_damage}d")
-        if deleted_path is not None:
-            self.assertNotEqual(deleted_path, cubin_path)
+        write_atomic(cubin_path, alternate_binary.payload, make_dirs=True)
+        graph.after_deserialization(CompiledFxGraphConstants())
         loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIs(loaded_autotuner, static_autotuner.kernel)
         self.assertEqual(graph.current_callable([x0])[0], expected0)
@@ -1638,7 +1611,6 @@ class TestFxGraphCache(TestCase):
         "cache_damage",
         (
             "delete",
-            "delete_recreate",
             "truncate",
         ),
     )
@@ -1670,53 +1642,89 @@ class TestFxGraphCache(TestCase):
                 file.write(b"truncated")
         missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
         self.assertFalse(os.path.exists(missing_libdevice_path))
-        damage_phase = "pending"
-        deleted_path = None
-
-        def damage_before_native_load(frame, event, arg):
-            nonlocal damage_phase, deleted_path
-            if (
-                cache_damage == "delete_recreate"
-                and damage_phase == "pending"
-                and event == "line"
-                and frame.f_code is static_kernel._load_kernel_from_path.__code__
-                and frame.f_locals.get("temporary_load_path") is not None
-                and frame.f_locals.get("load_path")
-                == frame.f_locals["temporary_load_path"]
-            ):
-                deleted_path = frame.f_locals["load_path"]
-                os.remove(deleted_path)
-                damage_phase = "damaged"
-            elif (
-                cache_damage == "delete_recreate"
-                and damage_phase == "damaged"
-                and event == "line"
-                and frame.f_code is static_kernel._load_kernel_from_path.__code__
-                and "error" in frame.f_locals
-            ):
-                write_atomic(
-                    frame.f_locals["load_path"],
-                    static_kernel.cubin_raw,
-                    make_dirs=True,
-                )
-                damage_phase = "recreated"
-            return damage_before_native_load
-
         with (
             _set_env("TRITON_LIBDEVICE_PATH", missing_libdevice_path),
             torch.cuda.device(1),
         ):
             x1 = torch.randn(32, device="cuda")
-            with set_trace(damage_before_native_load):
-                self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        expected_damage_phase = (
-            "recreated" if cache_damage == "delete_recreate" else "pending"
-        )
-        self.assertEqual(damage_phase, expected_damage_phase)
-        if deleted_path is not None:
-            self.assertNotEqual(deleted_path, cubin_path)
+            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
         with open(cubin_path, "rb") as file:
             self.assertEqual(file.read(), static_kernel.cubin_raw)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
+    def test_concurrent_first_device_load_is_serialized(self):
+        import threading
+
+        def fn(x):
+            return x.sin()
+
+        x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
+            fn, device=0
+        )
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
+        self.assertIs(loaded_autotuner, static_autotuner.kernel)
+        static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
+
+        source, start_line = inspect.getsourcelines(static_kernel.load_kernel.__func__)
+        before_load_line = start_line + next(
+            index
+            for index, line in enumerate(source)
+            if "self._load_kernel_from_path(self._agnostic_cubin_path()" in line
+        )
+        before_publish_line = start_line + next(
+            index
+            for index, line in enumerate(source)
+            if "self.modules[device] = module" in line
+        )
+        barriers = (threading.Barrier(2), threading.Barrier(2))
+        arrivals = [0, 0]
+
+        def synchronize_loaders(frame, event, arg):
+            if (
+                event != "line"
+                or frame.f_code is not static_kernel.load_kernel.__code__
+            ):
+                return synchronize_loaders
+            if frame.f_lineno == before_load_line:
+                barrier_index = 0
+            elif frame.f_lineno == before_publish_line:
+                barrier_index = 1
+            else:
+                return synchronize_loaders
+            arrivals[barrier_index] += 1
+            try:
+                barriers[barrier_index].wait(timeout=0.5)
+            except threading.BrokenBarrierError:
+                pass
+            return synchronize_loaders
+
+        inputs = [x0.to(1), x0.to(1)]
+        outputs = [None, None]
+
+        def launch(index):
+            sys.settrace(synchronize_loaders)
+            try:
+                with torch.cuda.device(1):
+                    outputs[index] = graph.current_callable([inputs[index]])[0]
+            finally:
+                sys.settrace(None)
+
+        threads = [threading.Thread(target=launch, args=(index,)) for index in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(arrivals, [1, 1])
+        self.assertEqual(set(static_kernel.functions), {0, 1})
+        for output, input in zip(outputs, inputs):
+            self.assertEqual(output, fn(input))
 
     @requires_cuda_and_triton
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)

@@ -3159,9 +3159,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.set_cubin_path()
-        if not getattr(
-            self.kernel, "_use_stable_cubin_path", False
-        ) and not os.path.exists(self.kernel.cubin_path):
+        if self.kernel.cubin_raw is None and not os.path.exists(self.kernel.cubin_path):
             self.reload_cubin_path()
         # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
         # kernel, so the launcher must keep its loaded handles per device.
