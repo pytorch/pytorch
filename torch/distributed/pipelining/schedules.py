@@ -1181,6 +1181,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
         # Update losses if there is a container passed in
         self._update_losses(self._stage, losses)
 
+        # This option defers only FSDP finalization. Other stages still need PP scaling.
         if self._finalize_gradients or not isinstance(self._stage.submod, FSDPModule):
             self._stage.perform_reduce_grad(
                 self._n_microbatches if self.scale_grads else 1
@@ -1401,6 +1402,7 @@ or equal to the number of stages ({self._num_stages})."
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
 
+        # This option defers only FSDP finalization. Other stages still need PP scaling.
         if self._finalize_gradients or not isinstance(self._stage.submod, FSDPModule):
             self._stage.perform_reduce_grad(
                 self._n_microbatches if self.scale_grads else 1
