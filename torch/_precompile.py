@@ -344,9 +344,11 @@ class MakeFxTracer:
     (``torch._dynamo.decorators``, inductor backend only) before the call: a
     marked dim is captured as an unbacked symint, so one artifact serves any
     runtime size of it, and a graph that needs to guard on it fails at capture.
-    Each input's dtype and device are specialized too (a runtime mismatch is
-    rejected), the inductor backend additionally specializes on memory format,
-    and a nested-tensor example input is refused.
+    Dims that must be equal at runtime must share a ``shape_id``: marked
+    independently they bake a silent equal-size assumption, and a mismatch at
+    runtime is not caught. Each input's dtype and device are specialized too (a
+    runtime mismatch is rejected), the inductor backend additionally specializes
+    on memory format, and a nested-tensor example input is refused.
 
     ``decompositions`` is an optional decomposition table (a dict mapping each
     ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
