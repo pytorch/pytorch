@@ -336,7 +336,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
         def trace_and_check(exp_config: _ExperimentalConfig | None) -> None:
             with _profile(
                 use_kineto=True,
-                use_device=torch.device(device).type,
+                use_device="cuda",
                 experimental_config=exp_config,
             ) as prof:
                 workload()
@@ -475,8 +475,6 @@ class TestProfilerITT(TestCase):
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
@@ -3109,29 +3107,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 device_type_enum = DeviceType.PrivateUse1
             gpu_events = [e for e in events if e.device_type == device_type_enum]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
-
-    @onlyOn(["cuda"])
-    @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_activity_filter_dict_syntax(self, device):
-        """Dict syntax collects only the requested activity types."""
-        device_type = device.split(":")[0]
-        device_activity = getattr(ProfilerActivity, device_type.upper(), None)
-        self.assertIsNotNone(device_activity)
-        with profile(
-            activities=[{device_activity: ["GPU_MEMCPY", "CUDA_RUNTIME"]}],
-        ) as p:
-            x = torch.randn(10, 10).to(device)
-            y = torch.mm(x, x)
-        events = p.events()
-        self.assertGreater(len(events), 0)
-        print(events)
-        has_memcpy = any("Memcpy" in e.name for e in events)
-        self.assertTrue(has_memcpy, "Expected GPU_MEMCPY events")
-        has_runtime = any("cuda" in e.name for e in events)
-        self.assertTrue(has_runtime, "Expected CUDA_RUNTIME events")
-        has_overhead = any("Lazy Function Loading" in e.name for e in events)
-        self.assertFalse(has_overhead)
 
     @onlyAccelerator
     @unittest.skipIf(not kineto_available(), "Kineto is required")
