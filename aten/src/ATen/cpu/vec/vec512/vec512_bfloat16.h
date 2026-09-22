@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <limits>
 
@@ -1478,7 +1479,7 @@ inline void transpose_mxn<BFloat16>(
     int M,
     int N) {
   // load from src
-  TORCH_CHECK(
+  STD_TORCH_CHECK(
       M <= 32 && N <= 32, "transpose_mxn<BFloat16> expects M, N <= 32.");
   __m512i r[32];
   int i;
@@ -1536,7 +1537,8 @@ inline void transpose_mxn<Half>(
     int64_t ld_dst,
     int M,
     int N) {
-  TORCH_CHECK(M <= 32 && N <= 32, "transpose_mxn<Half> expects M, N <= 32.");
+  STD_TORCH_CHECK(
+      M <= 32 && N <= 32, "transpose_mxn<Half> expects M, N <= 32.");
   // load from src
   __m512i r[32];
   int i;
