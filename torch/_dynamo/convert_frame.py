@@ -152,7 +152,13 @@ from .symbolic_convert import (
     SpeculationLog,
 )
 from .trace_rules import is_numpy
-from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
+from .types import (
+    ConvertFrameReturn,
+    FrameAction,
+    FrameExecStrategy,
+    GuardFilterEntry,
+    wrap_guarded_code,
+)
 from .utils import (
     _get_error_on_graph_break,
     chromium_event_timed,
@@ -771,9 +777,20 @@ class ConvertFrameAssert:
         try:
             compile_ctx = compile_context(CompileContext(compile_id))
             # When recompile_limit is set, temporarily override the global
-            # config so the existing exceeds_recompile_limit check uses it.
+            # config so the existing exceeds_recompile_limit check uses it. An
+            # explicit package is its own recompile budget, so its limit also
+            # lifts the accumulated safety cap; ordinary torch.compile keeps
+            # the ambient global cap.
+            explicit = self._package is not None and self._package.explicit_capture
             recompile_ctx = (
-                config.patch(recompile_limit=self._recompile_limit)
+                config.patch(
+                    recompile_limit=self._recompile_limit,
+                    accumulated_recompile_limit=(
+                        max(config.accumulated_recompile_limit, self._recompile_limit)
+                        if explicit
+                        else config.accumulated_recompile_limit
+                    ),
+                )
                 if self._recompile_limit is not None
                 else contextlib.nullcontext()
             )
@@ -804,7 +821,12 @@ class ConvertFrameAssert:
             # Restore the previous initial_global_state for nested compilation handling
             initial_global_state = prev_initial_global_state
 
-        if config.caching_precompile and self._package is not None:
+        # An explicit capture is saved by its caller, never by the ambient cache.
+        if (
+            config.caching_precompile
+            and self._package is not None
+            and not self._package.explicit_capture
+        ):
             from .package import DynamoCache
 
             # Record that the dynamo package has changed
@@ -1009,6 +1031,12 @@ class DynamoOutput:
         save: bool = False,
         cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1029,14 +1057,28 @@ class DynamoOutput:
 
         if not fx_experimental_config.translation_validation:
             return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
+                code,
+                output_graph,
+                cache_entries,
+                hooks,
+                save,
+                strict_error,
+                serialization_guard_filter_fn,
+                explicit_capture,
             )
 
         from torch.fx.experimental.validator import bisect, ValidationException
 
         try:
             return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
+                code,
+                output_graph,
+                cache_entries,
+                hooks,
+                save,
+                strict_error,
+                serialization_guard_filter_fn,
+                explicit_capture,
             )
         except ValidationException:
             bisect(output_graph.shape_env)
@@ -1050,6 +1092,12 @@ class DynamoOutput:
         hooks: Hooks | None,
         save: bool,
         strict_error: bool,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
@@ -1059,6 +1107,8 @@ class DynamoOutput:
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
             strict_error=strict_error,
+            serialization_guard_filter_fn=serialization_guard_filter_fn,
+            explicit_capture=explicit_capture,
         )
 
     def graph_capture_output(
@@ -1960,19 +2010,33 @@ def _compile(
             build_guards_ctx.enter_context(
                 torch_function_mode_stack_state_mgr.temp_restore_stack()
             )
+        # An explicit capture records only the filtered copy of its guards and
+        # fails loudly where the ambient cache would bypass the compile.
+        explicit_capture = package is not None and package.explicit_capture
+        # A serving package holds a loaded artifact that nothing will save
+        # again: a frame it does not cover still compiles, but records nothing.
+        record = package is not None and not package.serving
         with dynamo_timed("build_guards", log_pt2_compile_event=True), build_guards_ctx:
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
-                save=output.package is not None,
+                save=record and output.package is not None,
                 cache_entries=cache_entries,
+                serialization_guard_filter_fn=(
+                    package.serialization_guard_filter_fn
+                    if package is not None
+                    else None
+                ),
+                explicit_capture=explicit_capture,
+                strict_error=record and explicit_capture,
             )
 
         # bypass_package sets output.package to None when this compile cannot be
         # packaged (the local `package` still holds the object). Skip the whole
-        # block in that case: a bypassed compile contributes none of its guards,
-        # inlined source, or device type to the package.
-        if output.package is not None:
+        # block in that case, and for a serving package: neither contributes
+        # guards, inlined source, or device type to the package, and `save`
+        # above is gated identically so guards_state is deliberately None.
+        if record and output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
             output.package.add_guarded_code(check_fn.guards_state, out_code)
@@ -2068,6 +2132,29 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
+
+            if package is not None and package.current_entry is not None:
+                # This frame will stop compiling new variants, so the ones
+                # past the limit will never be captured. Record that so a caller
+                # building an artifact can detect the gap. Deliberately not a
+                # bypass: the variants captured so far are still valid and must
+                # stay installable, and for a cache a miss just recompiles.
+                # Only this frame is named even though the RUN_ONLY strategy set
+                # below is recursive: frames called beneath it go short too, and
+                # never re-enter here, so the record is a lower bound.
+                package.mark_current_entry_truncated()
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_truncated",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: {
+                        "reason": f"hit {limit_type}",
+                        "function": format_func_info(code),
+                    },
+                    expect_trace_id=False,
+                )
 
             def raise_unimplemented_cache_limit_exceeded() -> NoReturn:
                 unimplemented(
