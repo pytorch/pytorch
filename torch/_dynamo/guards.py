@@ -5115,41 +5115,60 @@ class CheckFunctionManager:
                         ret.append(True)
                 return ret
 
-        sorted_guards = sorted(guards or (), key=Guard.sort_key)
+        all_guards = sorted(guards or (), key=Guard.sort_key)
 
         # Disable __torch_function__ dispatch during guard construction so
         # modes with mutable state aren't triggered.  We exit the context
         # before the guard sanity check so GlobalStateGuard.check() sees
         # the true runtime state.
         with torch._C.DisableTorchFunction():
-            if guard_filter_fn:
-                # If we're filtering guards, we need to build it an extra time first
-                # because filtering depends on the builder/guard_manager results
-                builder, guard_manager = self.build_guards(
-                    sorted_guards,
+            filter_entries: list[GuardFilterEntry] | None = None
+
+            def build_filter_entries() -> None:
+                # Filtering depends on the builder's results, so the entries
+                # come from an extra, unsaved build over every guard. Built at
+                # most once: each build_guards call resets and repopulates
+                # code_list and guard_types on the guards it is given, so one
+                # snapshot serves every filter applied to these guards.
+                nonlocal filter_entries
+                if filter_entries is not None:
+                    return
+                inspection_builder, _ = self.build_guards(
+                    all_guards,
                     existing_diff_guard_sources,
                     f_code,
                     output_graph,
                     False,
                 )
+                filter_entries = [
+                    make_guard_filter_entry(guard, inspection_builder)
+                    for guard in all_guards
+                ]
 
-                filter_results = guard_filter_fn(
-                    [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
-                )
-                if len(filter_results) != len(sorted_guards):
+            def apply_filter(
+                filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
+            ) -> list[Guard]:
+                build_filter_entries()
+                if filter_entries is None:
+                    raise AssertionError("filter_entries must be built")
+                filter_results = filter_fn(filter_entries)
+                if len(filter_results) != len(all_guards):
                     raise AssertionError(
                         f"filter_results length ({len(filter_results)}) != "
-                        f"sorted_guards length ({len(sorted_guards)})"
+                        f"sorted_guards length ({len(all_guards)})"
                     )
                 if not all(type(x) is bool for x in filter_results):
                     raise AssertionError("All filter_results entries must be bool")
-                sorted_guards = [
-                    guard for i, guard in enumerate(sorted_guards) if filter_results[i]
+                return [
+                    guard for guard, keep in zip(all_guards, filter_results) if keep
                 ]
 
+            runtime_guards = (
+                apply_filter(guard_filter_fn) if guard_filter_fn else all_guards
+            )
             # Redo the guards because filtering relies on the results from the last guard builder.
             builder, guard_manager = self.build_guards(
-                sorted_guards,
+                runtime_guards,
                 existing_diff_guard_sources,
                 f_code,
                 output_graph,
@@ -5158,7 +5177,7 @@ class CheckFunctionManager:
             )
 
             self.guard_manager = guard_manager
-            self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
+            self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -5235,7 +5254,7 @@ class CheckFunctionManager:
                 )
             try:
                 self.guards_state = self.serialize_guards(
-                    builder, sorted_guards, self.output_graph
+                    builder, runtime_guards, self.output_graph
                 )
             except exc.PackageError as e:
                 if torch._dynamo.config.strict_precompile or strict_error:
