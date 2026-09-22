@@ -1665,6 +1665,10 @@ class PythonWrapperCodegen(CodeGen):
     """
 
     supports_caching: bool = True  # Whether the output code is cacheable.
+    # Whether Triton kernels are bound by handing their source to AsyncCompile (the
+    # default) or defined directly at module level. Only the former can fan compilation
+    # out to the worker pool, so this also decides whether priming it pays.
+    async_compiles_triton_kernels: bool = True
 
     def __init__(self):
         super().__init__()
@@ -1843,6 +1847,8 @@ class PythonWrapperCodegen(CodeGen):
                 "from torch._inductor.codegen.memory_planning import _align as align",
             ),
             (("device", "empty_strided"), "from torch import device, empty_strided"),
+            # Keyed by the binding it exists for, so it lives and dies with
+            # `async_compile = AsyncCompile()`.
             (
                 ("async_compile",),
                 f"from {async_compile.__name__} import AsyncCompile",
@@ -3807,11 +3813,6 @@ class PythonWrapperCodegen(CodeGen):
             kernel_name, kernel_body, metadata=metadata, standalone=standalone
         )
         self.header.splice(body)
-
-    # Whether Triton kernels are bound by handing their source to AsyncCompile (the
-    # default) or defined directly at module level. Only the former can fan compilation
-    # out to the worker pool, so this also decides whether priming it pays.
-    async_compiles_triton_kernels = True
 
     def emit_triton_kernel_definition(
         self,
