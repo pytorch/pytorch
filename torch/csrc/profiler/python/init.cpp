@@ -492,16 +492,9 @@ void initPythonBindings(PyObject* module) {
                 p.trace_only);
           },
           [](const py::tuple& t) { // __setstate__
-            TORCH_CHECK(!t.empty(), "Expected at least 10 values in state");
-            // Older pickles start with the two removed constructor arguments.
-            const size_t offset = py::isinstance<py::list>(t[0]) ? 2 : 0;
-            TORCH_CHECK(
-                t.size() >= 10 + offset,
-                "Expected at least ",
-                10 + offset,
-                " values in state");
+            TORCH_CHECK(t.size() >= 10, "Expected at least 10 values in state");
 
-            py::list py_perf_events = t[1 + offset].cast<py::list>();
+            py::list py_perf_events = t[1].cast<py::list>();
             std::vector<std::string> performance_events;
             performance_events.reserve(py_perf_events.size());
             for (const auto& py_perf_event : py_perf_events) {
@@ -509,18 +502,18 @@ void initPythonBindings(PyObject* module) {
             }
 
             return ExperimentalConfig(
-                t[offset].cast<bool>(),
+                t[0].cast<bool>(),
                 std::move(performance_events),
-                t[2 + offset].cast<bool>(),
-                t[3 + offset].cast<bool>(),
-                t[4 + offset].cast<bool>(),
-                t[5 + offset].cast<bool>(),
-                t[6 + offset].cast<bool>(),
-                t[7 + offset].cast<bool>(),
-                t[8 + offset].cast<bool>(),
-                t[9 + offset].cast<std::string>(),
-                t.size() > 10 + offset ? t[10 + offset].cast<bool>() : false,
-                t.size() > 11 + offset ? t[11 + offset].cast<bool>() : false);
+                t[2].cast<bool>(),
+                t[3].cast<bool>(),
+                t[4].cast<bool>(),
+                t[5].cast<bool>(),
+                t[6].cast<bool>(),
+                t[7].cast<bool>(),
+                t[8].cast<bool>(),
+                t[9].cast<std::string>(),
+                t.size() > 10 ? t[10].cast<bool>() : false,
+                t.size() > 11 ? t[11].cast<bool>() : false);
           }))
       // adjust_profiler_step is a deprecated no-op, exposed read-only so the
       // Python layer can detect it and warn.

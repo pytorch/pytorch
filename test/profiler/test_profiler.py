@@ -1042,29 +1042,6 @@ class TestProfiler(TestCase):
             copied = copy.deepcopy(config)
             self.assertIsInstance(copied, _ExperimentalConfig)
 
-            # Test state written before the first two arguments were removed.
-            legacy_state = (
-                [b"metric1"],
-                True,
-                True,
-                [b"event1"],
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                "custom_config",
-                True,
-                True,
-            )
-            legacy_config = _ExperimentalConfig.__new__(_ExperimentalConfig)
-            legacy_config.__setstate__(legacy_state)
-            self.assertTrue(legacy_config.adjust_profiler_step)
-            self.assertEqual(legacy_config.custom_profiler_config, "custom_config")
-            self.assertTrue(legacy_config.trace_only)
-
     def test_adjust_profiler_step_deprecated(self):
         # adjust_profiler_step is a deprecated no-op: passing it must warn with
         # FutureWarning and not error.
