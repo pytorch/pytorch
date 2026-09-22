@@ -810,7 +810,12 @@ class ConvertFrameAssert:
             # Restore the previous initial_global_state for nested compilation handling
             initial_global_state = prev_initial_global_state
 
-        if config.caching_precompile and self._package is not None:
+        # An explicit capture is saved by its caller, never by the ambient cache.
+        if (
+            config.caching_precompile
+            and self._package is not None
+            and not self._package.explicit_capture
+        ):
             from .package import DynamoCache
 
             # Record that the dynamo package has changed
@@ -1994,6 +1999,8 @@ def _compile(
             build_guards_ctx.enter_context(
                 torch_function_mode_stack_state_mgr.temp_restore_stack()
             )
+        # An explicit capture records only the filtered copy of its guards and
+        # fails loudly where the ambient cache would bypass the compile.
         explicit_capture = package is not None and package.explicit_capture
         with dynamo_timed("build_guards", log_pt2_compile_event=True), build_guards_ctx:
             check_fn = dynamo_output.build_guards(
@@ -2007,6 +2014,7 @@ def _compile(
                     else None
                 ),
                 explicit_capture=explicit_capture,
+                strict_error=explicit_capture,
             )
 
         # bypass_package sets output.package to None when this compile cannot be
