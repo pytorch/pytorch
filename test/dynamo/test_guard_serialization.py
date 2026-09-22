@@ -1072,6 +1072,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         explicit_capture = kwargs.pop("_explicit_capture", False)
         serialization_filter = kwargs.pop("_serialization_guard_filter_fn", None)
         post_trace = kwargs.pop("_post_trace", None)
+        runtime_filter = kwargs.pop("_guard_filter_fn", None)
         # kwargs might contain a callable that generates kwargs
         torch._dynamo.reset()
         kwarg_gen_fn = kwargs.get("_gen_fn")
@@ -1105,6 +1106,9 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
             ]
             self.assertTrue(any(ret))
             return ret
+
+        if runtime_filter is not None:
+            guard_filter_fn = runtime_filter
 
         ref_gm = None
         loaded_gm = None
@@ -3764,6 +3768,54 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertFalse(ref.check({"x": x_int}))
         self.assertFalse(self._saving_guard_manager.check({"x": x_int}))
         self.assertTrue(loaded.check({"x": x_int}))
+
+    def test_value_reached_only_by_a_dropped_guard_is_pruned(self):
+        # The serialization builder inherits from the runtime builder only what
+        # compile_check_fn registered. A value the saved copy's guards do not
+        # reach (every guard on the lock, TYPE_MATCH and ID_MATCH, is dropped)
+        # is pruned like any other unguarded value instead of being pickled; a
+        # copy of the whole runtime tree would try to pickle the lock and bypass.
+        def fn(d):
+            return d["a"] + id(d["b"])
+
+        def drop_guards_on_b(entries):
+            return [e.name != "d['b']" for e in entries]
+
+        d = {"a": torch.randn(3), "b": threading.Lock()}
+        self._test_serialization(
+            "ID_MATCH",
+            fn,
+            d,
+            _guard_filter_fn=lambda entries: [True] * len(entries),
+            _serialization_guard_filter_fn=drop_guards_on_b,
+        )
+        scope = load_guards_state(self._cached_guards_state).output_graph.local_scope
+        self.assertIsInstance(scope["d"]["a"], torch.Tensor)
+        self.assertIsInstance(scope["d"]["b"], _Missing)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_explicit_capture_keeps_id_match_live_under_caching_precompile(self):
+        # The ambient rewrite drops ID_MATCH from every build it makes; an
+        # explicit capture keeps the live guard and says what its artifact omits
+        # through its own filter.
+        def fn(x):
+            return x + id(x)
+
+        def drop_id_match(entries):
+            return [e.guard_type != "ID_MATCH" for e in entries]
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization(
+            "ID_MATCH",
+            fn,
+            x,
+            _explicit_capture=True,
+            _serialization_guard_filter_fn=drop_id_match,
+        )
+        other = torch.randn(3)
+        self.assertTrue(ref.check({"x": other}))
+        self.assertFalse(self._saving_guard_manager.check({"x": other}))
+        self.assertTrue(loaded.check({"x": other}))
 
     def test_weakref_alive(self):
         mod = torch.nn.Linear(10, 10, bias=False)
