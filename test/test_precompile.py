@@ -4389,6 +4389,34 @@ class TestPrecompileCapture(TestCase):
         with open(self.artifact, "rb") as f:
             self.assertEqual(f.read(), saved)
 
+    def test_save_after_a_raising_block_is_refused(self):
+        cap = self._capture(backend="eager")
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with cap:
+                cap(self.model, self.x)
+                raise RuntimeError("boom")
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap.save()
+        self.assertFalse(os.path.exists(self.artifact))
+
+    def test_a_capture_is_single_use(self):
+        cap = self._capture(backend="eager")
+        with cap:
+            with self.assertRaisesRegex(PrecompileError, "already been entered"):
+                with cap:
+                    pass
+            cap(self.model, self.x)
+        with self.assertRaisesRegex(PrecompileError, "already been entered"):
+            with cap:
+                pass
+
+    def test_an_exit_time_write_failure_raises_precompile_error(self):
+        disk_full = OSError("disk full")
+        with mock.patch("torch._precompile._write_artifact", side_effect=disk_full):
+            with self.assertRaisesRegex(PrecompileError, "could not write"):
+                with self._capture(backend="eager") as cap:
+                    cap(self.model, self.x)
+
     def test_capture_validates_backend_and_tracer(self):
         with self.assertRaisesRegex(ValueError, "backend must be"):
             self._capture(backend="nope")
