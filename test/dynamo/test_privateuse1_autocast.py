@@ -2,6 +2,7 @@
 
 import sys
 import types
+import typing
 import unittest
 from unittest import mock
 
@@ -264,6 +265,46 @@ class TestPrivateUse1Autocast(TestCase):
         self.assertEqual(len(backend.graphs), 2)
         self.assert_enter_autocast_args(backend, (BACKEND, None, True, None))
         self.assert_no_enter_autocast(backend.graphs[1])
+
+    def test_sourceless_registered_entrypoint_rebind_recompiles(self):
+        class RegisteredAutocast(torch.amp.autocast_mode.autocast):
+            _dynamo_autocast_passthrough = True
+
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
+
+        class ReplacementAutocast(RegisteredAutocast):
+            pass
+
+        autocast = RegisteredAutocast
+
+        def fn(x):
+            autocast_cls = typing.Annotated[autocast, "metadata"].__origin__
+            with autocast_cls():
+                return x + 1
+
+        backend = EagerAndRecordGraphs()
+        optimized_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(4)
+        device_module = self.device_module
+        with mock.patch.object(
+            device_module.amp, "autocast", RegisteredAutocast, create=True
+        ):
+            self.assertEqual(optimized_fn(x), x + 1)
+
+        self.assert_enter_autocast_args(backend, (BACKEND, None, True, None))
+
+        with mock.patch.object(
+            device_module.amp, "autocast", ReplacementAutocast, create=True
+        ):
+            self.assertEqual(optimized_fn(x), x + 1)
+
+        self.assertEqual(len(backend.graphs), 2)
 
     def test_unsupported_wrappers_keep_generic_route(self):
         class OptedInBaseAutocast(torch.amp.autocast_mode.autocast):
