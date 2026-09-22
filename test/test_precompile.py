@@ -1150,7 +1150,7 @@ class TestPrecompile(TestCase):
         # format/version/backend tag plus a code_hash binding the cache to its python_code).
         self.assertEqual(
             set(blob),
-            {"artifact", "format", "version", "backend", "tracer", "code_hash"},
+            {"artifact", "format", "version", "backend", "code_hash"},
         )
         self.assertEqual(blob["format"], _CACHE_FORMAT)
         self.assertEqual(blob["version"], _CACHE_VERSION)
@@ -1197,7 +1197,7 @@ class TestPrecompile(TestCase):
         blob = torch.load(io.BytesIO(cache), weights_only=True)  # must not raise
         self.assertEqual(
             set(blob),
-            {"artifact", "format", "version", "backend", "tracer", "code_hash"},
+            {"artifact", "format", "version", "backend", "code_hash"},
         )
         self.assertEqual(blob["format"], _CACHE_FORMAT)
         self.assertEqual(blob["version"], _CACHE_VERSION)
@@ -1691,6 +1691,18 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "tracer='dynamo'"):
             _precompile_pair(lambda model, xx: model(xx), m, x, tracer="dynamo")
 
+    def test_backend_invalid_raises(self):
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        with self.assertRaisesRegex(
+            ValueError, "backend must be 'inductor' or 'eager'"
+        ):
+            _precompile_pair(lambda x, y: x + y, a, b, backend="nope")
+
+    def test_tracer_invalid_raises(self):
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        with self.assertRaisesRegex(ValueError, "tracer must be 'make_fx' or 'dynamo'"):
+            _precompile_pair(lambda x, y: x + y, a, b, tracer="nope")
+
     def test_backend_default_is_inductor(self):
         # The default lowers through Inductor: the generated code inlines the Inductor
         # output module. Use a graph_partition-agnostic marker (the ``call = runner.call``
@@ -1811,7 +1823,7 @@ class TestPrecompile(TestCase):
         blob = torch.load(io.BytesIO(cache), weights_only=False)
         self.assertEqual(
             set(blob),
-            {"artifact", "format", "version", "backend", "tracer", "code_hash"},
+            {"artifact", "format", "version", "backend", "code_hash"},
         )
         self.assertIsNone(blob["artifact"])  # eager has no compiled blob to bundle
         self.assertEqual(blob["format"], _CACHE_FORMAT)
@@ -4085,7 +4097,7 @@ class TestPrecompileLoad(TestCase):
         with open(path, "rb") as f:
             return f.read().decode()
 
-    def test_load_refuses_a_pair_from_two_captures_or_a_missing_half(self):
+    def test_load_refuses_a_pair_from_two_captures_or_a_missing_cache(self):
         self._write(self.artifact, self.cache)
         other_artifact = os.path.join(self.dir, "other.py")
         other_cache = os.path.join(self.dir, "other.cache")
@@ -4094,31 +4106,6 @@ class TestPrecompileLoad(TestCase):
             load(self.artifact, other_cache)
         with self.assertRaisesRegex(PrecompileError, "could not read"):
             load(self.artifact, os.path.join(self.dir, "missing.cache"))
-
-    def test_load_pairs_the_cache_on_its_tracer_tag(self):
-        # The envelope names the tracer that produced it; a tag that differs from
-        # the python_code's is a wrong pairing, and a pair written before the tag
-        # (absent on both sides) still reads as make_fx.
-        _, cache = self._write(self.artifact, self.cache)
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        self.assertEqual(blob["tracer"], "make_fx")
-        blob["tracer"] = "dynamo"
-        buf = io.BytesIO()
-        torch.save(blob, buf)
-        _write_artifact(
-            self.artifact, self.cache, self._read(self.artifact), buf.getvalue()
-        )
-        with self.assertRaisesRegex(PrecompileError, "tracer"):
-            load(self.artifact, self.cache)
-        del blob["tracer"]
-        buf = io.BytesIO()
-        torch.save(blob, buf)
-        _write_artifact(
-            self.artifact, self.cache, self._read(self.artifact), buf.getvalue()
-        )
-        self.assertEqual(
-            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
-        )
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
@@ -4176,6 +4163,29 @@ class TestPrecompileCapture(TestCase):
             load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
         )
 
+    def test_a_capture_must_be_entered_before_it_is_called(self):
+        # Outside the block nothing would be written at exit, so the call is
+        # refused rather than running the whole trace for a missing artifact.
+        cap = self._capture(backend="eager")
+        with self.assertRaisesRegex(PrecompileError, "not active"):
+            cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+
+    def test_decompositions_forward_through_the_tracer(self):
+        called = []
+
+        def my_relu_decomp(x):
+            called.append(True)
+            return (x > 0) * x
+
+        tracer = MakeFxTracer(
+            decompositions={torch.ops.aten.relu.default: my_relu_decomp}
+        )
+        with self._capture(backend="eager", tracer=tracer) as cap:
+            y = cap(self.model, self.x)
+        self.assertTrue(called)
+        self.assertEqual(y, self.model(self.x))
+
     def test_a_block_without_a_call_or_that_raises_writes_nothing(self):
         with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
             with self._capture(backend="eager"):
@@ -4207,17 +4217,18 @@ class TestPrecompileCapture(TestCase):
             self._capture(backend="nope")
         with self.assertRaisesRegex(TypeError, "MakeFxTracer"):
             self._capture(tracer="make_fx")
-        with self.assertRaisesRegex(PrecompileError, "partial"):
+        with self.assertRaisesRegex(TypeError, "partial"):
             self._capture(functools.partial(_files_fn, self.model))
 
-    def test_training_capture_scatters_grads_onto_the_runtime_model(self):
+    @parametrize("backend", ["inductor", "eager"])
+    def test_a_backward_step_scatters_grads_onto_the_runtime_model(self, backend):
         def train_step(model, x):
             model(x).sum().backward()
 
         expected = _FilesModel()
         expected.load_state_dict(self.model.state_dict())
         expected(self.x).sum().backward()
-        with self._capture(train_step, backend="eager", training=True) as cap:
+        with self._capture(train_step, backend=backend) as cap:
             self.assertIsNone(cap(self.model, self.x))
         self.assertEqual(self.model.lin.weight.grad, expected.lin.weight.grad)
         runtime = _FilesModel()
