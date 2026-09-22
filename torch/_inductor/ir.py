@@ -5232,25 +5232,36 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return layout
 
     @staticmethod
-    def _reads_only_where_it_writes(src: IRNode, dst: IRNode) -> bool:
+    def _reads_only_where_it_writes(
+        src: IRNode, dst: IRNode, unsafe_alias: bool
+    ) -> bool:
         """
-        The kernel that computes src may write straight into dst's buffer only if
-        it reads that buffer at the position it writes: x + y does,
-        x + x.flip(0) does not.
+        Whether writing src into dst reads dst only at the element being
+        written: x + y does, x + x.flip(0) does not. With unsafe_alias the
+        kernel that computes src writes dst itself, so its own reads count;
+        otherwise the copy reads src through its loader, which inlines src when
+        it is not a buffer of its own (a view of an unrealized computation).
         """
-        loops = src.data if isinstance(src, StorageBox) else src
-        if isinstance(loops, ComputedBuffer):
-            loops = loops.data
-        if not isinstance(loops, Pointwise):
-            return False
+        target = src
+        if unsafe_alias:
+            loops = src.data if isinstance(src, StorageBox) else src
+            if isinstance(loops, ComputedBuffer):
+                loops = loops.data
+            if not isinstance(loops, Pointwise):
+                return False
+            target = loops
         name = dst.get_name()
-        with patch.object(FlexibleLayout, "allow_indexing", True):
-            loader, indexer = loops.make_loader(), dst.make_indexer()
+        try:
+            with patch.object(FlexibleLayout, "allow_indexing", True):
+                loader, indexer = target.make_loader(), dst.make_indexer()
 
-            def body(index: Sequence[Expr]) -> OpsValue:
-                return ops.store(name, indexer(index), loader(index))
+                def body(index: Sequence[Expr]) -> OpsValue:
+                    return ops.store(name, indexer(index), loader(index))
 
-            read_writes = extract_read_writes(body, loops.get_size())
+                read_writes = extract_read_writes(body, target.get_size())
+        except NotImplementedError:
+            # No index to compare with: keep the copy that unsafe_alias skips.
+            return not unsafe_alias
         (write,) = read_writes.writes
         return all(
             isinstance(read, dependencies.MemoryDep) and read.index == write.index
@@ -5279,9 +5290,20 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst, we can alias src to dst.
         src.realize_hint()
 
-        if unsafe_alias and not cls._reads_only_where_it_writes(src, dst):
-            # Compute src into a buffer of its own, then copy that into dst.
-            src.realize()
+        if not cls._reads_only_where_it_writes(src, dst, unsafe_alias):
+            if unsafe_alias:
+                # Compute src into a buffer of its own, then copy that into dst.
+                src.realize()
+            else:
+                # The copy below would inline src and read dst while writing it.
+                tmp = Pointwise.create(
+                    device=src.get_device(),
+                    dtype=src.get_dtype(),
+                    inner_fn=src.make_loader(),
+                    ranges=list(src.get_size()),
+                )
+                tmp.realize()
+                src = tmp.data
             unsafe_alias = False
 
         if not unsafe_alias:
