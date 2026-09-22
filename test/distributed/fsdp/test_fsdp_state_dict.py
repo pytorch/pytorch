@@ -3,6 +3,7 @@
 import io
 import itertools
 import sys
+import unittest
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
@@ -61,6 +62,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -158,6 +160,16 @@ class TestDummyModel(torch.nn.Module):
 
     def get_input(self):
         return torch.rand(8, 8, device=device_type)
+
+
+def _unsupported_state_dict_config(params):
+    rank0_only = params.get(
+        "state_dict_rank0_and_offload", params.get("rank0_only_and_offload", False)
+    )
+    return (rank0_only and params["state_dict_type"] != "state_dict") or (
+        params.get("use_orig_params", False)
+        and params["state_dict_type"] not in _UNFLATTENED_STATE_DICT_IMPLS
+    )
 
 
 class TestFSDPStateDict(FSDPTest):
@@ -380,6 +392,10 @@ class TestFSDPStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("rank0_only_and_offload", [False, True])
+    @decorateIf(
+        unittest.skip("Unsupported state-dict configuration"),
+        _unsupported_state_dict_config,
+    )
     def test_state_dict_with_manual_ac_wrapper(
         self,
         state_dict_type: str,
@@ -537,6 +553,10 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("use_orig_params", [True, False])
+    @decorateIf(
+        unittest.skip("Unsupported state-dict configuration"),
+        _unsupported_state_dict_config,
+    )
     def test_basic_save_and_load_state_dict(
         self,
         state_dict_type: str,
@@ -636,6 +656,10 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("use_orig_params", [True, False])
+    @decorateIf(
+        unittest.skip("Unsupported state-dict configuration"),
+        _unsupported_state_dict_config,
+    )
     def test_buffers_save_and_load_state_dict(
         self,
         state_dict_type: str,
@@ -698,6 +722,10 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
+    @decorateIf(
+        unittest.skip("Unsupported state-dict configuration"),
+        _unsupported_state_dict_config,
+    )
     def test_save_and_load_after_forward_state_dict(
         self, state_dict_type, mixed_precision, state_dict_rank0_and_offload
     ):
@@ -871,6 +899,10 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("fsdp_root", [True, False])
+    @decorateIf(
+        unittest.skip("Unsupported state-dict configuration"),
+        _unsupported_state_dict_config,
+    )
     def test_state_dict_load_into_local_module(
         self,
         state_dict_type,
