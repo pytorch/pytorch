@@ -24,6 +24,7 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
+from ._p2p import _build_p2p_edge_groups, _preconnect_p2p_edge_groups
 from ._recv_buffers import _RecvInfo
 from ._utils import (
     generate_rank_to_stage_mapping,
@@ -297,6 +298,7 @@ class _PipelineSchedule(ABC):
 
         # Derived
         self._has_backward = self._loss_fn is not None
+        self._p2p_initialized = False
 
         # Holds the losses for each microbatch.
         self._internal_losses: list[torch.Tensor] = []
@@ -344,26 +346,69 @@ class _PipelineSchedule(ABC):
 
         self._internal_losses.clear()
 
-    def _warmup_p2p(
+    def _initialize_pipeline_distributed_state(
         self,
         stages: list[_PipelineStageBase],
         has_backward: bool,
-        p2p_done: bool,
+        initialize_p2p: bool,
     ) -> None:
-        """Run the P2P warm-up protocol for the given stages.
+        """Determine metadata mode and initialize pipeline communication.
 
-        For ``PipelineStage`` instances this executes the forward/backward vote
-        protocol (which warms up 2-rank sub-communicators) and sets each
-        stage's ``_inference_mode``.  For other stage types it falls back to
-        the legacy ``_get_init_p2p_neighbors_ops`` + ``_batch_p2p`` path.
+        Manual stages agree on static or dynamic metadata before inference.
+        When P2P setup is requested, the legacy path initializes its existing
+        parent-group transport, while directed-edge mode initializes the parent,
+        creates children from the final stage-to-rank assignment, and
+        preconnects every child before execution or graph capture. This setup is
+        distinct from a runtime's model warmup. All local stages must share one
+        parent, assignment, and device; the schedule builds the complete
+        directed group map once and attaches it to every local stage.
 
         Args:
             stages: The pipeline stages owned by this rank.
             has_backward: Whether the schedule includes a backward pass.
-            p2p_done: ``True`` if P2P neighbours have already been initialised
-                (avoids redundant init on eval↔train mode switches).
+            initialize_p2p: Whether the schedule still needs to initialize its
+                P2P transport. Metadata mode agreement still runs when this is
+                ``False`` after an eval-to-train transition.
         """
-        if all(isinstance(stage, PipelineStage) for stage in stages):
+        per_edge = {stage.p2p_per_edge for stage in stages}
+        if len(per_edge) != 1:
+            raise ValueError(
+                "All local pipeline stages must use the same P2P communicator mode"
+            )
+        use_per_edge = next(iter(per_edge))
+        parent: dist.ProcessGroup | None = None
+        backend: str | None = None
+        stage_index_to_group_rank = stages[0].stage_index_to_group_rank
+        stage_device = torch.device(stages[0].device)
+        if use_per_edge:
+            # The shared-communicator path supports schedules without an
+            # initialized process group, so resolve the parent only when this
+            # opt-in mode needs to create child groups.
+            parent = stages[0]._parent_group
+            if any(stage._parent_group is not parent for stage in stages):
+                raise ValueError("All local pipeline stages must share one PP group")
+            if any(
+                stage.stage_index_to_group_rank != stage_index_to_group_rank
+                for stage in stages
+            ):
+                raise ValueError(
+                    "All local pipeline stages must share one stage-to-rank assignment"
+                )
+            if any(torch.device(stage.device) != stage_device for stage in stages):
+                raise ValueError(
+                    "All local pipeline stages must use one device with per-edge P2P"
+                )
+            backend = str(dist.get_backend(parent))
+
+        pipeline_stages = [
+            stage for stage in stages if isinstance(stage, PipelineStage)
+        ]
+        all_manual = len(pipeline_stages) == len(stages)
+        stage_backend_initialized = False
+        if pipeline_stages and not all_manual:
+            raise ValueError("A pipeline schedule cannot mix manual and traced stages")
+
+        if all_manual:
             # A fake process group cannot exchange real data: a cross-rank
             # vote recv reads zeros and selects DYNAMIC, which then fails in
             # `_recv_meta` (nothing was actually sent). Since dynamic
@@ -378,9 +423,14 @@ class _PipelineSchedule(ABC):
                 or (not st.is_last and not st._is_same_rank(st.stage_index + 1))
                 for st in pp_stages
             )
-            if has_cross_rank and any(
-                dist.get_backend(st.group) == "fake" for st in pp_stages
-            ):
+            fake_backend = backend == "fake" or (
+                not use_per_edge
+                and has_cross_rank
+                and any(
+                    str(dist.get_backend(stage.group)) == "fake" for stage in stages
+                )
+            )
+            if has_cross_rank and fake_backend:
                 for st in pp_stages:
                     if InferenceMode.needs_dynamic(st._user_meta, has_backward):
                         raise RuntimeError(
@@ -397,44 +447,82 @@ class _PipelineSchedule(ABC):
                     "for %d stage(s) without voting",
                     len(stages),
                 )
-                return
-            acc: torch.Tensor | None = None
-            for stage in cast(list[PipelineStage], stages):
-                acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
-            result: torch.Tensor | None = acc
-            determined_mode: InferenceMode | None = None
-            for stage in reversed(cast(list[PipelineStage], stages)):
-                result = stage._warmup_backward_result(received_result=result)
+            else:
+                if parent is not None:
+                    # Every parent rank must enter this setup-time vote before
+                    # any rank can create the assignment-derived child groups.
+                    vote = torch.tensor(
+                        [
+                            int(
+                                all(
+                                    not InferenceMode.needs_dynamic(
+                                        stage._user_meta, has_backward
+                                    )
+                                    for stage in pp_stages
+                                )
+                            ),
+                        ],
+                        dtype=torch.int32,
+                        device=stages[0].device,
+                    )
+                    dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=parent)
+                    stage_backend_initialized = True
+                    result: torch.Tensor | None = vote
+                else:
+                    # The legacy ring both reaches a global mode decision and
+                    # initializes only the neighbour P2P paths. Replacing it
+                    # with all_reduce would change that initialization contract
+                    # and would require a process group for the supported
+                    # single-process path.
+                    acc: torch.Tensor | None = None
+                    for stage in pp_stages:
+                        acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
+                    result = acc
+                    for stage in reversed(pp_stages):
+                        result = stage._warmup_backward_result(received_result=result)
                 if result is None:
                     raise RuntimeError("P2P warm-up voting failed")
+                # This initialization-time sync makes the global mode decision
+                # before any metadata P2P or CUDA graph capture can begin.
                 determined_mode = (
                     InferenceMode.STATIC
                     if result.item() == 1
                     else InferenceMode.DYNAMIC
                 )
-                stage._inference_mode = determined_mode
-            logger.debug(
-                "Rank determined inference_mode=%s for %d stage(s)",
-                determined_mode.value if determined_mode else "None",
-                len(stages),
-            )
-        elif not p2p_done:
+                for stage in pp_stages:
+                    stage._inference_mode = determined_mode
+                logger.debug(
+                    "Rank determined inference_mode=%s for %d stage(s)",
+                    determined_mode.value,
+                    len(stages),
+                )
+        elif initialize_p2p and parent is None:
             all_ops: list[dist.P2POp] = []
             for stage in stages:
                 all_ops.extend(stage._get_init_p2p_neighbors_ops())
             _wait_batch_p2p(_batch_p2p(all_ops))
 
-        # TODO: STATIC mode group communicator warm-up gap
-        # The vote protocol above warms up 2-rank sub-communicators
-        # (used by `_batch_p2p` homogeneous fast-path).  In DYNAMIC mode,
-        # `_send_meta`/`_recv_meta` (called during `_prepare_forward_infra` →
-        # `_forward_metadata_inference`) also warm up the *group* communicator
-        # (used by `_batch_p2p` mixed-op path).  In STATIC mode, metadata
-        # inference is skipped, so the group communicator is NOT warmed up —
-        # it will be lazily created on the first mixed `_batch_p2p` call
-        # (e.g., 1F1B steady-state with both sends and recvs).
-        # Fix: run `_get_init_p2p_neighbors_ops` + `_batch_p2p` after the
-        # vote, gated by `not p2p_done`.
+        if parent is not None and initialize_p2p:
+            if backend != "fake" and not stage_backend_initialized:
+                # Initialize the stage-device backend. The edge-group builder
+                # initializes any additional backend retained by an unfiltered
+                # mixed child before calling split_group.
+                dist.all_reduce(
+                    torch.zeros(1, dtype=torch.int32, device=stages[0].device),
+                    group=parent,
+                )
+            groups, split_rounds = _build_p2p_edge_groups(
+                parent, stage_index_to_group_rank, stage_device
+            )
+            for stage in stages:
+                stage._p2p_edge_groups = groups
+            if backend != "fake":
+                _preconnect_p2p_edge_groups(
+                    parent,
+                    groups,
+                    split_rounds,
+                    stage_device,
+                )
 
     def _initialize_pp_stages(
         self,
@@ -448,15 +536,14 @@ class _PipelineSchedule(ABC):
     ) -> tuple[bool, bool]:
         """Common stage initialization shared by Single and Multi schedules.
 
-        Handles mode-change detection (eval↔train), P2P warm-up, RNG forking,
-        forward / backward metadata inference, and FSDP cleanup.
+        Handles mode-change detection (eval↔train), one-time P2P setup, RNG
+        forking, forward/backward metadata inference, and FSDP cleanup.
 
         Returns the updated ``(fwd_initialized, bwd_initialized)`` flags.
         """
         # Detect eval↔train mode switch: if has_backward changed since last
         # init, re-initialize both fwd (recv buffers need different
-        # requires_grad) and bwd.  p2p_done avoids redundant P2P warm-up.
-        p2p_done = fwd_initialized
+        # requires_grad) and bwd. P2P transport has an independent lifetime.
         if fwd_initialized and (self._has_backward != bwd_initialized):
             fwd_initialized = False
             bwd_initialized = False
@@ -468,7 +555,13 @@ class _PipelineSchedule(ABC):
             return fwd_initialized, bwd_initialized
 
         if needs_fwd:
-            self._warmup_p2p(stages, self._has_backward, p2p_done)
+            initialize_p2p = not self._p2p_initialized
+            self._initialize_pipeline_distributed_state(
+                stages,
+                self._has_backward,
+                initialize_p2p,
+            )
+            self._p2p_initialized = True
 
         # Fork RNG so metadata inference doesn't perturb training RNG.
         devices = list(
@@ -784,7 +877,7 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
     desc_str = f"{desc}, " if desc else ""
     logger.debug("batch_p2p %s%s", desc_str, p2p_ops)
 
-    # Per-direction P2P (config.pipeline_per_direction_p2p) tags forward and
+    # Per-edge P2P (config.pipeline_per_edge_p2p) tags forward and
     # backward ops with different communicators. A fused batch (e.g. 1F1B's
     # fwd_sends + bwd_recvs) then spans >1 group; issue each group's ops as their
     # own batch so they run on separate comms/streams instead of one FIFO. When

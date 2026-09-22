@@ -4,11 +4,13 @@ import copy
 import csv
 import logging
 import os
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from model_registry import MultiMLP
 
 import torch
+import torch.distributed.config as dist_config
 from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     analyze_pipeline_activation_liveness,
@@ -20,6 +22,13 @@ from torch.distributed.pipelining import (
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
+)
+from torch.distributed.pipelining._p2p import (
+    _build_p2p_edge_groups,
+    _directed_edge_split_rounds,
+    _physical_edge_matchings,
+    _PP_EDGE_GROUP_CACHE,
+    _stage_rank_assignment,
 )
 from torch.distributed.pipelining._recv_buffers import _RecvInfo
 from torch.distributed.pipelining._utils import (
@@ -76,6 +85,375 @@ logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
 
+class P2PEdgeGroupTest(TestCase):
+    def test_neighbor_initialization_uses_pipeline_group_ranks(self):
+        stage = MockPipelineStage(num_stages=2, group_size=2, group_rank=1)
+        stage.stage_index = 0
+        stage.stage_index_to_group_rank = {0: 1, 1: 0}
+        stage.device = torch.device("cpu")
+
+        with patch("torch.distributed.pipelining.stage.dist.P2POp") as p2p:
+            stage._get_init_p2p_neighbors_ops()
+
+        self.assertEqual(
+            [call.kwargs["group_peer"] for call in p2p.call_args_list], [0, 0]
+        )
+        del stage.stage_index_to_group_rank[1]
+        with self.assertRaisesRegex(PipeliningMetadataError, "neighboring stage 1"):
+            stage._get_init_p2p_neighbors_ops()
+
+    def test_schedule_builds_and_preconnects_one_shared_edge_group_map(self):
+        parent = MagicMock()
+        assignment = dict(enumerate((0, 1, 2, 3, 0, 1, 2, 3)))
+        stages = []
+        for stage_index in (0, 4):
+            stage = MockPipelineStage(
+                num_stages=8,
+                group_size=4,
+                group_rank=0,
+                group=parent,
+            )
+            stage.stage_index = stage_index
+            stage.device = torch.device("cpu")
+            stage.p2p_per_edge = True
+            stage.stage_index_to_group_rank = assignment
+            stages.append(stage)
+
+        groups = {(0, 1): MagicMock(), (1, 0): MagicMock()}
+        split_rounds = (((0, 1),), ((1, 0),))
+        with (
+            patch(
+                "torch.distributed.pipelining.schedules.dist.get_backend",
+                return_value="gloo",
+            ),
+            patch(
+                "torch.distributed.pipelining.schedules.dist.all_reduce"
+            ) as initialize_parent,
+            patch(
+                "torch.distributed.pipelining.schedules._build_p2p_edge_groups",
+                return_value=(groups, split_rounds),
+            ) as build_groups,
+            patch(
+                "torch.distributed.pipelining.schedules._preconnect_p2p_edge_groups"
+            ) as preconnect_groups,
+        ):
+            _PipelineSchedule._initialize_pipeline_distributed_state(
+                MagicMock(), stages, has_backward=True, initialize_p2p=True
+            )
+
+        initialize_parent.assert_called_once()
+        build_groups.assert_called_once_with(parent, assignment, torch.device("cpu"))
+        preconnect_groups.assert_called_once_with(
+            parent, groups, split_rounds, torch.device("cpu")
+        )
+        self.assertTrue(all(stage._p2p_edge_groups is groups for stage in stages))
+
+    def test_per_edge_setup_requires_consistent_local_stage_metadata(self):
+        parent = MagicMock()
+        assignment = {0: 0, 1: 1}
+
+        def make_stage(stage_index: int) -> MockPipelineStage:
+            stage = MockPipelineStage(
+                num_stages=2,
+                group_size=2,
+                group_rank=0,
+                group=parent,
+            )
+            stage.stage_index = stage_index
+            stage.device = torch.device("cpu")
+            stage.p2p_per_edge = True
+            stage.stage_index_to_group_rank = assignment
+            return stage
+
+        stages = [make_stage(0), make_stage(1)]
+        stages[1].stage_index_to_group_rank = {0: 1, 1: 0}
+        with self.assertRaisesRegex(ValueError, "stage-to-rank assignment"):
+            _PipelineSchedule._initialize_pipeline_distributed_state(
+                MagicMock(), stages, has_backward=True, initialize_p2p=True
+            )
+
+        stages = [make_stage(0), make_stage(1)]
+        stages[1].device = torch.device("cuda", 1)
+        with self.assertRaisesRegex(ValueError, "use one device"):
+            _PipelineSchedule._initialize_pipeline_distributed_state(
+                MagicMock(), stages, has_backward=True, initialize_p2p=True
+            )
+
+    def test_p2p_initialization_state_is_independent_from_metadata(self):
+        stage = MockPipelineStage(num_stages=1, group_size=1)
+        stage.stage_index = 0
+        stage.device = torch.device("cpu")
+        stage._prepare_forward_infra = MagicMock(return_value=None)
+        schedule = ScheduleGPipe(stage, n_microbatches=1)
+
+        with patch.object(
+            schedule,
+            "_initialize_pipeline_distributed_state",
+        ) as initialize_distributed_state:
+            schedule._initialize_stage((), {})
+            schedule._stage_forward_initialized = False
+            schedule._initialize_stage((), {})
+
+        self.assertEqual(
+            [call.args[2] for call in initialize_distributed_state.call_args_list],
+            [True, False],
+        )
+
+    def test_loop_assignment_uses_four_disjoint_split_rounds(self):
+        assignment = _stage_rank_assignment(
+            {stage: stage % 4 for stage in range(8)}, group_size=4
+        )
+
+        self.assertEqual(
+            _physical_edge_matchings(assignment),
+            (
+                ((0, 1), (2, 3)),
+                ((0, 3), (1, 2)),
+            ),
+        )
+        self.assertEqual(
+            _directed_edge_split_rounds(assignment),
+            (
+                ((0, 1), (2, 3)),
+                ((1, 0), (3, 2)),
+                ((0, 3), (1, 2)),
+                ((3, 0), (2, 1)),
+            ),
+        )
+
+    def test_repeated_two_rank_assignment_uses_one_physical_pair(self):
+        assignment = _stage_rank_assignment(
+            {stage: stage % 2 for stage in range(8)}, group_size=2
+        )
+
+        self.assertEqual(_physical_edge_matchings(assignment), (((0, 1),),))
+        self.assertEqual(
+            _directed_edge_split_rounds(assignment),
+            (((0, 1),), ((1, 0),)),
+        )
+
+    def test_v_assignment_excludes_same_rank_turn_and_wraparound(self):
+        assignment = _stage_rank_assignment(
+            dict(enumerate((0, 1, 2, 3, 3, 2, 1, 0))),
+            group_size=4,
+        )
+
+        rounds = _directed_edge_split_rounds(assignment)
+        self.assertEqual(
+            _physical_edge_matchings(assignment),
+            (((0, 1), (2, 3)), ((1, 2),)),
+        )
+        edges = {edge for round_edges in rounds for edge in round_edges}
+        self.assertEqual(
+            edges,
+            {(0, 1), (1, 0), (1, 2), (2, 1), (2, 3), (3, 2)},
+        )
+        self.assertNotIn((0, 3), edges)
+        self.assertNotIn((3, 3), edges)
+        self.assertTrue(
+            all(
+                len({rank for edge in round_edges for rank in edge})
+                == 2 * len(round_edges)
+                for round_edges in rounds
+            )
+        )
+
+    def test_assignment_requires_contiguous_valid_stage_mapping(self):
+        with self.assertRaisesRegex(ValueError, "contiguous indices"):
+            _stage_rank_assignment({0: 0, 2: 1}, group_size=2)
+        with self.assertRaisesRegex(ValueError, "outside"):
+            _stage_rank_assignment({0: 0, 1: 2}, group_size=2)
+
+    def test_edge_groups_inherit_timeout_and_filter_only_mixed_backends(self):
+        cases = (
+            ("gloo", torch.device("cpu"), None),
+            ("cpu:gloo,cuda:nccl", torch.device("cuda"), "cuda:nccl"),
+            ("cpu:gloo,cuda:nccl", torch.device("cpu"), None),
+        )
+        for backend_config, device, expected_filter in cases:
+            with self.subTest(backend_config=backend_config, device=device):
+                timeout = timedelta(seconds=17)
+                store = FakeStore()
+                torch.distributed.init_process_group(
+                    backend="fake",
+                    rank=0,
+                    world_size=2,
+                    store=store,
+                    timeout=timeout,
+                )
+                parent = torch.distributed.distributed_c10d._get_default_group()
+                backend = MagicMock()
+                backend.supports_splitting = True
+                backend.options._timeout = timeout
+                try:
+                    with (
+                        patch.object(
+                            torch.distributed, "get_backend", return_value="gloo"
+                        ),
+                        patch.object(
+                            torch.distributed,
+                            "get_backend_config",
+                            return_value=backend_config,
+                        ),
+                        patch.object(
+                            torch.distributed.ProcessGroup,
+                            "_get_backend",
+                            return_value=backend,
+                        ),
+                        patch.object(
+                            torch.distributed, "split_group", return_value=parent
+                        ) as split_group,
+                        patch(
+                            "torch.distributed.pipelining._p2p."
+                            "_initialize_additional_parent_backends"
+                        ) as initialize_additional,
+                    ):
+                        _build_p2p_edge_groups(parent, {0: 0, 1: 1}, device)
+
+                    self.assertEqual(split_group.call_count, 2)
+                    for call in split_group.call_args_list:
+                        self.assertEqual(call.kwargs["backend"], expected_filter)
+                        self.assertEqual(call.kwargs["timeout"], timeout)
+                    if backend_config != "gloo" and device.type == "cpu":
+                        initialize_additional.assert_called_once_with(
+                            parent,
+                            {"cpu": "gloo", "cuda": "nccl"},
+                            "gloo",
+                        )
+                    else:
+                        initialize_additional.assert_not_called()
+                finally:
+                    _PP_EDGE_GROUP_CACHE.pop(parent, None)
+                    torch.distributed.destroy_process_group()
+
+    def test_edge_groups_validate_split_support_before_reading_options(self):
+        class UnsupportedBackend:
+            supports_splitting = False
+
+            @property
+            def options(self):
+                raise AssertionError("options must not be read")
+
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store
+        )
+        parent = torch.distributed.distributed_c10d._get_default_group()
+        try:
+            with (
+                patch.object(torch.distributed, "get_backend", return_value="gloo"),
+                patch.object(
+                    torch.distributed,
+                    "get_backend_config",
+                    return_value="cpu:gloo",
+                ),
+                patch.object(
+                    torch.distributed.ProcessGroup,
+                    "_get_backend",
+                    return_value=UnsupportedBackend(),
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "support split_group"):
+                    _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_edge_group_cache_distinguishes_stage_device(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store
+        )
+        parent = torch.distributed.distributed_c10d._get_default_group()
+        backend = MagicMock()
+        backend.supports_splitting = True
+        backend.options._timeout = timedelta(seconds=17)
+        try:
+            with (
+                patch.object(torch.distributed, "get_backend", return_value="gloo"),
+                patch.object(
+                    torch.distributed,
+                    "get_backend_config",
+                    return_value="cpu:gloo,cuda:nccl",
+                ),
+                patch.object(
+                    torch.distributed.ProcessGroup,
+                    "_get_backend",
+                    return_value=backend,
+                ),
+                patch.object(
+                    torch.distributed, "split_group", return_value=parent
+                ) as split_group,
+                patch(
+                    "torch.distributed.pipelining._p2p."
+                    "_initialize_additional_parent_backends"
+                ),
+            ):
+                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
+                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cuda"))
+                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
+
+            self.assertEqual(
+                [call.kwargs["backend"] for call in split_group.call_args_list],
+                [None, None, "cuda:nccl", "cuda:nccl"],
+            )
+        finally:
+            _PP_EDGE_GROUP_CACHE.pop(parent, None)
+            torch.distributed.destroy_process_group()
+
+    def test_fake_edge_groups_do_not_retain_their_parent(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store
+        )
+        parent = torch.distributed.distributed_c10d._get_default_group()
+        try:
+            groups, _ = _build_p2p_edge_groups(
+                parent, {0: 0, 1: 1}, torch.device("cpu")
+            )
+            self.assertEqual(set(groups), {(0, 1), (1, 0)})
+            self.assertNotIn(parent, _PP_EDGE_GROUP_CACHE)
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_edge_groups_delegate_split_policy_to_torchcomms(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store
+        )
+        parent = torch.distributed.distributed_c10d._get_default_group()
+        try:
+            with (
+                patch.object(torch.distributed, "get_backend", return_value="gloo"),
+                patch.object(
+                    torch.distributed,
+                    "get_backend_config",
+                    return_value="gloo",
+                ),
+                patch.object(
+                    torch.distributed.distributed_c10d,
+                    "_use_torchcomms_enabled",
+                    return_value=True,
+                ),
+                patch.object(
+                    torch.distributed.ProcessGroup,
+                    "_get_backend",
+                    side_effect=AssertionError("native backend must not be read"),
+                ),
+                patch.object(
+                    torch.distributed, "split_group", return_value=parent
+                ) as split_group,
+            ):
+                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
+
+            self.assertEqual(split_group.call_count, 2)
+            for call in split_group.call_args_list:
+                self.assertIsNone(call.kwargs["backend"])
+                self.assertIsNone(call.kwargs["timeout"])
+        finally:
+            _PP_EDGE_GROUP_CACHE.pop(parent, None)
+            torch.distributed.destroy_process_group()
+
+
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
@@ -84,6 +462,7 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group")
+        self.p2p_per_edge = False
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -195,7 +574,6 @@ class ScheduleTest(TestCase):
         stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         stage.stage_index = 1
         stage.device = torch.device("cpu")
-        stage._downstream_group = None
         info = _RecvInfo(
             "activation", source=0, tensor_meta=_TensorMeta.from_tensor(torch.ones(2))
         )
@@ -204,7 +582,7 @@ class ScheduleTest(TestCase):
             patch.object(stage, "_resolve_peer_global_rank", return_value=0),
             patch("torch.distributed.pipelining.stage.dist.P2POp") as p2p,
         ):
-            ops = stage._get_recv_ops((info,), stage._downstream_group)
+            ops = stage._get_recv_ops((info,))
 
         self.assertEqual(len(ops), 1)
         self.assertIsNotNone(info.buffer)
@@ -244,7 +622,6 @@ class ScheduleTest(TestCase):
         stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         stage.stage_index = 1
         stage.device = torch.device("cpu")
-        stage._downstream_group = None
         meta = _TensorMeta.from_tensor(torch.ones(2))
         valid_before_invalid = _RecvInfo("valid", source=0, tensor_meta=meta)
         invalid_source = _RecvInfo("invalid", source=None, tensor_meta=meta)
@@ -252,9 +629,7 @@ class ScheduleTest(TestCase):
             patch.object(stage, "_resolve_peer_global_rank", return_value=0),
             self.assertRaisesRegex(AssertionError, "info.source"),
         ):
-            stage._get_recv_ops(
-                (valid_before_invalid, invalid_source), stage._downstream_group
-            )
+            stage._get_recv_ops((valid_before_invalid, invalid_source))
         self.assertIsNone(valid_before_invalid.buffer)
         self.assertIsNone(invalid_source.buffer)
 
@@ -268,7 +643,7 @@ class ScheduleTest(TestCase):
             ),
             self.assertRaisesRegex(RuntimeError, "construction failed"),
         ):
-            stage._get_recv_ops((first, second), stage._downstream_group)
+            stage._get_recv_ops((first, second))
         self.assertIsNone(first.buffer)
         self.assertIsNone(second.buffer)
 
@@ -281,9 +656,21 @@ class ScheduleTest(TestCase):
             patch("torch.distributed.pipelining.stage.dist.P2POp"),
             self.assertRaisesRegex(RuntimeError, "allocation failed"),
         ):
-            stage._get_recv_ops((first, second), stage._downstream_group)
+            stage._get_recv_ops((first, second))
         self.assertIsNone(first.buffer)
         self.assertIsNone(second.buffer)
+
+        missing_edge = _RecvInfo("activation", source=0, tensor_meta=meta)
+        stage.args_recv_info = {2: (missing_edge,)}
+        stage.p2p_per_edge = True
+        stage.stage_index_to_group_rank = {0: 0, 1: 1}
+        stage._p2p_edge_groups = {}
+        with (
+            patch.object(stage, "_resolve_peer_global_rank", return_value=0),
+            self.assertRaisesRegex(RuntimeError, "Missing directed pipeline"),
+        ):
+            stage.get_fwd_recv_ops(2)
+        self.assertIsNone(missing_edge.buffer)
 
     def test_same_rank_recv_assignment_is_transactional(self):
         stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
@@ -323,14 +710,12 @@ class ScheduleTest(TestCase):
         valid_stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         valid_stage.stage_index = 1
         valid_stage.device = torch.device("cpu")
-        valid_stage._downstream_group = None
         valid_info = _RecvInfo("valid", source=0, tensor_meta=meta)
         valid_stage.args_recv_info = {0: (valid_info,)}
 
         invalid_stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         invalid_stage.stage_index = 2
         invalid_stage.device = torch.device("cpu")
-        invalid_stage._downstream_group = None
         invalid_info = _RecvInfo("invalid", source=None, tensor_meta=meta)
         invalid_stage.args_recv_info = {0: (invalid_info,)}
 
@@ -1072,7 +1457,8 @@ class ScheduleTest(TestCase):
             torch.distributed.destroy_process_group()
 
     @parametrize("rank", [0, 1])
-    def test_fake_pg_cross_rank_uses_static_metadata(self, rank):
+    @parametrize("per_edge", [False, True])
+    def test_fake_pg_cross_rank_uses_static_metadata(self, rank, per_edge):
         """
         With a fake process group, the cross-rank warm-up vote cannot exchange
         real data, so the schedule must infer the metadata mode locally:
@@ -1091,19 +1477,20 @@ class ScheduleTest(TestCase):
         x = torch.randn(batch_size, d_hid, device=device)
         mb = torch.randn(batch_size // num_microbatches, d_hid, device=device)
         try:
-            stage = PipelineStage(
-                mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
-            )
-            schedule = ScheduleGPipe(stage, num_microbatches)
-            schedule.step(x) if rank == 0 else schedule.step()
-            self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+            with dist_config.patch(pipeline_per_edge_p2p=per_edge):
+                stage = PipelineStage(
+                    mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
+                )
+                schedule = ScheduleGPipe(stage, num_microbatches)
+                schedule.step(x) if rank == 0 else schedule.step()
+                self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
 
-            # Without static metadata, dynamic inference is required, which
-            # cannot work over a fake group and must fail loudly.
-            stage_dyn = PipelineStage(mod, rank, n_stages, device)
-            schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
-            with self.assertRaisesRegex(RuntimeError, "fake process group"):
-                schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
+                # Without static metadata, dynamic inference is required, which
+                # cannot work over a fake group and must fail loudly.
+                stage_dyn = PipelineStage(mod, rank, n_stages, device)
+                schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
+                with self.assertRaisesRegex(RuntimeError, "fake process group"):
+                    schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
         finally:
             torch.distributed.destroy_process_group()
 
@@ -2592,7 +2979,7 @@ class TestBatchP2P(TestCase):
         p.tensor = torch.zeros(1)
         # Ops in a single _batch_p2p call normally share one group; tests pass an
         # explicit shared group. _batch_p2p splits a list spanning multiple groups
-        # into one batch per group (per-direction PP comms), covered separately.
+        # into one batch per communicator, covered separately.
         p.group = group if group is not None else MagicMock()
         # _batch_p2p groups/orders ops by group_name, so give each group a stable
         # string name (identity-derived) rather than a MagicMock attribute.
@@ -2664,9 +3051,12 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.irecv")
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_mixed_ops_split_per_group(self, mock_isend, mock_irecv, mock_batch):
-        """A mixed op list spanning multiple groups (per-direction PP comms) is
-        issued as one batch_isend_irecv per group, so each direction runs on its
-        own communicator instead of sharing one FIFO."""
+        """Issue a mixed operation list once per communicator.
+
+        Directed-edge P2P can place one fused schedule batch on several child
+        groups. Splitting by group lets each edge use its own communicator
+        instead of sharing one FIFO.
+        """
         mock_batch.side_effect = lambda ops: [MagicMock() for _ in ops]
         g_fwd, g_bwd = MagicMock(), MagicMock()
         ops = [
