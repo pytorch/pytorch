@@ -101,28 +101,53 @@ device_module = torch.get_device_module(device_type)
 
 
 class TestFSDPCommContext(TestCase):
-    def test_release_all_gather_state_before_lazy_init(self):
+    def test_release_all_gather_state_for_comm_reuse_before_lazy_init(self):
         comm_ctx = FSDPCommContext()
         comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
 
-        comm_ctx.release_all_gather_state()
+        comm_ctx.release_all_gather_state_for_comm_reuse()
 
         self.assertIsNone(comm_ctx.all_gather_state)
 
-    def test_release_all_gather_state_orders_all_gather_streams(self):
+    def test_release_all_gather_state_on_current_stream_before_lazy_init(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
+
+        comm_ctx.release_all_gather_state_on_current_stream()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_for_comm_reuse_orders_comm_streams(self):
         comm_ctx = FSDPCommContext()
         event = MagicMock()
         comm_ctx.all_gather_copy_in_stream = MagicMock()
         comm_ctx.all_gather_stream = MagicMock()
         comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
 
-        comm_ctx.release_all_gather_state()
+        comm_ctx.release_all_gather_state_for_comm_reuse()
 
         for stream in (
             comm_ctx.all_gather_copy_in_stream,
             comm_ctx.all_gather_stream,
         ):
             stream.wait_event.assert_called_once_with(event)
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_on_current_stream(self):
+        comm_ctx = FSDPCommContext()
+        event = MagicMock()
+        current_stream = MagicMock()
+        comm_ctx.device_handle = MagicMock()
+        comm_ctx.device_handle.current_stream.return_value = current_stream
+        comm_ctx.all_gather_copy_in_stream = MagicMock()
+        comm_ctx.all_gather_stream = MagicMock()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
+
+        comm_ctx.release_all_gather_state_on_current_stream()
+
+        current_stream.wait_event.assert_called_once_with(event)
+        comm_ctx.all_gather_copy_in_stream.wait_event.assert_not_called()
+        comm_ctx.all_gather_stream.wait_event.assert_not_called()
         self.assertIsNone(comm_ctx.all_gather_state)
 
 
