@@ -8,6 +8,7 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace c10d::fsdp {
@@ -151,6 +152,12 @@ at::Tensor& reduce_scatter_copy_in(
     int64_t num_chunks) {
   check_reduce_scatter_copy_in_inputs(
       out, tensors, num_leading_dims, num_chunks);
+  if (std::all_of(
+          num_leading_dims.begin(), num_leading_dims.end(), [](int64_t dim) {
+            return dim == 0;
+          })) {
+    return at::_chunk_cat_out(out, tensors, 0, num_chunks);
+  }
   std::vector<at::Tensor> inputs;
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
