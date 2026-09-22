@@ -26,7 +26,6 @@ from torch.testing._internal.common_utils import HardwareClassification, run_tes
 from torch.testing._internal.two_tensor import TwoTensor
 
 
-
 def two_tensor_fsdp_pre_all_gather_v1(
     self, mesh: DeviceMesh
 ) -> tuple[tuple[torch.Tensor, ...], Any]:
