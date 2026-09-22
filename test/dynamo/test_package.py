@@ -1651,6 +1651,36 @@ def add(x, y):
         self.assertEqual(len(pkg.cache_entry().codes[0].guarded_codes), 1)
         self.assertEqual(PrecompileContext._dynamo_cache_entries, {})
 
+    def test_serving_package_records_nothing_and_still_recompiles(self):
+        # A frame the loaded artifact does not cover compiles as usual (two
+        # variants, two compiles), but the package it serves gains no guarded
+        # code: nothing will save it, so there is nothing to serialize.
+        def fn(x):
+            return x + 1
+
+        pkg = CompilePackage(fn, serving=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch._dynamo.optimize(backend=counter, package=pkg)(fn)
+        compiled(torch.randn(3))
+        compiled(torch.randint(0, 5, (3,)))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(pkg.cache_entry().codes[0].guarded_codes, [])
+        self.assertFalse(pkg.cache_entry().codes[0].bypassed)
+
+    def test_serving_package_is_not_strict_about_unserializable_guards(self):
+        # Strictness is a property of the save build, which a serving package
+        # never runs: a guard the artifact could not carry neither raises (the
+        # class runs with strict_precompile on) nor bypasses the frame.
+        def fn(x, cfg=UnpicklableConfig()):
+            return x.sin() * cfg.scale
+
+        pkg = CompilePackage(fn, explicit_capture=True, serving=True)
+        with self.assertNoLogs("torch._dynamo.output_graph", level="WARNING"):
+            torch._dynamo.optimize(backend="eager", package=pkg)(fn)(torch.randn(3))
+        entry = pkg.cache_entry().codes[0]
+        self.assertEqual(entry.guarded_codes, [])
+        self.assertFalse(entry.bypassed)
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
