@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import operator
-import threading
 import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass
 from datetime import timedelta
 from importlib import import_module
 from threading import RLock
@@ -14,8 +11,16 @@ from typing import Any
 
 import torch
 
-from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
-from ._work import _validate_timeout, wait_all
+from .._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from .._work import _validate_timeout, wait_all
+from ._memory import (
+    _Registration,
+    NIXLMemory,
+    NIXLMemoryView,
+    NIXLMutableMemoryView,
+    NIXLRemoteBuffer,
+)
+from ._work import _live_transports, _NIXLWork
 
 
 def _load_backend() -> Any:
@@ -27,87 +32,6 @@ def _load_backend() -> Any:
 
 def _agent_name(name: str | bytes) -> str:
     return name.decode() if isinstance(name, bytes) else name
-
-
-@dataclass(frozen=True)
-class NIXLRemoteBuffer:
-    """A serializable descriptor for memory registered by a NIXL peer."""
-
-    agent_name: str
-    address: int
-    length: int
-    device_id: int
-    memory_type: str
-    metadata: bytes
-
-
-@dataclass
-class _Registration:
-    tensor: torch.Tensor
-    storage: Any
-    descs: Any
-    address: int
-    length: int
-    device_id: int
-    memory_type: str
-
-
-class NIXLMemoryView:
-    """A byte range in NIXL-registered memory."""
-
-    def __init__(self, memory: NIXLMemory, offset: int, length: int) -> None:
-        self._memory = memory
-        self._offset = offset
-        self._length = length
-
-    def size(self) -> int:
-        return self._length
-
-
-class NIXLMutableMemoryView(NIXLMemoryView):
-    """A writable byte range in NIXL-registered memory."""
-
-
-class NIXLMemory:
-    """A tensor registered with a NIXL transport."""
-
-    def __init__(
-        self, transport: NIXLTransport, registration: _Registration, reused: bool
-    ) -> None:
-        self._transport = transport
-        self._registration = registration
-        self._reused = reused
-
-    def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
-        offset = 0 if offset is None else operator.index(offset)
-        if offset < 0 or offset > self._registration.length:
-            raise ValueError("offset is outside the registered memory")
-        length = (
-            self._registration.length - offset
-            if length is None
-            else operator.index(length)
-        )
-        if length < 0 or length > self._registration.length - offset:
-            raise ValueError("view exceeds the registered memory")
-        return offset, length
-
-    def to_view(
-        self, offset: int | None = None, length: int | None = None
-    ) -> NIXLMemoryView:
-        return NIXLMemoryView(self, *self._range(offset, length))
-
-    def to_mutable_view(
-        self, offset: int | None = None, length: int | None = None
-    ) -> NIXLMutableMemoryView:
-        return NIXLMutableMemoryView(self, *self._range(offset, length))
-
-    def to_remote_buffer(self, *, timeout: float | None = None) -> NIXLRemoteBuffer:
-        return self._transport._call(
-            lambda: self._transport._remote_buffer(self._registration), timeout
-        )
-
-    def reused_registration(self) -> bool:
-        return self._reused
 
 
 class NIXLTransport(Transport):
@@ -522,142 +446,3 @@ class NIXLTransport(Transport):
         self._agent = None
         self._closed = True
         return 0
-
-
-# Dropping a Work or transport must not free memory still used by DMA. Entries
-# are removed only after polling establishes completion; users must wait/close.
-_live_transports: set[NIXLTransport] = set()
-
-
-class _PollingWork(Work):
-    """Work that resolves a future from backend status checks.
-
-    Subclasses implement a nonblocking, thread-safe ``_poll`` and record a
-    terminal error in ``_error``. A failed status query must not report completion
-    unless it establishes that the backend has stopped accessing memory.
-    """
-
-    def __init__(self, timeout: float | None = None) -> None:
-        super().__init__()
-        _validate_timeout(timeout)
-        self._timeout = timeout
-        self._error: BaseException | None = None
-        self._future: torch.futures.Future[Any] = torch.futures.Future()
-        self._future_lock = threading.Lock()
-        self._future_completed = False
-        self._progress_task: asyncio.Task[None] | None = None
-
-    def _poll(self) -> bool:
-        raise NotImplementedError
-
-    def is_completed(self) -> bool:
-        if not self._poll():
-            return False
-        with self._future_lock:
-            notify = not self._future_completed
-            self._future_completed = True
-        # Callbacks may reenter the transport: never invoke them under its lock.
-        if notify:
-            if self._error is None:
-                self._future.set_result([])
-            else:
-                error = self._error
-                if not isinstance(error, Exception):
-                    error = RuntimeError(str(error))
-                self._future.set_exception(error)
-        return True
-
-    def wait(self, timeout: timedelta = timedelta(0)) -> bool:
-        seconds = timeout.total_seconds()
-        _validate_timeout(seconds)
-        seconds = seconds or self._timeout
-        deadline = None if seconds is None else time.monotonic() + seconds
-        while not self.is_completed():
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutError(
-                    "transport wait timed out; operation remains pending"
-                )
-            time.sleep(0.001)
-        if self._error is not None:
-            raise self._error
-        return True
-
-    def is_success(self) -> bool:
-        return self.is_completed() and self._error is None
-
-    def exception(self) -> BaseException | None:
-        return self._error if self.is_completed() else None
-
-    async def _drive_future(self) -> None:
-        while not self.is_completed():
-            await asyncio.sleep(0.001)
-
-    def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:
-        if self.is_completed():
-            return self._future
-        loop = asyncio.get_running_loop()
-        if self._progress_task is None or self._progress_task.done():
-            self._progress_task = loop.create_task(self._drive_future())
-        return self._future
-
-    def result(self) -> list[torch.Tensor]:
-        self.wait()
-        return []
-
-    def synchronize(self) -> None:
-        self.wait()
-
-
-class _NIXLWork(_PollingWork):
-    def __init__(
-        self,
-        transport: NIXLTransport,
-        local: MemoryView,
-        remote: NIXLRemoteBuffer,
-        timeout: float,
-    ) -> None:
-        super().__init__(timeout)
-        self._transport = transport
-        self._buffers = (local, remote)
-        self._descriptors: Any = None
-        self._handle: Any = None
-        self._state = "PROC"
-        self._done = False
-
-    def _poll(self) -> bool:
-        transport = self._transport
-        if not transport._operation_lock.acquire(blocking=False):
-            return False
-        try:
-            if self._done:
-                return True
-            if self._state == "PROC":
-                try:
-                    self._state = transport._agent.check_xfer_state(self._handle)
-                except BaseException as error:
-                    if self._error is None:
-                        self._error = error
-                    return False
-            if self._state == "PROC":
-                return False
-            if self._state != "DONE" and self._error is None:
-                self._error = RuntimeError(f"NIXL transfer failed: {self._state}")
-            try:
-                transport._agent.release_xfer_handle(self._handle)
-                transport._transfers.pop(id(self))
-            except BaseException as error:
-                # Keep unreleased handles for close; disallow new requests so
-                # an old Work's identity cannot be reused as a new handle key.
-                transport._closing = True
-                if self._error is None:
-                    self._error = error
-            self._done = True
-            transport._pending.pop(id(self))
-            if not transport._pending:
-                _live_transports.discard(transport)
-            return True
-        finally:
-            transport._operation_lock.release()
-
-
-__all__ = ["NIXLTransport"]

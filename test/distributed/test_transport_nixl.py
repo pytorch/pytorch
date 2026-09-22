@@ -12,7 +12,8 @@ from unittest.mock import patch
 from transport_test_utils import TransportTestMixin
 
 import torch
-from torch.distributed._transport import _nixl, new_transport, wait_all
+from torch.distributed._transport import new_transport, wait_all
+from torch.distributed._transport._nixl import _transport as _nixl
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
