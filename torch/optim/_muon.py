@@ -13,6 +13,7 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _params_doc,
     _to_scalar,
     Optimizer,
@@ -20,7 +21,7 @@ from .optimizer import (
 )
 
 
-__all__ = ["Muon"]
+__all__ = ["Muon", "muon"]
 
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
 # github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
@@ -55,7 +56,7 @@ def _zeropower_via_newtonschulz(
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    ortho_grad = grad.bfloat16()
+    ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
     # Ensure spectral norm is at most 1
@@ -525,3 +526,6 @@ def muon(
         adjust_lr_fn=adjust_lr_fn,
         has_complex=has_complex,
     )
+
+
+muon.__doc__ = _functional_api_doc.format(optimizer="Muon")

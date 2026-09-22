@@ -161,7 +161,7 @@ def _benchmark_collective_with_cuda_events_impl(
         stride = [get_hint(s) for s in t.stride()]
 
         if any(s is None for s in itertools.chain(shape, stride)):
-            # This should not happen, as can_benhcmark_collective checks for unbacked
+            # This should not happen, as can_benchmark_collective checks for unbacked
             raise ValueError("Cannot convert tensor with symbolic dimensions")
 
         return rand_strided(shape, stride, device=t.device, dtype=t.dtype)  # type: ignore[arg-type]

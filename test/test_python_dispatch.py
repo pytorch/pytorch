@@ -2926,7 +2926,7 @@ class TestWrapperSubclassAliasing(TestCase):
             self._test_wrapper_subclass_aliasing(torch.ops.aten.fft_fft2, args, kwargs)
 
 
-instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
+instantiate_device_type_tests(TestWrapperSubclassAliasing, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

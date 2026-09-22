@@ -4,7 +4,8 @@
 # This workflow runs smoke tests on B200 hardware
 #
 # Flow:
-# 1. Builds PyTorch with CUDA 13.0+ and sm100 architecture for B200
+# 1. Builds PyTorch with CUDA 13.0 for B200's sm100 architecture
+#    (CUDA 13.2 sm100 jobs moved to trunk.yml so every commit gets tested on B200)
 # 2. Runs smoke tests on linux.dgx.b200 runner
 # 3. Tests executed are defined in .ci/pytorch/test.sh -> test_python_smoke_b200() function
 #    - Includes matmul, scaled_matmul, FP8, and FlashAttention CuTe tests
@@ -24,7 +25,7 @@ on:
       - .github/workflows/test-b200.yml
   workflow_dispatch:
   schedule:
-    - cron: 0 */2 * * *  # every 2 hours
+    - cron: 0 */6 * * *  # every 6 hours
   push:
     tags:
       - ciflow/b200/*
@@ -49,7 +50,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   linux-jammy-cuda13_0-py3_12-gcc11-sm100-build:
     name: linux-jammy-cuda13.0-py3.12-gcc11-sm100
@@ -67,7 +68,6 @@ jobs:
           { config: "smoke_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
       # config: "smoke_b200" maps to test_python_smoke_b200() in .ci/pytorch/test.sh
-      use-arc: true
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"
@@ -83,7 +83,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-sm100-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-sm100-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-sm100-build.outputs.test-matrix }}
-      use-arc: true
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"

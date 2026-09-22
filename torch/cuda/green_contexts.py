@@ -4,6 +4,7 @@ import functools
 import sys
 import warnings
 from typing import Any
+from typing_extensions import deprecated
 
 import torch
 from torch.cuda._utils import (
@@ -24,6 +25,12 @@ _WORKQUEUE_SCOPE_VALUES = {
     "device_ctx": 0,
     "balanced": 1,
 }
+
+_CONTEXT_STACK_DEPRECATION = (
+    "`GreenContext.set_context` and `GreenContext.pop_context` are deprecated. "
+    "Please create a stream with `GreenContext.Stream()` and use "
+    "`torch.cuda.stream(stream)` instead."
+)
 
 
 # note: this can safely be cached in a process/thread because
@@ -76,6 +83,20 @@ class GreenContext:
 
     .. warning::
        This API is in beta and may change in future releases.
+
+    CUDA work should be placed on streams created from the green context:
+
+    .. code-block:: python
+
+        ctx = GreenContext(...)
+        stream = ctx.Stream()
+        with torch.cuda.stream(stream):
+            # torch operations here are using resources from `ctx`
+            pass
+
+    Green-context streams are custom CUDA streams. Synchronization with other
+    streams is the user's responsibility and should be handled with CUDA events,
+    as with any other custom stream.
     """
 
     def __init__(
@@ -284,8 +305,13 @@ class GreenContext:
         if self._green_ctx is None or self._context is None:
             raise RuntimeError("GreenContext has been destroyed")
 
+    @deprecated(_CONTEXT_STACK_DEPRECATION, category=FutureWarning)
     def set_context(self) -> None:
-        r"""Make the green context the current context."""
+        r"""Make the green context the current context.
+
+        Deprecated. Create streams with :meth:`Stream` and use
+        :func:`torch.cuda.stream` instead.
+        """
         self._ensure_alive()
         if self._parent_stream is not None:
             raise RuntimeError("set_context called twice before pop_context")
@@ -308,9 +334,13 @@ class GreenContext:
         event.wait(green_ctx_stream)
         torch.cuda.set_stream(green_ctx_stream)
 
+    @deprecated(_CONTEXT_STACK_DEPRECATION, category=FutureWarning)
     def pop_context(self) -> None:
         r"""Assuming the green context is the current context, pop it from the
         context stack and restore the previous context.
+
+        Deprecated. Create streams with :meth:`Stream` and use
+        :func:`torch.cuda.stream` instead.
         """
         try:
             self._ensure_alive()
@@ -332,7 +362,12 @@ class GreenContext:
             self._parent_stream = None
 
     def Stream(self) -> torch.cuda.Stream:
-        r"""Return the CUDA Stream used by the green context."""
+        r"""Return a CUDA stream associated with this green context.
+
+        Use the returned stream with :func:`torch.cuda.stream` to run work on
+        the green context. Synchronization with other streams is not automatic;
+        use CUDA events as with any other custom stream.
+        """
         self._ensure_alive()
         curr_idx = self._curr_stream_idx + 1
         idx = curr_idx % _STREAMS_PER_GREEN_CONTEXT_POOL

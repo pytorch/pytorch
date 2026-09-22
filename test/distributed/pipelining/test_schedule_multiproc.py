@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from model_registry import (
     ConditionalGradStack,
+    FlexAttentionTransformer,
     ModelWithKwargs,
     MultiMLP,
     MultiMLPKwargs,
@@ -34,6 +35,7 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
+from torch.distributed.pipelining.microbatch import split_args_kwargs_into_chunks
 from torch.distributed.pipelining.schedules import (
     _Action,
     _PipelineContext,
@@ -43,6 +45,7 @@ from torch.distributed.pipelining.schedules import (
     OVERLAP_F_B,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase  # noqa: TC002
+from torch.nn.attention.flex_attention import BlockMask, create_block_mask
 from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -51,6 +54,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -253,6 +257,67 @@ def run_none_grad_reference(ref_mod, x, flag, target) -> None:
         strict=True,
     ):
         none_grad_loss(ref_mod(x_mb, flag_mb), target_mb).backward()
+
+
+def step_with_optional_pre_split(
+    schedule,
+    num_microbatches,
+    args=(),
+    kwargs=None,
+    target=None,
+    losses=None,
+    return_outputs=True,
+    pre_split=False,
+):
+    kwargs = kwargs or {}
+    if not pre_split:
+        return schedule.step(
+            *args,
+            target=target,
+            losses=losses,
+            return_outputs=return_outputs,
+            **kwargs,
+        )
+
+    step_kwargs = {
+        "losses": losses,
+        "return_outputs": return_outputs,
+    }
+    if args or kwargs:
+        arg_mbs, kwarg_mbs = split_args_kwargs_into_chunks(
+            args,
+            kwargs,
+            num_microbatches,
+        )
+        if args:
+            step_kwargs["arg_mbs"] = arg_mbs
+        if kwargs:
+            step_kwargs["kwarg_mbs"] = kwarg_mbs
+    if target is not None:
+        step_kwargs["target_mbs"] = list(torch.tensor_split(target, num_microbatches))
+
+    return schedule.step(**step_kwargs)
+
+
+def create_packed_document_block_mask(
+    positions: torch.Tensor, num_heads: int
+) -> BlockMask:
+    doc_ids = torch.cumsum((positions == 0).int(), dim=1) - 1
+
+    def document_causal_mask(b, h, q_idx, kv_idx):
+        return (q_idx >= kv_idx) & (doc_ids[b, q_idx] == doc_ids[b, kv_idx])
+
+    batch_size, seq_len = positions.shape
+    return create_block_mask(
+        document_causal_mask,
+        B=batch_size,
+        H=num_heads,
+        Q_LEN=seq_len,
+        KV_LEN=seq_len,
+        device=positions.device,
+        compute_dq_write_order=True,
+        dq_kv_order=True,
+    )
 
 
 class ScheduleTest(MultiProcContinuousTest):
@@ -481,8 +546,9 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_kwargs_with_tracer(self, ScheduleClass):
+    def test_kwargs_with_tracer(self, ScheduleClass, pre_split):
         mod = ModelWithKwargs(d_hid, splits=self.world_size)
         mod.to(self.device)
 
@@ -513,11 +579,27 @@ class ScheduleTest(MultiProcContinuousTest):
         out = None
         losses = []
         if self.rank == 0:
-            schedule.step(x, y=y)
+            step_with_optional_pre_split(
+                schedule,
+                chunks,
+                args=(x,),
+                kwargs={"y": y},
+                pre_split=pre_split,
+            )
         elif self.rank == self.world_size - 1:
-            out = schedule.step(target=target, losses=losses)
+            out = step_with_optional_pre_split(
+                schedule,
+                chunks,
+                target=target,
+                losses=losses,
+                pre_split=pre_split,
+            )
         else:
-            schedule.step()
+            step_with_optional_pre_split(
+                schedule,
+                chunks,
+                pre_split=pre_split,
+            )
 
         dist.barrier(device_ids=[self.rank])
 
@@ -534,8 +616,9 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_tracer(self, ScheduleClass):
+    def test_grad_with_tracer(self, ScheduleClass, pre_split):
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
         # Run reference
@@ -554,11 +637,26 @@ class ScheduleTest(MultiProcContinuousTest):
         for _ in range(2):
             zero_gradients(stage_module)
             if self.rank == 0:
-                schedule.step(x)
+                step_with_optional_pre_split(
+                    schedule,
+                    chunks,
+                    args=(x,),
+                    pre_split=pre_split,
+                )
             elif self.rank == self.world_size - 1:
-                out = schedule.step(target=target, losses=losses)
+                out = step_with_optional_pre_split(
+                    schedule,
+                    chunks,
+                    target=target,
+                    losses=losses,
+                    pre_split=pre_split,
+                )
             else:
-                schedule.step()
+                step_with_optional_pre_split(
+                    schedule,
+                    chunks,
+                    pre_split=pre_split,
+                )
 
         dist.barrier(device_ids=[self.rank])
 
@@ -645,8 +743,9 @@ class ScheduleTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
+    @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_interleaved(self, ScheduleClass):
+    def test_grad_with_manual_interleaved(self, ScheduleClass, pre_split):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -680,11 +779,26 @@ class ScheduleTest(MultiProcContinuousTest):
             for _ in range(2):
                 zero_gradients(stage_modules)
                 if self.rank == 0:
-                    schedule.step(x)
+                    step_with_optional_pre_split(
+                        schedule,
+                        num_microbatches,
+                        args=(x,),
+                        pre_split=pre_split,
+                    )
                 elif self.rank == self.world_size - 1:
-                    out = schedule.step(target=target, losses=losses)
+                    out = step_with_optional_pre_split(
+                        schedule,
+                        num_microbatches,
+                        target=target,
+                        losses=losses,
+                        pre_split=pre_split,
+                    )
                 else:
-                    schedule.step()
+                    step_with_optional_pre_split(
+                        schedule,
+                        num_microbatches,
+                        pre_split=pre_split,
+                    )
 
         self.assertEqual(
             len(garbage_tensors),
@@ -704,6 +818,139 @@ class ScheduleTest(MultiProcContinuousTest):
         check_gradients(
             self.config, stage_modules, ref_mod, submod_names, rtol=5e-3, atol=5e-3
         )
+
+    @requires_accelerator_dist_backend(["nccl"])
+    @skip_but_pass_in_sandcastle_if(
+        device_type != "cuda" or not TEST_MULTIACCELERATOR,
+        "CUDA/NCCL flex attention test requires 4+ GPUs",
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_interleaved_1f1b_pre_split_flex_attention(self):
+        stages_per_rank = 2
+        n_stages = stages_per_rank * self.world_size
+        num_microbatches = 8
+        batch = 8
+        seq_len = 64
+        model_dim = 32
+        num_heads = 2
+        ffn_dim = 64
+
+        auto_mod = FlexAttentionTransformer(model_dim, num_heads, ffn_dim, n_stages).to(
+            self.device
+        )
+        pre_split_mod = copy.deepcopy(auto_mod)
+        ref_mod = copy.deepcopy(auto_mod)
+        x = torch.randn(batch, seq_len, model_dim, device=self.device)
+        target = torch.randn_like(x)
+        positions = torch.stack(
+            [
+                torch.arange(seq_len, device=self.device) % (8 * (i % 4 + 1))
+                for i in range(batch)
+            ]
+        )
+        block_mask = create_packed_document_block_mask(positions, num_heads)
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        auto_stages, auto_stage_modules, submod_names = create_multi_stage_pipeline(
+            self.config, auto_mod, stages_per_rank, n_stages
+        )
+        pre_split_stages, pre_split_stage_modules, pre_split_submod_names = (
+            create_multi_stage_pipeline(
+                self.config, pre_split_mod, stages_per_rank, n_stages
+            )
+        )
+        self.assertEqual(pre_split_submod_names, submod_names)
+
+        has_first_stage = any(stage.is_first for stage in auto_stages)
+        has_last_stage = any(stage.is_last for stage in auto_stages)
+        self.assertEqual(
+            has_first_stage,
+            any(stage.is_first for stage in pre_split_stages),
+        )
+        self.assertEqual(
+            has_last_stage,
+            any(stage.is_last for stage in pre_split_stages),
+        )
+
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+        position_mbs = torch.tensor_split(positions, num_microbatches)
+        kwarg_mbs = [
+            {"block_mask": create_packed_document_block_mask(positions_mb, num_heads)}
+            for positions_mb in position_mbs
+        ]
+
+        auto_schedule = ScheduleInterleaved1F1B(
+            auto_stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+        pre_split_schedule = ScheduleInterleaved1F1B(
+            pre_split_stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+
+        auto_out = None
+        auto_losses = []
+        pre_split_out = None
+        pre_split_losses = []
+        with DeterministicGuard(True):
+            ref_out, ref_loss = run_reference_model(
+                ref_mod,
+                x,
+                target,
+                loss_fn,
+                num_iterations=1,
+                block_mask=block_mask,
+            )
+
+            zero_gradients(auto_stage_modules)
+            auto_out = auto_schedule.step(
+                *((x,) if has_first_stage else ()),
+                block_mask=block_mask,
+                target=target if has_last_stage else None,
+                losses=auto_losses if has_last_stage else None,
+            )
+
+            dist.barrier()
+
+            zero_gradients(pre_split_stage_modules)
+            pre_split_out = pre_split_schedule.step(
+                arg_mbs=arg_mbs if has_first_stage else None,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs if has_last_stage else None,
+                losses=pre_split_losses if has_last_stage else None,
+            )
+
+            dist.barrier()
+
+        if has_last_stage:
+            self.assertEqual(pre_split_out, auto_out)
+            self.assertEqual(
+                torch.stack(pre_split_losses),
+                torch.stack(auto_losses),
+            )
+            self.assertEqual(auto_out, ref_out)
+            self.assertEqual(sum(auto_losses), ref_loss)
+
+        for auto_stage_module, pre_split_stage_module in zip(
+            auto_stage_modules,
+            pre_split_stage_modules,
+            strict=True,
+        ):
+            for (auto_name, auto_param), (pre_split_name, pre_split_param) in zip(
+                auto_stage_module.named_parameters(),
+                pre_split_stage_module.named_parameters(),
+                strict=True,
+            ):
+                self.assertEqual(auto_name, pre_split_name)
+                self.assertEqual(pre_split_param.grad, auto_param.grad)
+
+        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
+        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -1034,7 +1281,7 @@ class ScheduleTest(MultiProcContinuousTest):
                 self.assertIn(
                     stage_idx,
                     stage_indices,
-                    f"Callback called for stage {stage_idx} not on rank {self.rank}",
+                    lambda msg: f"{msg}\nCallback called for stage {stage_idx} not on rank {self.rank}",
                 )
 
         # Check gradients using helper method

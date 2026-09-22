@@ -1,8 +1,10 @@
 #include <chrono>
 #include <iostream>
+#include <vector>
 
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 #include "c10d/Types.hpp"
@@ -17,6 +19,32 @@
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
+
+TEST(NCCLBootstrapTest, RootIndex) {
+  struct TestCase {
+    int numRanks;
+    int numRoots;
+    std::vector<int> expected;
+  };
+  const std::vector<TestCase> cases = {
+      {4, 1, {0, -1, -1, -1}},
+      {4, 4, {0, 1, 2, 3}},
+      {6, 3, {0, -1, 1, -1, 2, -1}},
+      {10, 3, {0, -1, -1, -1, 1, -1, -1, 2, -1, -1}},
+      {3, 2, {0, -1, 1}},
+  };
+
+  for (const auto& test : cases) {
+    ASSERT_EQ(test.expected.size(), test.numRanks);
+    for (int rank = 0; rank < test.numRanks; ++rank) {
+      EXPECT_EQ(
+          c10d::nccl2::detail::getRootIndex(rank, test.numRanks, test.numRoots),
+          test.expected[rank])
+          << "rank=" << rank << ", numRanks=" << test.numRanks
+          << ", numRoots=" << test.numRoots;
+    }
+  }
+}
 
 class NCCLTestBase {
  public:
@@ -666,14 +694,6 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
-void testSequenceNumInit(const std::string& path, int rank, int size) {
-  NCCLTest test(path, rank, size);
-  test.initialize(rank, size);
-  test.getProcessGroup()->setSequenceNumberForGroup();
-  auto seqNum = test.getProcessGroup()->getSequenceNumberForGroup();
-  EXPECT_EQ(seqNum, 0);
-}
-
 void testSplittingCommunicator(const std::string& path, int rank, int size) {
   auto test1 = BroadcastNCCLTest(path, rank, size);
   test1.initialize(rank, size);
@@ -831,13 +851,6 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
     return;
   }
   multiThreadRun(testReduceScatter);
-}
-
-TEST_F(ProcessGroupNCCLTest, testSequenceNumInit) {
-  if (skipTest()) {
-    return;
-  }
-  multiThreadRun(testSequenceNumInit);
 }
 
 TEST_F(ProcessGroupNCCLTest, testReduceScatterBase) {

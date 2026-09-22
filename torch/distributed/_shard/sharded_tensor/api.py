@@ -97,8 +97,9 @@ class ShardedTensorBase(torch.Tensor):
         if dtype is None:
             dtype = torch.get_default_dtype()
 
+        strides = kwargs.get("strides")
         tensor_properties = TensorProperties(
-            dtype, layout, requires_grad, pin_memory=pin_memory
+            dtype, layout, requires_grad, pin_memory=pin_memory, strides=strides
         )
         sharded_tensor_metadata = sharding_spec.build_metadata(
             sizes, tensor_properties=tensor_properties
@@ -107,6 +108,7 @@ class ShardedTensorBase(torch.Tensor):
         r = torch.Tensor._make_wrapper_subclass(
             cls,
             sizes,
+            strides=strides,
             dtype=dtype,
             layout=layout,
             pin_memory=pin_memory,
@@ -171,6 +173,7 @@ class ShardedTensorBase(torch.Tensor):
             layout=tensor_properties.layout,
             pin_memory=tensor_properties.pin_memory,
             requires_grad=tensor_properties.requires_grad,
+            strides=tensor_properties.strides,
         )
 
         # check if shards_metadata have overlap shards
@@ -193,7 +196,7 @@ class ShardedTensorBase(torch.Tensor):
 
 class ShardedTensor(ShardedTensorBase):
     """
-    ShardedTensor is an torch.Tensor subclass to represent Tensors that are sharded
+    ShardedTensor is a torch.Tensor subclass to represent Tensors that are sharded
     across multiple devices and multiple processes.
 
     ShardedTensor is initialized in an SPMD like fashion where each rank
@@ -595,20 +598,20 @@ class ShardedTensor(ShardedTensorBase):
             device = torch.device(device) if isinstance(device, str) else device
             if not (
                 isinstance(device, torch.device)
-                and device.index == torch.cuda.current_device()
+                and device.index == torch.accelerator.current_device_index()
             ):
                 raise AssertionError(
-                    """Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!"""
+                    f"Only device without device id (e.g. 'cpu' or '{device.type}') "
+                    f"is expected for ShardedTensor!"
                 )
-
-        current_device = torch.device(torch.cuda.current_device())
-        # returns a copy of ShardedTensor on CUDA current device
+        current_device = torch.device(torch.accelerator.current_device_index())
+        # returns a copy of ShardedTensor on accelerator current device
         list_shards: list[Shard] = []
         # move all local shards to current device, and change metadata
         # if local shards already on the current device, there's no
         # real data movement, only the metadata are copied.
         for shard in self._local_shards:
-            cuda_tensor = shard.tensor.cuda(
+            new_tensor = shard.tensor.to(
                 device=current_device,
                 non_blocking=non_blocking,
                 memory_format=memory_format,
@@ -616,23 +619,22 @@ class ShardedTensor(ShardedTensorBase):
             metadata = copy.deepcopy(shard.metadata)
             metadata.placement._device = current_device  # type: ignore[union-attr]
 
-            list_shards.append(Shard(cuda_tensor, metadata))
+            list_shards.append(Shard(new_tensor, metadata))
 
         st_meta = copy.deepcopy(self.metadata())
         for meta in st_meta.shards_metadata:
-            if meta.placement.device().type != "cuda":  # type: ignore[union-attr]
+            if meta.placement.device().type != current_device.type:  # type: ignore[union-attr]
                 meta.placement._device = current_device  # type: ignore[union-attr]
 
         pg = self._process_group if process_group is None else process_group
         # we need to use `init_from_local_shards` to communicate between ranks
         # and update the sharding spec/shards metadata.
-        st_cuda = ShardedTensor._init_from_local_shards_and_global_metadata(
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
             list_shards,
             sharded_tensor_metadata=st_meta,
             process_group=pg,
             init_rrefs=self._init_rrefs,
         )
-        return st_cuda
 
     def to(self, *args, **kwargs) -> ShardedTensor:
         current_device: torch.device
@@ -667,9 +669,9 @@ class ShardedTensor(ShardedTensorBase):
             torch.device(device_to) if isinstance(device_to, (str, int)) else device_to
         )
 
-        if device_to.type in {"cuda", "xpu"}:
-            # if device_to set to cuda, set to current device even
-            # if user specify the device index.
+        if device_to.type != "cpu":
+            # if device_to set to accelerator, set to current device even
+            # if user specifies the device index.
             current_idx = torch.accelerator.current_device_index()
             if device_to.index != current_idx:
                 warnings.warn(
@@ -692,7 +694,7 @@ class ShardedTensor(ShardedTensorBase):
             # already have correct dtype and device, return itself
             return self
 
-        # returns a copy of ShardedTensor on CUDA current device
+        # returns a copy of ShardedTensor on target device
         list_shards: list[Shard] = []
 
         for shard in self._local_shards:
@@ -996,6 +998,7 @@ class ShardedTensor(ShardedTensorBase):
             layout=tensor_properties.layout,
             pin_memory=tensor_properties.pin_memory,
             requires_grad=tensor_properties.requires_grad,
+            strides=tensor_properties.strides,
         )
 
         def _raise_if_mismatch(expected, actual, prop_name, rank, is_property=False):

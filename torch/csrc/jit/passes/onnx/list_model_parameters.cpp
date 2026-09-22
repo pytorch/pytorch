@@ -115,7 +115,7 @@ static std::vector<IValue> getParamAttributes(
       if (type->is_parameter(slot) || type->is_buffer(slot) ||
           (attr.isObject() && !attr.toObjectRef().type()->is_module()) ||
           attr.isBool()) {
-        if (attrValues.find(fullName) == attrValues.end() &&
+        if (!attrValues.contains(fullName) &&
             attr.isTensor()) { // TODO: Handle float/int
           TORCH_INTERNAL_ASSERT(attr.isTensor());
           auto tensor_ = attr.toTensor();

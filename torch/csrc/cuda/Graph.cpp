@@ -7,7 +7,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/cuda/CUDAGraph.h>
-#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 // Cargo culted partially from csrc/distributed/c10d/init.cpp
 // and partially from csrc/cuda/Stream.cpp.
@@ -129,7 +128,17 @@ void THCPGraph_init(PyObject* module) {
               &::at::cuda::CUDAGraph::begin_capture_to_if_node),
           py::arg("scalar_cuda_pred_tensor"))
       .def(
+          "begin_capture_to_while_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_while_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
           "end_capture_to_conditional_node",
           torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::end_capture_to_conditional_node));
+              &::at::cuda::CUDAGraph::end_capture_to_conditional_node))
+      .def(
+          "set_conditional_handle_for_current_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::set_conditional_handle_for_current_node),
+          py::arg("scalar_cuda_pred_tensor"));
 }
