@@ -288,6 +288,10 @@ class TritonBundler:
         if not config.use_static_triton_launcher:
             raise AssertionError("expected config.use_static_triton_launcher to be set")
         if (entries := cls._static_autotuners) is not None:
+            if config.keep_static_cubin_raw:
+                for result in kernel.compile_results:
+                    result.set_cubin_path()
+                    result.kernel.retain_cubin_from_path()
             # Clear a bunch of unpicklable values and make a copy to save
             # for FXGraphCache
             old_values = kernel.prepare_for_pickle()
