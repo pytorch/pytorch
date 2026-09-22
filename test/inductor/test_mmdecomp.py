@@ -5,7 +5,7 @@ import unittest
 
 import torch
 from torch._inductor import config
-from torch._inductor.decomposition import bmm as decomp_bmm, mm
+from torch._inductor.decomposition import addmm as decomp_addmm, bmm as decomp_bmm, mm
 from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
@@ -416,6 +416,37 @@ class TestDecomp(NNTestCase):
             init_tensor([[[1, 2, 3, 4]]] * bs, dtype=dtype, device=device),
             init_tensor([[[1], [2], [3], [4]]] * bs, dtype=dtype, device=device),
         )
+
+    # Shapes hit each addmm decomp branch: CPU dot, CPU small mat2, non-CPU k == 1.
+    @parametrize("m,k,n", [(1, 4, 1), (1, 4, 4), (4, 1, 4)])
+    @parametrize("beta,alpha", [(0, 1), (1, 0), (0, 0)])
+    def test_addmm_zero_scalar_matches_eager(self, device, m, k, n, beta, alpha):
+        def fn(x, a, b):
+            return torch.addmm(x, a, b, beta=beta, alpha=alpha)
+
+        x = torch.randn(n, device=device)
+        a = torch.randn(m, k, device=device)
+        b = torch.randn(k, n, device=device)
+        if beta == 0:
+            x.fill_(float("nan"))
+        if alpha == 0:
+            a.fill_(float("nan"))
+        self.assertIs(decomp_addmm(x, a, b, beta=beta, alpha=alpha), NotImplemented)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x, a, b), fn(x, a, b))
+
+    # torch.addmm specifies that beta == 0 ignores input, nan and inf included;
+    # alpha has no such wording, so only beta gets the backend-independent check.
+    @parametrize("m,k,n", [(1, 4, 1), (1, 4, 4), (4, 1, 4)])
+    def test_addmm_zero_beta_drops_nan_bias(self, device, m, k, n):
+        def fn(x, a, b):
+            return torch.addmm(x, a, b, beta=0)
+
+        x = torch.full((n,), float("nan"), device=device)
+        a = torch.randn(m, k, device=device)
+        b = torch.randn(k, n, device=device)
+        out = torch.compile(fn, fullgraph=True)(x, a, b)
+        self.assertFalse(out.isnan().any())
+        self.assertEqual(out, fn(x, a, b), equal_nan=False)
 
     @parametrize("dtype", [torch.float, torch.bfloat16])
     def test_dynamic_shape_mm(self, device, dtype):
