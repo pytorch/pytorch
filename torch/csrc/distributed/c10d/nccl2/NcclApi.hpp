@@ -203,6 +203,10 @@ class NcclApi {
   // Group operations
   [[nodiscard]] virtual ncclResult_t groupStart() = 0;
   [[nodiscard]] virtual ncclResult_t groupEnd() = 0;
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  [[nodiscard]] virtual ncclResult_t groupSimulateEnd(
+      ncclSimInfo_t* simInfo) = 0;
+#endif
 
   [[nodiscard]] virtual ncclResult_t commUserRank(
       ncclComm_t comm,
@@ -449,6 +453,9 @@ class DefaultNcclApi : public NcclApi {
   // Group operations
   [[nodiscard]] ncclResult_t groupStart() override;
   [[nodiscard]] ncclResult_t groupEnd() override;
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  [[nodiscard]] ncclResult_t groupSimulateEnd(ncclSimInfo_t* simInfo) override;
+#endif
 
   [[nodiscard]] ncclResult_t commUserRank(ncclComm_t comm, int* userRank)
       override;

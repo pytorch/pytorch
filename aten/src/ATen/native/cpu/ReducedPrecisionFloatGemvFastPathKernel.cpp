@@ -27,7 +27,7 @@ constexpr auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32Elemen
 
 namespace {
 template <typename T>
-constexpr int IntegerLog2(T n, int p = 0) {
+consteval int IntegerLog2(T n, int p = 0) {
   return (n <= 1) ? p : IntegerLog2(n / 2, p + 1);
 }
 } // namespace

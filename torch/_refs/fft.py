@@ -81,7 +81,9 @@ def _promote_type_fft(
         #     (test_python_ref__refs_fft_*_cuda_bfloat16).
         if dtype == torch.bfloat16:
             dtype = torch.float32
-    torch._check(dtype in allowed_types, lambda: f"Unsupported dtype {dtype}")
+    torch._check_not_implemented(
+        dtype in allowed_types, lambda: f"Unsupported dtype {dtype}"
+    )
 
     if require_complex:
         dtype = utils.corresponding_complex_dtype(dtype)
@@ -165,7 +167,7 @@ def _fft_r2c(
     onesided: bool,
 ) -> TensorLikeType:
     """Common code for performing any real to complex FFT (rfft or ihfft)"""
-    torch._check(
+    torch._check_type(
         not input.dtype.is_complex,
         lambda: f"{func_name} expects a floating point input tensor, but got {input.dtype}",
     )
@@ -405,7 +407,7 @@ def rfftn(
     dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not input.dtype.is_complex,
         lambda: f"rfftn expects a real-valued input tensor, but got {input.dtype}",
     )
@@ -424,7 +426,7 @@ def ihfftn(
     dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not input.dtype.is_complex,
         lambda: f"ihfftn expects a real-valued input tensor, but got {input.dtype}",
     )

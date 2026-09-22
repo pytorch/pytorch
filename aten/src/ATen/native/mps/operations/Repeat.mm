@@ -130,19 +130,19 @@ Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output
   auto result = at::empty({total}, repeat.options());
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync(mpsStream->queue(), ^() {
+  at::mps::dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
       auto pipelineState = lib.getPipelineStateForFunc(fmt::format("repeat_interleave_{}", scalar_type));
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);
+      getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false, mpsStream);
 
       [computeEncoder setComputePipelineState:pipelineState];
       mps::mtl_setArgs(computeEncoder, repeat, cumsum, result, repeat.stride(0));
       mps::mtl_dispatch1DJob(computeEncoder, pipelineState, repeat.size(0));
 
-      getMPSProfiler().endProfileKernel(pipelineState);
+      getMPSProfiler().endProfileKernel(pipelineState, mpsStream);
     }
   });
   return result;
