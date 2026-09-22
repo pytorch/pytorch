@@ -321,9 +321,9 @@ case "$tag" in
     ACL=yes
     OPENBLAS=yes
     ;;
-  pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.10-gcc13)
+  pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.12-gcc13)
     CUDA_VERSION=13.0.3
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
     ACL=yes
     KATEX=yes
