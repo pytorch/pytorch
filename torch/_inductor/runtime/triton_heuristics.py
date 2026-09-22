@@ -685,7 +685,6 @@ class CachingAutotuner(KernelInterface):
         self._jit_fallback_condition = threading.Condition()
         self._jit_fallback_active_runs = 0
         self._jit_fallback_pending = False
-        self._jit_fallback_released = False
         self._jit_fallback_compiling = False
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
@@ -1230,7 +1229,6 @@ class CachingAutotuner(KernelInterface):
         self._jit_fallback_condition = threading.Condition()
         self._jit_fallback_active_runs = 0
         self._jit_fallback_pending = False
-        self._jit_fallback_released = False
         self._jit_fallback_compiling = False
 
     def get_device_interface(self):
@@ -1238,6 +1236,13 @@ class CachingAutotuner(KernelInterface):
         from torch._dynamo.device_interface import get_interface_for_device
 
         return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
+
+    def has_device_agnostic_static_launchers(self) -> bool:
+        return any(
+            isinstance(result, StaticTritonCompileResult)
+            and result.compile_meta.get("device") is None
+            for result in self.compile_results
+        )
 
     def _create_compile_meta(self, cfg: Config) -> dict[str, Any]:
         """
@@ -2483,7 +2488,6 @@ class CachingAutotuner(KernelInterface):
                     self._jit_fallback_compiling = True
                     while self._jit_fallback_active_runs:
                         self._jit_fallback_condition.wait()
-                    should_release = not self._jit_fallback_released
                     break
                 self._jit_fallback_condition.wait()
 
@@ -2497,11 +2501,11 @@ class CachingAutotuner(KernelInterface):
             "falling back to JIT compilation"
         )
         try:
-            if should_release:
-                self.release_benchmark_artifacts()
-                with self._jit_fallback_condition:
-                    self._jit_fallback_released = True
+            self.release_benchmark_artifacts()
             fallback = compile_kernel_from_src()
+            result = fallback.run(
+                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
         except BaseException:
             with self._jit_fallback_condition:
                 self._jit_fallback_compiling = False
@@ -2512,10 +2516,9 @@ class CachingAutotuner(KernelInterface):
             self._jit_fallback = fallback
             self._compile_kernel_from_src = None
             self._jit_fallback_pending = False
-            self._jit_fallback_released = False
             self._jit_fallback_compiling = False
             self._jit_fallback_condition.notify_all()
-        return fallback.run(*args, stream=stream, benchmark_run=benchmark_run, **kwargs)
+        return result
 
     def _run_with_jit_fallback(self, *args, stream, benchmark_run, **kwargs):
         with self._jit_fallback_condition:
@@ -2581,11 +2584,7 @@ class CachingAutotuner(KernelInterface):
             )
         except MissingTritonKernelError:
             self._post_launch()
-            if self._compile_kernel_from_src is None:
-                raise
-            return self._run_jit_fallback(
-                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-            )
+            raise
 
     def _run(self, *args, stream, benchmark_run=False, **kwargs):
         # --- FAST PATH ---

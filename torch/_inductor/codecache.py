@@ -5686,7 +5686,6 @@ class StaticAutotunerFuture(CodeCacheFuture):
             raise AssertionError(
                 "source reload callbacks must be set before calling result()"
             )
-        self.static_autotuner._compile_kernel_from_src = self.compile_kernel_from_src
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
             try:
                 self.static_autotuner.recheck_autotune_cache(
@@ -5697,6 +5696,10 @@ class StaticAutotunerFuture(CodeCacheFuture):
                     reload_kernel=self.reload_kernel_from_src,
                     static_triton_bundle_key=None,  # no need to save again
                 )
+                if self.static_autotuner.has_device_agnostic_static_launchers():
+                    self.static_autotuner._compile_kernel_from_src = (
+                        self.compile_kernel_from_src
+                    )
                 return self.static_autotuner
             except MissingTritonKernelError:
                 log.warning(
