@@ -202,9 +202,8 @@ class TestFullyShardConversion(TestCase):
         group = model._get_fsdp_state()._fsdp_param_groups[0]
         param = group.fsdp_params[0]
         self.assertTrue(group.is_unsharded)
-        pending, partial = model.get_pending_gradients()[param.sharded_param]
+        pending = model.weight.grad
         self.assertIs(pending, param.unsharded_param.grad)
-        self.assertIsNone(partial)
         self.assertIsNotNone(pending)
         self.assertEqual(pending.dtype, torch.float32)
         self.assertNotIsInstance(pending, DTensor)
@@ -213,8 +212,7 @@ class TestFullyShardConversion(TestCase):
         self._assert_conversion_requires_clear(model, torch.bfloat16)
         self.assertTrue(group.is_unsharded)
         self.assertEqual(param.unsharded_param.untyped_storage().nbytes(), storage_size)
-        self.assertIs(param.unsharded_accumulated_grad, pending)
-        self.assertIs(model.get_pending_gradients()[param.sharded_param][0], pending)
+        self.assertIs(model.weight.grad, pending)
         self.assertEqual(pending, pending_value)
 
         model.zero_grad(set_to_none=True)
@@ -241,21 +239,24 @@ class TestFullyShardConversion(TestCase):
         self.assertIs(model.weight, sharded_param)
         self.assertEqual(sharded_param.dtype, torch.float32)
         self.assertIsNone(sharded_param.grad)
-        pending, partial = model.get_pending_gradients()[sharded_param]
-        self.assertIsNone(partial)
+        model.unshard()
+        pending = model.weight.grad
         self.assertEqual(pending.dtype, torch.bfloat16)
         pending_value = pending.clone()
+        model.reshard()
 
         model.float()
         self.assertIs(model.weight, sharded_param)
-        self.assertIs(model.get_pending_gradients()[sharded_param][0], pending)
+        model.unshard()
+        self.assertIs(model.weight.grad, pending)
         self.assertEqual(pending, pending_value)
+        model.reshard()
 
         model.set_requires_gradient_sync(True)
         model(inp).sum().backward()
-        self.assertEqual(sharded_param.grad.dtype, torch.float32)
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
         self.assertEqual(
-            sharded_param.grad.full_tensor(),
+            model.weight.grad.full_tensor(),
             torch.full((4, 4), 4.0, device=device),
         )
 

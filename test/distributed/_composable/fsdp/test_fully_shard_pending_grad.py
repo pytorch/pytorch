@@ -19,7 +19,6 @@ from torch.distributed.pipelining._backward import (
     stage_backward_weight,
 )
 from torch.distributed.tensor import DTensor, Shard
-from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -60,7 +59,6 @@ class TestFullyShardPendingGrad(FSDPTest):
             if cpu_offload
             else OffloadPolicy(),
         )
-        param = model.weight
         cases = (
             (((True, 256), (False, 1), (True, -256)), 1),
             (((True, 3), (False, 256), (False, 1), (True, -256)), 3),
@@ -72,22 +70,17 @@ class TestFullyShardPendingGrad(FSDPTest):
                 model(
                     torch.full((1, 1), value, device=device, dtype=torch.bfloat16)
                 ).sum().backward()
-                with CommDebugMode() as comm:
-                    pending = model.get_pending_gradients()
-                self.assertEqual(comm.get_total_counts(), 0)
-                self.assertEqual(param.grad.dtype, torch.float32)
-                if sync:
-                    self.assertEqual(pending, {})
-                else:
-                    unreduced, partial = pending[param]
-                    self.assertIsNone(partial)
-                    self.assertEqual(unreduced.dtype, torch.bfloat16)
-                    self.assertEqual(unreduced.device.type, device)
+                self.assertEqual(model.weight.grad.dtype, torch.float32)
+                if not sync:
                     self.assertEqual(
-                        param.grad.to(device).full_tensor(),
+                        model.weight.grad.to(device).full_tensor(),
                         torch.full((2, 1), float(contributions[0][1]), device=device),
                     )
-            actual = param.grad.to(device).full_tensor()
+                    model.unshard()
+                    self.assertEqual(model.weight.grad.dtype, torch.bfloat16)
+                    self.assertEqual(model.weight.grad.device.type, device)
+                    model.reshard()
+            actual = model.weight.grad.to(device).full_tensor()
             # Previously reduced FP32 history stays separate; pending history
             # still rounds in BF16, including 256 + 1 before the final -256.
             self.assertEqual(actual, torch.full_like(actual, expected))
@@ -111,7 +104,6 @@ class TestFullyShardPendingGrad(FSDPTest):
         )
         model.set_requires_gradient_sync(False)
         model.set_reshard_after_backward(reshard_after_backward)
-        param = model.weight
         saved = None
         expected = torch.zeros((4, 2), device=device, dtype=torch.bfloat16)
         for step, value in enumerate((2, 1, 1)):
@@ -119,17 +111,13 @@ class TestFullyShardPendingGrad(FSDPTest):
                 torch.full((1, 2), value, device=device, dtype=torch.bfloat16)
             )
             if saved is not None:
-                self.assertIs(model.get_pending_gradients()[param][0], saved)
+                self.assertIs(model.weight.grad, saved)
             output.sum().backward()
             expected.add_(value)
-            with CommDebugMode() as comm:
-                pending = model.get_pending_gradients()
-                unreduced, partial = pending[param]
-                pending[param] = (None, None)
-                self.assertIs(model.get_pending_gradients()[param][0], unreduced)
-            self.assertEqual(comm.get_total_counts(), 0)
-            self.assertIsNone(param.grad)
-            self.assertIsNone(partial)
+            if reshard_after_backward:
+                self.assertIsNone(model.weight.grad)
+                model.unshard()
+            unreduced = model.weight.grad
             self.assertEqual(unreduced.device.type, device)
             self.assertEqual(unreduced.dtype, torch.bfloat16)
             if saved is not None:
@@ -146,11 +134,14 @@ class TestFullyShardPendingGrad(FSDPTest):
                 expected.fill_(3)
             self.assertEqual(unreduced, expected)
             model.reshard()
-            self.assertIs(model.get_pending_gradients()[param][0], saved)
+            self.assertIsNone(model.weight.grad)
         model.synchronize_gradients()
-        self.assertEqual(model.get_pending_gradients(), {})
-        self.assertEqual(param.grad.device.type, "cpu" if cpu_offload else device)
-        self.assertEqual(param.grad.to(device).full_tensor(), expected.float())
+        self.assertEqual(
+            model.weight.grad.device.type, "cpu" if cpu_offload else device
+        )
+        self.assertEqual(model.weight.grad.to(device).full_tensor(), expected.float())
+        model.unshard()
+        self.assertIsNone(model.weight.grad)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("set_to_none", [False, True])
@@ -172,7 +163,6 @@ class TestFullyShardPendingGrad(FSDPTest):
         )
         fully_shard(model)
         model.set_reshard_after_backward(False)
-        first, second = model.first.weight, model.second.weight
         for sync, value in ((True, 4), (False, 2)):
             model.set_requires_gradient_sync(sync)
             model(
@@ -181,35 +171,30 @@ class TestFullyShardPendingGrad(FSDPTest):
         output = model.first(
             torch.ones(1, 4, device=device, dtype=torch.bfloat16, requires_grad=True)
         )
-        self.assertEqual(set(model.get_pending_gradients()), {first, second})
+        for param in model.parameters():
+            self.assertEqual(param.grad, torch.full_like(param.grad, 2))
         (model if clear_root else model.first).zero_grad(set_to_none=set_to_none)
-        pending = model.get_pending_gradients()
-        for param in (first, second) if clear_root else (first,):
+        for module in (model.first, model.second) if clear_root else (model.first,):
             if set_to_none:
-                self.assertNotIn(param, pending)
-                self.assertIsNone(param.grad)
+                self.assertIsNone(module.weight.grad)
             else:
-                unreduced, partial = pending[param]
+                unreduced = module.weight.grad
                 self.assertEqual(unreduced, torch.zeros_like(unreduced))
-                self.assertIsNone(partial)
-                data = param.grad.to_local()
-                self.assertEqual(data, torch.zeros_like(data))
         if not clear_root:
-            unreduced, partial = pending[second]
+            unreduced = model.second.weight.grad
             self.assertEqual(unreduced, torch.full_like(unreduced, 2))
-            self.assertIsNone(partial)
-            data = second.grad.to_local()
-            self.assertEqual(data, torch.full_like(data, 4))
         output.sum().backward()
         model.synchronize_gradients()
+        model.first.reshard()
         self.assertEqual(
-            first.grad.to(device).full_tensor(), torch.ones((4, 4), device=device)
+            model.first.weight.grad.to(device).full_tensor(),
+            torch.ones((4, 4), device=device),
         )
         if set_to_none and clear_root:
-            self.assertIsNone(second.grad)
+            self.assertIsNone(model.second.weight.grad)
         else:
             self.assertEqual(
-                second.grad.to(device).full_tensor(),
+                model.second.weight.grad.to(device).full_tensor(),
                 torch.full((4, 4), 0.0 if clear_root else 6.0, device=device),
             )
 
@@ -235,14 +220,13 @@ class TestFullyShardPendingGrad(FSDPTest):
             ),
         )
         fully_shard(model)
-        params = list(model.parameters())
         model.set_reshard_after_backward(False)
         for _ in range(2):
             model.zero_grad(set_to_none=set_to_none)
             reference.zero_grad(set_to_none=set_to_none)
             model.set_requires_gradient_sync(False)
             model.set_is_last_backward(False)
-            saved = {}
+            saved = []
             for step in range(3):
                 inp = torch.full(
                     (2, 4),
@@ -257,21 +241,22 @@ class TestFullyShardPendingGrad(FSDPTest):
                 )
                 stage_backward_weight(model.parameters(), groups)
                 reference(inp.detach()).sum().backward()
-                pending = model.get_pending_gradients()
-                for param, ref_param in zip(params, reference.parameters()):
-                    unreduced, partial = pending[param]
-                    self.assertIsNone(partial)
+                for index, (param, ref_param) in enumerate(
+                    zip(model.parameters(), reference.parameters())
+                ):
+                    unreduced = param.grad
                     self.assertEqual(unreduced.dtype, reduce_dtype)
                     self.assertEqual(unreduced, ref_param.grad)
-                    if param in saved:
-                        self.assertIs(unreduced, saved[param])
-                    saved[param] = unreduced
+                    if step:
+                        self.assertIs(unreduced, saved[index])
+                    else:
+                        saved.append(unreduced)
             model.set_is_last_backward(True)
             model.synchronize_gradients()
-            for param, ref_param in zip(params, reference.parameters()):
+            model[0].reshard()
+            for param, ref_param in zip(model.parameters(), reference.parameters()):
                 dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
                 self.assertEqual(param.grad.full_tensor(), ref_param.grad.float())
-            self.assertEqual(model.get_pending_gradients(), {})
 
     @skip_if_lt_x_gpu(2)
     @parametrize("cpu_offload", [False, True])
@@ -294,16 +279,12 @@ class TestFullyShardPendingGrad(FSDPTest):
         )
         model.set_reshard_after_backward(False)
         model.set_requires_gradient_sync(False)
-        param = model.weight
         saved = None
         for value in (1, 2):
             inp = torch.full((2, 4), value, device=device, dtype=torch.float32)
             reference(inp).sum().backward()
             model(inp).sum().backward()
-            with CommDebugMode() as comm:
-                unreduced, partial = model.get_pending_gradients()[param]
-            self.assertEqual(comm.get_total_counts(), 0)
-            self.assertIsNone(partial)
+            unreduced = model.weight.grad
             self.assertIsInstance(unreduced, DTensor)
             self.assertEqual(unreduced.device_mesh, mesh["tp"])
             self.assertEqual(unreduced.placements, (Shard(0),))
@@ -313,30 +294,31 @@ class TestFullyShardPendingGrad(FSDPTest):
                 self.assertIs(unreduced, saved)
             saved = unreduced
         model.synchronize_gradients()
-        self.assertEqual(model.get_pending_gradients(), {})
-        self.assertEqual(param.grad.to(device).full_tensor(), reference.weight.grad)
+        self.assertIsNone(model.weight.grad)
+        model.reshard()
+        self.assertEqual(
+            model.weight.grad.to(device).full_tensor(), reference.weight.grad
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_explicit_sync_divide_factor(self, device):
         device = torch.device(device).type
         model = nn.Linear(1, 2, bias=False, device=device)
         fully_shard(model, mesh=init_device_mesh(device, (self.world_size,)))
-        param = model.weight
         model.set_gradient_divide_factor(3)
         for sync in (True, False):
             model.set_requires_gradient_sync(sync)
             model(torch.full((1, 1), 3.0, device=device)).sum().backward()
         self.assertEqual(
-            param.grad.full_tensor(), torch.full((2, 1), 2.0, device=device)
-        )
-        model.synchronize_gradients()
-        self.assertEqual(model.get_pending_gradients(), {})
-        self.assertEqual(
-            param.grad.full_tensor(), torch.full((2, 1), 4.0, device=device)
+            model.weight.grad.full_tensor(), torch.full((2, 1), 2.0, device=device)
         )
         model.synchronize_gradients()
         self.assertEqual(
-            param.grad.full_tensor(), torch.full((2, 1), 4.0, device=device)
+            model.weight.grad.full_tensor(), torch.full((2, 1), 4.0, device=device)
+        )
+        model.synchronize_gradients()
+        self.assertEqual(
+            model.weight.grad.full_tensor(), torch.full((2, 1), 4.0, device=device)
         )
 
 
@@ -372,7 +354,6 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
         )
         fully_shard(model)
         model.set_reshard_after_backward(False)
-        first, second = model.first.weight, model.second.weight
         model(
             torch.full((1, in_features), 4.0, device=device, dtype=torch.bfloat16)
         ).sum().backward()
@@ -393,35 +374,23 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
                 1, in_features, device=device, dtype=torch.bfloat16, requires_grad=True
             )
         ).sum().backward()
-        with CommDebugMode() as comm:
-            pending = model.get_pending_gradients()
-        self.assertEqual(comm.get_total_counts(), 0)
-        self.assertEqual(set(pending), {first, second})
-        self.assertIsNotNone(pending[first][0])
-        self.assertIsNone(pending[second][0])
-        for param, (unreduced, partial) in pending.items():
-            self.assertIsNotNone(partial)
-            self.assertNotIsInstance(partial, DTensor)
-            self.assertEqual(partial.dtype, torch.bfloat16)
-            self.assertEqual(partial.device.type, device)
-            self.assertEqual(partial.shape, param.to_local().shape)
-            self.assertEqual(param.grad.dtype, torch.float32)
-            if unreduced is not None:
-                self.assertEqual(unreduced.dtype, torch.bfloat16)
+        self.assertEqual(model.first.weight.grad.dtype, torch.bfloat16)
+        self.assertEqual(model.first.weight.grad.device.type, device)
+        # The second parameter only has an internal HSDP partial to synchronize.
+        self.assertIsNone(model.second.weight.grad)
         if clear is not None:
             model.zero_grad(set_to_none=clear)
-            if clear:
-                self.assertEqual(model.get_pending_gradients(), {})
-            else:
-                for unreduced, partial in model.get_pending_gradients().values():
-                    if unreduced is not None:
-                        self.assertEqual(unreduced, torch.zeros_like(unreduced))
-                    if partial is not None:
-                        self.assertEqual(partial, torch.zeros_like(partial))
+            for param in model.parameters():
+                if clear:
+                    self.assertIsNone(param.grad)
+                elif param.grad is not None:
+                    self.assertEqual(param.grad, torch.zeros_like(param.grad))
         model.synchronize_gradients()
         expected = 7 if clear is None else 0
-        self.assertEqual(model.get_pending_gradients(), {})
-        for param in (first, second):
+        for param in model.parameters():
+            self.assertIsNone(param.grad)
+        model.first.reshard()
+        for param in model.parameters():
             if clear is True:
                 self.assertIsNone(param.grad)
             else:
@@ -437,7 +406,8 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
         model(
             torch.ones(1, in_features, device=device, dtype=torch.bfloat16)
         ).sum().backward()
-        for param in (first, second):
+        model.first.reshard()
+        for param in model.parameters():
             self.assertEqual(
                 param.grad.to(device).full_tensor(),
                 torch.full(
@@ -511,11 +481,10 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
             if cpu_offload
             else OffloadPolicy(),
         )
-        params = list(model.parameters())
         model.set_reshard_after_backward(False)
         dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
         tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
-        saved = {}
+        saved = []
         for step in range(3):
             model.set_requires_gradient_sync(step == 2)
             inputs = [
@@ -542,22 +511,21 @@ class TestFullyShardSpmdPendingGrad(FSDPTest):
                     partition_spec=spmd.PartitionSpec((dp_axis, tp_axis), None),
                 )
                 model(inp).backward()
-            with CommDebugMode() as comm:
-                pending = model.get_pending_gradients()
-            self.assertEqual(comm.get_total_counts(), 0)
             if step == 2:
-                self.assertEqual(pending, {})
+                for param in model.parameters():
+                    self.assertIsNone(param.grad)
                 continue
-            for param, (unreduced, partial) in pending.items():
-                self.assertIsNone(partial)
+            for index, param in enumerate(model.parameters()):
+                unreduced = param.grad
                 self.assertNotIsInstance(unreduced, DTensor)
                 self.assertEqual(unreduced.dtype, torch.float32)
                 self.assertEqual(unreduced.device.type, device)
-                if param in saved:
-                    self.assertIs(unreduced, saved[param])
-                saved[param] = unreduced
-            self.assertEqual(set(pending), set(params))
-        for param, ref_param in zip(params, reference.parameters()):
+                if step:
+                    self.assertIs(unreduced, saved[index])
+                else:
+                    saved.append(unreduced)
+        model.reshard()
+        for param, ref_param in zip(model.parameters(), reference.parameters()):
             self.assertEqual(param.grad.to(device).full_tensor(), ref_param.grad)
 
 

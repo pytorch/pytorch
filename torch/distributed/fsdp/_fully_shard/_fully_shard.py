@@ -432,11 +432,14 @@ class FSDPModule:
         configured ``grad_dtype``. HSDP may also retain reduce-scattered gradients
         that still require all-reduce. These contributions remain separate.
 
-        Which gradients ``model.parameters()`` exposes depends on whether the
-        parameters are sharded or unsharded. Use :meth:`get_pending_gradients` to
-        access pending contributions independently of that state. With CPU
-        offload, pending gradients stay on the compute device; only fully reduced
-        sharded gradients are offloaded.
+        In the sharded state, ``model.parameters()`` exposes the sharded
+        parameters and their reduced ``grad``. In the unsharded state, it exposes
+        the unsharded parameters and their accumulated ``grad``. HSDP partial
+        reduction buffers remain internal. With CPU offload, unreduced gradients
+        stay on the compute device; fully reduced sharded gradients are offloaded.
+        When ``reshard_after_forward`` is an integer, the temporary post-forward
+        shards have no gradient; unsharding or fully resharding restores the
+        corresponding parameter owners.
 
         Assigning ``param.grad`` or calling ``optimizer.zero_grad()`` affects
         only the addressed parameters. Use :meth:`zero_grad` on the FSDP module
@@ -475,57 +478,13 @@ class FSDPModule:
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
 
-    def get_pending_gradients(
-        self, *, recurse: bool = True
-    ) -> dict[nn.Parameter, tuple[torch.Tensor | None, torch.Tensor | None]]:
-        """Return pending gradients keyed by their sharded parameters.
-
-        Each value is ``(unreduced, partial)``. ``unreduced`` is the native
-        unsharded parameter's gradient. ``partial`` is a local HSDP shard that
-        has been reduce-scattered but still requires all-reduce and any final
-        division. Both retain their native accumulation dtype. Only parameters
-        with at least one pending contribution are included; already reduced
-        gradients remain accessible through the key parameter's ``grad``.
-
-        This method does not communicate or combine contributions. It waits on
-        the current device stream for pending partial reductions. Returned
-        tensors reference the actual buffers, so compatible in-place operations
-        modify those contributions only. Assigning dictionary entries does not
-        replace gradients. Obtain new references after backward, synchronization,
-        or gradient clearing. Under CPU offload, pending tensors remain on the
-        compute device.
-
-        Args:
-            recurse (bool): Whether to include all FSDP submodules or only this
-                module. A grouped FSDP module includes its entire parameter group.
-        """
-        self_module = cast(nn.Module, self)
-        modules = self_module.modules() if recurse else (self_module,)
-        seen_groups: set[FSDPParamGroup] = set()
-        pending = {}
-        for module in modules:
-            if not isinstance(module, FSDPModule):
-                continue
-            for group in module._get_fsdp_state()._fsdp_param_groups:
-                if group in seen_groups:
-                    continue
-                seen_groups.add(group)
-                if any(param._partial_grad is not None for param in group.fsdp_params):
-                    group._wait_for_post_backward()
-                for param in group.fsdp_params:
-                    unreduced = param.unsharded_accumulated_grad
-                    partial = param._partial_grad
-                    if unreduced is not None or partial is not None:
-                        pending[param.sharded_param] = (unreduced, partial)
-        return pending
-
     def zero_grad(self, set_to_none: bool = True) -> None:
         """Reset reduced and pending gradients of this module's parameters.
 
         This includes gradients on hidden sharded or unsharded parameters and
-        HSDP contributions awaiting all-reduce. In contrast, assigning
-        ``param.grad`` or calling ``optimizer.zero_grad()`` affects only the
-        addressed parameters. No gradient reductions are performed.
+        HSDP contributions awaiting all-reduce. Assigning ``param.grad`` or
+        calling ``optimizer.zero_grad()`` affects only the addressed parameters.
+        No gradient reductions are performed.
 
         Args:
             set_to_none (bool): Whether to discard gradients or zero their
