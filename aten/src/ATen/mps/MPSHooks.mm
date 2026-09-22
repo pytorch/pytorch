@@ -70,6 +70,10 @@ Generator MPSHooks::getNewGenerator([[maybe_unused]] DeviceIndex device_index) c
   return make_generator<at::MPSGeneratorImpl>();
 }
 
+// Unlike commitStream()/getCommandBuffer() below, every caller of this one
+// (torch.mps.synchronize() and torch::mps::synchronize()) is off the serial
+// queue, so it has to take the queue itself: synchronize() ends and releases
+// the encoder, which races whichever thread is mid-encode.
 void MPSHooks::deviceSynchronize() const {
   auto stream = at::mps::getDefaultMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -77,22 +81,23 @@ void MPSHooks::deviceSynchronize() const {
   });
 }
 
+// torch::mps::commit() and get_command_buffer() are encoding-time calls: per
+// torch/mps.h the caller drives them from inside a dispatch_sync() on
+// get_dispatch_queue(), so they must not dispatch again. Assert that contract
+// rather than leave it to the docs -- dispatching here would trap on re-entry,
+// and running off-queue would race whoever owns the encoder.
 void MPSHooks::commitStream() const {
   auto stream = at::mps::getDefaultMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT);
-  });
+  dispatch_assert_queue(stream->queue());
+  stream->synchronize(SyncType::COMMIT);
 }
 
 void* MPSHooks::getCommandBuffer() const {
   auto stream = at::mps::getDefaultMPSStream();
-  __block void* buffer = nullptr;
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    // Release pending computeCommandEncoder, as extensions is likely to allocate new one
-    stream->endKernelCoalescing();
-    buffer = stream->commandBuffer();
-  });
-  return buffer;
+  dispatch_assert_queue(stream->queue());
+  // Release pending computeCommandEncoder, as extensions is likely to allocate new one
+  stream->endKernelCoalescing();
+  return stream->commandBuffer();
 }
 
 void* MPSHooks::getDispatchQueue() const {
