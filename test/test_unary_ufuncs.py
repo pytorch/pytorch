@@ -1906,16 +1906,31 @@ class TestUnaryUfuncsCpuOnly(TestCase):
         x = t[:, :cols]
         self.assertFalse(x.is_contiguous())
         got = torch.special.logit(x, eps=eps)
-        # Reference: apply the scalar kernel elementwise against a single-
-        # lane tensor of the same dtype. cpu_kernel_vec falls back to its
-        # scalar lambda for lengths below `Vectorized::size()`, so this
-        # always hits the scalar path and gives a bit-exact ground truth.
+        # Reference: evaluate one element at a time. A one-element tensor is
+        # contiguous, so on MKL builds this takes LogitMKLKernel rather than
+        # cpu_kernel_vec's scalar lambda; it pins the clamp semantics (the
+        # point of #177839), not a bit-exact scalar ground truth.
         ref = torch.empty_like(x)
         x_flat = x.reshape(-1)
         ref_flat = ref.reshape(-1)
         for i in range(x_flat.numel()):
             ref_flat[i] = torch.special.logit(x_flat[i : i + 1], eps=eps)
         self.assertEqual(got, ref)
+
+    # Regression for https://github.com/pytorch/pytorch/issues/188382: logit's
+    # contiguous fast path must use the same logarithm as the strided path, or
+    # the result changes by 1 ULP based on layout alone.
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("eps", [None, 0.1, 0.4, 0.6])
+    def test_logit_layout_invariant(self, device, dtype, eps):
+        torch.manual_seed(0)
+        # 64 columns so no dtype falls into cpu_kernel_vec's scalar remainder.
+        t = torch.rand((4, 66), dtype=dtype, device=device)
+        x = t[:, :64]
+        self.assertFalse(x.is_contiguous())
+        got = torch.special.logit(x, eps=eps)
+        ref = torch.special.logit(x.contiguous(), eps=eps)
+        self.assertEqual(got, ref, rtol=0, atol=0)
 
 
 class TestUnaryUfuncsCUDADevice(TestCase):

@@ -80,16 +80,6 @@ void VmlLog(int64_t N, const T* X, T* Y) {
   });
 }
 
-template <>
-void VmlLog<float>(int64_t N, const float* X, float* Y) {
-  vsLn(N, X, Y);
-}
-
-template <>
-void VmlLog<double>(int64_t N, const double* X, double* Y) {
-  vdLn(N, X, Y);
-}
-
 template <typename T>
 void LogitMKLKernel(T eps, TensorIteratorBase* it) {
   if (!it->can_use_32bit_indexing()) {
@@ -138,6 +128,9 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
+        // Despite the name and the hasMKL() gate, this path no longer
+        // calls MKL: the VmlLog VML specializations were removed so it
+        // takes the same SLEEF log as the cpu_kernel_vec paths below.
         if (at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
           iter.cast_outputs();
