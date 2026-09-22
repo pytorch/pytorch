@@ -5267,6 +5267,34 @@ def _offending_value_path(state: Any, target: Any) -> str:
                         else:
                             children.append((f"{path}[<a key>]", k))
                             children.append((f"{path}[<that key>]", v))
+                elif isinstance(value, types.FunctionType):
+                    # A function a guard is rooted at is pickled by value,
+                    # defaults, kwdefaults and closure cells included (its
+                    # __dict__ is walked below like any other), so a failure
+                    # behind one of those has to be reachable from here.
+                    children += [
+                        (f"{path}.__defaults__[{i}]", v)
+                        for i, v in enumerate(value.__defaults__ or ())
+                    ]
+                    children += [
+                        (f"{path}.__kwdefaults__[{k!r}]", v)
+                        for k, v in (value.__kwdefaults__ or {}).items()
+                    ]
+                    for i, (name, cell) in enumerate(
+                        zip(value.__code__.co_freevars, value.__closure__ or ())
+                    ):
+                        try:
+                            contents = cell.cell_contents
+                        except ValueError:  # an empty cell
+                            continue
+                        # A pasteable accessor, annotated with the variable name.
+                        accessor = f"{path}.__closure__[{i}].cell_contents  # {name}"
+                        children.append((accessor, contents))
+                elif isinstance(value, types.MethodType):
+                    # A guard can be rooted at a bound method; the reducer
+                    # carries its function and receiver.
+                    children.append((f"{path}.__func__", value.__func__))
+                    children.append((f"{path}.__self__", value.__self__))
             except Exception:
                 pass
             try:
