@@ -31,10 +31,10 @@ void all_gather_copy_out_cuda(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
-    at::IntArrayRef num_prefixes,
+    at::IntArrayRef outer_sizes,
     int64_t num_chunks) {
   check_all_gather_copy_out_inputs(
-      out, input, split_sizes, num_prefixes, num_chunks);
+      out, input, split_sizes, outer_sizes, num_chunks);
   const c10::cuda::CUDAGuard device_guard(input.device());
   std::vector<int64_t> srcs;
   std::vector<int64_t> dsts;
@@ -42,7 +42,7 @@ void all_gather_copy_out_cuda(
   int64_t num_splits = 0;
   for (const auto i : c10::irange(split_sizes.size())) {
     if (split_sizes[i] > 0) {
-      num_splits += num_prefixes[i];
+      num_splits += outer_sizes[i];
     }
   }
   srcs.reserve(num_splits);
@@ -54,11 +54,11 @@ void all_gather_copy_out_cuda(
     if (split_sizes[i] == 0) {
       continue;
     }
-    const int64_t chunk_size = split_sizes[i] / num_prefixes[i] * elem_size;
+    const int64_t chunk_size = split_sizes[i] / outer_sizes[i] * elem_size;
     const auto dst = reinterpret_cast<int64_t>(out[i].data_ptr());
-    for (const auto prefix : c10::irange(num_prefixes[i])) {
-      srcs.push_back(src + prefix * chunk_size);
-      dsts.push_back(dst + prefix * num_chunks * chunk_size);
+    for (const auto outer_idx : c10::irange(outer_sizes[i])) {
+      srcs.push_back(src + outer_idx * chunk_size);
+      dsts.push_back(dst + outer_idx * num_chunks * chunk_size);
       chunk_sizes.push_back(chunk_size);
     }
     src += split_sizes[i] * elem_size;
@@ -146,8 +146,8 @@ at::Tensor& reduce_scatter_copy_in_cuda(
     const auto& tensor = tensors[i];
     const auto sizes = tensor.sizes();
     const auto dim = num_leading_dims[i];
-    const auto num_prefixes = c10::multiply_integers(sizes.slice(0, dim));
-    if (num_prefixes == 0) {
+    const auto outer_size = c10::multiply_integers(sizes.slice(0, dim));
+    if (outer_size == 0) {
       continue;
     }
     const auto trailing_numel = c10::multiply_integers(sizes.slice(dim + 1));
@@ -158,9 +158,9 @@ at::Tensor& reduce_scatter_copy_in_cuda(
         (chunk_size + bytes_per_block - 1) / bytes_per_block;
     const int64_t actual_size = sizes[dim] * trailing_numel * src_elem_size;
     const auto src = reinterpret_cast<int64_t>(tensor.const_data_ptr());
-    for (const auto prefix : c10::irange(num_prefixes)) {
+    for (const auto outer_idx : c10::irange(outer_size)) {
       const auto input_idx = static_cast<int64_t>(metadata.srcs.size());
-      metadata.srcs.push_back(src + prefix * actual_size);
+      metadata.srcs.push_back(src + outer_idx * actual_size);
       metadata.pad_tensor_chunk_sizes.push_back(chunk_size);
       metadata.chunk_size += chunk_size;
       metadata.num_blocks_per_tensor_chunk.push_back(num_blocks);
