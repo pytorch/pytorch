@@ -6151,7 +6151,6 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 # end TestNN.test_affine_* helpers
 
 
-
 class TestNNDeviceType(NNTestCase):
 
     def test_grid_sample_backward_error_checking(self, device):
@@ -6293,8 +6292,8 @@ class TestNNDeviceType(NNTestCase):
                     D = random.randint(2, 5)
                     H = random.randint(2, 5)
                     W = random.randint(2, 5)
-                    input = torch.randn(N, C, D, H, W, requires_grad=True)
-                    grid = torch.randn(N, D, H, W, 3, requires_grad=True)
+                    input = torch.randn(N, C, D, H, W, requires_grad=True, device=device)
+                    grid = torch.randn(N, D, H, W, 3, requires_grad=True, device=device)
                     self.assertTrue(gradcheck(
                         lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
                                                         align_corners=align_corners),
@@ -15778,6 +15777,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
+    @onlyAccelerator
+    @skipMPS
     @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
     @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
     @parametrize_test(
@@ -16094,10 +16095,18 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
             F.grid_sample(torch.empty(1, 1, 0, 2, device=device), grid, align_corners=False)
 
-        input_5d = torch.empty(1, 1, 2, 2, 2, device=device)
-        grid_5d = torch.empty(1, 1, 1, 1, 3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
-            F.grid_sample(input_5d, grid_5d, mode='bicubic')
+        if torch.device(device).type == 'mps':
+            # a backend whose 5-D sampler implements bilinear and nearest only refuses bicubic
+            with self.assertRaisesRegex(RuntimeError, "Unsupported Bicubic interpolation"):
+                F.grid_sample(torch.empty(1, 1, 2, 2, 2, device=device),
+                              torch.empty(1, 1, 1, 1, 3, device=device), mode='bicubic')
+
+        # A trace is refused by the meta kernel, with its own message. A fake tensor
+        # needs no MPS device.
+        with FakeTensorMode():
+            with self.assertRaisesRegex(RuntimeError, "bicubic interpolation with 5D input"):
+                F.grid_sample(torch.empty(1, 1, 2, 2, 2, device='mps'),
+                              torch.empty(1, 1, 1, 1, 3, device='mps'), mode='bicubic')
 
         if torch.device(device).type != 'cpu':
             with self.assertRaisesRegex(RuntimeError, "[Ee]xpected.*same device"):
