@@ -1256,10 +1256,11 @@ def _by_name_fn(x):
 
 class _Forwarder:
     # A class declaring __getattr__ is refused by _pickles_by_default and
-    # travels whole; `note` is what pruning would have replaced.
+    # travels whole; `note` is a non-literal no guard reads, so pruning would
+    # have replaced it.
     def __init__(self, inner):
         self._inner = inner
-        self.note = "n"
+        self.note = ["n"]
 
     def __getattr__(self, name):
         # Raises for a hollow instance, as any picklable forwarder must: pickle
@@ -1270,15 +1271,16 @@ class _Forwarder:
 
 
 class _Totals:
-    # A property computed from two plain fields the guard never names as such.
+    # A property computed from two fields the guard never names as such; lists,
+    # so only the guard tree (not the literal rule) can keep them.
     def __init__(self, a, b):
-        self.a = a
-        self.b = b
+        self.a = [a]
+        self.b = [b]
         self.it = (i for i in range(3))
 
     @property
     def total(self):
-        return self.a + self.b
+        return self.a[0] + self.b[0]
 
 
 class _PipelineWithSetstate:
@@ -1821,7 +1823,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # A guarded module-level function is saved by reference, so its __dict__
         # never travels: the reducer declines it (pickle then writes the global)
         # rather than rebuilding it from a filtered copy of its attributes.
-        _by_name_fn.cache = {"k": 1}
         pickler = GuardsStatePickler(
             {id(_by_name_fn): _by_name_fn}, {}, {}, {}, io.BytesIO()
         )
@@ -4832,21 +4833,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
     def test_a_forwarding_getattr_object_is_pickled_whole(self):
         # nn.Module needs _NN_MODULE_STATE_ATTRS because its __getattr__ reads
         # dicts no guard names; a user __getattr__ has no such list, so the
-        # predicate refuses the class and nothing of the object is pruned.
+        # predicate refuses the class and nothing of the object is pruned: the
+        # unguarded list bystander is what the gate would have replaced.
         def fn(w, x):
             return x * w.scale
 
+        self.assertFalse(_pickles_by_default(_Forwarder))
         w, x = _Forwarder(_SubCfg(2.0, ["t"])), torch.randn(2)
         ref, loaded = self._test_serialization("EQUALS_MATCH", fn, w, x)
         self._test_check_fn(ref, loaded, {"w": w, "x": x}, True)
         state = load_guards_state(self._cached_guards_state).output_graph
-        self.assertEqual(state.local_scope["w"].note, "n")
+        self.assertEqual(state.local_scope["w"].note, ["n"])
         self.assertEqual(state.local_scope["w"].scale, 2.0)
 
     def test_a_property_keeps_the_fields_it_is_computed_from(self):
-        # The load-time partner of the forwarder test: a pruned `a` or `b` would
-        # make `.total` raise on _Missing + _Missing while the guard tree is
-        # rebuilt; Dynamo inlines the getter, so both fields get their own source.
+        # A pruned `a` or `b` would make `.total` raise on _Missing while the
+        # guard tree is rebuilt; Dynamo inlines the getter, so both lists get
+        # their own source and only the guard-tree rule keeps them.
         def fn(t, x):
             return x * t.total
 
