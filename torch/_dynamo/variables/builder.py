@@ -933,7 +933,6 @@ class VariableBuilder:
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
             CustomClassObjectVariable,
-            UserFunctionVariable,
         }
 
     def get_source(self) -> Source:
