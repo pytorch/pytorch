@@ -387,6 +387,94 @@ class ComposabilityTest(MultiProcContinuousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    def test_pp_fsdp_outer_gradient_accumulation(self):
+        if TEST_WITH_ROCM:
+            return
+
+        torch.get_device_module(device_type).set_device(self.device)
+        device_mesh = init_device_mesh(
+            "cuda",
+            mesh_shape=(self.world_size, 1),
+            mesh_dim_names=("dp", "pp"),
+        )
+        dp_mesh = device_mesh["dp"]
+        pp_group = device_mesh["pp"].get_group()
+        dim = 10
+        microbatches_per_step = 2
+        num_deferred_steps = 2
+        total_steps = num_deferred_steps + 1
+        total_microbatches = microbatches_per_step * total_steps
+        model = nn.Sequential(MLPModule(dim)).to(self.device)
+        ref_model = copy.deepcopy(model)
+        _, inputs, _ = self._rand_microbatches(dp_mesh, total_microbatches, dim)
+        _, targets, _ = self._rand_microbatches(dp_mesh, total_microbatches, dim)
+
+        def make_schedule(model, n_microbatches):
+            for layer in model.children():
+                fully_shard(layer, mesh=dp_mesh, reshard_after_forward=False)
+            fully_shard(model, mesh=dp_mesh)
+            fully_shard.state(model)._lazy_init()
+            stage = PipelineStage(model, 0, 1, self.device, group=pp_group)
+            schedule = _PipelineScheduleRuntime(
+                [stage],
+                n_microbatches=n_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+            actions = [
+                _Action(0, _ComputationType.FORWARD, i) for i in range(n_microbatches)
+            ]
+            actions.extend(
+                _Action(0, _ComputationType.FULL_BACKWARD, i)
+                for i in range(n_microbatches)
+            )
+            schedule._prepare_schedule_with_comms({0: actions})
+            return schedule
+
+        def assert_unsharded(model, expected):
+            states = [
+                fsdp_param.sharded_state
+                for state in fully_shard.state(model)._state_ctx.all_states
+                for group in state._fsdp_param_groups
+                for fsdp_param in group.fsdp_params
+            ]
+            self.assertNotEqual(states, [])
+            self.assertEqual(
+                [state == ShardedState.UNSHARDED for state in states],
+                [expected] * len(states),
+            )
+
+        schedule = make_schedule(model, microbatches_per_step)
+        for step in range(total_steps):
+            start = step * microbatches_per_step
+            end = start + microbatches_per_step
+            finalize_gradients = step == num_deferred_steps
+            schedule.step(
+                inputs[start:end],
+                target=targets[start:end],
+                finalize_gradients=finalize_gradients,
+            )
+            assert_unsharded(model, not finalize_gradients)
+
+        self.assertNotIn(0, schedule.unsharded_stages)
+        ref_schedule = make_schedule(ref_model, total_microbatches)
+        ref_schedule.step(inputs, target=targets)
+
+        ref_parameters = dict(ref_model.named_parameters())
+        for name, param in model.named_parameters():
+            ref_param = ref_parameters[name]
+            self.assertIsInstance(param.grad, DTensor)
+            self.assertIsInstance(ref_param.grad, DTensor)
+            self.assertEqual(
+                param.grad.full_tensor(),
+                ref_param.grad.full_tensor(),
+                atol=1e-6,
+                rtol=1e-5,
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
         """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""
@@ -488,7 +576,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                         stage_index=0,  # stage 0 (the only stage)
                         computation_type=comp_type,
                         microbatch_index=microbatch_index
-                        if comp_type == _ComputationType.FORWARD
+                        if comp_type
+                        in (_ComputationType.FORWARD, _ComputationType.FULL_BACKWARD)
                         else None,
                     )
                     for comp_type in computation_types
@@ -496,11 +585,12 @@ class ComposabilityTest(MultiProcContinuousTest):
             }
             return schedule
 
-        unshard_schedule = create_schedule(
+        finalize_schedule = create_schedule(
             [
                 _ComputationType.UNSHARD,
                 _ComputationType.FORWARD,
-                _ComputationType.REDUCE_GRAD,  # Contains final fsdp post_backward
+                _ComputationType.FULL_BACKWARD,
+                _ComputationType.REDUCE_GRAD,
             ],
             microbatch_index=0,
         )
@@ -524,11 +614,20 @@ class ComposabilityTest(MultiProcContinuousTest):
         # Verify parameters are now sharded again
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
-        # Test 2: Run UNSHARD only schedule
-        runtime.pipeline_order_with_comms = unshard_schedule
-        runtime.step(dummy_input)
+        # Test 2: Run a backward schedule with explicit FSDP finalization
+        runtime = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=loss_fn, scale_grads=False
+        )
+        runtime.pipeline_order_with_comms = finalize_schedule
+        target = torch.randn_like(dummy_input)
+        runtime.step(dummy_input, target=target)
 
         # Verify parameters are still sharded
+        check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
+        self.assertNotIn(0, runtime.unsharded_stages)
+
+        # The bookkeeping must allow the next step to unshard again.
+        runtime.step(dummy_input, target=target)
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
 
