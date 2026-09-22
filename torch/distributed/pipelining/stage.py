@@ -5,7 +5,10 @@ import operator
 import warnings
 import weakref
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from collections.abc import Callable
+from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from typing import Any, cast
 
 import torch
@@ -42,6 +45,7 @@ from torch.distributed.pipelining._utils import (
 from torch.distributed.tensor import DTensor
 from torch.fx.node import Argument, map_aggregate
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils.hooks import RemovableHandle
 
 from ._backward import (
     _autograd_grad_for_inputs,
@@ -54,10 +58,35 @@ from ._debug import map_debug_info
 
 __all__ = [
     "PipelineStage",
+    "PipelineStageInfo",
     "build_stage",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PipelineStageInfo:
+    """Identify one pipeline-stage forward invocation.
+
+    This immutable value owns no tensors, process groups, schedule state, or
+    storage. Future fields must have defaults so existing keyword-only
+    construction remains source compatible.
+
+    Attributes:
+        stage_index: Global logical pipeline-stage index. A physical pipeline
+            rank may own several logical stages.
+        microbatch_index: Microbatch index within the current pipeline step.
+        is_metadata_inference: Whether this invocation is the representative
+            dynamic metadata-inference probe rather than real execution.
+    """
+
+    stage_index: int
+    microbatch_index: int
+    is_metadata_inference: bool = False
+
+
+_ForwardContextFactory = Callable[[PipelineStageInfo], AbstractContextManager[None]]
 
 
 def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
@@ -239,6 +268,8 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
+        # RemovableHandle weak-references its registry, matching module hooks.
+        self._forward_contexts: OrderedDict[int, _ForwardContextFactory] = OrderedDict()
 
         _warn_if_eager_nccl(group)
 
@@ -318,6 +349,76 @@ class _PipelineStageBase(ABC):
         # DTensor support: consolidated stage metadata container
         # Contains inputs, outputs, input_grads, output_grads metadata
         self._stage_meta = _StageMeta()
+
+    def register_forward_context(
+        self, context_factory: _ForwardContextFactory
+    ) -> RemovableHandle:
+        """Register a context manager around this stage's forward computation.
+
+        The factory receives a :class:`PipelineStageInfo` for every built-in
+        runtime forward and dynamic metadata-inference probe. Static metadata
+        setup does not execute the stage module and therefore does not invoke
+        the factory. The returned handle removes the registration.
+
+        Only one context may be registered at a time. A custom schedule action
+        receives the context only when it delegates execution to
+        :meth:`forward_one_chunk`. CUDA graph replay does not execute this
+        Python callback; consumers must bind replay-stable state during capture.
+
+        Args:
+            context_factory: Callable that returns a fresh context manager for
+                each stage invocation. The context must not suppress exceptions
+                raised by the stage module.
+
+        Returns:
+            A handle whose :meth:`~torch.utils.hooks.RemovableHandle.remove`
+            method removes the registration.
+
+        Raises:
+            RuntimeError: If a forward context is already registered.
+        """
+        if self._forward_contexts:
+            raise RuntimeError(
+                "A pipeline forward context is already registered; remove its "
+                "handle before registering another"
+            )
+        handle = RemovableHandle(self._forward_contexts)
+        self._forward_contexts[handle.id] = context_factory
+        return handle
+
+    def _call_with_forward_context(
+        self,
+        info: PipelineStageInfo,
+        forward: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Call a forward function inside the registered stage context.
+
+        Args:
+            info: Identity of the stage invocation.
+            forward: Forward function to execute.
+            *args: Positional arguments passed to ``forward``.
+            **kwargs: Keyword arguments passed to ``forward``.
+
+        Returns:
+            The value returned by ``forward``.
+
+        Raises:
+            RuntimeError: If the context suppresses an exception from
+                ``forward`` and would otherwise leave no result.
+        """
+        context_factory = next(iter(self._forward_contexts.values()))
+        completed = False
+        with context_factory(info):
+            output = forward(*args, **kwargs)
+            completed = True
+        if not completed:
+            raise RuntimeError(
+                "A pipeline forward context suppressed an exception from the "
+                "stage module; forward contexts must not suppress exceptions"
+            )
+        return output
 
     @property
     def has_backward(self) -> bool:
@@ -996,7 +1097,20 @@ class _PipelineStageBase(ABC):
 
         # Compute forward
         try:
-            output = self.forward_maybe_with_nosync(*composite_args, **composite_kwargs)
+            if self._forward_contexts:
+                output = self._call_with_forward_context(
+                    PipelineStageInfo(
+                        stage_index=self.stage_index,
+                        microbatch_index=fwd_chunk_id,
+                    ),
+                    self.forward_maybe_with_nosync,
+                    *composite_args,
+                    **composite_kwargs,
+                )
+            else:
+                output = self.forward_maybe_with_nosync(
+                    *composite_args, **composite_kwargs
+                )
 
         except Exception as e:
             exc_msg = f"""
@@ -2080,9 +2194,22 @@ class PipelineStage(_PipelineStageBase):
         # no backward → no_grad() for cross-rank consistency.
         ctx = torch.enable_grad() if has_backward else torch.no_grad()
         with ctx:
-            outputs = self._compute_outputs(
-                *inference_args, module=self.submod, **inference_kwargs
-            )
+            if self._forward_contexts:
+                outputs = self._call_with_forward_context(
+                    PipelineStageInfo(
+                        stage_index=self.stage_index,
+                        microbatch_index=0,
+                        is_metadata_inference=True,
+                    ),
+                    self._compute_outputs,
+                    *inference_args,
+                    module=self.submod,
+                    **inference_kwargs,
+                )
+            else:
+                outputs = self._compute_outputs(
+                    *inference_args, module=self.submod, **inference_kwargs
+                )
 
         # Normalize outputs to tuple
         outputs = validate_and_normalize_to_tuple(outputs)

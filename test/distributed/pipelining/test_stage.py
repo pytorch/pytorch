@@ -3,6 +3,8 @@
 
 import os
 import tempfile
+from contextlib import contextmanager, nullcontext
+from dataclasses import FrozenInstanceError
 from unittest import mock
 
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
@@ -10,10 +12,12 @@ from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 import torch
 import torch.distributed as dist
 import torch.distributed.pipelining.stage as stage_module
+from torch._dynamo.testing import CompileCounter
 from torch.distributed.pipelining import (
     build_stage,
     pipeline,
     PipelineStage,
+    PipelineStageInfo,
     ScheduleGPipe,
 )
 from torch.distributed.pipelining._utils import PipeliningMetadataError
@@ -61,6 +65,25 @@ class PipelineStageBackendWarningTest(TestCase):
 
 
 instantiate_parametrized_tests(PipelineStageBackendWarningTest)
+
+
+@contextmanager
+def _single_rank_process_group():
+    """Provide a temporary single-rank Gloo group when no group exists."""
+    initialize = not dist.is_initialized()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if initialize:
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{os.path.join(tmpdir, 'pg')}",
+                rank=0,
+                world_size=1,
+            )
+        try:
+            yield
+        finally:
+            if initialize:
+                dist.destroy_process_group()
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
@@ -126,6 +149,169 @@ class PipelineStageMetadataInferenceTest(TestCase):
                     dist.destroy_process_group()
 
 
+class PipelineStageForwardContextTest(TestCase):
+    @parametrize(
+        "registered,static_metadata",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_forward_context(self, registered, static_metadata):
+        class StrictModule(torch.nn.Module):
+            def forward(self, x, *, scale):
+                return x * scale
+
+        with _single_rank_process_group():
+            module = StrictModule()
+            x = torch.ones(2, requires_grad=True)
+            scale = torch.full((2,), 3.0, requires_grad=True)
+            stage_kwargs = (
+                {
+                    "input_args": torch.ones(1, requires_grad=True),
+                    "output_args": torch.ones(1, requires_grad=True),
+                }
+                if static_metadata
+                else {}
+            )
+            stage = PipelineStage(module, 0, 1, torch.device("cpu"), **stage_kwargs)
+            events: list[tuple[str, PipelineStageInfo]] = []
+
+            @contextmanager
+            def forward_context(info):
+                events.append(("enter", info))
+                try:
+                    yield
+                finally:
+                    events.append(("exit", info))
+
+            if registered:
+                stage.register_forward_context(forward_context)
+            schedule = ScheduleGPipe(
+                stage,
+                2,
+                loss_fn=lambda output, target: (output - target).square().sum(),
+                scale_grads=False,
+            )
+
+            info_patch = (
+                mock.patch.object(
+                    stage_module,
+                    "PipelineStageInfo",
+                    side_effect=AssertionError("unexpected stage info construction"),
+                )
+                if not registered
+                else nullcontext()
+            )
+            with info_patch:
+                output = schedule.step(x, scale=scale, target=torch.zeros(2))
+
+            self.assertEqual(output, x * scale)
+            self.assertEqual(x.grad, torch.full_like(x, 18))
+            self.assertEqual(scale.grad, torch.full_like(scale, 6))
+            if not registered:
+                self.assertEqual(events, [])
+                return
+
+            expected = [
+                PipelineStageInfo(stage_index=0, microbatch_index=0),
+                PipelineStageInfo(stage_index=0, microbatch_index=1),
+            ]
+            if not static_metadata:
+                expected.insert(
+                    0,
+                    PipelineStageInfo(
+                        stage_index=0,
+                        microbatch_index=0,
+                        is_metadata_inference=True,
+                    ),
+                )
+            self.assertEqual(
+                events,
+                [(phase, info) for info in expected for phase in ("enter", "exit")],
+            )
+            with self.assertRaises(FrozenInstanceError):
+                expected[0].__setattr__("stage_index", 1)
+            self.assertFalse(hasattr(expected[0], "__dict__"))
+
+    def test_forward_context_lifecycle_and_exceptions(self):
+        class RaisingModule(torch.nn.Module):
+            def forward(self, x):
+                raise ValueError("module failure")
+
+        with _single_rank_process_group():
+            stage = PipelineStage(RaisingModule(), 0, 1, torch.device("cpu"))
+            events = []
+
+            @contextmanager
+            def forward_context(info):
+                events.append(("enter", info))
+                try:
+                    yield
+                finally:
+                    events.append(("exit", info))
+
+            handle = stage.register_forward_context(forward_context)
+            with self.assertRaisesRegex(RuntimeError, "already registered"):
+                stage.register_forward_context(forward_context)
+            with self.assertRaisesRegex(RuntimeError, "failed to run forward"):
+                stage.forward_one_chunk(0, (torch.ones(1),))
+            self.assertEqual([event[0] for event in events], ["enter", "exit"])
+
+            handle.remove()
+            replacement = stage.register_forward_context(forward_context)
+            replacement.remove()
+
+            @contextmanager
+            def suppressing_context(info):
+                try:
+                    yield
+                except ValueError:
+                    pass
+
+            stage.register_forward_context(suppressing_context)
+            with self.assertRaisesRegex(RuntimeError, "failed to run forward") as error:
+                stage.forward_one_chunk(1, (torch.ones(1),))
+            self.assertRegex(str(error.exception.__cause__), "must not suppress")
+
+    def test_forward_context_wraps_compiled_module(self):
+        class StrictModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with _single_rank_process_group():
+            counter = CompileCounter()
+            self.addCleanup(torch._dynamo.reset)
+            module = torch.compile(StrictModule(), backend=counter, fullgraph=True)
+            stage = PipelineStage(
+                module,
+                0,
+                1,
+                torch.device("cpu"),
+                input_args=torch.ones(1),
+                output_args=torch.ones(1),
+            )
+            observed = []
+
+            @contextmanager
+            def forward_context(info):
+                observed.append(info)
+                yield
+
+            stage.register_forward_context(forward_context)
+            output = ScheduleGPipe(stage, 2).step(torch.ones(2))
+
+            self.assertEqual(output, torch.full((2,), 2.0))
+            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(
+                observed,
+                [
+                    PipelineStageInfo(stage_index=0, microbatch_index=0),
+                    PipelineStageInfo(stage_index=0, microbatch_index=1),
+                ],
+            )
+
+
+instantiate_parametrized_tests(PipelineStageForwardContextTest)
+
+
 def get_dtype_change_hook(new_dtype):
     """A simple hook for simulating mixed precision"""
 
@@ -187,6 +373,14 @@ class StageTest(MultiProcContinuousTest):
             self.rank,
             self.device,
         )
+        observed = []
+
+        @contextmanager
+        def forward_context(info):
+            observed.append(info)
+            yield
+
+        stage.register_forward_context(forward_context)
 
         # Attach to a schedule
         schedule = ScheduleGPipe(stage, chunks)
@@ -203,6 +397,16 @@ class StageTest(MultiProcContinuousTest):
         if self.rank == self.world_size - 1:
             ref_out = mod(x)
             torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=5e-2)
+        self.assertEqual(
+            observed,
+            [
+                PipelineStageInfo(
+                    stage_index=self.rank,
+                    microbatch_index=microbatch_index,
+                )
+                for microbatch_index in range(chunks)
+            ],
+        )
 
         # Test qualname mapping
         submod_keys = stage.submod.state_dict().keys()
