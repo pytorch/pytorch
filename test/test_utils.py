@@ -1269,11 +1269,12 @@ class TestUtilsInternal(TestCase):
             torch._utils_internal.max_clock_rate.cache_clear()
 
     def test_max_clock_rate_uses_current_rocm_device(self):
-        properties = types.SimpleNamespace(gcnArchName="gfx90a:sramecc+")
+        properties = types.SimpleNamespace(clock_rate=1_700_000)
         torch._utils_internal.max_clock_rate.cache_clear()
         try:
             with (
                 unittest.mock.patch.object(torch.version, "hip", "6.0"),
+                unittest.mock.patch.object(torch.cuda, "device"),
                 unittest.mock.patch.object(
                     torch.cuda, "current_device", return_value=1
                 ) as current_device,
