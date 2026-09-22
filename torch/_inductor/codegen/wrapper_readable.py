@@ -166,6 +166,12 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
                 for line in metadata.splitlines()
                 if not line.startswith("# kernel path:")
             )
+        # @triton.jit helpers are numbered per kernel and named by op sequence, so two
+        # kernels can define the same helper name with different bodies; in one shared
+        # namespace the later def would win for both. Make them kernel-unique.
+        helpers = re.findall(r"^def (_triton_helper_fn\w*)\(", src_code, re.MULTILINE)
+        for helper in OrderedSet(helpers):
+            src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
         self.define_kernel(
             kernel_name,
             src_code,
@@ -236,14 +242,15 @@ def readable_wrapper_requested() -> bool:
             "which requires triton.unique_kernel_names so they do not shadow each "
             "other. Enable unique_kernel_names or disable readable_wrapper."
         )
-    if config.benchmark_kernel:
-        # benchmark_kernel appends get_args()/call()/__main__ to each kernel's source;
-        # at module level those collide with each other and with the wrapper's own call.
-        raise RuntimeError(
-            "torch._inductor.config.readable_wrapper is incompatible with "
-            "benchmark_kernel, which appends a get_args()/call()/__main__ harness to "
-            "every kernel; defined at module level those collide."
-        )
+    for flag in ("benchmark_kernel", "benchmark_combo_kernel"):
+        if getattr(config, flag):
+            # These append get_args()/call()/__main__ to each kernel's source; at module
+            # level those collide with each other and with the wrapper's own call.
+            raise RuntimeError(
+                f"torch._inductor.config.readable_wrapper is incompatible with {flag}, "
+                "which appends a get_args()/call()/__main__ harness to every kernel; "
+                "defined at module level those collide."
+            )
     if config.profile_bandwidth_output:
         # profile_bandwidth_output runs the module's benchmark harness, which this mode
         # does not emit.
