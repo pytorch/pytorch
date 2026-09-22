@@ -392,6 +392,34 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), mod(x))
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_saving_does_not_bypass_the_live_entry(self):
+        # from_cache_entry marks a code whose backend it cannot find as bypassed
+        # on the entry it is handed. Saving must work on a copy: the live entry
+        # keeps serving this process, and a save that came up short on a
+        # backend must not flip it to bypassed.
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
+        self.assertTrue(live.codes[0].backend_ids)
+        artifacts = dict(PrecompileContext._backend_artifacts_by_key)
+        PrecompileContext._backend_artifacts_by_key.clear()
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertIsNot(saved[key].dynamo, live)
+        self.assertTrue(saved[key].dynamo.codes[0].bypassed)
+        self.assertFalse(live.codes[0].bypassed)
+        # Backend artifacts are recorded lazily (a backward's at its first
+        # compile), so a later save can find what an earlier one missed. It
+        # must then write an installable entry, and with every backend present
+        # the code passes through as the live object.
+        PrecompileContext._backend_artifacts_by_key.update(artifacts)
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertFalse(saved[key].dynamo.codes[0].bypassed)
+        self.assertIs(saved[key].dynamo.codes[0], live.codes[0])
+
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
         class MyModule(torch.nn.Module):
