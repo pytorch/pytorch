@@ -922,6 +922,104 @@ class TestPrecompile(TestCase):
             self.assertEqual(build()(model, x), expected)
         self.assertNotIn("__resume_at_dead", scope)
 
+    def test_multigraph_artifact_round_trips_a_hand_built_package(self):
+        # The renderer turns a package Dynamo filled into the (python_code, cache)
+        # pair load reads: readable metadata beside the opaque blobs, the tracer
+        # tag pairing the two halves, and a driver that serves the captured
+        # variants and refuses the rest.
+        from unittest import mock
+
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import (
+            _build_multigraph_artifact,
+            _multigraph_frames,
+            _parse_artifact_metadata,
+            _runnable_from_pair,
+            _serving_mode,
+        )
+        from torch.compiler.precompile import PrecompileSummary
+
+        def step(model, x, *, scale=2.0):
+            y = model(x) * scale * _MULTIGRAPH_SCALE
+            torch._dynamo.graph_break()
+            return y + y.shape[0]
+
+        model = torch.nn.Linear(4, 4)
+        x2, x3 = torch.randn(2, 4), torch.randn(3, 4)
+        package = CompilePackage(step)
+        compiled = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)
+        expected2, expected3 = compiled(model, x2), compiled(model, x3)
+        entry = package.cache_entry()
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=backend)
+            for backend_id, backend in package.cached_backends.items()
+        }
+        summary = PrecompileSummary(
+            frames=len(entry.codes),
+            resume_functions=1,
+            guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
+            backend_graphs=len(backends),
+            dropped_guards=(("MODULE_MATCH", "model"),),
+        )
+        # The records name this module, which is __main__ under a script run and
+        # the driver refuses that; serve them from an importable alias of it.
+        module = "precompile_test_captured_module"
+        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
+        self.addCleanup(alias.stop)
+        alias.start()
+        for code in entry.codes:
+            code.python_module = module
+        python_code, cache = _build_multigraph_artifact(
+            entry, backends, summary, "eager", step
+        )
+        meta = _parse_artifact_metadata(python_code)
+        self.assertEqual(meta["TRACER"], "dynamo")
+        self.assertEqual(meta["SERVING_MODE"], "standalone")
+        self.assertEqual(meta["BACKEND"], "eager")
+        self.assertEqual(meta["FN_NAME"], step.__qualname__)
+        self.assertEqual(
+            [name for name, _ in meta["FRAMES"]],
+            [c.python_code.co_name for c in entry.codes],
+        )
+        self.assertEqual(meta["DROPPED_GUARDS"], [["MODULE_MATCH", "model"]])
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertEqual(blob["tracer"], "dynamo")
+        self.assertIsNone(blob["artifact"])
+        # A serving process never traced, so the names Dynamo minted into this
+        # module during capture must not be what makes the guards pass.
+        torch._dynamo.reset()
+        scope = step.__globals__
+        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
+
+        def scrub():
+            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
+
+        removed = scrub()
+        self.addCleanup(lambda: (scrub(), scope.update(removed)))
+        f = _runnable_from_pair(python_code, cache, _trusted=True)
+        self.assertFalse(f.installed)
+        self.assertEqual(f(model, x2), expected2)
+        self.assertEqual(f(model, x3), expected3)
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+            f(model, x2.double())
+        # The two halves pair on the tracer tag: a make_fx cache is refused.
+        _, fx_cache = _precompile_pair(_files_fn, _FilesModel(), x2, backend="eager")
+        with self.assertRaisesRegex(PrecompileError, "tracer"):
+            _runnable_from_pair(python_code, fx_cache)
+        # A continuation Dynamo never traced (no tensor reached it) ran eager
+        # during capture and is served eager, so it counts as covered; one
+        # Dynamo compiled but kept no variant of does not.
+        frames = _multigraph_frames(entry)
+        self.assertEqual(_serving_mode(frames), "standalone")
+        frames[1]["variants"] = []
+        self.assertEqual(_serving_mode(frames), "installed")
+        frames[1]["trivial"] = True
+        self.assertEqual(_serving_mode(frames), "standalone")
+
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
         # than the raw internal error one produces further down (a static capture has no
