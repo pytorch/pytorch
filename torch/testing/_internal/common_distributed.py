@@ -240,6 +240,8 @@ def skip_if_small_worldsize(func):
 
         return func(*args, **kwargs)
 
+    # Allow TestDistBackend to skip before launching rank workers.
+    wrapper._skip_small_worldsize_before_spawn = True
     return wrapper
 
 
