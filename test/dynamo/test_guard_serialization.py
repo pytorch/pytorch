@@ -1255,11 +1255,11 @@ def _by_name_fn(x):
 
 
 class _Forwarder:
-    # Attribute lookup that reads an unguarded-looking sibling: __getattr__
-    # goes through _inner, which no guard names directly.
+    # A class declaring __getattr__ is refused by _pickles_by_default and
+    # travels whole; `note` is what pruning would have replaced.
     def __init__(self, inner):
         self._inner = inner
-        self.it = (i for i in range(3))
+        self.note = "n"
 
     def __getattr__(self, name):
         # Raises for a hollow instance, as any picklable forwarder must: pickle
@@ -1355,6 +1355,15 @@ class _RaisingGetattr:
         raise RuntimeError(name)
 
 
+class _DelegatingForwarder:
+    # The common forwarder: on a hollow instance every lookup recurses.
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+
 class _PermissiveGetattr:
     # Serves any name, so BUILD gets a __setstate__ to call and drops the state.
     def __init__(self):
@@ -1377,7 +1386,8 @@ _FINALIZED: list = []
 
 
 class _CountsDeletes:
-    # A finalizer that touches only a global, the shape a probe must not run.
+    # A finalizer that touches only a global; a pruned object's would run
+    # against the sentinels.
     def __init__(self):
         self.a = 1
 
@@ -3196,17 +3206,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # The predicate the attribute pruner will gate on: an object round-trips
         # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
         # registration and no state outside __dict__ (slots, container items,
-        # var-sized or C layout) is involved. One refusal fixture per conjunct;
-        # a __getattr__ that serves any name is refused (BUILD would call what it
-        # returns as __setstate__), one that raises reads as False rather than
-        # failing the dump.
+        # var-sized or C layout) is involved. One refusal fixture per conjunct.
+        # Every __getattr__ is refused by declaration; the two permissive ones
+        # show why in pickle's own terms: BUILD calls what the hollow instance
+        # resolves __setstate__ to, so the state is dropped or a None is called.
+        self.assertEqual(vars(pickle.loads(pickle.dumps(_PermissiveGetattr()))), {})
+        with self.assertRaisesRegex(TypeError, "NoneType.*not callable"):
+            pickle.loads(pickle.dumps(_NoneGetattr()))
         copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
         self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
         self.assertTrue(_pickles_by_default(_HolderWithGenerator))
         self.assertTrue(_pickles_by_default(_GenericHolder))
         before = len(_FINALIZED)
         self.assertFalse(_pickles_by_default(_CountsDeletes))
-        self.assertEqual(len(_FINALIZED), before)  # the probe ran no finalizer
+        self.assertEqual(len(_FINALIZED), before)  # judged without an instance
         for obj in (
             _PipelineWithSetstate(),
             _WithGetstate(),
@@ -3218,6 +3231,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _PermissiveGetattr(),
             _NoneGetattr(),
             _RaisingGetattr(),
+            _DelegatingForwarder(_GenericHolder()),
             _SlottedHolder(),
             _PureSlots(),
             _AttrDict(a=1),
@@ -3284,6 +3298,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _PermissiveGetattr(),
             _NoneGetattr(),
             _RaisingGetattr(),
+            _DelegatingForwarder(_GenericHolder()),
             _CountsDeletes(),
             types.SimpleNamespace(a=1),
             Point(1, 2),
@@ -3317,7 +3332,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                     # hollow cls.__new__(cls), then BUILD asks that instance for
                     # __setstate__ before applying the dict. Run on a hollow
                     # instance given a picklable state, since the admitted zoo
-                    # entries hold a live generator by design.
+                    # entries hold a live generator by design; it is what would
+                    # catch a hook the type-level reads cannot see.
                     fn, args = obj.__reduce_ex__(protocol)[:2]
                     hollow = fn(*args)
                     vars(hollow)["probe"] = 1
@@ -4742,19 +4758,18 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIsInstance(state.local_scope["h"].it, _Missing)
         self.assertEqual(state.local_scope["h"].cfg, {"a": 1})
 
-    def test_a_forwarding_getattr_keeps_the_attribute_it_reads_through(self):
+    def test_a_forwarding_getattr_object_is_pickled_whole(self):
         # nn.Module needs _NN_MODULE_STATE_ATTRS because its __getattr__ reads
-        # dicts no guard names; a user __getattr__ has no such list, and relies
-        # on Dynamo inlining it so the intermediate access gets its own source.
+        # dicts no guard names; a user __getattr__ has no such list, so the
+        # predicate refuses the class and nothing of the object is pruned.
         def fn(w, x):
             return x * w.scale
 
-        w, x = _Forwarder(_HolderWithGenerator()), torch.randn(2)
-        w._inner.scale = 2.0
+        w, x = _Forwarder(_SubCfg(2.0, ["t"])), torch.randn(2)
         ref, loaded = self._test_serialization("EQUALS_MATCH", fn, w, x)
         self._test_check_fn(ref, loaded, {"w": w, "x": x}, True)
         state = load_guards_state(self._cached_guards_state).output_graph
-        self.assertIsInstance(state.local_scope["w"].it, _Missing)
+        self.assertEqual(state.local_scope["w"].note, "n")
         self.assertEqual(state.local_scope["w"].scale, 2.0)
 
     def test_a_property_keeps_the_fields_it_is_computed_from(self):
