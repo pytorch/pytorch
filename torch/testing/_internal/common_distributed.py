@@ -223,6 +223,7 @@ def skip_if_no_gpu(func):
 
         return func(*args, **kwargs)
 
+    wrapper._skip_no_accelerator_before_spawn = TEST_SKIPS["no_accelerator"].message
     return wrapper
 
 
@@ -240,6 +241,8 @@ def skip_if_small_worldsize(func):
 
         return func(*args, **kwargs)
 
+    # Allow TestDistBackend to skip before launching rank workers.
+    wrapper._skip_small_worldsize_before_spawn = True
     return wrapper
 
 
@@ -318,6 +321,10 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        if not allow_cpu:
+            wrapper._skip_no_accelerator_before_spawn = TEST_SKIPS[
+                f"multi-device-{x}"
+            ].message
         return wrapper
 
     return decorator
@@ -1186,8 +1193,9 @@ class MultiProcessTestCase(TestCase):
                     for p in self.processes:
                         p.terminate()
                     break
-                # Sleep to avoid excessive busy polling.
-                time.sleep(0.1)
+                pending = [p.sentinel for p in self.processes if p.exitcode is None]
+                if pending:
+                    multiprocessing.connection.wait(pending, timeout=0.1)
 
             elapsed_time = time.time() - start_time
             self._check_return_codes(fn, elapsed_time)
