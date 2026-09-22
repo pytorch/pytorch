@@ -1156,16 +1156,36 @@ class TestLocalTensorWorld12(LocalTensorWorldTest):
             for r, i in zip((8, 11, 9, 10), range(4)):
                 self.assertEqual(out._local_tensors[r].item(), 1100.0 + i)
 
-    def test_prepare_collective_groups_rejects_misaligned_group(self):
-        from torch.distributed._local_tensor._c10d import _prepare_collective_groups
+    def test_broadcast_strided_group(self):
+        sub_pg = dist.new_group(ranks=[0, 4, 8])
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor(
+                {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+            )
+            dist.broadcast(lt, src=4, group=sub_pg)
+            for fiber in ((0, 4, 8), (1, 5, 9), (2, 6, 10), (3, 7, 11)):
+                for r in fiber:
+                    self.assertEqual(lt._local_tensors[r].item(), float(fiber[1]))
 
-        dist.destroy_process_group()
-        dist.init_process_group("fake", rank=1, world_size=self.world_size)
-        sub_pg = dist.new_group(ranks=[1, 2, 3, 4])
-        with self.assertRaisesRegex(
-            AssertionError, r"\[1, 2, 3, 4\].*are not a fiber of the global mesh"
-        ):
-            _prepare_collective_groups(sub_pg)
+    def test_scatter_strided_group(self):
+        from torch.distributed._local_tensor._c10d import _local_scatter_
+
+        sub_pg = dist.new_group(ranks=[0, 4, 8])
+        with LocalTensorMode(self.world_size):
+            scatter_list = [
+                LocalTensor(
+                    {
+                        r: torch.tensor([float(100 * r + i)])
+                        for r in range(self.world_size)
+                    }
+                )
+                for i in range(3)
+            ]
+            out = LocalTensor({r: torch.zeros(1) for r in range(self.world_size)})
+            _local_scatter_([out], [scatter_list], sub_pg, root_rank=1)
+            for fiber in ((0, 4, 8), (1, 5, 9), (2, 6, 10), (3, 7, 11)):
+                for i, r in enumerate(fiber):
+                    self.assertEqual(out._local_tensors[r].item(), 100.0 * fiber[1] + i)
 
 
 class TestLocalTensorWorld12Rank4(LocalTensorWorldTest):
@@ -1239,6 +1259,15 @@ class TestLocalTensorWorld12Rank4(LocalTensorWorldTest):
                 self.assertEqual(out._local_tensors[r].item(), 700.0 + i)
             for r, i in zip((8, 11, 9, 10), range(4)):
                 self.assertEqual(out._local_tensors[r].item(), 1100.0 + i)
+
+    def test_prepare_collective_groups_rejects_misaligned_group(self):
+        from torch.distributed._local_tensor._c10d import _prepare_collective_groups
+
+        sub_pg = dist.new_group(ranks=[1, 2, 3, 4])
+        with self.assertRaisesRegex(
+            AssertionError, r"\[1, 2, 3, 4\].*are not a fiber of the global mesh"
+        ):
+            _prepare_collective_groups(sub_pg)
 
 
 class TestLocalTensorWorld8(LocalTensorWorldTest):
