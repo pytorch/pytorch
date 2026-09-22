@@ -23,8 +23,14 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    HAS_GPU_AND_TRITON,
+)
 from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
@@ -106,7 +112,7 @@ class BaseLookupTableTest(TestCase):
     def create_mock_mm_kernel_inputs(
         self,
         shapes: list[tuple[int, ...]] | None = None,
-        device: torch.device = torch.device("cuda"),
+        device: torch.device = torch.device(GPU_TYPE),
         dtype: torch.dtype = torch.float32,
         scalars: dict[str, float | int] | None = None,
     ) -> MockMMKernelInputs:
@@ -167,7 +173,10 @@ class BaseLookupTableTest(TestCase):
         return config
 
 
-@unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
+@unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
+@skipIfXpu(
+    msg="Lookup table device key not supported on XPU: https://github.com/intel/torch-xpu-ops/issues/5442"
+)
 @instantiate_parametrized_tests
 class TestLookupTable(BaseLookupTableTest):
     """Consolidated tests for lookup table functionality"""
@@ -559,7 +568,7 @@ class TestLookupTable(BaseLookupTableTest):
         class TableKeyChoices(LookupTableChoices):
             @staticmethod
             def _get_device_key(device):
-                if device.type != "cuda":
+                if device.type not in ["cuda", "xpu"]:
                     return None
                 return "device_1"  # Always device_1 for table key generation
 
@@ -583,7 +592,7 @@ class TestLookupTable(BaseLookupTableTest):
             class TestChoices(LookupTableChoices):
                 @staticmethod
                 def _get_device_key(device):
-                    if device.type != "cuda":
+                    if device.type not in ["cuda", "xpu"]:
                         return None
                     return "device_1"
 
@@ -592,7 +601,7 @@ class TestLookupTable(BaseLookupTableTest):
             class TestChoices(LookupTableChoices):
                 @staticmethod
                 def _get_device_key(device):
-                    if device.type != "cuda":
+                    if device.type not in ["cuda", "xpu"]:
                         return None
                     return "device_2"
 
@@ -722,7 +731,7 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
         super().setUp()
         torch._dynamo.reset()
         clear_preprocessing_fns()
-        self.device = torch.device("cuda")
+        self.device = torch.device(GPU_TYPE)
         self.dev_key = LookupTableChoices._get_device_key(self.device)
         self.original_lookup_table = inductor_config.lookup_table.table
         # Set the lookup table choices handler
@@ -849,7 +858,7 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
 
         return SimpleMatmul()
 
-    def _create_test_inputs(self, device="cuda"):
+    def _create_test_inputs(self, device=GPU_TYPE):
         """Create test inputs for matmul"""
         return [
             torch.randn(512, 512, device=device, dtype=torch.float32),
@@ -857,7 +866,10 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
         ]
 
 
-@unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
+@unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
+@skipIfXpu(
+    msg="Lookup table device key not supported on XPU: https://github.com/intel/torch-xpu-ops/issues/5443"
+)
 @instantiate_parametrized_tests
 class TestLookupTableE2E(BaseE2ELookupTableTest):
     """E2E tests for lookup table functionality"""
