@@ -479,6 +479,28 @@
   - Lint
   - pull
 
+- name: Profiler
+  patterns:
+  - test/cpp/profiler/**
+  - test/profiler/**
+  - third_party/kineto
+  - torch/_C/_profiler.pyi
+  - torch/autograd/profiler*
+  - torch/csrc/autograd/profiler*
+  - torch/csrc/profiler/**
+  - torch/profiler/**
+  approved_by:
+  - ryanzhang22
+  - scotts
+  - ngimel
+  - dolpm
+  - sanrise
+  - NicolasHug
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
@@ -520,8 +542,9 @@
   - torch/_C/__init__.pyi.in
   approved_by:
   - EikanWang
-  - jgong5
   - gujinghui
+  - guangyey
+  - etaf
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -581,8 +604,8 @@
   approved_by:
   - aditvenk
   - AmesingFlank
-  - amirafzali
   - angelayi
+  - anshul-si
   - aorenste
   - atalman
   - blaine-rister
@@ -598,7 +621,6 @@
   - frgossen
   - georgehong
   - han3101
-  - haoyuz
   - htyu
   - huydhn
   - IvanKobzarev
@@ -620,8 +642,8 @@
   - pianpwk
   - ryanzhang22
   - sanketpurandare
+  - sanrise
   - scotts
-  - seemethere
   - sevenEng
   - SherlockNoMad
   - slayton58
