@@ -14168,8 +14168,13 @@ def ___make_guard_fn():
 
         x = torch.randn([0, 1, 2, 3, 4, 5])
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "infinite generator"
+        # symbolic_convert imports the limit by value, so patch it there. A small
+        # limit exercises the same bail-out without tracing 100k YIELD_VALUEs.
+        with (
+            unittest.mock.patch.object(
+                torch._dynamo.symbolic_convert, "MAX_ITERATOR_LIMIT", 100
+            ),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "infinite generator"),
         ):
             compiled_fn(x)
 

@@ -1526,7 +1526,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """19""")
 
     def test_hf_t5_forward(self):
-        input = torch.randn([1, 2048, 512])
+        # 512 is PartialT5's hidden size; the sequence length only has to be
+        # long enough to trace, the assertions below are graph/op counts.
+        input = torch.randn([1, 256, 512])
         model = PartialT5()
         correct = model(input)
         cnt = torch._dynamo.testing.CompileCounter()
@@ -8359,9 +8361,9 @@ SavedForBackwardsAOTOutput(idx=5)""",
         # symints). sym_min/sym_max carry it symbolically, so a single graph
         # serves both the "length exceeds signal" and "length within signal"
         # cases.
-        n_fft = 1024
-        hop_length = 512
-        length = 60000
+        n_fft = 64
+        hop_length = 32
+        length = 3000
 
         def fn(spec, window):
             return torch.istft(
@@ -8373,8 +8375,8 @@ SavedForBackwardsAOTOutput(idx=5)""",
             )
 
         window = torch.hann_window(n_fft)
-        # 50 frames -> signal shorter than length (tail is padded);
-        # 200 frames -> signal longer than length (clamped/sliced).
+        # 50 frames -> 1632 samples, shorter than length (tail is padded);
+        # 200 frames -> 6432 samples, longer than length (clamped/sliced).
         spec_short = torch.view_as_complex(torch.randn(4, n_fft // 2 + 1, 50, 2))
         spec_long = torch.view_as_complex(torch.randn(4, n_fft // 2 + 1, 200, 2))
 
