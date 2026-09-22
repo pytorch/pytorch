@@ -2572,11 +2572,15 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         self._set_guard_export_info(guard, [code])
+        reason = (
+            f"Set {set_ref} must contain item {item!r}; Dynamo specialized the "
+            "compiled code on this item being present."
+        )
 
         self.get_guard_manager(guard).add_set_contains_guard(
             True,
             item,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
@@ -2594,11 +2598,15 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         self._set_guard_export_info(guard, [code])
+        reason = (
+            f"Set {set_ref} must not contain item {item!r}; Dynamo specialized the "
+            "compiled code on this item being absent."
+        )
 
         self.get_guard_manager(guard).add_set_contains_guard(
             False,
             item,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
