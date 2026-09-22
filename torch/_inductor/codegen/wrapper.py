@@ -1697,9 +1697,6 @@ class PythonWrapperCodegen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
-        # Set by define_kernel when a backend binds its kernel through AsyncCompile.
-        # Only meaningful once every kernel has been defined, i.e. after line replay.
-        self.uses_async_compile = False
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
         # Nesting depth of the kernel-profiling {} scope blocks currently open.
         # A symbolic numel emitted inside one is block-scoped, so it has to be
@@ -1814,7 +1811,7 @@ class PythonWrapperCodegen(CodeGen):
         self.header.writeline(f"{name} = None  # {hashed}")
 
     def _preamble_imports(self) -> tuple[tuple[tuple[str, ...], str], ...]:
-        """The imports every graph gets, as (names bound, source line).
+        """The imports every graph gets, as (names the line exists for, source line).
 
         Named rather than written as one blob so a wrapper that cares whether the
         emitted module is minimal can decide per entry; see write_preamble_line.
@@ -1841,7 +1838,11 @@ class PythonWrapperCodegen(CodeGen):
                 "from torch._inductor.codegen.memory_planning import _align as align",
             ),
             (("device", "empty_strided"), "from torch import device, empty_strided"),
-            (("AsyncCompile",), f"from {async_compile.__name__} import AsyncCompile"),
+            # Its only user is the async_compile binding, so it lives and dies with it.
+            (
+                ("async_compile",),
+                f"from {async_compile.__name__} import AsyncCompile",
+            ),
             (
                 ("extern_kernels",),
                 "from torch._inductor.select_algorithm import extern_kernels",
@@ -1894,12 +1895,14 @@ class PythonWrapperCodegen(CodeGen):
                 ("alloc_from_pool",),
                 "alloc_from_pool = torch.ops.inductor._alloc_from_pool",
             ),
+            (("async_compile",), "async_compile = AsyncCompile()"),
         )
 
     def write_preamble_line(
         self, buf: IndentedBuffer, names: tuple[str, ...], line: str
     ) -> None:
-        """Emit one preamble line binding ``names``.
+        """Emit one line that exists only for ``names``: an import or binding of
+        them, or the AsyncCompile wait/del that retires async_compile.
 
         The default emits every line: which of them a given graph will use is not known
         here, since write_header runs before anything has been lowered.
@@ -1926,7 +1929,6 @@ class PythonWrapperCodegen(CodeGen):
             self.imports.splice(inductor_debug_utils, strip=True)
         for names, line in self._preamble_bindings():
             self.write_preamble_line(self.header, names, line)
-        self.write_async_compile_binding()
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
@@ -2022,18 +2024,24 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
-        import_str = f"""
-            import triton
-            import triton.language as tl
-            from {triton_heuristics.__name__} import start_graph, end_graph
-            """
+        triton_imports = (
+            (("triton",), "import triton"),
+            (("tl",), "import triton.language as tl"),
+            (
+                ("start_graph", "end_graph"),
+                f"from {triton_heuristics.__name__} import start_graph, end_graph",
+            ),
+        )
         if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.splice(import_str)
+            self.kernel_autotune_calls.writeline("")
+            for _, line in triton_imports:
+                self.kernel_autotune_calls.writeline(line)
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
         if not V.graph.cpp_wrapper:
-            self.imports.splice(import_str, strip=True)
+            for names, line in triton_imports:
+                self.write_preamble_line(self.imports, names, line)
             self.imports.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
@@ -2118,17 +2126,11 @@ class PythonWrapperCodegen(CodeGen):
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
 
-    def write_async_compile_binding(self) -> None:
-        self.header.writeline("async_compile = AsyncCompile()")
-
     def write_async_compile_wait(self) -> None:
-        self.prefix.splice(
-            """
-
-            async_compile.wait(globals())
-            del async_compile
-            """
-        )
+        self.prefix.writeline("")
+        self.prefix.writeline("")
+        for line in ("async_compile.wait(globals())", "del async_compile"):
+            self.write_preamble_line(self.prefix, ("async_compile",), line)
 
     def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
@@ -3719,11 +3721,6 @@ class PythonWrapperCodegen(CodeGen):
         standalone: bool = False,
         autotune_body: str | None = None,
     ):
-        # Every backend's kernel definition funnels through here, so this is the one
-        # place that can tell whether the emitted module still needs an AsyncCompile at
-        # all -- ten of the eleven backends bind their kernel by calling one.
-        if "async_compile." in kernel_body:
-            self.uses_async_compile = True
         self.writeline(
             KernelDefinitionLine(
                 self,
