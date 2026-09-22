@@ -1807,6 +1807,24 @@ graph(%Ra, %Rb):
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
+    def test_native_dropout_none(self):
+        class Module(nn.Module):
+            def forward(self, x):
+                first = torch.native_dropout(x, 0.5, None)
+                second = torch.native_dropout(x, 0.5, None)
+                return first, second
+
+        scripted = torch.jit.script(Module()).eval()
+        for module in (scripted, torch.jit.freeze(scripted)):
+            graph = module.graph.copy()
+            torch._C._jit_pass_cse(graph)
+            nodes = list(graph.findAllNodes("aten::native_dropout"))
+            self.assertEqual(len(nodes), 2)
+            self.assertTrue(all(node.isNondeterministic() for node in nodes))
+            x = torch.ones(256)
+            for output, mask in module(x):
+                self.assertEqual(output, x * mask * 2)
+
     def test_dropout(self):
         x = torch.ones(2, 2)
         with torch.random.fork_rng(devices=[]):

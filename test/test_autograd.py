@@ -13825,6 +13825,39 @@ class TestAutogradForwardMode(TestCase):
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
+    @parametrize("train", [None, False, True])
+    @parametrize("p", [0.0, 0.2, 0.5, 1.0])
+    def test_native_dropout_optional_train(self, device, train, p):
+        x = torch.randn(256, device=device, requires_grad=True)
+        tangent = torch.randn_like(x)
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, tangent)
+            output, mask = torch.native_dropout(dual, p, train)
+            output, jvp = fwAD.unpack_dual(output)
+
+        scale = 1.0 if train is False else (0.0 if p == 1 else 1.0 / (1.0 - p))
+        multiplier = mask * scale
+        self.assertEqual(output, x * multiplier)
+        self.assertEqual(jvp, tangent * multiplier)
+        if train is False or p == 0:
+            self.assertEqual(mask, torch.ones_like(mask))
+        elif p == 1:
+            self.assertEqual(mask, torch.zeros_like(mask))
+
+        grad_output = torch.randn_like(x, requires_grad=True)
+        grad = torch.autograd.grad(output, x, grad_output, retain_graph=True)[0]
+        self.assertEqual(grad, grad_output * multiplier)
+        differentiable_grad = torch.autograd.grad(
+            output, x, grad_output, create_graph=True, retain_graph=True
+        )[0]
+        self.assertEqual(differentiable_grad, grad_output * multiplier)
+        gradgrad = torch.autograd.grad(differentiable_grad.sum(), grad_output)[0]
+        self.assertEqual(gradgrad, multiplier)
+
+        loss_grad = torch.autograd.grad(output.square().sum(), x, create_graph=True)[0]
+        hessian = torch.autograd.grad(loss_grad.sum(), x)[0]
+        self.assertEqual(hessian, 2 * multiplier.square())
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:

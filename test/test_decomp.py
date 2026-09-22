@@ -34,6 +34,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1178,6 +1179,21 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
+    @parametrize("train", [None, False, True])
+    @parametrize("p", [0.0, 0.2, 0.5, 1.0])
+    def test_native_dropout_optional_train(self, device, train, p):
+        x = torch.ones(256, device=device)
+        output, mask = decomposition_table[aten.native_dropout.default](x, p, train)
+        scale = 1.0 if train is False else (0.0 if p == 1 else 1.0 / (1.0 - p))
+        self.assertEqual(output, x * mask * scale)
+        if train is False or p == 0:
+            self.assertEqual(mask, torch.ones_like(mask))
+        elif p == 1:
+            self.assertEqual(mask, torch.zeros_like(mask))
+        else:
+            self.assertTrue(mask.any())
+            self.assertFalse(mask.all())
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_softmax(self, device):

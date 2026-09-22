@@ -429,6 +429,27 @@ class TestCase(InductorTestCase):
             if elapsed >= 120:
                 raise AssertionError(f"Test took too long: {elapsed:.1f}s >= 120s")
 
+    def _check_native_dropout(self, train, p, requires_grad):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return torch.ops.aten.native_dropout.default(x, p, train)
+
+        x = torch.ones(256, device=self.device, requires_grad=requires_grad)
+        output, mask = fn(x)
+        if requires_grad:
+            output.sum().backward()
+        scale = 1.0 if train is False else (0.0 if p == 1 else 1.0 / (1.0 - p))
+        self.assertEqual(output, x * mask * scale)
+        if requires_grad:
+            self.assertEqual(x.grad, mask * scale)
+        if train is False or p == 0:
+            self.assertEqual(mask, torch.ones_like(mask))
+        elif p == 1:
+            self.assertEqual(mask, torch.zeros_like(mask))
+        else:
+            self.assertTrue(mask.any())
+            self.assertFalse(mask.all())
+
 
 class ToTuple(torch.nn.Module):
     def forward(self, x):
@@ -12474,6 +12495,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [torch.randn(55, device=self.device)], assert_equal=False)
 
+    @parametrize("train", [None, False, True])
+    @parametrize("p", [0.0, 0.2, 0.5, 1.0])
+    @parametrize("requires_grad", [False, True])
+    def test_native_dropout_optional_train(self, train, p, requires_grad):
+        self._check_native_dropout(train, p, requires_grad)
+
     def test_dropout_trivial_0(self):
         def fn1(a):
             return torch.nn.functional.dropout(a, 0.0, True) + a
@@ -20141,6 +20168,20 @@ def add_test_failures(
             orig_failure.is_skip = orig_failure.is_skip or new_failure.is_skip
         else:
             test_failures[name] = new_failure
+
+
+if RUN_GPU and GPU_TYPE == "cuda":
+
+    @instantiate_parametrized_tests
+    class NativeDropoutRngTests(TestCase):
+        device = "cuda"
+
+        @parametrize("train", [None, False, True])
+        @parametrize("p", [0.0, 0.2, 0.5, 1.0])
+        @parametrize("requires_grad", [False, True])
+        @torch._functorch.config.patch(functionalize_rng_ops=True)
+        def test_native_dropout_optional_train(self, train, p, requires_grad):
+            self._check_native_dropout(train, p, requires_grad)
 
 
 if RUN_CPU:
