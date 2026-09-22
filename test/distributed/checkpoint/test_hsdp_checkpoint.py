@@ -19,10 +19,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.tensor import Replicate
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     _get_device_type,
     DTensorContinuousTestBase,
@@ -30,8 +27,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
-
-
 
 
 class SimpleModel(torch.nn.Module):
