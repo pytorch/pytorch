@@ -185,6 +185,7 @@ class SMPartition:
 
         Example::
 
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
             >>> sms = SMPartition.from_device(device_id=0)
             >>> (first,), rest = sms.split(num_sms=4, coscheduled_sm_count=2)
             >>> rest_ctx = GreenContext(sm_partition=rest)
@@ -475,6 +476,7 @@ class GreenContext:
 
         Example::
 
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
             >>> a, b = GreenContext.split(
             ...     num_sms=(24, 40), coscheduled_sm_count=8, device_id=0
             ... )
