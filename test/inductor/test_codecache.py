@@ -1086,12 +1086,18 @@ class TestFxGraphCache(TestCase):
             static_autotuner.kernel_name
         ]
         coordinator = loaded_autotuner.run.__self__
+        static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
+        cubin_path = static_kernel._agnostic_cubin_path()
         with torch.cuda.device(0):
             self.assertEqual(graph.current_callable([x0])[0], fn(x0))
 
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
         with torch.cuda.device(1):
             x1 = torch.randn(32, device="cuda")
+            with self.assertRaisesRegex(
+                MissingTritonKernelError, "disappeared while loading"
+            ):
+                static_kernel._load_kernel_from_path(cubin_path, 1)
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
         self.assertIsNot(loaded_autotuner.run.__self__, coordinator)
 
@@ -1242,47 +1248,6 @@ class TestFxGraphCache(TestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
         with torch.cuda.device(1):
             x1 = torch.randn(32, device="cuda")
-            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
-        self.assertIsNot(cached_autotuner.run.__self__, coordinator)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @requires_cuda_and_triton
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    @config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": True,
-            "compile_threads": 1,
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "keep_static_cubin_raw": False,
-            "use_static_triton_launcher": True,
-        }
-    )
-    def test_missing_bundled_cubin_during_load_falls_back_to_jit(self):
-        def fn(x):
-            return x.sin()
-
-        with torch.cuda.device(0):
-            x0 = torch.randn(32, device="cuda")
-            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
-
-        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
-
-        self.reset()
-        TritonBundler.read_and_emit(bundle)
-        graph.after_deserialization(CompiledFxGraphConstants())
-        cached_autotuner = static_autotuner.kernel
-        coordinator = cached_autotuner.run.__self__
-        static_kernel = cached_autotuner.launchers[0].__globals__["runner"].__self__
-        cubin_path = static_kernel._agnostic_cubin_path()
-
-        os.remove(cubin_path)
-        with torch.cuda.device(1):
-            x1 = torch.randn(32, device="cuda")
-            with self.assertRaisesRegex(
-                MissingTritonKernelError, "disappeared while loading"
-            ):
-                static_kernel._load_kernel_from_path(cubin_path, 1)
             self.assertEqual(graph.current_callable([x1])[0], fn(x1))
         self.assertIsNot(cached_autotuner.run.__self__, coordinator)
 

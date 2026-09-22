@@ -216,14 +216,20 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        if not os.path.exists(filepath):
+        # A newly deserialized launcher with retained bytes must restore the
+        # bundled artifact even if a stale/truncated file already occupies the
+        # expected cache path. Later device-agnostic loads can reuse a path that
+        # this launcher has already established.
+        if not os.path.exists(filepath) or (
+            self.cubin_path is None and self.cubin_raw is not None
+        ):
             if self.cubin_raw is None:
                 raise MissingTritonKernelError(
                     f"Triton kernel binary not found at {filepath}"
                 )
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            with open(filepath, "wb") as f:
-                f.write(self.cubin_raw)
+            from torch._inductor.codecache import write_atomic
+
+            write_atomic(filepath, self.cubin_raw, make_dirs=True)
         self.cubin_path = filepath
         return self.cubin_path
 
