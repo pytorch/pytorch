@@ -1586,11 +1586,11 @@ class PrecompileSession:
     """A caller-driven multi-graph capture in progress.
 
     Enter it to get the callable to exercise, call that with real inputs inside
-    the block, and :meth:`summary` reports what the calls covered. The calls run
-    under ``_capture_config``, so every backend graph reaches the artifact as a
-    bundled AOTAutograd entry, and under the package's guard filter, which this
-    session wraps to record what it kept and dropped for the
-    :class:`PrecompileSummary`. Rendering the artifact is the next commit's.
+    the block, and :meth:`snapshot_artifact` renders everything captured so far as
+    a ``(python_code, cache)`` pair. The calls run under ``_capture_config``, so
+    every backend graph reaches the artifact as a bundled AOTAutograd entry, and
+    under the package's guard filter, which this session wraps to record what it
+    kept and dropped for the :class:`PrecompileSummary`.
 
     The artifact is STANDALONE: it rebuilds each captured frame from its code
     object and guard trees (see ``torch._precompile_driver._build_multigraph_forward``)
@@ -1755,6 +1755,40 @@ class PrecompileSession:
                 if artifact is not None:
                     self._backend_artifacts[backend_id] = artifact
 
+    def _collect_backends(self) -> dict[str, Any]:
+        """The compiled subgraphs this capture produced, keyed by backend id."""
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        self._take_backend_artifacts()
+        entry = self._package.cache_entry()
+        collected: dict[str, Any] = {}
+        missing: list[_BackendId] = []
+        for backend_id in sorted(entry.backend_ids):
+            artifact = self._backend_artifacts.get(backend_id)
+            backend = self._package.cached_backends.get(backend_id)
+            if artifact is None and backend is not None:
+                # An eager "backend" is an fx graph with no compiled artifact of
+                # its own, and output_graph short-circuits an empty graph to
+                # noop_graph_call without filing anything under its id, which
+                # the bytecode still names; both are carried as-is.
+                if self._backend == "eager" or backend is noop_graph_call:
+                    artifact = EagerCacheArtifact(key=backend_id, content=backend)
+            if artifact is None:
+                missing.append(backend_id)
+            else:
+                collected[str(backend_id)] = artifact
+        if missing:
+            raise PackageError(
+                f"precompile captured {len(entry.backend_ids)} backend graph(s) but "
+                f"{len(missing)} of them recorded no serializable artifact: "
+                f"{missing}. The {self._backend!r} backend reaches the artifact "
+                f"through the AOTAutograd cache (bundled_autograd_cache); a graph "
+                f"that cache bypassed cannot be served. Check TORCH_LOGS=+aot for "
+                f"the bypass reason."
+            )
+        return collected
+
     def summary(self) -> PrecompileSummary:
         """Coverage and guard information for everything captured so far."""
         # A dropped slot is risky when the SAME source held DIFFERENT values
@@ -1779,6 +1813,98 @@ class PrecompileSession:
             capture_errors=self._capture_errors,
             guard_sets=self._guard_sets,
             dropped_code=self._dropped_guard_code,
+        )
+
+    def _gated_summary(
+        self,
+        *,
+        require_complete: bool,
+        require_no_risky_drops: bool,
+        require_no_dropped_guards: bool,
+    ) -> PrecompileSummary:
+        """Run the coverage and guard gates, or raise saying which one failed."""
+        summary = self.summary()
+        if require_no_dropped_guards and summary.dropped_guards:
+            raise PackageError(
+                f"Precompilation dropped {len(summary.dropped_guards)} guard(s) that "
+                f"were not serialized: {list(summary.dropped_guards)}. Rebinding any "
+                f"of those sources between capture and load can silently serve a "
+                f"graph traced against the old value. Pass "
+                f"require_no_dropped_guards=False to accept the default policy, which "
+                f"refuses only the risky drops."
+            )
+        if require_no_risky_drops and summary.risky_dropped_guards:
+            raise PackageError(
+                f"Precompilation dropped guard(s) that can affect dispatch on "
+                f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
+                f"a slot whose value differed between captured variants, a "
+                f"configuration-dependent identity slot, or a guard discarded by a "
+                f"custom filter. Nothing checks it at load time, so a different value "
+                f"can silently select the wrong graph instead of recompiling. Make the "
+                f"value reachable through a serializable guard, pin both machines to "
+                f"the same value, or pass require_no_risky_drops=False to accept the "
+                f"risk explicitly."
+            )
+        if require_complete:
+            if summary.capture_errors:
+                raise PackageError(
+                    "Precompilation is incomplete because a captured call raised: "
+                    f"{list(summary.capture_errors)}. Re-run every example "
+                    "successfully, or pass require_complete=False to save the partial "
+                    "artifact."
+                )
+            if summary.guarded_codes == 0:
+                raise PackageError(
+                    "Precompilation captured no compiled code. Capture happens by "
+                    "execution, so the callable must actually be run inside the "
+                    "capture block."
+                )
+            if summary.backend_graphs == 0:
+                raise PackageError(
+                    "Precompilation compiled no graph: every captured frame was "
+                    "empty, so the artifact carries no compiled compute. Pass "
+                    "require_complete=False to write the guards-only artifact anyway."
+                )
+            if summary.uncovered_frames:
+                raise PackageError(
+                    f"Precompilation exercised frame(s) that produced NO guarded code "
+                    f"at all: {list(summary.uncovered_frames)}. Those paths are absent "
+                    f"from the artifact. This is expected for a frame that only "
+                    f"dispatches to covered submodules; it also looks exactly like a "
+                    f"frame Dynamo gave up on (check TORCH_LOGS=graph_breaks). Pass "
+                    f"require_complete=False once you have confirmed which."
+                )
+            if summary.bypassed:
+                raise PackageError(
+                    f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
+                    f"were bypassed and will serve nothing: {list(summary.bypassed)}. "
+                    f"This usually means their guards could not be serialized. Pass "
+                    f"require_complete=False to accept a partial artifact."
+                )
+        return summary
+
+    def snapshot_artifact(
+        self,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = True,
+        require_no_dropped_guards: bool = False,
+    ) -> tuple[str, bytes]:
+        """Render everything captured SO FAR as ``(python_code, cache)``.
+
+        Leaves the session able to capture more, which is what lets a capture
+        checkpoint mid-block. The gates run first, so a refusal renders nothing.
+        """
+        from torch._precompile import _build_multigraph_artifact
+
+        summary = self._gated_summary(
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+        )
+        backends = self._collect_backends()
+        return _build_multigraph_artifact(
+            self._package.cache_entry(), backends, summary, self._backend, self._fn
         )
 
 
