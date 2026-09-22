@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import inspect
+import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
@@ -578,7 +579,11 @@ class TritonBenchmarker(Benchmarker):
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def __init__(self: Self) -> None:
         super().__init__()
-        self._in_cudagraph_benchmark = False
+        self._cudagraph_benchmark_state = threading.local()
+
+    @property
+    def _in_cudagraph_benchmark(self: Self) -> bool:
+        return getattr(self._cudagraph_benchmark_state, "depth", 0) > 0
 
     @cached_property
     def L2_cache_size(self: Self) -> int:
@@ -638,7 +643,8 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     ) -> float:
         # Prevent benchmark_gpu from re-entering this method
         # when autotune_cudagraph_benchmarking is enabled.
-        self._in_cudagraph_benchmark = True
+        previous_depth = getattr(self._cudagraph_benchmark_state, "depth", 0)
+        self._cudagraph_benchmark_state.depth = previous_depth + 1
         try:
             result = super().benchmark_gpu_with_cuda_graph(
                 _callable,
@@ -647,7 +653,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 **kwargs,
             )
         finally:
-            self._in_cudagraph_benchmark = False
+            self._cudagraph_benchmark_state.depth = previous_depth
         return result
 
     @may_distort_benchmarking_result
