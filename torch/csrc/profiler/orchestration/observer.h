@@ -3,6 +3,8 @@
 #include <ATen/record_function.h>
 #include <torch/csrc/Export.h>
 
+#include <cstdint>
+#include <optional>
 #include <utility>
 
 namespace torch::profiler::impl {
@@ -67,7 +69,8 @@ struct TORCH_API ExperimentalConfig {
       bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
       bool adjust_timestamps = false,
-      bool trace_only = false);
+      bool trace_only = false,
+      std::optional<int64_t> max_stack_events = std::nullopt);
 
   std::vector<std::string> profiler_metrics;
   bool profiler_measure_per_kernel;
@@ -138,6 +141,11 @@ struct TORCH_API ExperimentalConfig {
   // materializeOpEvents. Only export_chrome_trace / save() will work;
   // accessing events() raises an error.
   bool trace_only;
+
+  // Post-processing threshold for collected Python stack events. If exceeded,
+  // all Python stack events are omitted. This does not limit collection during
+  // tracing.
+  std::optional<int64_t> max_stack_events;
 };
 
 struct TORCH_API ProfilerConfig {
