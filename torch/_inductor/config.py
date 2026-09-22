@@ -765,6 +765,9 @@ nvgemm_prefetch: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0")
 # before accessing global memory. All threads execute the common release at the
 # kernel tail, so non-epilogue warps can let the dependent grid launch while
 # the epilogue stores continue to drain.
+# Eligible scheduler-adjacent same-stream Triton consumers also continue the
+# PDL chain. Workspace-backed and composite launches are excluded; deferred
+# alignment copies remain ordered on the same stream before the consumer.
 nvgemm_pdl: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PDL", "0")
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.

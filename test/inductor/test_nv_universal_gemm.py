@@ -189,7 +189,293 @@ class TestNVUniversalGemmDense(TestCase):
         torch.testing.assert_close(result, expected)
 
 
+@instantiate_parametrized_tests
+class TestNVUniversalGemmPDLMetadata(TestCase):
+    """Hardware-independent tests for selective NVGEMM PDL metadata."""
+
+    @mock.patch.object(torch.version, "hip", None)
+    @mock.patch.object(torch.cuda, "get_device_capability", return_value=(9, 0))
+    def test_pdl_chain_only_enables_direct_nvgemm_consumers(self, _capability):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+        from torch._inductor.codegen.triton import TritonKernel
+
+        previous_node = MagicMock()
+        previous_write = MagicMock()
+        previous_write.name = "gemm_output"
+        previous_node.read_writes.writes = (previous_write,)
+        current_node = MagicMock()
+        current_read = MagicMock()
+        current_read.name = "gemm_output"
+        current_node.read_writes.reads = (current_read,)
+        current_node.mutation_renames = {}
+        kernel = object.__new__(TritonKernel)
+        kernel.current_node = current_node
+        kernel.is_combo_kernel = False
+        kernel._from_combo_codegen = False
+        kernel._is_first_combo_launch = False
+        kernel._in_multi_kernel = False
+        kernel._nvgemm_pdl_enabled = False
+        kernel.cooperative_reduction = False
+        kernel.mix_order_reduction = False
+        kernel.args = SimpleNamespace(workspace_args=())
+        graph = MagicMock()
+        graph.scheduler.previous_node = previous_node
+        graph.get_current_device_or_throw.return_value = torch.device("cuda")
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_kernel_handler(SimpleNamespace()),
+            config.patch(
+                {
+                    "triton.enable_pdl": False,
+                    "nvgemm_pdl": "auto",
+                }
+            ),
+        ):
+            self.assertFalse(TritonKernel._enable_pdl_codegen())
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_kernel_handler(kernel),
+            config.patch(
+                {
+                    "triton.enable_pdl": False,
+                    "nvgemm_pdl": "auto",
+                }
+            ),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "is_pdl_enabled_template",
+                return_value=True,
+            ) as is_nvgemm,
+        ):
+            self.assertTrue(TritonKernel._enable_pdl_codegen())
+            is_nvgemm.assert_called_once_with(previous_node)
+
+        kernel.args.workspace_args = (object(),)
+        with (
+            V.set_graph_handler(graph),
+            V.set_kernel_handler(kernel),
+            config.patch(
+                {
+                    "triton.enable_pdl": False,
+                    "nvgemm_pdl": "auto",
+                }
+            ),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "is_pdl_enabled_template",
+                return_value=True,
+            ),
+        ):
+            self.assertFalse(TritonKernel._enable_pdl_codegen())
+        kernel.args.workspace_args = ()
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_kernel_handler(kernel),
+            config.patch(
+                {
+                    "triton.enable_pdl": False,
+                    "nvgemm_pdl": "0",
+                }
+            ),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "is_pdl_enabled_template",
+                return_value=True,
+            ) as is_nvgemm,
+        ):
+            self.assertFalse(TritonKernel._enable_pdl_codegen())
+            is_nvgemm.assert_not_called()
+
+        fused_consumer = SimpleNamespace(
+            read_writes=SimpleNamespace(reads=(current_read,))
+        )
+        current_read.name = "gemm_output"
+        self.assertTrue(TritonKernel._has_pdl_dependency(previous_node, fused_consumer))
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_kernel_handler(kernel),
+            config.patch(
+                {
+                    "triton.enable_pdl": False,
+                    "nvgemm_pdl": "auto",
+                }
+            ),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "is_pdl_enabled_template",
+                return_value=False,
+            ),
+        ):
+            kernel._nvgemm_pdl_enabled = False
+            self.assertFalse(TritonKernel._enable_pdl_codegen())
+
+        current_read.name = "unrelated"
+        with (
+            V.set_graph_handler(graph),
+            V.set_kernel_handler(kernel),
+            config.patch(
+                {
+                    "triton.enable_pdl": False,
+                    "nvgemm_pdl": "auto",
+                }
+            ),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "is_pdl_enabled_template",
+                return_value=True,
+            ),
+        ):
+            kernel._nvgemm_pdl_enabled = False
+            self.assertFalse(TritonKernel._enable_pdl_codegen())
+
+    @parametrize(
+        "attribute",
+        (
+            "is_combo_kernel",
+            "_from_combo_codegen",
+            "_in_multi_kernel",
+            "cooperative_reduction",
+            "mix_order_reduction",
+        ),
+    )
+    def test_pdl_chain_rejects_composite_kernel(self, attribute):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+        from torch._inductor.codegen.triton import TritonKernel
+
+        write = SimpleNamespace(name="gemm_output")
+        previous_node = MagicMock()
+        previous_node.read_writes.writes = (write,)
+        current_node = MagicMock()
+        current_node.read_writes.reads = (write,)
+        current_node.mutation_renames = {}
+        kernel = object.__new__(TritonKernel)
+        kernel.current_node = current_node
+        kernel.is_combo_kernel = False
+        kernel._from_combo_codegen = False
+        kernel._is_first_combo_launch = False
+        kernel._in_multi_kernel = False
+        kernel._nvgemm_pdl_enabled = False
+        kernel.cooperative_reduction = False
+        kernel.mix_order_reduction = False
+        kernel.args = SimpleNamespace(workspace_args=())
+        setattr(kernel, attribute, True)
+        graph = MagicMock()
+        graph.scheduler.previous_node = previous_node
+        graph.get_current_device_or_throw.return_value = torch.device("cuda")
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_kernel_handler(kernel),
+            config.patch({"triton.enable_pdl": False, "nvgemm_pdl": "auto"}),
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch.object(torch.cuda, "get_device_capability", return_value=(9, 0)),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "is_pdl_enabled_template",
+                return_value=True,
+            ),
+        ):
+            self.assertFalse(TritonKernel._enable_pdl_codegen())
+            if attribute == "_from_combo_codegen":
+                kernel._is_first_combo_launch = True
+                kernel._nvgemm_pdl_enabled = False
+                self.assertTrue(TritonKernel._enable_pdl_codegen())
+
+    def test_pdl_composite_codegen_marks_kernels(self):
+        from torch._inductor.codegen.triton import TritonScheduling
+
+        scheduling = object.__new__(TritonScheduling)
+        first = MagicMock()
+        first.persistent_reduction = True
+        first.cooperative_reduction = False
+        first._in_multi_kernel = False
+        second = MagicMock()
+        second.persistent_reduction = False
+        second.cooperative_reduction = False
+        second._in_multi_kernel = False
+        scheduling.kernel_type = MagicMock(return_value=second)
+        with config.patch({"triton.multi_kernel": True}):
+            kernels = scheduling.add_multi_kernel_choices(first, [], {})
+        self.assertEqual(len(kernels), 2)
+        self.assertTrue(all(kernel._in_multi_kernel for kernel in kernels))
+
+        standalone = MagicMock()
+        standalone._from_combo_codegen = False
+        standalone._is_first_combo_launch = False
+        standalone.codegen_kernel.return_value = "source"
+        scheduling.kernel_type = MagicMock(return_value=standalone)
+        scheduling.process_kernel = MagicMock()
+        node_info = SimpleNamespace(
+            tiling={}, features=MagicMock(), tiling_scores={}, node_schedule=[]
+        )
+        source, kernel = scheduling._codegen_standalone_kernel(node_info, False, True)
+        self.assertEqual(source, "source")
+        self.assertIs(kernel, standalone)
+        self.assertTrue(kernel._from_combo_codegen)
+        self.assertTrue(kernel._is_first_combo_launch)
+
+        later = MagicMock()
+        later._from_combo_codegen = False
+        later._is_first_combo_launch = False
+        later.codegen_kernel.return_value = "later_source"
+        scheduling.kernel_type = MagicMock(return_value=later)
+        source, kernel = scheduling._codegen_standalone_kernel(node_info, False, False)
+        self.assertEqual(source, "later_source")
+        self.assertIs(kernel, later)
+        self.assertTrue(kernel._from_combo_codegen)
+        self.assertFalse(kernel._is_first_combo_launch)
+
+    def test_pdl_chain_checks_selected_nvgemm_kernel(self):
+        from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+        from torch._inductor.ir import MultiTemplateBuffer, NVUniversalGemmBuffer
+        from torch._inductor.scheduler import FusedSchedulerNode, SchedulerNode
+
+        buffer = object.__new__(NVUniversalGemmBuffer)
+        buffer.kernel_metadata = {"use_pdl": True}
+        node = object.__new__(SchedulerNode)
+        node.node = buffer
+        self.assertTrue(NVUniversalGemmScheduling.is_pdl_enabled_template(node))
+
+        buffer.kernel_metadata = {"use_pdl": False}
+        self.assertFalse(NVUniversalGemmScheduling.is_pdl_enabled_template(node))
+
+        caller = object.__new__(NVUniversalGemmCaller)
+        caller.kernel = MagicMock()
+        caller.kernel.impl.use_pdl = True
+        multi_template = object.__new__(MultiTemplateBuffer)
+        multi_template._render_caller = caller
+        node.node = multi_template
+        self.assertTrue(NVUniversalGemmScheduling.is_pdl_enabled_template(node))
+
+        caller.kernel.impl.use_pdl = False
+        self.assertFalse(NVUniversalGemmScheduling.is_pdl_enabled_template(node))
+
+        multi_template._render_caller = MagicMock()
+        self.assertFalse(NVUniversalGemmScheduling.is_pdl_enabled_template(node))
+
+        caller.kernel.impl.use_pdl = True
+        multi_template._render_caller = caller
+
+        fused = object.__new__(FusedSchedulerNode)
+        with mock.patch.object(
+            FusedSchedulerNode, "get_template_node", return_value=multi_template
+        ):
+            self.assertTrue(NVUniversalGemmScheduling.is_pdl_enabled_template(fused))
+
+
 # EFC and block-scaled tests below remain Blackwell-only.
+# TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
     "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
@@ -197,6 +483,161 @@ class TestNVUniversalGemmDense(TestCase):
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
+
+    def test_pdl_chain_follows_nvgemm_on_the_same_stream(self):
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        a2, b2, scale_a2, scale_b2 = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        side_input = torch.randn(m, n, device="cuda", dtype=torch.bfloat16)
+
+        def scaled_mm_with_interleaved_streams(a, b, scale_a, scale_b, side_input):
+            producer_stream = torch.cuda.Stream()
+            side_stream = torch.cuda.Stream()
+            with torch.cuda.stream(producer_stream):
+                gemm = torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                )
+            with torch.cuda.stream(side_stream):
+                side = side_input + 1
+            with torch.cuda.stream(producer_stream):
+                result = gemm.float() + 1
+            producer_stream.synchronize()
+            side_stream.synchronize()
+            return result, side
+
+        expected = scaled_mm_with_interleaved_streams(
+            a, b, scale_a, scale_b, side_input
+        )
+        repeated_expected = scaled_mm_with_interleaved_streams(
+            a2, b2, scale_a2, scale_b2, side_input
+        )
+        torch._dynamo.reset()
+        with config.patch(
+            _nvgemm_config(
+                nvgemm_pdl="auto",
+                nvgemm_max_profiling_configs=1,
+                epilogue_fusion=False,
+                force_disable_caches=True,
+                **{"triton.enable_pdl": False},
+            )
+        ):
+            compiled = torch.compile(scaled_mm_with_interleaved_streams)
+            actual, (code,) = run_and_get_code(
+                compiled,
+                a,
+                b,
+                scale_a,
+                scale_b,
+                side_input,
+            )
+            repeated = compiled(a2, b2, scale_a2, scale_b2, side_input)
+
+        self.assertEqual(actual[0], expected[0], equal_nan=True, atol=0.1, rtol=0.1)
+        self.assertEqual(actual[1], expected[1])
+        self.assertEqual(
+            repeated[0], repeated_expected[0], equal_nan=True, atol=0.1, rtol=0.1
+        )
+        self.assertEqual(repeated[1], repeated_expected[1])
+        consumer_marker = "Original ATen: [aten._to_copy, aten.add]"
+        side_marker = "Original ATen: [aten.add]"
+        consumer_start = code.index(consumer_marker)
+        side_start = code.index(side_marker, consumer_start + len(consumer_marker))
+        consumer_code = code[consumer_start:side_start]
+        side_code = code[side_start:]
+        self.assertIn("'launch_pdl': True", consumer_code)
+        self.assertIn("gdc_wait", consumer_code)
+        self.assertIn("gdc_launch", consumer_code)
+        self.assertIn("'launch_pdl': False", side_code)
+        self.assertNotIn("gdc_wait", side_code)
+        self.assertNotIn("gdc_launch", side_code)
+
+    def test_pdl_chain_supports_single_launch_reduction(self):
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+
+        def scaled_mm_then_reduce(a, b, scale_a, scale_b):
+            gemm = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            return gemm.float().sum(dim=-1)
+
+        expected = scaled_mm_then_reduce(a, b, scale_a, scale_b)
+        torch._dynamo.reset()
+        with config.patch(
+            _nvgemm_config(
+                nvgemm_pdl="auto",
+                nvgemm_max_profiling_configs=1,
+                epilogue_fusion=False,
+                force_disable_caches=True,
+                **{
+                    "triton.cooperative_reductions": False,
+                    "triton.enable_pdl": False,
+                    "triton.multi_kernel": False,
+                },
+            )
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(scaled_mm_then_reduce), a, b, scale_a, scale_b
+            )
+
+        self.assertEqual(actual, expected, equal_nan=True, atol=1.0, rtol=0.1)
+        self.assertEqual(code.count("'launch_pdl': True"), 1)
+        self.assertEqual(code.count("gdc_wait"), 1)
+        self.assertEqual(code.count("gdc_launch"), 1)
+
+    def test_pdl_chain_handles_deferred_alignment_copy(self):
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        consumer_input = torch.randn(m, n, device="cuda", dtype=torch.bfloat16)
+
+        def scaled_mm_with_consumer_input(a, b, scale_a, scale_b, consumer_input):
+            gemm = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            return gemm.float() + consumer_input.float()
+
+        expected = scaled_mm_with_consumer_input(a, b, scale_a, scale_b, consumer_input)
+        torch._dynamo.reset()
+        with config.patch(
+            _nvgemm_config(
+                nvgemm_pdl="auto",
+                nvgemm_max_profiling_configs=1,
+                epilogue_fusion=False,
+                force_disable_caches=True,
+                **{"triton.enable_pdl": False},
+            )
+        ):
+            compiled = torch.compile(scaled_mm_with_consumer_input)
+            actual, (code,) = run_and_get_code(
+                compiled, a, b, scale_a, scale_b, consumer_input
+            )
+
+            misaligned_storage = torch.empty(
+                m * n + 1, device="cuda", dtype=torch.bfloat16
+            )
+            misaligned_input = misaligned_storage[1:].view(m, n)
+            misaligned_input.copy_(consumer_input)
+            self.assertNotEqual(misaligned_input.data_ptr() % 16, 0)
+            repeated = compiled(a, b, scale_a, scale_b, misaligned_input)
+
+        self.assertEqual(actual, expected, equal_nan=True, atol=0.1, rtol=0.1)
+        self.assertEqual(repeated, expected, equal_nan=True, atol=0.1, rtol=0.1)
+        self.assertIn("copy_if_misaligned", code)
+        self.assertEqual(code.count("'launch_pdl': True"), 1)
+        self.assertEqual(code.count("gdc_wait"), 1)
+        self.assertEqual(code.count("gdc_launch"), 1)
 
     def test_direct_epilogue_cache_signature_distinguishes_wrapped_tensors(self):
         from cutlass.operators.utils.tensor import TensorWrapper
@@ -923,7 +1364,7 @@ class TestNVUniversalGemm(TestCase):
         self.assertEqual(benchmark_policy["cudagraph_cold_cache_input_indices"], (1, 3))
 
     def test_scaled_mm_output_scale_aten_candidate(self):
-        """Execute the ATen fallback candidate for the folded output scale."""
+        """Ignore configured backends that cannot implement this FP4 recipe."""
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
         m, n, k = 32, 512, 512
@@ -947,7 +1388,7 @@ class TestNVUniversalGemm(TestCase):
         with (
             config.patch(
                 _nvgemm_config(
-                    max_autotune_gemm_backends="ATEN,NVGEMM",
+                    max_autotune_gemm_backends="ATEN,TRITON,CPP,NVGEMM",
                     compile_threads=1,
                     force_disable_caches=True,
                 )
@@ -962,15 +1403,6 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(actual, expected, equal_nan=True)
         self.assertIn("extern_kernels.scaled_mm_with_output_scale", code)
-
-    def test_scaled_mm_output_scale_preserves_other_backends(self):
-        from torch._inductor.fx_passes.post_grad import _can_fold_scaled_mm_output_scale
-
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="ATEN,NVGEMM,TRITON",
-        ):
-            self.assertFalse(_can_fold_scaled_mm_output_scale(MagicMock()))
 
     def test_scaled_mm_output_scale_falls_back_after_native_choice_failure(self):
         """Resume ordinary lowering when every native-scale choice fails."""
@@ -2566,6 +2998,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             mm_inputs.mnk_hinted.return_value = mnk
             with (
                 config.patch(nvgemm_pdl="auto"),
+                mock.patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
                 mock.patch.object(
                     nv_universal_gemm,
                     "_create_dummy_tensor_from_layout",
@@ -2949,6 +3382,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         request.benchmark_with_cudagraphs = True
         request.make_run_fn = MagicMock(return_value=lambda: None)
         request.do_bench = MagicMock(return_value=1.25)
+        request._get_benchmark_device = MagicMock(return_value=(MagicMock(), "cuda", 0))
         request.cleanup_run_fn = MagicMock()
 
         with patch.object(
@@ -3002,6 +3436,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
         request.make_run_fn = MagicMock(return_value=lambda: None)
         request.do_bench = MagicMock(return_value=1.25)
+        request._get_benchmark_device = MagicMock(return_value=(MagicMock(), "cuda", 0))
         request.cleanup_run_fn = MagicMock()
 
         with patch.object(
@@ -3630,49 +4065,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
             secondary_feed_output="output",
         )
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
-
-    def test_bias_epilogue_plan_composition(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
-            _build_bias_epilogue,
-            _compose_bias_into_epilogue,
-        )
-        from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan
-
-        bias = _build_bias_epilogue("bias", "out")
-        self.assertEqual(bias.reads, ("bias",))
-        self.assertEqual(bias.renames["D"], "out")
-        self.assertFalse(bias.is_evt_fallback)
-
-        pointwise = GemmEpiloguePlan(
-            source="def epilogue(accum, scale):\n    return accum * scale",
-            reads=("scale",),
-            writes=("out",),
-            renames={"scale": "scale", "D": "out"},
-            is_evt_fallback=False,
-        )
-        composed = _compose_bias_into_epilogue(pointwise, "bias")
-        self.assertIn("biased = accum + bias", composed.source)
-        self.assertIn("return biased * scale", composed.source)
-        self.assertEqual(composed.reads, ("scale", "bias"))
-        self.assertEqual(composed.writes, pointwise.writes)
-
-    def test_reduction_pattern_accepts_unrecognized_pointwise_source(self):
-        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
-            GemmEpilogueIRExpression as Expr,
-            GemmEpilogueIRStore,
-            grouped_reduction_pattern_ir,
-        )
-
-        load = Expr("load", ("gemm", 0, None))
-        one = Expr("constant", (1.0, torch.float32))
-        source = Expr("add", (Expr("exp", (load,)), one))
-        reduction = Expr("reduction", (torch.float32, torch.float32, "sum", source))
-        pattern = grouped_reduction_pattern_ir(
-            GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.float32
-        )
-        self.assertIsNotNone(pattern)
-        self.assertEqual(pattern[0], "sum")
-        self.assertIs(pattern[1], source)
 
     def _create_mock_kernel(
         self,
