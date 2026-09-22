@@ -1,6 +1,5 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/native/Resize.h>
-#include <ATen/ops/_chunk_cat.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -11,6 +10,12 @@
 #include <torch/library.h>
 #include <algorithm>
 #include <cmath>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_chunk_cat.h>
+#endif
 
 namespace c10d::fsdp {
 namespace {
@@ -35,8 +40,12 @@ void all_gather_copy_out_cuda(
     at::IntArrayRef split_sizes,
     at::IntArrayRef outer_sizes,
     int64_t num_chunks) {
-  check_all_gather_copy_out_inputs(
+  const bool needs_resize = check_all_gather_copy_out_inputs(
       out, input, split_sizes, outer_sizes, num_chunks);
+  if (needs_resize) {
+    all_gather_copy_out(out, input, split_sizes, outer_sizes, num_chunks);
+    return;
+  }
   const c10::cuda::CUDAGuard device_guard(input.device());
   std::vector<int64_t> srcs;
   std::vector<int64_t> dsts;
