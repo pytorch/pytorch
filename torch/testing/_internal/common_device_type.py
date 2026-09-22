@@ -1312,11 +1312,6 @@ def instantiate_device_type_tests(
         device_type_test_class.setUpClass = _setUpClass
         device_type_test_class.tearDownClass = _tearDownClass
 
-        # Initialize device state before test instantiation so that callable
-        # parametrizers observe the final device type (e.g. the registered
-        # backend name rather than "privateuse1").
-        device_type_test_class._init_and_get_primary_device()
-
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
                 # Skip the specified methods.

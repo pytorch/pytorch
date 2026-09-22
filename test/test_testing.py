@@ -3047,16 +3047,6 @@ class TestTestParametrizationDeviceType(TestCase):
             ],
         )
 
-    @parametrize("backend", lambda device_cls: [device_cls.device_type])
-    def test_parametrize_callable_backend(self, device, backend):
-        # Verify that the callable sees the resolved device type
-        # and that it is reflected in the generated test name.
-        self.assertEqual(backend, self.device_type)
-        self.assertEqual(
-            self._testMethodName,
-            f"test_parametrize_callable_backend_backend_{self.device_type}_{self.device_type}",
-        )
-
 instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
 
