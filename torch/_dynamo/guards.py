@@ -21,6 +21,7 @@ import ast
 import builtins
 import collections
 import contextlib
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -93,7 +94,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger, get_metrics_context
+from torch._dynamo.utils import CompileEventLogger, get_metrics_context, is_torch_class
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -4282,6 +4283,87 @@ def _instance_dict(obj: Any) -> dict[str, Any] | None:
     except AttributeError:
         return None
     return d if isinstance(d, dict) else None
+
+
+# The instance size of a class whose state is exactly its __dict__, computed at
+# import so it follows the running CPython (the dict pointer is managed from
+# 3.11 and the weakref pointer from 3.12, so it equals object's on 3.12+ and is
+# one or two pointers larger before), the reference _pickles_by_default
+# compares against.
+_PLAIN_INSTANCE_SIZE = type("_PlainInstance", (), {}).__basicsize__
+
+
+# Declaring any of these makes a class unfit for attribute pruning, by name
+# along the MRO (object itself declares __getattribute__).
+_REFUSED_METHODS = frozenset({"__del__", "__getattr__", "__getattribute__"})
+
+
+def _pickles_by_default(cls: type) -> bool:
+    """Whether an instance of ``cls`` round-trips as ``cls.__new__(cls)`` plus its
+    ``__dict__``, judged from the type: its own hooks, its copyreg registration
+    and its instance layout. Judging from the type is complete but for one
+    hole: an instance-dict __reduce_ex__ or __reduce__ is not seen (pickle
+    resolves those two on the real object), while the other hooks pickle looks
+    up on the type, and __setstate__ on an instance whose dict is still empty.
+
+    Attribute pruning is only sound for that protocol. A custom __reduce_ex__
+    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
+    __getnewargs__(_ex) reads attributes no guard named and gets the sentinel
+    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned).
+    State outside __dict__ is caught by layout rather than by hook, and the
+    intent is "no C-level per-instance storage": a plain Python class has the
+    instance size of a bare class and no variable-length items, while a class
+    with __slots__, a dict or list subclass (whose items ride the reduce tuple,
+    not __dict__), a tuple, int or str subclass (var-sized, ``__itemsize__``)
+    and a C extension type with an instance dict all differ in one of the two.
+    A copyreg registration means someone declared the default protocol wrong
+    for the type. The explicit __slots__ scan covers 3.10 and 3.11, where
+    ``("a", "__dict__")`` has the plain size; an EMPTY __slots__ (abc.ABC,
+    Protocol) adds no state and does not count. A __new__ of
+    the class's own is refused as well: the load side calls ``cls.__new__(cls)``
+    with no arguments, which a __new__ that takes any fails. So is a class
+    declaring __getattr__ or __getattribute__: pickle resolves __setstate__ on
+    the hollow instance at load and __getnewargs__(_ex) on the real one at
+    dump, so such a class can supply hooks a read on the type cannot see (one
+    serving every name hands BUILD a __setstate__ to call), and asking an
+    instance would run user code from a predicate, which the common delegating
+    forwarder answers by recursing. A __del__ is refused because a pruned
+    object's finalizer would run against the sentinels. A hook that raises on
+    any of these reads (a metaclass __getattr__) is answered with False: not
+    pruning is always safe, and the failure it would turn into is the one being
+    avoided.
+    """
+    try:
+        return (
+            cls.__basicsize__ == _PLAIN_INSTANCE_SIZE
+            and all(c.__itemsize__ == 0 for c in cls.__mro__)
+            and not any(vars(c).get("__slots__") for c in cls.__mro__)
+            and not any(
+                vars(c).keys() & _REFUSED_METHODS
+                for c in cls.__mro__
+                if c is not object
+            )
+            and cls not in copyreg.dispatch_table
+            and cls.__new__ is object.__new__
+            and cls.__reduce_ex__ is object.__reduce_ex__
+            and cls.__reduce__ is object.__reduce__
+            and getattr(cls, "__getstate__", None)
+            is getattr(object, "__getstate__", None)
+            and not hasattr(cls, "__setstate__")
+            and not hasattr(cls, "__getnewargs__")
+            and not hasattr(cls, "__getnewargs_ex__")
+        )
+    except Exception:
+        return False
+
+
+def _is_torch_type(cls: type) -> bool:
+    """Whether ``cls`` or any base of it is torch's own (``is_torch_class`` over
+    the MRO). Types from other packages (torch_xla, torchrec) are user state to
+    the pruner. This is deliberately over-broad: a user Dataset or Optimizer
+    subclass is pickled whole too, and pruning only the names no torch base
+    declares is the follow-up that would cover those."""
+    return any(is_torch_class(c) for c in cls.__mro__)
 
 
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it

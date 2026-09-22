@@ -2,6 +2,7 @@
 
 import builtins
 import collections
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -15,7 +16,7 @@ import types
 import unittest
 import weakref
 from collections.abc import Iterator
-from typing import Any, NamedTuple
+from typing import Any, Generic, NamedTuple, TypeVar
 from unittest import mock
 
 import torch
@@ -29,7 +30,9 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
+    _is_torch_type,
     _Missing,
+    _pickles_by_default,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -1203,6 +1206,182 @@ if torch.distributed.is_available():
         def __init__(self):
             super().__init__(0, 1)
             self.calls = []
+
+
+class _HolderWithGenerator:
+    def __init__(self):
+        self.it = (i for i in range(3))
+        self.cfg = {"a": 1}
+
+
+_T = TypeVar("_T")
+
+
+class _GenericHolder(Generic[_T]):
+    # A Generic subclass has the plain layout; through 3.11 typing.Generic also
+    # declares an empty __slots__ (as abc.ABC does), which adds no state.
+    def __init__(self):
+        self.it = (i for i in range(3))
+        self.cfg = {"a": 1}
+
+
+class _OuterHolder:
+    def __init__(self):
+        self.inner = _HolderWithGenerator()
+        self.name = "outer"
+
+
+@dataclasses.dataclass(frozen=True)
+class _ConstantCfg:
+    dims: tuple
+    tags: list
+
+    def __hash__(self):
+        return hash(self.dims)
+
+
+class _PipelineWithSetstate:
+    def __init__(self):
+        self.stages = ["a", "b"]
+        self.n = len(self.stages)
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.n = len(self.stages)
+
+
+class _SlottedHolder:
+    __slots__ = ("tag", "__dict__")
+
+    def __init__(self):
+        self.tag = "slot"
+        self.extra = [1]
+
+
+class _AttrDict(dict):
+    pass
+
+
+class _TaggedList(list):
+    pass
+
+
+class _WithGetstate:
+    def __init__(self):
+        self.a = 1
+
+    def __getstate__(self):
+        return {"a": self.a}
+
+
+class _WithNewargsEx:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs_ex__(self):
+        return (self.a,), {}
+
+
+class _WithReduce:
+    def __init__(self):
+        self.a = 1
+
+    def __reduce__(self):
+        return (_WithReduce, ())
+
+
+class _CopyregRegistered:
+    # Registered in copyreg.dispatch_table by the tests that use it, never at import.
+    def __init__(self):
+        self.a = 1
+
+
+class _NewNeedsArg:
+    # Reduces to newobj plus __dict__ like a plain class, but cls.__new__(cls)
+    # at load has no argument to pass.
+    def __new__(cls, a):
+        self = super().__new__(cls)
+        self.a = a
+        return self
+
+
+class _RaisingGetattr:
+    # pickle's BUILD asks the hollow instance for __setstate__; this raises.
+    def __init__(self):
+        self.a = 1
+
+    def __getattr__(self, name):
+        raise RuntimeError(name)
+
+
+class _RaisingMeta(type):
+    def __getattr__(cls, name):
+        raise RuntimeError(name)
+
+
+class _WithRaisingMeta(metaclass=_RaisingMeta):
+    # The hasattr reads on the class miss the MRO and reach the metaclass hook.
+    def __init__(self):
+        self.a = 1
+
+
+class _DelegatingForwarder:
+    # The common forwarder: on a hollow instance every lookup recurses.
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+
+class _PermissiveGetattr:
+    # Serves any name, so BUILD gets a __setstate__ to call and drops the state.
+    def __init__(self):
+        self.a = 1
+
+    def __getattr__(self, name):
+        return lambda *args: None
+
+
+class _NoneGetattr:
+    # Resolves any name to None; the C unpickler calls that as __setstate__.
+    def __init__(self):
+        self.a = 1
+
+    def __getattr__(self, name):
+        return None
+
+
+_FINALIZED: list = []
+
+
+class _CountsDeletes:
+    # A finalizer that touches only a global; a pruned object's would run
+    # against the sentinels.
+    def __init__(self):
+        self.a = 1
+
+    def __del__(self):
+        _FINALIZED.append(type(self))
+
+
+class _TupleSub(tuple):
+    __slots__ = ()  # var-sized, so refused by __itemsize__, not by the slots scan
+
+
+class _PureSlots:
+    __slots__ = ("a",)
+
+    def __init__(self):
+        self.a = 1
+
+
+class _RebuiltFromNewargs:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs__(self):
+        return (self.a,)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2599,6 +2778,165 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler = GuardsStatePickler({}, {}, missing, {id(key): key}, io.BytesIO())
         with self.assertRaisesRegex(TypeError, "cannot pickle 'generator' object"):
             pickler.dump({"k": key})
+
+    def test_pickles_by_default_admits_only_dict_only_plain_objects(self):
+        # The predicate the attribute pruner will gate on: an object round-trips
+        # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
+        # registration and no state outside __dict__ (slots, container items,
+        # var-sized or C layout) is involved. One refusal fixture per conjunct.
+        # Every __getattr__ is refused by declaration; the two permissive ones
+        # show why in pickle's own terms: BUILD calls what the hollow instance
+        # resolves __setstate__ to, so the state is dropped or a None is called.
+        # A metaclass __getattr__ that raises is answered False, not raised.
+        self.assertEqual(vars(pickle.loads(pickle.dumps(_PermissiveGetattr()))), {})
+        with self.assertRaisesRegex(TypeError, "NoneType.*not callable"):
+            pickle.loads(pickle.dumps(_NoneGetattr()))
+        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
+        self.assertTrue(_pickles_by_default(_HolderWithGenerator))
+        self.assertTrue(_pickles_by_default(_GenericHolder))
+        before = len(_FINALIZED)
+        self.assertFalse(_pickles_by_default(_CountsDeletes))
+        self.assertEqual(len(_FINALIZED), before)  # judged without an instance
+        for obj in (
+            _PipelineWithSetstate(),
+            _WithGetstate(),
+            _RebuiltFromNewargs([1]),
+            _WithNewargsEx(1),
+            _WithReduce(),
+            _CopyregRegistered(),
+            _NewNeedsArg(1),
+            _PermissiveGetattr(),
+            _NoneGetattr(),
+            _RaisingGetattr(),
+            _DelegatingForwarder(_GenericHolder()),
+            _WithRaisingMeta(),
+            _SlottedHolder(),
+            _PureSlots(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            _TupleSub((1,)),
+            enum.Enum("Color", "RED").RED,
+            torch.nn.Linear(1, 1),
+            torch.randn(1),
+        ):
+            self.assertFalse(_pickles_by_default(type(obj)), type(obj).__name__)
+
+    def test_is_torch_type_walks_the_mro(self):
+        self.assertTrue(_is_torch_type(torch.nn.Linear))
+        self.assertTrue(_is_torch_type(type("_Sub", (torch.nn.Linear,), {})))
+        self.assertFalse(_is_torch_type(_HolderWithGenerator))
+        self.assertFalse(_is_torch_type(_ConstantCfg))
+
+    def test_pickles_by_default_is_sound_against_pickle_itself(self):
+        # Soundness, not a list of known holes: whenever the predicate says an
+        # object is rebuilt as cls.__new__ plus __dict__, pickle's own reduce of
+        # that object at every protocol from 2 up must be exactly that (newobj,
+        # no items, state is the instance dict), and pickle itself must rebuild
+        # the type from that reduce, for a zoo of shapes it was never written
+        # against.
+        copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
+        self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
+        import array
+        import decimal
+        import fractions
+        import pathlib
+
+        def dict_only_reduce(obj, protocol):
+            try:
+                r = obj.__reduce_ex__(protocol)
+            except Exception:
+                return False
+            return (
+                isinstance(r, tuple)
+                and len(r) >= 3
+                and getattr(r[0], "__name__", "") == "__newobj__"
+                and r[1] == (type(obj),)
+                and r[2] == (getattr(obj, "__dict__", None) or None)
+                and all(x is None for x in r[3:5])
+            )
+
+        self.addCleanup(_FINALIZED.clear)  # the zoo's _CountsDeletes appends
+        Point = collections.namedtuple("Point", "x y")
+        zoo = [
+            _HolderWithGenerator(),
+            _GenericHolder(),
+            _OuterHolder(),
+            _ConstantCfg((0, 1), ["a"]),
+            _KeyCfg("a", ["t"]),
+            _PipelineWithSetstate(),
+            _RebuiltFromNewargs([1]),
+            _SlottedHolder(),
+            _AttrDict(a=1),
+            _TaggedList([1]),
+            _TupleSub((1,)),
+            _PureSlots(),
+            _WithGetstate(),
+            _WithReduce(),
+            _CopyregRegistered(),
+            _NewNeedsArg(1),
+            _PermissiveGetattr(),
+            _NoneGetattr(),
+            _RaisingGetattr(),
+            _DelegatingForwarder(_GenericHolder()),
+            _WithRaisingMeta(),
+            _WithNewargsEx(1),
+            _CountsDeletes(),
+            types.SimpleNamespace(a=1),
+            Point(1, 2),
+            collections.OrderedDict(a=1),
+            collections.defaultdict(int),
+            collections.deque([1]),
+            collections.Counter("ab"),
+            array.array("i", [1]),
+            decimal.Decimal("1.5"),
+            fractions.Fraction(1, 3),
+            pathlib.PurePosixPath("a/b"),
+            enum.Enum("Color", "RED").RED,
+            functools.partial(len),
+            weakref.WeakValueDictionary(),
+            threading.Lock(),
+            torch.randn(1),
+            torch.nn.Linear(1, 1),
+            torch.Size([1]),
+            torch.float32,
+            torch.device("cpu"),
+            torch.Generator(),
+        ]
+        # Every protocol the pickler could write with, DEFAULT_PROTOCOL included.
+        for protocol in range(2, pickle.HIGHEST_PROTOCOL + 1):
+            for obj in zoo:
+                if _pickles_by_default(type(obj)):
+                    self.assertTrue(
+                        dict_only_reduce(obj, protocol), (type(obj).__name__, protocol)
+                    )
+                    # The load side through pickle itself: NEWOBJ builds the
+                    # hollow cls.__new__(cls), then BUILD asks that instance for
+                    # __setstate__ before applying the dict. Run on a hollow
+                    # instance given a picklable state, since the admitted zoo
+                    # entries hold a live generator by design; it is what would
+                    # catch a hook the type-level reads cannot see.
+                    fn, args = obj.__reduce_ex__(protocol)[:2]
+                    hollow = fn(*args)
+                    vars(hollow)["probe"] = 1
+                    loaded = pickle.loads(pickle.dumps(hollow, protocol))
+                    self.assertIs(type(loaded), type(obj))
+                    self.assertEqual(vars(loaded), {"probe": 1})
+        # And the predicate is not vacuous: the plain shapes are admitted, and
+        # so is WeakValueDictionary, a pure-Python class whose state is its dict.
+        admitted = {type(o).__name__ for o in zoo if _pickles_by_default(type(o))}
+        self.assertLessEqual(
+            {
+                "_HolderWithGenerator",
+                "_GenericHolder",
+                "_OuterHolder",
+                "_KeyCfg",
+                "WeakValueDictionary",
+            },
+            admitted,
+        )
+        # A C type: layout differs, and it has a __reduce__ of its own.
+        self.assertNotIn("SimpleNamespace", admitted)
 
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
