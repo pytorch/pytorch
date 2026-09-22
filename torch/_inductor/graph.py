@@ -58,6 +58,7 @@ from torch.utils._typing_utils import not_none
 
 from . import config, ir
 from .codegen.common import (
+    _uses_gpu_cpp_wrapper,
     BackendFeature,
     DeviceOpOverrides,
     FileBackedGraphModule,
@@ -143,6 +144,7 @@ from torch._inductor.codecache import output_code_log
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
 
 aten = torch.ops.aten
 
@@ -472,7 +474,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.additional_buffer_deps: dict[str, OrderedSet[str]] = defaultdict(
             OrderedSet
         )
-        self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
         # Maps control_deps FX node to operation names created when lowering it,
         # for void ops (e.g. record_event) that return None and therefore cannot
         # be referenced by name in subsequent control_deps ordering constraints.
@@ -507,6 +508,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.torchbind_constants: dict[
             str, torch._C.ScriptObject | FakeScriptObject
         ] = {}
+        self.torchbind_replay_objects: dict[
+            str, torch._C.ScriptObject | FakeScriptObject
+        ] = {}
         self.opaque_value_type_classes: dict[str, type] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
@@ -515,7 +519,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
         self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
+        # Buffers that are neither recycled nor freed. Aliasing kernels rely on
+        # the second half: some have no output variable to free at all.
         self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
+        # Buffers withheld from the reuse pool but still freed, for storage that
+        # may be retained behind inductor's back. Freeing only drops inductor's
+        # own reference, so a retained tensor survives; recycling would not.
+        self.never_reuse_but_free_buffers: OrderedSet[str] = OrderedSet()
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
@@ -1587,7 +1597,15 @@ class GraphLowering(torch.fx.Interpreter):
             if target in self.seen_subgraphs:
                 return self.seen_subgraphs[target]
 
-            out = ir.Subgraph(name=target, graph_module=value)
+            nested_config = getattr(value, "meta", {}).get("nested_region_config")
+            inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+            out = ir.Subgraph(
+                name=target,
+                graph_module=value,
+                inductor_config_patches=inductor_config_patches,
+            )
             self.seen_subgraphs[target] = out
             return out
 
@@ -1633,10 +1651,22 @@ class GraphLowering(torch.fx.Interpreter):
 
         return self.add_tensor_constant(value, target)
 
-    def call_module(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
+    @typing_extensions.override
+    def call_module(
+        self,
+        target: torch.fx.node.Target,
+        args: tuple[torch.fx.node.Argument, ...],
+        kwargs: dict[str, object],
+    ) -> NoReturn:
         raise AssertionError
 
-    def call_method(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
+    @typing_extensions.override
+    def call_method(
+        self,
+        target: torch.fx.node.Target,
+        args: tuple[torch.fx.node.Argument, ...],
+        kwargs: dict[str, object],
+    ) -> NoReturn:
         raise AssertionError
 
     @typing_extensions.override
@@ -1806,7 +1836,7 @@ class GraphLowering(torch.fx.Interpreter):
                 f"old_kwargs length ({len(old_kwargs)}) != new_kwargs length ({len(new_kwargs)})"
             )
 
-        def already_reflected(old_arg: Any, new_arg: Any) -> bool:
+        def already_reflected(old_arg: object, new_arg: object) -> bool:
             # No propagation is needed when new_arg already reflects the
             # mutation of old_arg: either they are the same object, or they are
             # distinct IR nodes aliasing the same buffer (e.g. an in-place op
@@ -2117,21 +2147,17 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
-                        # To avoid converting possible view ops to a copy kernel, we use the previous
-                        # require_exact_strides to handle views. But ultimately it's better to require
-                        # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view() or isinstance(
+                        is_view = n.meta["val"]._is_view() or isinstance(
                             result.data,  # type: ignore[missing-attribute]
                             ir.BaseView,
-                        ):
+                        )
+                        if is_view and not (is_output and config.strict_output_strides):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),
                                 allow_padding=allow_padding,
                             )
                         else:
-                            # Fix for 0-d tensors: if result size is empty,
-                            # strides should also be empty
                             if len(result.get_size()) == 0 and len(strides) > 0:
                                 strides = []
                             result = ir.ExternKernel.require_exact_strides(
@@ -2587,7 +2613,7 @@ class GraphLowering(torch.fx.Interpreter):
         `cpp_wrapper_cpu.py`).
         """
         self.validate_can_generate_cpp_wrapper()
-        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
+        has_gpu = any(_uses_gpu_cpp_wrapper(device) for device in self.device_types)
         # CPU + user-defined Triton + AOTI + autotune block disabled is the
         # only CPU configuration that needs the two-pass dance: the autotune
         # block normally populates CpuTritonKernelCache, but here it doesn't run.
@@ -2897,7 +2923,7 @@ class GraphLowering(torch.fx.Interpreter):
         # A "cpu" device would precompile cpp_wrapper/cpu.h, which does not
         # include the CUDA headers needed to compile the kernel call sites.
         device_type = next(
-            (d for d in self.device_types if d in ("cuda", "xpu")),
+            (d for d in self.device_types if _uses_gpu_cpp_wrapper(d)),
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 
@@ -3193,6 +3219,8 @@ class SubgraphLowering(GraphLowering):
     def __init__(self, parent: GraphLowering, *args: Any, **kwargs: Any) -> None:
         self.parent = parent
         super().__init__(*args, **kwargs)
+        # Donation indices use the parent graph's placeholder ordering, not ours.
+        self.bw_donated_idxs = None
 
     def allocate_non_dup_const_name(self, name: str | None, data: Tensor) -> str:
         name = super().allocate_non_dup_const_name(name, data)

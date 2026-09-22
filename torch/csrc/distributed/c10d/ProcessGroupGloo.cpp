@@ -4,6 +4,7 @@
 
 #ifdef USE_C10D_GLOO
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -753,7 +754,20 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 }
 
 const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
-  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
+  // An empty global_ranks_in_group means "this group spans the whole world, in
+  // rank order": _new_process_group_helper() only fills the vector in for
+  // subgroups, and a directly-constructed (stateless) ProcessGroupGloo leaves
+  // it at its default. Deriving the identity mapping is therefore the right
+  // answer whenever it is empty.
+  //
+  // This must NOT be gated on local_id_ == 0. local_id_ is a process-global
+  // counter over every ProcessGroupGloo ever constructed in this process, so
+  // the default group only gets 0 when it happens to be the first gloo backend
+  // built. If any gloo pg was created earlier -- a stateless pg, or one
+  // inherited across fork() -- the default group fell through to the empty
+  // global_ranks_in_group below and split() then indexed an empty vector,
+  // segfaulting on a null data pointer.
+  if (options_->global_ranks_in_group.empty()) {
     if (defaultRanks_.size() != static_cast<size_t>(size_)) {
       defaultRanks_.resize(size_);
       std::iota(defaultRanks_.begin(), defaultRanks_.end(), 0);
@@ -1524,7 +1538,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   std::vector<c10::Event> outputEvents;
 };
 
-// A work that takes an lambda on construction and calls it on wait.
+// A work that takes a lambda on construction and calls it on wait.
 // It is useful for add a continuation to another work, and/or
 // composing multiple works together.
 class LambdaWork : public Work {
@@ -1573,14 +1587,14 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
     }
     buffers.push_back(inputTensors[i].clone());
   }
-  std::vector<c10::intrusive_ptr<Work>> works;
-  for (const auto i : c10::irange(buffers.size())) {
-    std::vector<at::Tensor> inp = {buffers[i]};
-    AllreduceOptions arOpts;
-    arOpts.reduceOp = opts.reduceOp;
-    arOpts.timeout = opts.timeout;
-    works.push_back(allreduce(inp, arOpts));
-  }
+  AllreduceOptions arOpts;
+  arOpts.reduceOp = opts.reduceOp;
+  arOpts.timeout = opts.timeout;
+  std::vector<c10::intrusive_ptr<Work>> works =
+      c10::fmap(buffers, [this, &arOpts](const at::Tensor& buffer) {
+        std::vector<at::Tensor> inp = {buffer};
+        return allreduce(inp, arOpts);
+      });
   return c10::make_intrusive<LambdaWork>(
       [rank, worldSize, buffers, outputTensors, works = std::move(works)]() {
         for (const auto i : c10::irange(outputTensors.size())) {
@@ -2256,14 +2270,14 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
       buffers.push_back(inputs[0][i].clone());
     }
   }
-  std::vector<c10::intrusive_ptr<Work>> works;
-  for (const auto i : c10::irange(buffers.size())) {
-    std::vector<at::Tensor> inp = {buffers[i]};
-    AllreduceOptions arOpts;
-    arOpts.reduceOp = opts.reduceOp;
-    arOpts.timeout = opts.timeout;
-    works.push_back(allreduce(inp, arOpts));
-  }
+  AllreduceOptions arOpts;
+  arOpts.reduceOp = opts.reduceOp;
+  arOpts.timeout = opts.timeout;
+  std::vector<c10::intrusive_ptr<Work>> works =
+      c10::fmap(buffers, [this, &arOpts](const at::Tensor& buffer) {
+        std::vector<at::Tensor> inp = {buffer};
+        return allreduce(inp, arOpts);
+      });
   return c10::make_intrusive<LambdaWork>(
       [worldSize, works = std::move(works)]() {
         for (const auto i : c10::irange(worldSize)) {
@@ -2317,8 +2331,6 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       gloo::alltoall(opts);
     } else {
       // Gloo alltoallv
-      c10d::checkSplitSizes(inputCounts, inputTensor, context_->size);
-      c10d::checkSplitSizes(outputCounts, outputTensor, context_->size);
       std::vector<int64_t> sendCounts(context_->size);
       std::vector<int64_t> recvCounts(context_->size);
       std::vector<int64_t> sendOffsets(context_->size);
@@ -2433,6 +2445,9 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
   if (!inputTensor.is_contiguous(inputTensor.suggest_memory_format())) {
     C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
   }
+
+  c10d::checkSplitSizes(inputCounts, inputTensor, getSize());
+  c10d::checkSplitSizes(outputCounts, outputTensor, getSize());
 
   const auto& device = outputTensor.device();
   c10::intrusive_ptr<AsyncAlltoallWork> work;

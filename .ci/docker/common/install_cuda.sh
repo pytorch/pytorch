@@ -10,7 +10,7 @@ else
   arch_path='sbsa'
 fi
 
-NVSHMEM_VERSION=3.4.5
+NVSHMEM_VERSION=3.7.2
 CUDA_CUPTI_VERSION=13.3.75
 
 function install_cuda {
@@ -107,21 +107,6 @@ function install_cupti_headers {
   echo "CUPTI ${cupti_version} headers installed to ${target_dir}."
 }
 
-function install_124 {
-  CUDNN_VERSION=9.1.0.70
-  CUSPARSELT_VERSION=0.6.2.3
-  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
-  install_cuda 12.4.1 cuda_12.4.1_550.54.15_linux
-
-  install_cudnn 12 $CUDNN_VERSION
-
-  CUDA_VERSION=12.4 bash install_nccl.sh
-
-  CUDA_VERSION=12.4 bash install_cusparselt.sh $CUSPARSELT_VERSION
-
-  ldconfig
-}
-
 function install_126 {
   CUDNN_VERSION=9.10.2.21
   CUSPARSELT_VERSION=0.7.1.0
@@ -140,7 +125,7 @@ function install_126 {
 }
 
 function install_129 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.26.0.51
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 12.9.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 12.9.1 in the same container
@@ -159,7 +144,7 @@ function install_129 {
 }
 
 function install_128 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.26.0.51
   CUSPARSELT_VERSION=0.7.1.0
   echo "Installing CUDA 12.8.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 12.8.1 in the same container
@@ -178,11 +163,11 @@ function install_128 {
 }
 
 function install_130 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.26.0.51
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.0 in the same container
-  install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
+  install_cuda 13.0.3 cuda_13.0.3_580.126.20_linux
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION
@@ -197,11 +182,11 @@ function install_130 {
 }
 
 function install_132 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.26.0.51
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.2 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.2 in the same container
-  install_cuda 13.2.1 cuda_13.2.1_595.58.03_linux
+  install_cuda 13.2.2 cuda_13.2.2_595.71.05_linux
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION
@@ -215,12 +200,29 @@ function install_132 {
   ldconfig
 }
 
+function install_134 {
+  CUDNN_VERSION=9.26.0.51
+  CUSPARSELT_VERSION=0.8.1.1
+  echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
+  # install CUDA 13.4 in the same container
+  install_cuda 13.4.1 cuda_13.4.1_linux
+
+  # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+  install_cudnn 13 $CUDNN_VERSION
+
+  install_nvshmem 13 $NVSHMEM_VERSION
+
+  CUDA_VERSION=13.4 bash install_nccl.sh
+
+  CUDA_VERSION=13.4 bash install_cusparselt.sh $CUSPARSELT_VERSION
+
+  ldconfig
+}
+
 # idiomatic parameter and option handling in sh
 while test $# -gt 0
 do
     case "$1" in
-    12.4) install_124;
-        ;;
     12.6|12.6.*) install_126;
         ;;
     12.8|12.8.*) install_128;
@@ -230,6 +232,8 @@ do
     13.0|13.0.*) install_130;
         ;;
     13.2|13.2.*) install_132;
+        ;;
+    13.4|13.4.*) install_134;
         ;;
     *) echo "bad argument $1"; exit 1
         ;;

@@ -59,11 +59,13 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
+    DictKeysVariable,
+    DictValuesVariable,
     DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
-    OrderedItemsDictVariable,
+    OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
@@ -121,10 +123,13 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeIteratorVariable,
+    DequeReverseIteratorVariable,
     DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
+    SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -187,14 +192,15 @@ from .tensor import (
     UntypedStorageVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch_function import TensorWithTFOverrideVariable
 from .user_defined import (
     DefaultDictVariable,
     FrozenDataClassVariable,
     InspectVariable,
     MutableMappingVariable,
     NamedTupleVariable,
-    OrderedDictVariable,
     RemovableHandleVariable,
+    SimpleNamespaceVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -268,7 +274,6 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "OrderedDictVariable",
-    "OrderedItemsDictVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
@@ -277,6 +282,7 @@ __all__ = [
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
     "SetAttrBuiltinVariable",
+    "SimpleNamespaceVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StopIterationVariable",

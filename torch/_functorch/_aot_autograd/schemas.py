@@ -1246,7 +1246,7 @@ class AOTState:
 
     # Whether or not we need to handle autograd when doing graph capture and
     # compilation.  Although the calling convention for non-autograd graph
-    # capture in AOTAutograd is simple and can be relied upon, the autograph
+    # capture in AOTAutograd is simple and can be relied upon, the autograd
     # capture calling convention is quite complicated and in general you are
     # only expected to pass to aot_stage2_compile to process.
     needs_autograd: bool
