@@ -52,6 +52,7 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
+from fx.test_fx_traceback import TestFXNodeSource  # noqa: F401
 
 from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     AnnotationsTest,
@@ -66,7 +67,10 @@ from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBI
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
-from torch.testing._internal.common_cuda import blas_library_context
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    blas_library_context,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -1487,6 +1491,58 @@ class TestFX(JitTestCase):
             raise AssertionError(
                 f"Expected 2 occurrences of '_torch__ops_aten_aten_relu_', got {count}"
             )
+
+    def test_print_readable_with_sparse_meta_val(self):
+        # The compressed sparse layouts have no strides; annotating a node
+        # whose meta["val"] carries one used to raise from Tensor.stride().
+        for layout in (
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ):
+            with self.subTest(layout=layout):
+                dense = torch.eye(4)
+                kwargs = (
+                    {"blocksize": (2, 2)}
+                    if layout in (torch.sparse_bsr, torch.sparse_bsc)
+                    else {}
+                )
+                sparse = dense.to_sparse(layout=layout, **kwargs)
+
+                graph = torch.fx.Graph()
+                node = graph.create_node("placeholder", "x")
+                node.meta["val"] = sparse
+                graph.output(node)
+                gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+                text = gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                self.assertIn("x", text)
+
+    def test_print_sparse_tensor_metadata(self):
+        crow = torch.tensor([0, 1, 2])
+        col = torch.tensor([0, 1])
+        vals = [
+            torch.sparse_coo_tensor(torch.tensor([[0, 1], [0, 1]]), torch.randn(2), (2, 2)),
+            torch.sparse_csr_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_csc_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_bsr_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+            torch.sparse_bsc_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+        ]
+
+        for val in vals:
+            graph: torch.fx.Graph = torch.fx.Graph()
+            x: torch.fx.Node = graph.create_node("placeholder", "x")
+            node: torch.fx.Node = graph.create_node("call_function", torch.relu, args=(x,))
+            node.meta["val"] = val
+            graph.output(node)
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+            text = gm.print_readable(print_output=False, include_stride=True, include_device=True)
+            if val.layout is not torch.sparse_coo:
+                self.assertIn(f'"f32{list(val.shape)}cpu"', text)
+                self.assertIn(f'"f32{list(val.shape)}cpu"', node.format_node(include_tensor_metadata=True))
 
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
@@ -4144,6 +4200,37 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
     def test_graph_module_init_buffer_param_copied_mod_init(self):
         self._test_graph_module_init_buffer_param_copied(use_dict_init=False)
 
+    def test_graph_module_init_preserves_non_persistent_buffers(self):
+        class Child(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("nested", torch.ones(1), persistent=False)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("top_level", torch.ones(1), persistent=False)
+                self.child = Child()
+
+            def forward(self, x):
+                return x + self.top_level + self.child.nested
+
+        module = MyModule()
+        graph_module = GraphModule(module, symbolic_trace(module).graph)
+
+        self.assertEqual(torch.full((1,), 2.0), graph_module(torch.zeros(1)))
+        self.assertEqual(
+            {"top_level", "child.nested"},
+            {name for name, _ in graph_module.named_buffers()},
+        )
+        self.assertEqual(
+            {"top_level"}, graph_module._non_persistent_buffers_set
+        )
+        self.assertEqual(
+            {"nested"}, graph_module.child._non_persistent_buffers_set
+        )
+        self.assertEqual({}, graph_module.state_dict())
+
     def test_annotations_with_no_forward_references(self):
         class A:
             def __call__(self, x: torch.Tensor):
@@ -4687,12 +4774,26 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 },
             )
         else:
+            # cuBLASLt added two internal cudaStreamIsCapturing checks before
+            # launching GEMM kernels starting with CUDA 13.4, which show up
+            # as extra runtime events ahead of each addmm's kernel launch.
+            extra_event = not torch.version.hip and _get_torch_cuda_version() >= (13, 4)
+            capture_1, capture_2 = "", ""
+            if extra_event:
+                capture_1 = (
+                    "event=cudaStreamIsCapturing node=addmm "
+                    "stack_trace=x = self.linear1(x)\n"
+                ) * 2
+                capture_2 = (
+                    "event=cudaStreamIsCapturing node=addmm_1 "
+                    "stack_trace=x = self.linear2(x)\n"
+                ) * 2
             expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
+{capture_1}event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
 event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
@@ -4700,7 +4801,7 @@ event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+{capture_2}event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
             self.assertExpectedInline(actual_traces, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
@@ -5298,6 +5399,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         None: "None",
         typing.Iterator: "Iterator",
         collections.abc.Iterator: "Iterator",
+        types.ModuleType: "types.ModuleType",
     }
 
     _UNBOUND_TYPES = {
@@ -5629,6 +5731,7 @@ class TestFunctionalTracing(JitTestCase):
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
+        "scaled_addmm_": MUTABLE,
         "scaled_dot_product_attention": BUILT_IN_FUNC,
         "softplus": BUILT_IN_FUNC,
         "softshrink": BUILT_IN_FUNC,

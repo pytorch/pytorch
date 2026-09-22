@@ -1,8 +1,8 @@
-// @allow-raw-throw
 #pragma once
 
 #include <exception>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 
@@ -104,6 +104,11 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define CATCH_ALL_ERRORS(retstmnt)               \
   CATCH_TH_ERRORS(retstmnt)                      \
+  catch (const std::out_of_range& e) {           \
+    auto msg = torch::processErrorMsg(e.what()); \
+    PyErr_SetString(PyExc_IndexError, msg);      \
+    retstmnt;                                    \
+  }                                              \
   catch (const std::exception& e) {              \
     auto msg = torch::processErrorMsg(e.what()); \
     PyErr_SetString(PyExc_RuntimeError, msg);    \
@@ -264,9 +269,51 @@ struct python_error : public std::exception {
   std::string message;
 };
 
+// Hand control back to the interpreter when `cond` is false, propagating the
+// error CPython has already set. Unlike TORCH_CHECK this takes no message,
+// because the message is whatever CPython raised; a TORCH_CHECK here would
+// replace a real Python exception with a RuntimeError.
+#define TORCH_CHECK_PYTHON(cond)                                        \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
+    /* @allow-raw-throw: this macro is the sanctioned wrapper for it */ \
+    throw python_error();                                               \
+  }
+
 bool THPException_init(PyObject* module);
 
 namespace torch {
+
+// Note [ Persisting PyErr state across autograd engine threads ]
+//
+// Since the autograd engine is multi-threaded, and Python error state is local
+// to each thread, it must preserve the python error from the worker thread and
+// rethrow it as-is in the calling thread. persist() does that by taking the
+// error indicator with PyErr_Fetch - which clears it - and storing the type,
+// value and traceback on the exception object, so that restore() can set it
+// again wherever the exception is finally caught. It is idempotent: an
+// exception that has already been persisted is left alone, which is why the
+// engine can persist a second time harmlessly.
+//
+// The engine persists in the two places that can encounter Python errors:
+// (1) evaluate function and (2) queued callbacks.
+//
+// TODO: the engine is not actually responsible for persisting the error in the
+// custom autograd Function case today. It still seems to be needed for the
+// DistEngine; the reproducer is
+//
+//   python test/distributed/rpc/test_tensorpipe_agent.py -k
+//   test_backward_autograd_engine_error
+//
+// See also https://github.com/pytorch/pytorch/pull/34845.
+//
+// Prefer TORCH_CHECK_PYTHON where there is a condition to check; this is for
+// the paths that have already decided to fail.
+[[noreturn]] inline void throw_python_error() {
+  python_error err;
+  err.persist();
+  // @allow-raw-throw: persist() above has to run before the stack unwinds
+  throw std::move(err);
+}
 
 // Set python current exception from a C++ exception
 TORCH_PYTHON_API void translate_exception_to_python(
