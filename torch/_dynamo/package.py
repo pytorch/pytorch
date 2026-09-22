@@ -26,7 +26,7 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import nullcontext
 from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
@@ -41,6 +41,7 @@ from .bytecode_transformation import (
     get_code_keys,
     is_compiled_fn_name,
 )
+from .types import GuardFilterEntry
 from .utils import CleanupHook, counters, dynamo_timed, increment_frame
 
 
@@ -623,12 +624,17 @@ class _DynamoCodeCacheEntry:
          artifact was missing when the package was saved. install() then leaves
          the frame to be traced fresh rather than skipping it as trivial.
          Cleared once a compile records a guarded code. The save-time writer,
-         PrecompileCacheEntry.from_cache_entry, flags the whole entry when any
-         one of its backend artifacts is missing; CompilePackage.initialize then
+         PrecompileCacheEntry.from_cache_entry, flags a saved copy of the whole
+         entry when any one of its backend artifacts is missing (the live entry
+         keeps serving this process); CompilePackage.initialize then
          loads it without its stale guarded codes and backend ids, every variant
          of that code object included, since install() would have used none.
          TODO(#196773): prune only the guarded codes whose bytecode names the
          missing backend at write time, so the other variants stay installable.
+      11. Why the entry is bypassed, while it is: the reason the last compile
+         gave up, known at the bypass site and otherwise only reachable via
+         tlparse. None whenever the entry is not bypassed, and None for the
+         save-time bypass above, which records its cause in the trace instead.
     """
 
     python_code: SerializedCode
@@ -641,6 +647,12 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    bypass_reason: str | None = None
+
+
+# A bypass reason can embed repr() of user objects; cap it before it is
+# pickled into the artifact so a pathological repr cannot bloat the file.
+_BYPASS_REASON_MAX_CHARS = 2048
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -893,7 +905,7 @@ class _DynamoCacheEntry:
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
     fn_name: str | None = None
-    fn_first_lineno: str | None = None
+    fn_first_lineno: int | None = None
 
     @property
     def backend_ids(self) -> set[_BackendId]:
@@ -950,7 +962,9 @@ class PrecompileCacheEntry:
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
     ) -> Optional["PrecompileCacheEntry"]:
         backend_content: dict[_BackendId, Any] = {}
-
+        # Non-mutating: the entry handed in may be the live one still serving
+        # this process, so a code whose backend is missing is bypassed on a copy.
+        codes: list[_DynamoCodeCacheEntry] = []
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
                 if backend_id not in backends:
@@ -970,12 +984,13 @@ class PrecompileCacheEntry:
                         payload_fn=lambda: debug_str,
                         expect_trace_id=False,
                     )
-                    code.bypassed = True
+                    code = dataclasses.replace(code, bypassed=True)
                     break
-                else:
-                    backend_content[backend_id] = backends[backend_id]
+                backend_content[backend_id] = backends[backend_id]
+            codes.append(code)
 
-        return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
+        dynamo = dataclasses.replace(cache_entry, codes=codes)
+        return PrecompileCacheEntry(dynamo=dynamo, backends=backend_content)
 
 
 def _hash_source(source: str) -> str:
@@ -1049,6 +1064,13 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        *,
+        serialization_guard_filter_fn: Callable[
+            [Sequence[GuardFilterEntry]], Sequence[bool]
+        ]
+        | None = None,
+        explicit_capture: bool = False,
+        serving: bool = False,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
@@ -1066,6 +1088,20 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
+        # Runtime guards stay intact; this filter applies only to the guard
+        # state recorded in the package.
+        self._serialization_guard_filter_fn = serialization_guard_filter_fn
+        # A torch.compiler.precompile capture or serve, as opposed to the
+        # ambient caching_precompile cache: the live guards are built strictly,
+        # only the (filtered) saved copy is recorded, and the package is never
+        # auto-persisted. Independent of the filter: a package can carry a
+        # filter without being an explicit capture, and the other way round.
+        self._explicit_capture = explicit_capture
+        # Serves a loaded artifact. A frame it does not cover still compiles
+        # and counts toward the recompile limit, but nothing will ever save
+        # this package, so its guards are neither serialized nor held to the
+        # strictness of a capture.
+        self._serving = serving
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
@@ -1074,6 +1110,20 @@ class CompilePackage:
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def serialization_guard_filter_fn(
+        self,
+    ) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None:
+        return self._serialization_guard_filter_fn
+
+    @property
+    def explicit_capture(self) -> bool:
+        return self._explicit_capture
+
+    @property
+    def serving(self) -> bool:
+        return self._serving
 
     def initialize(
         self,
@@ -1230,6 +1280,7 @@ class CompilePackage:
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
         self._current_entry.bypassed = False
+        self._current_entry.bypass_reason = None
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
@@ -1247,7 +1298,7 @@ class CompilePackage:
         # must not erase the accelerator an earlier frame named.
         self._device_types |= _graph_device_types(graph)
 
-    def bypass_current_compile(self) -> None:
+    def bypass_current_compile(self, reason: str | None = None) -> None:
         """Drop the backend ids the current compile registered on its entry.
 
         Only this compile is lost: its guarded code is never recorded
@@ -1257,7 +1308,8 @@ class CompilePackage:
         installable, so a reload keeps them and only re-traces the inputs that
         would have matched the dropped one. An entry left with no guarded code
         is marked bypassed so install() re-traces the frame instead of skipping
-        it as trivial.
+        it as trivial, and `reason` is recorded on it; an entry that keeps an
+        installable variant records none.
         """
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_compile")
@@ -1266,6 +1318,11 @@ class CompilePackage:
             self._cached_backends.pop(backend_id, None)
         self._current_backend_ids = []
         self._current_entry.bypassed = not self._current_entry.guarded_codes
+        if reason is not None and len(reason) > _BYPASS_REASON_MAX_CHARS:
+            reason = reason[:_BYPASS_REASON_MAX_CHARS] + " ... (truncated)"
+        self._current_entry.bypass_reason = (
+            reason if self._current_entry.bypassed else None
+        )
 
     def add_resume_function(
         self,
