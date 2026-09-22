@@ -64,6 +64,7 @@ from torch._inductor.output_code import CompiledFxGraphConstants
 from torch._inductor.runtime.runtime_utils import cache_dir, triton_cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.triton_bundler import (
+    TritonBundle,
     TritonBundler,
     TritonKernelArtifact,
     TritonKernelArtifacts,
@@ -788,6 +789,25 @@ class TestFxGraphCache(TestCase):
         )
         return artifacts, artifact
 
+    @classmethod
+    def make_complete_conflicting_artifacts(cls, bundle, *, device, payload):
+        """Copy a complete cache group while replacing its GPU binary."""
+        artifacts, binary_index, _ = cls.find_bundled_binary(bundle)
+        return (
+            TritonKernelArtifacts(
+                artifacts.kernel_hash,
+                device,
+                [
+                    TritonKernelArtifact(
+                        artifact.filename,
+                        payload if index == binary_index else artifact.payload,
+                    )
+                    for index, artifact in enumerate(artifacts.artifacts)
+                ],
+            ),
+            binary_index,
+        )
+
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
             f"""
@@ -1303,24 +1323,14 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
 
         graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
-        original_artifacts, binary_index, _ = self.find_bundled_binary(bundle)
+        original_artifacts, _, _ = self.find_bundled_binary(bundle)
         duplicate_device = (
             original_artifacts.device if conflicting_device == "same" else 1
         )
-        conflicting_artifacts = TritonKernelArtifacts(
-            original_artifacts.kernel_hash,
-            duplicate_device,
-            [
-                TritonKernelArtifact(
-                    artifact.filename,
-                    (
-                        b"conflicting bundled binary"
-                        if index == binary_index
-                        else artifact.payload
-                    ),
-                )
-                for index, artifact in enumerate(original_artifacts.artifacts)
-            ],
+        conflicting_artifacts, binary_index = self.make_complete_conflicting_artifacts(
+            bundle,
+            device=duplicate_device,
+            payload=b"conflicting bundled binary",
         )
         # Put the complete conflicting cache entry first.  If ambiguity is not
         # rejected before emission, ordinary Triton loading can cache-hit it.
@@ -1347,6 +1357,121 @@ class TestFxGraphCache(TestCase):
         with torch.cuda.device(duplicate_device):
             actual_x = x.clone().to(duplicate_device)
             self.assertEqual(graph.current_callable([actual_x])[0], fn(actual_x))
+
+    @requires_cuda_and_triton
+    @parametrize("bundle_damage", ("corrupt", "ambiguous"))
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": True,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_retained_cubin_ignores_damaged_bundle(self, bundle_damage):
+        def fn(x):
+            return x.sin()
+
+        with torch.cuda.device(0):
+            x0 = torch.randn(32, device="cuda")
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
+
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        compile_result = static_autotuner.kernel.compile_results[0]
+        retained_cubin = compile_result.kernel.cubin_raw
+        self.assertIsNotNone(retained_cubin)
+        original_artifacts, _, _ = self.find_bundled_binary(bundle)
+        damaged_artifacts, binary_index = self.make_complete_conflicting_artifacts(
+            bundle,
+            device=original_artifacts.device,
+            payload=b"damaged bundled binary",
+        )
+        if bundle_damage == "corrupt":
+            bundle.kernel_artifacts[
+                bundle.kernel_artifacts.index(original_artifacts)
+            ] = damaged_artifacts
+        else:
+            bundle.kernel_artifacts.insert(0, damaged_artifacts)
+
+        self.reset()
+        shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        metadata = TritonBundler.read_and_emit(bundle)
+        self.assertIsNotNone(metadata)
+        self.assertIn(
+            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
+        )
+        self.assertEqual(compile_result.kernel.cubin_raw, retained_cubin)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        self.assertIs(loaded_autotuner, static_autotuner.kernel)
+        missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
+        self.assertFalse(os.path.exists(missing_libdevice_path))
+        with _set_env("TRITON_LIBDEVICE_PATH", missing_libdevice_path):
+            self.assertEqual(graph.current_callable([x0.clone()])[0], fn(x0))
+        emitted_binary = os.path.join(
+            triton_cache_dir(original_artifacts.device),
+            damaged_artifacts.kernel_hash,
+            damaged_artifacts.artifacts[binary_index].filename,
+        )
+        with open(emitted_binary, "rb") as file:
+            self.assertEqual(file.read(), retained_cubin)
+
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_ambiguous_bundle_recovers_preexisting_local_artifact(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(32, device="cuda")
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        original_artifacts, _, _ = self.find_bundled_binary(bundle)
+        damaged_artifacts, binary_index = self.make_complete_conflicting_artifacts(
+            bundle,
+            device=original_artifacts.device,
+            payload=b"damaged preexisting binary",
+        )
+        bundle.kernel_artifacts.insert(0, damaged_artifacts)
+
+        self.reset()
+        shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        TritonBundler.read_and_emit(TritonBundle([damaged_artifacts], []))
+        emitted_binary = os.path.join(
+            triton_cache_dir(original_artifacts.device),
+            damaged_artifacts.kernel_hash,
+            damaged_artifacts.artifacts[binary_index].filename,
+        )
+        with open(emitted_binary, "rb") as file:
+            self.assertEqual(file.read(), b"damaged preexisting binary")
+
+        metadata = TritonBundler.read_and_emit(bundle)
+        self.assertIsNotNone(metadata)
+        self.assertIn(
+            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
+        )
+        graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
+        self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
+        with open(emitted_binary, "rb") as file:
+            self.assertNotEqual(file.read(), b"damaged preexisting binary")
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton

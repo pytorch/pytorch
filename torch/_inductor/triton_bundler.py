@@ -18,7 +18,8 @@ from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
 log = logging.getLogger(__name__)
 
 _BinaryArtifactIdentity = tuple[int | None, str, str]
-_BinaryPayloads = dict[_BinaryArtifactIdentity, OrderedSet[bytes]]
+_BinaryArtifactName = tuple[str, str]
+_BinaryArtifactGroup = tuple[int | None, str]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -90,6 +91,55 @@ class TritonBundle:
 
     kernel_artifacts: list[TritonKernelArtifacts]
     static_autotuners: list[StaticallyLaunchedAutotuner]
+
+
+@dataclasses.dataclass
+class _BundledBinaryIndex:
+    """Device-specific and device-agnostic views of bundled GPU binaries."""
+
+    by_identity: dict[_BinaryArtifactIdentity, OrderedSet[bytes]]
+    by_name: dict[_BinaryArtifactName, OrderedSet[bytes]]
+    groups_by_name: dict[_BinaryArtifactName, OrderedSet[_BinaryArtifactGroup]]
+
+    @classmethod
+    def from_bundle(cls, bundle: TritonBundle) -> "_BundledBinaryIndex":
+        index = cls({}, {}, {})
+        for artifacts in bundle.kernel_artifacts:
+            for artifact in artifacts.artifacts:
+                if (
+                    os.path.splitext(artifact.filename)[1]
+                    not in GPU_KERNEL_BIN_EXTS.values()
+                ):
+                    continue
+                identity = (
+                    artifacts.device,
+                    artifacts.kernel_hash,
+                    artifact.filename,
+                )
+                name = artifacts.kernel_hash, artifact.filename
+                group = artifacts.device, artifacts.kernel_hash
+                index.by_identity.setdefault(identity, OrderedSet()).add(
+                    artifact.payload
+                )
+                index.by_name.setdefault(name, OrderedSet()).add(artifact.payload)
+                index.groups_by_name.setdefault(name, OrderedSet()).add(group)
+        return index
+
+    def matching_payloads(self, identity: _BinaryArtifactIdentity) -> OrderedSet[bytes]:
+        device, kernel_hash, filename = identity
+        if device is None:
+            return self.by_name.get((kernel_hash, filename), OrderedSet())
+        return self.by_identity.get(identity, OrderedSet())
+
+    def matching_groups(
+        self, identity: _BinaryArtifactIdentity
+    ) -> OrderedSet[_BinaryArtifactGroup]:
+        device, kernel_hash, filename = identity
+        if device is None:
+            return self.groups_by_name.get((kernel_hash, filename), OrderedSet())
+        if identity in self.by_identity:
+            return OrderedSet(((device, kernel_hash),))
+        return OrderedSet()
 
 
 class TritonBundler:
@@ -225,64 +275,26 @@ class TritonBundler:
             return cls._static_autotuners, static_autotuner_names
 
     @staticmethod
-    def _matching_binary_payloads(
-        identity: _BinaryArtifactIdentity,
-        binary_payloads: _BinaryPayloads,
-    ) -> OrderedSet[bytes]:
-        device, kernel_hash, filename = identity
-        if device is not None:
-            return binary_payloads.get(identity, OrderedSet()).copy()
-
-        matches: OrderedSet[bytes] = OrderedSet()
-        for (
-            _,
-            candidate_hash,
-            candidate_filename,
-        ), candidates in binary_payloads.items():
-            if candidate_hash == kernel_hash and candidate_filename == filename:
-                matches.update(candidates)
-        return matches
-
-    @classmethod
     def _ambiguous_binary_artifact_groups(
-        cls,
         static_autotuners: list[StaticallyLaunchedAutotuner] | None,
-        binary_payloads: _BinaryPayloads,
-    ) -> OrderedSet[tuple[int | None, str]]:
+        binary_index: _BundledBinaryIndex,
+    ) -> OrderedSet[_BinaryArtifactGroup]:
         """Find bundle cache groups that cannot be emitted unambiguously."""
-        ambiguous_groups: OrderedSet[tuple[int | None, str]] = OrderedSet()
+        ambiguous_groups: OrderedSet[_BinaryArtifactGroup] = OrderedSet()
         for result in static_autotuners or ():
             for compile_result in result.kernel.compile_results:
-                device, kernel_hash, filename = (
-                    compile_result.bundled_artifact_identity()
-                )
-                if (
-                    len(
-                        cls._matching_binary_payloads(
-                            (device, kernel_hash, filename), binary_payloads
-                        )
-                    )
-                    <= 1
-                ):
+                if compile_result.kernel.cubin_raw is not None:
                     continue
-                for (
-                    candidate_device,
-                    candidate_hash,
-                    candidate_filename,
-                ) in binary_payloads:
-                    if (
-                        candidate_hash == kernel_hash
-                        and candidate_filename == filename
-                        and (device is None or candidate_device == device)
-                    ):
-                        ambiguous_groups.add((candidate_device, candidate_hash))
+                identity = compile_result.bundled_artifact_identity()
+                if len(binary_index.matching_payloads(identity)) > 1:
+                    ambiguous_groups.update(binary_index.matching_groups(identity))
         return ambiguous_groups
 
     @classmethod
     def load_autotuners(
         cls,
         static_autotuners: list[StaticallyLaunchedAutotuner] | None,
-        binary_payloads: _BinaryPayloads | None = None,
+        binary_index: _BundledBinaryIndex | None = None,
     ) -> list[str]:
         """
         Load statically launchable CachingAutotuners into async_compile.CompiledTritonKernels
@@ -304,25 +316,23 @@ class TritonBundler:
                 try:
                     # Make sure the cubin path exists and is valid
                     for compile_result in result.kernel.compile_results:
-                        device, kernel_hash, filename = (
-                            compile_result.bundled_artifact_identity()
-                        )
-                        matches = (
-                            cls._matching_binary_payloads(
-                                (device, kernel_hash, filename), binary_payloads
+                        if (
+                            compile_result.kernel.cubin_raw is None
+                            and binary_index is not None
+                        ):
+                            matches = binary_index.matching_payloads(
+                                compile_result.bundled_artifact_identity()
                             )
-                            if binary_payloads is not None
-                            else OrderedSet()
-                        )
-                        if len(matches) > 1:
-                            raise MissingTritonKernelError(
-                                "static kernel has ambiguous bundled binaries"
-                            )
-                        if matches:
-                            # The graph already retains this immutable payload.
-                            # Single-device launchers release it after loading;
-                            # device-agnostic launchers retain it for new devices.
-                            compile_result.kernel.cubin_raw = matches.pop()
+                            if len(matches) == 1:
+                                # The graph already retains this immutable payload.
+                                # Single-device launchers release it after loading;
+                                # device-agnostic launchers retain it for new devices.
+                                compile_result.kernel.cubin_raw = next(iter(matches))
+                            elif len(matches) > 1:
+                                log.warning(
+                                    "Ignoring ambiguous bundled binaries for %s",
+                                    result.kernel_name,
+                                )
                         compile_result.reload_cubin_path()
                         compile_result.kernel.retain_cubin_from_path()
                 except MissingTritonKernelError:
@@ -458,24 +468,9 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
-            binary_payloads: _BinaryPayloads = {}
-            for artifacts in bundle.kernel_artifacts:
-                for artifact in artifacts.artifacts:
-                    if (
-                        os.path.splitext(artifact.filename)[1]
-                        in GPU_KERNEL_BIN_EXTS.values()
-                    ):
-                        identity = (
-                            artifacts.device,
-                            artifacts.kernel_hash,
-                            artifact.filename,
-                        )
-                        binary_payloads.setdefault(identity, OrderedSet()).add(
-                            artifact.payload
-                        )
-
+            binary_index = _BundledBinaryIndex.from_bundle(bundle)
             ambiguous_artifact_groups = cls._ambiguous_binary_artifact_groups(
-                bundle.static_autotuners, binary_payloads
+                bundle.static_autotuners, binary_index
             )
 
             for artifacts in bundle.kernel_artifacts:
@@ -537,7 +532,7 @@ class TritonBundler:
 
             if config.use_static_triton_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
-                    bundle.static_autotuners, binary_payloads
+                    bundle.static_autotuners, binary_index
                 )
             else:
                 static_kernel_names = []
