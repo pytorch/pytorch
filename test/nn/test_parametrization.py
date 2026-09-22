@@ -6,7 +6,6 @@ from itertools import product
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
 from torch import Tensor
 from torch.__future__ import get_swap_module_params_on_conversion
@@ -33,10 +32,7 @@ class TestNNParametrization(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
     # torch/nn/utils/parametrize
-    @skipIfNoLapack
     @swap([True, False])
     def test_register_and_remove_parametrization(self):
         r"""Test that it is possible to add a few parametrizations
@@ -52,14 +48,8 @@ class TestNNParametrization(NNTestCase):
 
         class Orthogonal(nn.Module):
             def forward(self, X):
-                # Cayley map
-                # If X is skew-symmetric it returns an orthogonal matrix
-                Id = torch.eye(X.size(0), device=X.device)
-                # We call contiguous because solve returns a tensor with strides that are Fortran-contiguous
-                # and autograd raises a performance warning.
-                # This happens when we remove the parametrization with leave_parametrized=True,
-                # which does a set_ with a non-contiguous tensor while the gradient is contiguous
-                return torch.linalg.solve(Id + X, Id - X).contiguous()
+                # The exponential of a skew-symmetric matrix is orthogonal
+                return torch.matrix_exp(X)
 
         class Resize(nn.Module):
             def forward(self, X):
@@ -379,9 +369,6 @@ class TestNNParametrization(NNTestCase):
         self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
         self.assertEqual(len(list(model.parameters())), 1)
 
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
     @skipIfTorchDynamo(
         "Not applicable; see https://github.com/pytorch/pytorch/issues/127738"
     )
@@ -393,14 +380,12 @@ class TestNNParametrization(NNTestCase):
         class Orthogonal(nn.Module):
             def __init__(self, n):
                 super().__init__()
-                self.id = Buffer(torch.eye(n))
-                self.B = Buffer(torch.empty(n, n))
-                init.orthogonal_(self.B)
+                B = torch.randn(n, n).triu(1)
+                self.B = Buffer(torch.matrix_exp(B - B.T))
 
             def forward(self, X):
                 A = X.triu(1)
-                A = A - A.T
-                return self.B @ torch.linalg.solve(self.id + A, self.id - A)
+                return self.B @ torch.matrix_exp(A - A.T)
 
         def get_model():
             model = torch.nn.Sequential(
@@ -432,9 +417,6 @@ class TestNNParametrization(NNTestCase):
             with TemporaryFileName() as fname:
                 torch.save(model, fname)
 
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
     @swap([True, False])
     def test_initialization_parametrization(self):
         r"""Test that it is possible to initialize a parametrization when it
@@ -454,15 +436,14 @@ class TestNNParametrization(NNTestCase):
                     raise ValueError("The matrix is not skew-symmetric.")
                 return X.triu(1)
 
-        # Implements a Cayley map where right_inverse is not quite the inverse of forward
+        # Implements a map where right_inverse is not quite the inverse of forward
         class Orthogonal(nn.Module):
             def __init__(self, n):
                 super().__init__()
                 self.B = Buffer(torch.eye(n))
 
             def forward(self, X):
-                Id = torch.eye(X.size(0))
-                return self.B @ torch.linalg.solve(Id + X, Id - X)
+                return self.B @ torch.matrix_exp(X)
 
             def is_orthogonal(self, X):
                 Id = torch.eye(X.size(0))
@@ -471,7 +452,7 @@ class TestNNParametrization(NNTestCase):
             def right_inverse(self, X):
                 if not self.is_orthogonal(X):
                     raise ValueError("The input is not orthogonal.")
-                # cayley(0) == Id, so B @ cayley(0) == B
+                # matrix_exp(0) == Id, so B @ matrix_exp(0) == B
                 self.B = X
                 return torch.zeros_like(X)
 
@@ -500,7 +481,8 @@ class TestNNParametrization(NNTestCase):
         # X is not orthogonal, so it throws an error
         with self.assertRaises(ValueError):
             model.weight = X
-        init.orthogonal_(X)
+        A = torch.rand(N, N).triu(1)
+        X = torch.matrix_exp(A - A.T)
         model.weight = X
         self.assertEqual(model.weight, X)
         self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
@@ -852,9 +834,6 @@ class TestNNParametrization(NNTestCase):
             loss.backward()
             sgd.step()
 
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
     @swap([True, False])
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
@@ -867,8 +846,8 @@ class TestNNParametrization(NNTestCase):
 
         class Orthogonal(nn.Module):
             def forward(self, X):
-                Id = torch.eye(X.size(0), device=X.device)
-                return torch.linalg.solve(Id + X, Id - X)
+                # The exponential of a skew-symmetric matrix is orthogonal
+                return torch.matrix_exp(X)
 
         model = nn.Linear(5, 5)
         parametrize.register_parametrization(model, "weight", Skew())
@@ -880,9 +859,6 @@ class TestNNParametrization(NNTestCase):
             Y = model.weight
             self.assertEqual(id(X), id(Y))
 
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
     @swap([True, False])
     def test_caching_parametrization_with_transfer_parametrizations_and_params(self):
         r"""Test that transferring parametrizations doesn't cause issues with caching"""
@@ -894,8 +870,8 @@ class TestNNParametrization(NNTestCase):
 
         class Orthogonal(nn.Module):
             def forward(self, X):
-                Id = torch.eye(X.size(0), device=X.device)
-                return torch.linalg.solve(Id + X, Id - X)
+                # The exponential of a skew-symmetric matrix is orthogonal
+                return torch.matrix_exp(X)
 
         model = nn.Linear(5, 5)
         parametrize.register_parametrization(model, "weight", Skew())
