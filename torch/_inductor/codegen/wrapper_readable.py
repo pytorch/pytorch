@@ -12,6 +12,9 @@ module level compiles serially, in process, on its first launch, instead of fann
 to the compile worker pool. And every hoisted kernel names itself by the wrapper's
 ``__file__``, so they all share one autotune-cache key; that cache is effectively off in
 this mode (its configs_hash check keeps a wrong config from being applied).
+
+Only kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel is
+still emitted as a source string passed to ``async_compile.triton``.
 """
 
 import re
@@ -106,6 +109,9 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
                 # Every buffer that can hold a use, including header, which by now also
                 # holds the kernel definitions replayed into it, and
                 # subgraph_definitions, which holds each subgraph's finished text.
+                # generate() also writes a few lines straight into the assembled result
+                # (generate_after_suffix and friends); none of them may name a preamble
+                # binding, or the emitted module raises NameError.
                 text = "\n".join(
                     buf.getrawvalue()
                     for buf in (
@@ -122,8 +128,9 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
                     text = text.replace(kernel_text, "")
                 # Inductor emits a provenance comment per kernel naming every source op
                 # ("Original ATen: [aten.mul, ...]"), so a comment-blind scan reads
-                # `aten` as used by every graph. A name mentioned in a comment is not a
-                # use.
+                # `aten` as used by every graph, so whole-line comments are skipped.
+                # Trailing comments and string literals still count, which can only
+                # keep a line, never drop a needed one.
                 self._used_names = OrderedSet(
                     word
                     for line in text.splitlines()
