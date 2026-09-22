@@ -1110,6 +1110,9 @@ def getitem_on_dict_manager(
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
         # TODO - source debug string is probably wrong here.
+        # Not recorded by _compared_by_value (no builder here): a
+        # DictGuardManager exists only under guard_on_key_order, whose
+        # install_dict_keys_match_guard records the same key.
         base_guard_manager.get_key_manager(
             index=index,
             source=key_source,
@@ -1417,9 +1420,11 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
-        # The plain tuples an EQUALS_MATCH reads whole, keyed by id and holding
-        # the value so the id stays live; see Note [Reconstructing a function a
-        # guard is rooted at] in GuardsStatePickler. Save-path only.
+        # What a guard compares by value at run time: the plain tuples an
+        # EQUALS_MATCH reads whole and the non-const dict keys the key managers
+        # bake, keyed by id and holding the value so the id stays live; see Note
+        # [Reconstructing a function a guard is rooted at] in GuardsStatePickler.
+        # Save-path only.
         self.value_guarded_containers: dict[int, Any] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
@@ -1472,12 +1477,21 @@ class GuardBuilder(GuardBuilderBase):
             guard_manager_enum = self.get_guard_manager_type(
                 value_source, example_value
             )
+            self._compared_by_value(key)
             dict_mgr.dict_getitem_manager(
                 key=key,
                 source=f"{dict_source}[{key!r}]",
                 example_value=value,
                 guard_manager_enum=guard_manager_enum,
             )
+
+    def _compared_by_value(self, val: object) -> None:
+        # See Note [Reconstructing a function a guard is rooted at] in
+        # GuardsStatePickler: what a guard compares by value at run time must
+        # travel verbatim, so the serializer never prunes or substitutes it. A
+        # literal is never pruned, so only an object is worth recording.
+        if self.save_guards and not FunctionPicklerBase._is_literal(val):
+            self.value_guarded_containers[id(val)] = val
 
     def guard_on_dict_keys_and_order(self, value: dict[Any, Any], guard: Guard) -> None:
         # Add key managers for the DictGuardManager. Then add either an
@@ -1515,6 +1529,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
             else:
                 # Install EQUALS_MATCH guard
+                self._compared_by_value(key)
                 key_manager.add_equals_match_guard(
                     key,
                     get_verbose_code_parts(f"{key_source} == {key!r}", guard),
@@ -2529,6 +2544,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___dict_contains({key!r}, {dict_ref})"
         if code in self.already_added_code_parts:
             return
+        self._compared_by_value(key)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
@@ -2549,6 +2565,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"not ___dict_contains({key!r}, {dict_ref})"
         if code in self.already_added_code_parts:
             return
+        self._compared_by_value(key)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
@@ -2571,6 +2588,7 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
 
+        self._compared_by_value(item)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
@@ -2593,6 +2611,7 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
 
+        self._compared_by_value(item)
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
@@ -2909,10 +2928,11 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard)
         # See Note [Reconstructing a function a guard is rooted at] in
-        # GuardsStatePickler: a plain tuple this guard compares whole must be
-        # carried verbatim by the serializer.
-        if self.save_guards and type(val) is tuple:
-            self.value_guarded_containers[id(val)] = val
+        # GuardsStatePickler: what this guard compares whole (a tuple, a
+        # torch.Size, a registered constant) must be carried verbatim by the
+        # serializer. The original, not the deepcopy below: the state holds
+        # this object, and the loaded guards re-bake from it.
+        self._compared_by_value(val)
         if np:
             np_types: tuple[type[Any], ...] = (
                 np.int8,
@@ -3357,8 +3377,12 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
 
-        code = []
-        code.append(f"list({ref}.keys()) == {list(value.keys())}")
+        keys = list(value.keys())
+        code = [f"list({ref}.keys()) == {keys}"]
+        # The keys, not the values: the leaf snapshots them and compares the
+        # list by value at run time.
+        for key in keys:
+            self._compared_by_value(key)
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_mapping_keys_guard(
             value, code, guard.user_stack
@@ -4249,6 +4273,17 @@ def _is_shared_constant(value: Any) -> bool:
     return FunctionPicklerBase._is_literal(value)
 
 
+def _instance_dict(obj: Any) -> dict[str, Any] | None:
+    """obj.__dict__ via object.__getattribute__: a user __getattr__ or
+    __getattribute__ never runs (a type-level __dict__ property still does, and
+    only its AttributeError is absorbed); None when there is no instance dict."""
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
 # breaks the module itself: __getattr__ indexes the three dicts for every name
 # outside __dict__, and __setattr__/__delattr__ index all four on any
@@ -4274,9 +4309,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
-        # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
-        # above _keep. Required, because omitting it would carry no plain
-        # tuple verbatim.
+        # What a guard compares by value (plain tuples an EQUALS_MATCH reads
+        # whole, non-const dict keys), by id; see the Note above _keep. Required,
+        # because omitting it would carry no plain tuple verbatim.
         self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
@@ -4286,19 +4321,51 @@ class GuardsStatePickler(FunctionPicklerBase):
         # Elements of a container carried verbatim (a value-guarded __defaults__
         # tuple, see _keep_container_verbatim) must stay real even when an
         # unguarded attribute is the very same object and registers it mid-dump.
-        self._verbatim_elements: set[int] = set()
+        # So must an object a guard compares by value itself (a dict key).
+        self._verbatim_elements: dict[int, Any] = {}
         stack = list(value_guarded_containers.values())
         while stack:
-            for element in stack.pop():
-                if id(element) in self._verbatim_elements:
-                    continue
-                self._verbatim_elements.add(id(element))
-                if isinstance(element, (list, tuple, set, frozenset)):
-                    stack.append(element)
-                elif isinstance(element, dict):
-                    # Values only: no pruned type is hashable, so a key can
-                    # neither be one nor contain one.
-                    stack.append(list(element.values()))
+            value = stack.pop()
+            if id(value) in self._verbatim_elements:
+                continue
+            # Holds the value, like its sibling maps, so the id stays live: a
+            # __dict__ property may hand the walk fields that die with its dict.
+            self._verbatim_elements[id(value)] = value
+            if inspect.ismodule(value) or isinstance(
+                value, (torch.Tensor, torch.nn.Module)
+            ):
+                # A module is pickled by name and its dict leads into every other
+                # namespace. A tensor or an nn.Module field is a known limit,
+                # like __slots__ (see the Note above _keep): their branches below
+                # do not consult the mark, and a loaded copy could not compare
+                # equal to the run-time object anyway (an nn.Module compares by
+                # identity). Descending would only switch pruning off for
+                # everything they hold.
+                continue
+            if isinstance(value, (dict, types.MappingProxyType)):
+                # Keys too: missing_values prunes hashable objects (a frozen
+                # dataclass), so a key can be one or hold one. A mappingproxy
+                # reached as a field is compared with == like a dict, and its
+                # reducer pickles each key on its own. Read through the
+                # subclass's own __iter__ and values() on purpose: that is what
+                # its reducer pickles (unlike the builtin reads the C++ guards
+                # use), so the mark lands on exactly what travels.
+                stack.extend(value)
+                stack.extend(value.values())
+            elif isinstance(
+                value, (list, tuple, set, frozenset, dict_keys, collections.deque)
+            ):
+                # A dict_keys view is a KeysView, not a set, and a deque has no
+                # instance dict; the reducers of both pickle each item on its own.
+                stack.extend(value)
+            if (fields := _instance_dict(value)) is not None:
+                # A by-value comparison reads every field, so the protection
+                # is transitive through an object's instance dict; a container
+                # subclass with instance state gets its elements and its fields.
+                # The dict itself is marked too: an exact dict a scope leaf
+                # registered would otherwise be swapped whole by persistent_id.
+                self._verbatim_elements[id(fields)] = fields
+                stack.extend(fields.values())
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4450,8 +4517,18 @@ class GuardsStatePickler(FunctionPicklerBase):
     # call-site default binding next to `f.__defaults__ == (...)`), and only
     # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
     # records those tuples in value_guarded_containers, which the pickler takes
-    # as a required argument. A dict/tuple SUBCLASS is verbatim whenever kept,
-    # since its type must survive for the guard reading the slot
+    # as a required argument. A non-const dict key, a *_CONTAINS comparand and
+    # a MAPPING_KEYS_CHECK key are recorded there too (_compared_by_value):
+    # the key managers and those guards bake them and compare by value at run
+    # time, and that comparison reads every field, so the protection extends
+    # through the key's instance dict. Known limits: a slotted key's slot
+    # values are not marked (KeysView/ValuesView/ItemsView are slotted too), and
+    # the reducer_override branches that return the sentinel without consulting
+    # the mark (a tensor or nn.Module outside the guard tree, a capsule, the
+    # unsupported types, an fqn-mismatched function, a distributed Work) keep
+    # doing so: each of those compares by identity, so a carried copy could not
+    # make the guard match anyway. A dict/tuple SUBCLASS is verbatim whenever
+    # kept, since its type must survive for the guard reading the slot
     # (_keep_container_verbatim).
 
     def _keep(self, value: object) -> bool:
@@ -4473,10 +4550,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Whether a function container (__defaults__/__dict__/...) is carried whole
         rather than pruned per value; the rule and its reasons are in the Note
         [Reconstructing a function a guard is rooted at] above."""
-        # The tuple case is decided on the recording alone. A recorded tuple is
-        # also in guard_tree_values today (EQUALS_MATCH registers the value it
-        # reads), but the failure mode of that second invariant breaking would
-        # be the silent forever-miss this rule exists to prevent.
+        # The tuple case is decided on the recording alone. A tuple EQUALS_MATCH
+        # recorded is also in guard_tree_values; one recorded as a dict key by
+        # _compared_by_value need not be, and either way the failure mode of
+        # relying on guard_tree_values would be the silent forever-miss this
+        # rule exists to prevent.
         if type(container) is tuple:
             return id(container) in self.value_guarded_containers
         if type(container) is dict:
@@ -4650,7 +4728,11 @@ class GuardsStatePickler(FunctionPicklerBase):
     # Everything else in missing_values stays on the reducer_override path, and
     # so does a container that is also in empty_values: reducer_override checks
     # empty_values first, so a bound method's receiver is rebuilt empty rather
-    # than as the sentinel, and this hook keeps that precedence.
+    # than as the sentinel, and this hook keeps that precedence. Above both
+    # ranks _verbatim_elements, in this hook and in reducer_override alike: a
+    # value some guard compares by value travels whole even when it is also an
+    # empty-rebuilt receiver, because carrying it risks a loud dump failure
+    # while an empty or hollow comparand is a silent forever-miss.
     _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
     def persistent_id(self, obj: object) -> int | str | None:
@@ -4669,13 +4751,15 @@ class GuardsStatePickler(FunctionPicklerBase):
     ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
         import sympy
 
-        if id(obj) in self.empty_values:
+        if id(obj) in self.empty_values and id(obj) not in self._verbatim_elements:
             return type(obj).__new__, (type(obj),)
 
         if inspect.iscode(obj):
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
 
-        if id(obj) in self.missing_values:
+        if id(obj) in self.missing_values and id(obj) not in self._verbatim_elements:
+            # A value some guard compares by value (a dict key, one of its
+            # fields) stays whole even when a scope leaf registered it.
             return _Missing, ("missing values",)
 
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
