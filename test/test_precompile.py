@@ -4244,9 +4244,11 @@ class TestPrecompileCapture(TestCase):
 
     @parametrize("backend", ["inductor", "eager"])
     def test_capture_and_load_round_trip(self, backend):
+        # The call is served through the artifact, without the exec warning a load
+        # of untrusted source emits, and returns what fn returns.
         with self._capture(backend=backend) as cap:
-            y = cap(self.model, self.x)
-        # The call is served through the artifact and returns what fn returns.
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                y = cap(self.model, self.x)
         self.assertEqual(y, self.model(self.x))
         self.assertTrue(os.path.exists(self.artifact))
         self.assertTrue(os.path.exists(self.cache))
