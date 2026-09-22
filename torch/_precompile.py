@@ -225,9 +225,18 @@ it.
 
 from __future__ import annotations
 
+import base64
+import dataclasses
+import errno
 import hashlib
+import inspect
 import io
 import logging
+import os
+import pickle
+import stat
+import types
+import uuid
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
@@ -245,6 +254,7 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from typing_extensions import Self
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -300,6 +310,73 @@ class PrecompileError(RuntimeError):
     memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
     """
+
+
+@dataclasses.dataclass(frozen=True)
+class MakeFxTracer:
+    """The ``make_fx`` capture front-end, passed as ``tracer=`` to a precompile capture.
+
+    A NON-STRICT single make_fx trace: it records the ATen ops of ONE execution of
+    ``fn``, so a ``capture`` with this tracer takes exactly one call and refuses a
+    second, and control flow and shapes are specialized to that call (the source of
+    the programming-model contract). Part of the prototype ``torch.compiler.precompile``
+    API, so it may change without a deprecation cycle.
+
+    ``decompositions`` is an optional decomposition table (a dict mapping each
+    ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
+    ``decomposition_table``; it is specific to this tracer (Dynamo lowers through the
+    backend instead).
+    """
+
+    decompositions: dict | None = None
+
+
+class PrecompiledRunnable:
+    """What ``torch.compiler.precompile.load`` returns.
+
+    A callable with the captured ``fn``'s calling convention that can also be
+    entered as a context manager and unloaded. A standalone artifact installs
+    nothing, so for it ``__enter__``/``__exit__``/:meth:`unload` are no-ops;
+    ``installed`` is ``True`` on the shape that installs onto the captured code
+    objects. Part of the prototype ``torch.compiler.precompile`` API, so it may
+    change without a deprecation cycle.
+    """
+
+    installed: bool = False
+    """Whether calling this handle installs onto the captured code objects."""
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unload()
+
+    def unload(self) -> None:
+        """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
+
+
+class Capture:
+    r"""The caller-driven capture ``torch.compiler.precompile.capture`` returns.
+
+    Part of the prototype ``torch.compiler.precompile`` API, so it may change
+    without a deprecation cycle. Enter it as a context manager to arm the
+    capture, call it exactly as you would ``fn`` inside the block -- each call
+    runs for real, folds what it exercised into the capture, and returns what
+    ``fn`` returned -- and the artifact is written once, to the ``artifact_path``
+    / ``cache_path`` files, when the block exits.
+    """
+
+    def __enter__(self) -> Self:
+        raise NotImplementedError
+
+    def __exit__(self, *exc: object) -> None:
+        raise NotImplementedError
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -421,6 +498,23 @@ def _reject_unsupported_marks(user_flat: list[object]) -> None:
                 "precompile cannot honor (it produces a single artifact, not per-value "
                 "specializations). Remove specialize_on."
             )
+
+
+def _unbacked_guard_error(e: BaseException) -> PrecompileError:
+    """The capture-time error for a guard on a mark_unbacked dim, shared by the capture paths.
+
+    A mark_unbacked dim is captured as an unbacked symint (no hint), so a computation that
+    needs to guard on / specialize its size (a shape-dependent branch, a reshape that pins
+    it) cannot be captured. Unbacked dims cannot be guarded, so rather than bake a
+    silently-wrong artifact, fail here.
+    """
+    return PrecompileError(
+        "precompile: fn needs to guard on a dim marked with mark_unbacked "
+        "(it branches on or specializes that size), which is not allowed for "
+        "an unbacked dynamic dim. Do not mark that dim (capture it static), "
+        "or restructure fn to avoid the size-dependent operation. Underlying: "
+        f"{(str(e).splitlines() or [''])[0]}"
+    )
 
 
 def _read_unbacked_marks(user_flat: list[object]) -> list[dict[int, _MarkSpec]]:
@@ -970,17 +1064,7 @@ def _capture(
                     tracing_mode=tracing_mode,
                 )(flat_args)
             except GuardOnDataDependentSymNode as e:
-                # A mark_unbacked dim was captured as an unbacked symint (no hint), but
-                # the computation needs to guard on / specialize its size (e.g. a
-                # shape-dependent branch or a reshape that pins it). Unbacked dims cannot
-                # be guarded, so rather than bake a silently-wrong artifact, fail here.
-                raise PrecompileError(
-                    "precompile: fn needs to guard on a dim marked with mark_unbacked "
-                    "(it branches on or specializes that size), which is not allowed for "
-                    "an unbacked dynamic dim. Do not mark that dim (capture it static), "
-                    "or restructure fn to avoid the size-dependent operation. Underlying: "
-                    f"{str(e).splitlines()[0]}"
-                ) from e
+                raise _unbacked_guard_error(e) from e
     finally:
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
@@ -1181,33 +1265,20 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     executing it (exec'ing the inlined Inductor output would JIT the kernels, the
     very work the cache exists to skip).
 
-    python_code is the single source of truth: ``_build_metadata_section`` emits the
-    constants below as top-level literal assignments, so an AST walk + literal_eval
-    recovers them safely. The cache then only needs to carry the compiled artifact.
+    python_code is the single source of truth: the metadata builders emit the constants
+    below as top-level literal assignments, so an AST walk + literal_eval recovers them
+    safely. The cache then only needs to carry the compiled artifact.
+
+    The required set follows TRACER: absent (artifacts predating the dynamo tracer) or
+    anything but "dynamo" means the make_fx set the inlined driver reads. A dynamo
+    artifact instead carries the multi-graph driver's blobs (_FRAMES and _BACKENDS, or
+    _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once SERVING_MODE is "installed"), the
+    readable frame report beside them and the two versions that lock them,
+    _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION for the
+    pickled guard state.
     """
     import ast
 
-    wanted = {
-        "BACKEND",
-        "MODULE_POSITIONS",
-        "NUM_POSITIONAL_ARGS",
-        "PARAM_NAMES",
-        "BUFFER_NAMES",
-        "PARAM_SHAPES",
-        "BUFFER_SHAPES",
-        "PARAM_DTYPES",
-        "BUFFER_DTYPES",
-        "PARAM_DEVICES",
-        "BUFFER_DEVICES",
-        "GRAD_PARAM_INDICES",
-        "IN_SPEC",
-        "OUT_SPEC",
-        "USER_INPUT_SHAPES",
-        "USER_INPUT_DTYPES",
-        "USER_INPUT_DEVICES",
-        "USER_INPUT_BOUNDS",
-    }
-    found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -1215,31 +1286,95 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "python_code is not valid Python; it does not look like a "
             "torch.compiler.precompile artifact."
         ) from e
+    # The last top-level assignment to a name wins, as it would under exec, so the
+    # set selection below and the reported values read the same assignment.
+    assigns: dict[str, ast.expr] = {}
     for node in tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            continue
-        if target.id in wanted:
-            found[target.id] = ast.literal_eval(node.value)
-        else:
-            # Not a metadata name we consume (the driver section emits only
-            # function defs today, but a future artifact revision could add a
-            # driver-internal top-level assignment). Skipped by design, but log
-            # it at debug so a malformed / renamed artifact is diagnosable
-            # rather than silently dropped.
-            log.debug(
-                "precompile: ignoring unrecognized top-level assignment %r while "
-                "parsing artifact calling-convention metadata",
-                target.id,
-            )
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            assigns[node.targets[0].id] = node.value
+
+    def literal(name: str) -> object:
+        try:
+            return ast.literal_eval(assigns[name])
+        except (ValueError, TypeError) as e:
+            raise PrecompileError(
+                f"python_code {name!r} calling-convention metadata is malformed; "
+                "it must be a Python literal."
+            ) from e
+
+    tracer = literal("TRACER") if "TRACER" in assigns else None
+    if tracer == "dynamo":
+        wanted = {
+            "BACKEND",
+            "FN_NAME",
+            "FRAMES",
+            "DROPPED_GUARDS",
+            "RISKY_DROPPED_GUARDS",
+            "WONT_GENERALIZE",
+            "_FRAMES",
+            "_BACKENDS",
+            "_DYNAMO_PYTHON_VERSION",
+            "_ENTRY_BINDING",
+            "TORCH_VERSION",
+        }
+        mode = literal("SERVING_MODE") if "SERVING_MODE" in assigns else None
+        if mode == "installed":
+            wanted -= {"_FRAMES", "_BACKENDS"}
+            wanted |= {"_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL"}
+    else:
+        wanted = {
+            "BACKEND",
+            "MODULE_POSITIONS",
+            "NUM_POSITIONAL_ARGS",
+            "PARAM_NAMES",
+            "BUFFER_NAMES",
+            "PARAM_SHAPES",
+            "BUFFER_SHAPES",
+            "PARAM_DTYPES",
+            "BUFFER_DTYPES",
+            "PARAM_DEVICES",
+            "BUFFER_DEVICES",
+            "GRAD_PARAM_INDICES",
+            "IN_SPEC",
+            "OUT_SPEC",
+            "USER_INPUT_SHAPES",
+            "USER_INPUT_DTYPES",
+            "USER_INPUT_DEVICES",
+            "USER_INPUT_BOUNDS",
+        }
+    # Parsed when present but never required, so older artifacts load unchanged:
+    # TRACER and SERVING_MODE already selected the required set above, and
+    # the guard-audit sections come back as data.
+    optional = {
+        "TRACER",
+        "SERVING_MODE",
+        "POLICY_DROPPED_GUARDS",
+        "DROPPED_GUARD_CODE",
+    }
+    found = {name: literal(name) for name in assigns if name in wanted | optional}
+    for name in assigns.keys() - wanted - optional - {"forward"}:
+        # Not a metadata name we consume (``forward = ...`` is the multi-graph
+        # driver's own binding, emitted later in this stack). Skipped by design,
+        # but log it at debug so a malformed / renamed artifact is diagnosable
+        # rather than silently dropped.
+        log.debug(
+            "precompile: ignoring unrecognized top-level assignment %r while "
+            "parsing artifact calling-convention metadata",
+            name,
+        )
     missing = wanted - found.keys()
     if missing:
         raise PrecompileError(
             f"python_code is missing calling-convention metadata {sorted(missing)}; "
             "it does not look like a torch.compiler.precompile artifact."
         )
+    # Artifacts predating the installed serving mode carry no SERVING_MODE, and
+    # they were all standalone.
+    found.setdefault("SERVING_MODE", "standalone")
     return found
 
 
@@ -1352,7 +1487,6 @@ def _emit_driver_source(forward_fn_name: str) -> str:
     selected forward variant to the public ``forward``. Emitting the TEXT (rather than
     importing the module from the artifact) keeps python_code self-contained and
     version-frozen (Note [precompile programming model], invariant 7)."""
-    import inspect
 
     from torch import _precompile_driver as driver
 
@@ -1367,6 +1501,227 @@ def _emit_driver_source(forward_fn_name: str) -> str:
     ]
     body = "\n\n".join(block.rstrip() for block in blocks)
     return "\n" + body + "\n\n\n" + _DRIVER_MAIN
+
+
+_MULTIGRAPH_GENERATED_HEADER = """\
+# Generated by torch.compiler.precompile (multi-graph) -- do not edit.
+#
+# Self-contained, executable artifact for a computation with GRAPH BREAKS or several
+# guarded variants. Where the single-graph forms inline one graph, this inlines every
+# frame Dynamo compiled -- the entry frame plus each continuation -- with one guard tree
+# per captured variant, and dispatches among them at call time:
+#
+#     ns = {}
+#     exec(open("this_file.py").read(), ns)
+#     out = ns["forward"](model, my_input)      # same args as the captured callable
+#
+# Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state --
+# the guard trees and the transformed bytecode -- because those have no readable
+# source form. The compiled subgraphs DO have one and are emitted as source; only a
+# subgraph the backend could not render (an eager fx graph, a training graph) falls
+# back to the blob. Everything else is meant to be read and reviewed.
+"""
+
+
+# What the artifact does to the process, which differs by serving mode.
+_SERVING_NOTES = {
+    "standalone": """\
+# Nothing is installed onto your code objects and no frame evaluator is involved; the
+# only global state loading touches is the captured module, where the names Dynamo
+# minted while tracing (import aliases, the builtins dict key, the compiled subgraphs
+# under their backend ids) are re-seeded and stay. The flip side is that there is no
+# compiler behind it: a call no captured variant covers RAISES rather than compiling a
+# new one.
+""",
+    "installed": """\
+# This artifact SERVES BY INSTALLING onto the live code objects, so loading and then
+# entering it mutates global state, which unload() and __exit__ take back out. And
+# there IS a compiler behind it: a call no captured variant covers is compiled fresh
+# at serve time rather than refused. That is what makes a graph-breaking model
+# servable at all, but it means the artifact can quietly serve less and less of
+# itself -- watch for the "serving compiled a NEW graph" warning, or read
+# serve_time_compiles() on the loaded object.
+""",
+}
+
+
+def _b64(payload: object) -> str:
+    return base64.b64encode(pickle.dumps(payload)).decode("ascii")
+
+
+def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
+    """One record per Dynamo frame, in the form the driver rebuilds from.
+
+    A standalone artifact can reach exactly two kinds of frame: the ENTRY frame,
+    which the caller invokes, and a continuation, which the frame ahead of it
+    reaches by LOAD_GLOBAL on the name capture minted. Anything else Dynamo
+    compiled is entered by an ordinary Python call that only the frame evaluator
+    intercepts, so it has no place in a source artifact.
+
+    The entry is ``codes[0]``: CompilePackage records the captured callable's
+    code first and reads it back by position (``main, *codes``). A bypassed code
+    keeps its record, flagged and without variants, the way install() keeps its
+    global binding but none of its guarded codes: a continuation the frame ahead
+    of it names must stay bound, and a bypassed code's guarded codes are dead.
+    """
+    return [
+        {
+            "is_entry": i == 0,
+            "bypassed": code.bypassed,
+            "code": code.python_code,
+            "python_module": code.python_module,
+            "import_sources": dict(code.import_sources),
+            "resume_names": list(code.function_names) if code.install_to_global else [],
+            "variants": [
+                {
+                    "guards_state": guarded.guards_state,
+                    "dynamo_code": guarded.dynamo_code,
+                }
+                for guarded in ([] if code.bypassed else code.guarded_codes)
+            ],
+        }
+        for i, code in enumerate(entry.codes)
+    ]
+
+
+def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
+    """Indices of the frames a standalone driver can actually dispatch.
+
+    The entry is reachable, and a continuation is reachable only once some
+    ALREADY reachable frame's bytecode names it. Asking merely whether a frame
+    carries a resume name is not the same question: a continuation whose parent
+    is itself unreachable is just as dead, and counting it as covered
+    under-reports how much of the artifact will run eager.
+    """
+    from torch._dynamo.package import SerializedCode
+
+    def named_globals(frame: dict[str, Any]) -> set[str]:
+        # co_names of every variant's bytecode, nested code objects included.
+        # co_consts is acyclic (a code object cannot contain itself).
+        out: set[str] = set()
+        stack = [
+            SerializedCode.to_code_object(variant["dynamo_code"])
+            for variant in frame["variants"]
+        ]
+        while stack:
+            code = stack.pop()
+            out.update(code.co_names)
+            stack.extend(c for c in code.co_consts if isinstance(c, types.CodeType))
+        return out
+
+    reachable = {i for i, frame in enumerate(frames) if frame["is_entry"]}
+    named: set[str] = set()
+    pending = list(reachable)
+    while pending:
+        named |= named_globals(frames[pending.pop()])
+        grew = {
+            i
+            for i, frame in enumerate(frames)
+            if i not in reachable and any(n in named for n in frame["resume_names"])
+        }
+        reachable |= grew
+        pending.extend(grew)
+    return reachable
+
+
+def _serving_mode(frames: list[dict[str, Any]]) -> str:
+    """``"standalone"`` when a source artifact serves every captured frame.
+
+    A frame it cannot reach would run eager, silently giving up the compiled
+    variant; a frame it reaches but has no variant of (a bypassed continuation)
+    would raise on the very path capture exercised. Either way the capture is
+    served by installing instead, which has a compiler behind it.
+    """
+    reachable = _reachable_frames(frames)
+    covered = {i for i, frame in enumerate(frames) if frame["variants"]}
+    return "standalone" if covered == reachable else "installed"
+
+
+def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
+    """Refuse a capture whose entry the artifact could not rebuild or serve.
+
+    The multi-graph driver rebuilds the entry from its code object, which
+    carries no closure, so a closure entry cannot be built at all. That is a
+    capture-time fact and is refused here rather than at load on the serving
+    machine. (Defaults, which the code object does not carry either, are
+    recorded into the artifact rather than refused.) An entry with no
+    dispatchable variant is refused too, naming which of its two causes applies.
+    """
+    from torch._dynamo.package import SerializedCode
+
+    entry_frame = next((f for f in frames if f["is_entry"]), None)
+    if entry_frame is None:
+        return
+    if entry_frame["bypassed"]:
+        # Dynamo logged why when it bypassed the frame; the thin-wrapper advice
+        # below would send the caller restructuring code that was never the
+        # problem.
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}: the "
+            f"entry frame was BYPASSED during capture (its guards could not be "
+            f"serialized, or a backend artifact was missing when the package was "
+            f"saved), so no variant of it can be served. Dynamo logged the reason: "
+            f"look for the package-bypass warning, or the precompile_cache_bypass / "
+            f"dynamo_cache_bypass artifacts under tlparse. Fix that rather than "
+            f"restructuring the captured callable."
+        )
+    if not entry_frame["variants"]:
+        # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
+        # frame (external_utils.wrap_inline's `inner`) rather than the module:
+        # every graph lands there, closing over the module, and the entry frame
+        # itself holds nothing. Load cannot rebuild that closure, and `inner`'s
+        # code object is shared by every wrap_inline in the process, so serving
+        # it would let an unrelated frame hit these guards.
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}. The "
+            f"entry frame produced no guarded code, so the artifact would serve "
+            f"nothing. This happens when the captured callable is a thin wrapper -- "
+            f"an nn.Module, or a forward that immediately delegates -- where Dynamo "
+            f"compiles the wrapper's inner frame instead. Capture the function that "
+            f"CALLS the model, e.g. "
+            f"precompile.capture(lambda m, x: m(x), ...) and calling cap(model, x)."
+        )
+    code = SerializedCode.to_code_object(entry_frame["code"])
+    if code.co_freevars:
+        raise PrecompileError(
+            f"precompile cannot build a self-contained artifact for {entry.fn_name!r}: "
+            f"it closes over {list(code.co_freevars)!r}, and this capture has to rebuild "
+            f"the entry from its code object, which cannot restore a closure. Capture a "
+            f"module-level function that takes what it needs as arguments, e.g. "
+            f"precompile.capture(step, ...), calling cap(model, x), with "
+            f"'def step(model, x): return model(x)'."
+        )
+
+
+def _entry_binding(fn: object) -> dict[str, Any]:
+    """The default arguments an entry's code object does not carry.
+
+    The artifact rebuilds its entry from that entry's code object, which holds
+    no default arguments. Without them a defaulted parameter is simply absent at
+    the served call -- which the guard check then cannot bind, so every variant
+    misses. Closure cells are not carried: an entry that closes over free
+    variables is refused before we reach here (a rebuilt cell is a new object
+    that Dynamo's identity guard would miss), so a valid entry has none, and
+    the driver refuses one that arrives anyway rather than rebuilding it over
+    empty cells.
+    """
+    return {
+        "defaults": getattr(fn, "__defaults__", None),
+        "kwdefaults": getattr(fn, "__kwdefaults__", None),
+    }
+
+
+def _emit_multigraph_driver_source() -> str:
+    """Emit the multi-graph driver as text, the same getsource path the others use.
+
+    The driver is a builder, so the section binds ``forward`` itself and then ends
+    in the same ``__main__`` hint as the single-graph drivers."""
+
+    from torch import _precompile_driver as driver
+
+    body = inspect.getsource(driver._build_multigraph_forward).rstrip()
+    forward = "forward = _build_multigraph_forward()"
+    return "\n" + body + "\n\n\n" + forward + "\n\n\n" + _DRIVER_MAIN
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
@@ -1404,7 +1759,7 @@ def _unsupported(reason: str) -> PrecompileError:
     )
 
 
-class PrecompiledModule:
+class PrecompiledModule(PrecompiledRunnable):
     """Internal holder for a precompiled computation / a loaded runnable."""
 
     def __init__(
@@ -1554,7 +1909,7 @@ class PrecompiledModule:
         # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
         # no manual TracingContext to install: a static capture specializes to the
         # example shapes, an unbacked capture keeps the symbols.
-        options: dict[str, Any] = {"size_asserts": True}
+        options: dict[str, object] = {"size_asserts": True}
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
         try:
@@ -1586,15 +1941,15 @@ class PrecompiledModule:
                 ) from e
             raise
 
-    def __call__(self, *args: object) -> object:
-        # A PrecompiledModule is runnable only after load(); precompile() itself
-        # returns (python_code, cache) rather than a runnable.
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        # A PrecompiledModule is runnable only after load(); a capture instead
+        # renders (python_code, cache) rather than a runnable.
         if self._loaded_forward is None:
             raise PrecompileError(
                 "this object is not runnable; build one with "
                 "torch.compiler.precompile.load(python_code, cache)."
             )
-        return self._loaded_forward(*args)
+        return self._loaded_forward(*args, **kwargs)
 
     def to_python_code(self) -> str:
         """Return the self-contained, executable Python artifact as a string.
@@ -1661,25 +2016,299 @@ class PrecompiledModule:
         return buf.getvalue()
 
 
-def _make_inlined_forward(python_code: str) -> Callable[..., object]:
+def _make_inlined_forward(
+    python_code: str, *, warn: bool = True
+) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
     ``python_code`` needs no cache -- the kernels (inductor) or graph (eager) are
     inlined, so we just exec it and hand back its ``forward``. The returned
     ``forward`` takes the same args the traced fn took (model(s) plus runtime
-    inputs)."""
+    inputs). ``warn`` is off only for the capture-time self-load, where the source
+    was just produced in-process and so is not untrusted input."""
     # python_code is untrusted EXECUTABLE input -- exec'ing it runs whatever it contains
     # (JIT-compiling inlined kernels or running the inlined graph). Warn per load (not
-    # warning_once) before the exec so the inlined fallback is never silent about it.
-    log.warning(
-        "torch.compiler.precompile.load is about to EXEC python_code, which is untrusted "
-        "executable input (it runs inlined kernels / graph code). Only exec python_code "
-        "you produced or otherwise trust (Note [precompile programming model], "
-        "invariant 7)."
-    )
+    # warning_once) before the exec so a load is never silent about it; only the
+    # capture-time self-load of source this process just rendered passes warn=False.
+    if warn:
+        log.warning(
+            "torch.compiler.precompile.load is about to EXEC python_code, which is "
+            "untrusted executable input (it runs inlined kernels / graph code). Only "
+            "exec python_code you produced or otherwise trust (Note [precompile "
+            "programming model], invariant 7)."
+        )
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
+
+
+# The os.link failures that mean "this filesystem does not do hard links" (a
+# FAT/exFAT mount, a container overlay, a cross-device target), as opposed to one
+# about the path itself, which must not be papered over with a move. EPERM is in the
+# set only for a source the CALLER owns (the ownership test at its use site).
+_NO_HARD_LINK_ERRNOS = frozenset(
+    {errno.EPERM, errno.EOPNOTSUPP, errno.EMLINK, errno.EXDEV}
+)
+
+
+def _same_inode(
+    path: str | os.PathLike[str], other: str | os.PathLike[str] | os.stat_result
+) -> bool:
+    """True when ``path`` resolves now to ``other`` (a path or a recorded stat).
+
+    False whenever either st_ino is 0: an inode number identifies a file only if it is
+    non-zero (a FAT/exFAT mount, CIFS mounted noserverino, Windows without
+    FILE_ID_INFO), and every name the writer compares lives in one directory, so
+    st_dev alone would call two DIFFERENT files the same one. Unknown identity must
+    never read as "same file".
+    """
+    try:
+        st = other if isinstance(other, os.stat_result) else os.stat(other)
+        here = os.stat(path)
+        if not st.st_ino or not here.st_ino:
+            return False
+        return os.path.samestat(here, st)
+    except OSError:
+        return False
+
+
+def _unlink_quietly(path: str | os.PathLike[str]) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _write_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    python_code: str,
+    cache: bytes,
+) -> None:
+    """Write the matched (python_code, cache) pair, creating parent directories.
+
+    Each half is written beside its target and renamed into place, so neither named file
+    is ever truncated or half-written. The two renames are not one atomic step: the
+    previous source is hard-linked to a backup first and put back if the second rename
+    raises, so a Python exception (a full disk, a permission error) leaves the previous
+    pair intact. Without hard links the previous source is MOVED aside instead, so an
+    interrupt before the undo's probes have run leaves the artifact NAME empty with that
+    source only in the ``.bak``, unreported and one rename from recovered. Which undo
+    runs, and whether it is reported, is read off the DISK, not from flags (the comment
+    on the undo has the reasoning). Process death between the renames is not covered, nor
+    a reader or a second writer racing them: that can leave one source beside the other's
+    cache, which ``load`` refuses on the cache's sha256, and can cost the previous source.
+    Nor is a SYMLINKED artifact name: ``os.link`` follows it, so the backup holds the
+    link's target while ``os.replace`` replaces the link itself, and an undo therefore
+    restores a regular file where the symlink stood.
+    The parent directory is fsync'd after, best effort.
+    """
+    written = []
+    new_stats: list[os.stat_result] = []
+    try:
+        for path, payload in ((artifact_path, python_code), (cache_path, cache)):
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # A unique name per writer: two captures targeting one path must not share a
+            # scratch file. Beside the target, so the rename stays on one filesystem.
+            tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            written.append((tmp, path))
+            # The temp is CREATED with the mode of the file its rename replaces: chmod'ing
+            # it down only after the write would publish the whole new payload at the umask
+            # mode, in a directory the caller chose. Permission bits only: setuid/setgid on a
+            # new inode owned by the WRITING user name a different principal. O_BINARY:
+            # os.open on Windows translates the newlines code_hash covers.
+            try:
+                mode: int | None = stat.S_IMODE(os.stat(path).st_mode) & 0o777
+            except OSError:
+                mode = None
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+            perm = 0o666 if mode is None else mode
+            # opener=, not a bare os.open: an fd is unowned until open() wraps it.
+            with open(tmp, "wb", opener=lambda p, _: os.open(p, flags, perm)) as f:
+                f.write(payload.encode() if isinstance(payload, str) else payload)
+                f.flush()
+                os.fsync(f.fileno())
+            if mode is not None:
+                # O_CREAT's mode is umask-masked, so the exact bits need this too; best
+                # effort, a filesystem that drops modes must not fail the write.
+                try:
+                    os.chmod(tmp, mode)
+                except OSError:
+                    pass
+            # Name the bytes about to be renamed in by inode, for the undo below.
+            new_stats.append(os.stat(tmp))
+    except BaseException:
+        for tmp, _ in written:
+            _unlink_quietly(tmp)
+        raise
+    (artifact_tmp, _), (cache_tmp, _) = written
+    backup = f"{os.fspath(artifact_path)}.{os.getpid()}.{uuid.uuid4().hex}.bak"
+    try:
+        # A hard link, not a move: the named path must resolve to the previous or the new
+        # source at every instant.
+        try:
+            os.link(artifact_path, backup)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            # No hard links here: fall back to moving aside, only for the errnos that mean
+            # unsupported and only for a regular file (os.link on a DIRECTORY also fails EPERM).
+            if e.errno not in _NO_HARD_LINK_ERRNOS or not os.path.isfile(artifact_path):
+                raise
+            # EPERM is also what fs.protected_hardlinks=1 (a Linux default) raises for a
+            # source the caller does not OWN, and chattr +i for one it cannot write -- on a
+            # filesystem that does have hard links. Moving such a file out from under its
+            # name is what the fallback must not do to someone else's artifact, so on POSIX
+            # that errno means "no hard links" only for a source the caller owns.
+            if (
+                e.errno == errno.EPERM
+                and hasattr(os, "geteuid")
+                and os.stat(artifact_path).st_uid != os.geteuid()
+            ):
+                raise
+            os.replace(artifact_path, backup)
+        os.replace(artifact_tmp, artifact_path)
+        os.replace(cache_tmp, cache_path)
+        # Any backup taken above is superseded; inside the try, so an interrupt here is handled.
+        _unlink_quietly(backup)
+    except BaseException:
+        # Put the previous source back (or remove the new one on a first write) so the named
+        # files stay loadable, best effort; then drop every temp and re-raise. Every predicate
+        # that CHOOSES the undo is read off the DISK, never from a flag set after its own
+        # syscall, and ``probed`` says all four reads RAN: an interrupt among them leaves the
+        # rest half-set, so neither the report nor the drop below may consult one. ``kept``:
+        # the backup name carries this call's pid and a uuid, so its existing is this call's.
+        # ``complete`` (both names are this call's temps) means written even though this block
+        # ran; ``aside`` (a backup with the artifact NAME gone) is the move-aside fallback
+        # holding the previous source's only copy; ``landed`` says the FIRST rename happened.
+        # ``undone`` says the undo RETURNED, the finally's unlink safe under it.
+        complete = kept = landed = aside = probed = undone = False
+        try:
+            # Where st_ino is 0 no inode read can say whose source a name holds, so the
+            # temps stand in for the renames: os.replace CONSUMED the one it renamed, so a
+            # temp that is GONE is its rename having run. Only consulted there, since a
+            # temp says nothing about a SECOND writer repointing the name afterwards, which
+            # is what the inode read sees and what the restore below must not overwrite.
+            # Per HALF: the two names are independent arguments, so one can be on a
+            # filesystem with inodes and the other not.
+            blind_artifact = not new_stats[0].st_ino
+            blind_cache = not new_stats[1].st_ino
+            landed = _same_inode(artifact_path, new_stats[0]) or (
+                blind_artifact and not os.path.lexists(artifact_tmp)
+            )
+            complete = landed and (
+                _same_inode(cache_path, new_stats[1])
+                or (blind_cache and not os.path.lexists(cache_tmp))
+            )
+            kept = os.path.lexists(backup)
+            aside = kept and not os.path.lexists(artifact_path)
+            probed = True
+            try:
+                if complete or not (landed or kept):
+                    undone = True
+                elif kept and (landed or aside):
+                    os.replace(backup, artifact_path)
+                    undone = True
+                elif kept:
+                    # The artifact name is neither this call's new source nor gone, so it
+                    # cannot tell the previous source still under the hard link (a failed FIRST
+                    # rename) from one a second WRITER repointed here. Neither wants a restore:
+                    # the first already IS the previous pair, the second a THIRD, older source.
+                    undone = True
+                elif landed:
+                    # A first write, so there is no previous pair to restore: drop the new
+                    # source rather than leave it named with no cache beside it. An unlink, not
+                    # a rename: a rename needs a directory entry, which ENOSPC just exhausted.
+                    os.unlink(artifact_path)
+                    undone = True
+            except OSError:
+                pass
+        finally:
+            # Keyed on that same on-disk outcome: a report NAMES a file, so it fires only
+            # while that file is there and ``probed`` says the reads that chose it ran.
+            named = backup if kept else artifact_path
+            if probed:
+                drop_backup = kept
+            else:
+                # An interrupt among the reads never set ``kept``, so the drop reads the
+                # name itself and fires only while it resolves to the backup's inode.
+                drop_backup = _same_inode(artifact_path, backup)
+            if probed and not undone and os.path.lexists(named):
+                if kept:
+                    # Reached from both shapes the undo's rename serves, so the wording
+                    # names only what holds in both: the .bak, and the one rename back.
+                    log.warning(
+                        "precompile could not put the previous artifact back at %s; that "
+                        "previous source is kept at %s, and the pair does not load until "
+                        "that file is moved back over the first path (the cache at %s is "
+                        "the one that matches it).",
+                        os.fspath(artifact_path),
+                        backup,
+                        os.fspath(cache_path),
+                    )
+                else:
+                    log.warning(
+                        "precompile wrote the artifact at %s and then failed to write "
+                        "its cache at %s, and could not remove the artifact again; no "
+                        "cache beside it matches that file, so the pair does not load.",
+                        os.fspath(artifact_path),
+                        os.fspath(cache_path),
+                    )
+            elif drop_backup:
+                # Reached only where the named pair came out loadable, so the backup is not a
+                # copy anyone still needs: an undo rename consumed it, or nothing needed undoing
+                # because the previous source is still under its own name (a failed FIRST rename).
+                _unlink_quietly(backup)
+            for tmp, _ in written:
+                _unlink_quietly(tmp)
+        raise
+    parents = {os.path.dirname(os.fspath(path)) or "." for _, path in written}
+    # Durably record the renames: without an fsync of the containing directory a crash
+    # just after os.replace returns can still lose the new entry and resurrect the old.
+    for parent in parents:
+        try:
+            fd = os.open(parent, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            # Best effort like the os.open above, close included: by here both renames have
+            # returned, so an error out of either would fail an already loadable pair.
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _read_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+) -> tuple[str, bytes]:
+    r"""Read back a pair written by :func:`_write_artifact`.
+
+    Bytes, then decoded: the exact inverse of the byte-mode write, so a ``\r`` in
+    python_code survives the round trip instead of being translated to ``\n`` by a
+    text-mode read and failing the cache's code_hash. An ``OSError`` from either open (a
+    missing half, a path the filesystem cannot open) or a ``UnicodeDecodeError`` from the
+    decode (a readable file that is not the source half -- transposed arguments, say) is
+    a ``PrecompileError`` naming both paths, with the original as its ``__cause__``.
+    """
+    try:
+        with open(artifact_path, "rb") as f:
+            python_code = f.read().decode()
+        with open(cache_path, "rb") as f:
+            cache = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise PrecompileError(
+            f"precompile could not read the artifact pair (artifact_path="
+            f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
+        ) from e
+    return python_code, cache
 
 
 class _PrecompileApi:
