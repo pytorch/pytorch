@@ -1,8 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/ResizeCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -83,9 +81,6 @@ const Tensor& resize_cuda_(
     const Tensor& self,
     IntArrayRef size,
     std::optional<MemoryFormat> optional_memory_format) {
-  if (self.has_names()) {
-    return resize_named_tensor_(self, size, optional_memory_format);
-  }
   auto* self_ = self.unsafeGetTensorImpl();
   auto old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().nbytes() : 0;
   resize_impl_cuda_(self_, size, /*stride=*/std::nullopt);

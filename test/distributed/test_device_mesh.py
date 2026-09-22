@@ -105,6 +105,37 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
         else:
             self.assertEqual(mesh_group, default_group)
 
+    @with_comms
+    def test_device_mesh_reuse_default_group_for_custom_order_by_default(self):
+        # Without opting in via preserve_rank_order, a mesh dim whose size
+        # equals world_size must still take the default_group shortcut even
+        # when _rank_map is a permutation of [0, .., world_size). Skipping the
+        # shortcut unconditionally would silently change subgroup rank order
+        # for callers whose existing code relies on default_group's rank order.
+        reversed_ranks = list(reversed(range(self.world_size)))
+        mesh = DeviceMesh(self.device_type, torch.tensor(reversed_ranks))
+        mesh_group = mesh.get_group()
+        default_group = _get_default_group()
+        if torch.cuda.is_available():
+            self.assertEqual(mesh_group.group_desc, "mesh_default")
+        else:
+            self.assertEqual(mesh_group, default_group)
+
+    @with_comms
+    def test_device_mesh_skips_default_group_reuse_when_opted_in(self):
+        # With preserve_rank_order=True, a permuted full-world mesh dim must
+        # get a dedicated group instead of silently reusing default_group.
+        reversed_ranks = list(reversed(range(self.world_size)))
+        mesh = DeviceMesh(
+            self.device_type,
+            torch.tensor(reversed_ranks),
+            preserve_rank_order=True,
+        )
+        mesh_group = mesh.get_group()
+        default_group = _get_default_group()
+        self.assertEqual(mesh_group.group_desc, "mesh_dim_0")
+        self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
+
 
 class DeviceMeshSetDeviceTest(DTensorTestBase):
     @property
@@ -185,7 +216,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
-    @with_comms()
+    @with_comms(backend="nccl-legacy")
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
@@ -308,7 +339,7 @@ class DeviceMeshTest(DTensorTestBase):
         mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
-        global_tensor = funcol.all_gather_tensor(
+        global_tensor = funcol.all_gather_single(
             local_tensor, gather_dim=0, group=(mesh, 0)
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
@@ -448,6 +479,36 @@ class DeviceMeshTestNDim(DTensorTestBase):
             for ranks in dim_ranks:
                 if self.rank in ranks:
                     self.assertEqual(global_ranks, ranks.tolist())
+
+    @with_comms
+    def test_device_mesh_preserve_rank_order(self):
+        # Permute the innermost dim so dim-2 subgroups are [1, 0], [3, 2], [5, 4], [7, 6].
+        mesh_tensor = torch.arange(8).reshape(2, 2, 2).flip(-1)
+        dim_ranks = mesh_tensor.reshape(-1, 2)
+
+        default_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        default_group = default_mesh.get_group(2)
+        default_global_ranks = [
+            get_global_rank(default_group, i)
+            for i in range(get_world_size(default_group))
+        ]
+        for ranks in dim_ranks:
+            if self.rank in ranks:
+                # Without opting in, subgroup ranks are still sorted ascending.
+                self.assertEqual(default_global_ranks, sorted(ranks.tolist()))
+
+        ordered_mesh = DeviceMesh(
+            self.device_type, mesh_tensor, preserve_rank_order=True
+        )
+        ordered_group = ordered_mesh.get_group(2)
+        ordered_global_ranks = [
+            get_global_rank(ordered_group, i)
+            for i in range(get_world_size(ordered_group))
+        ]
+        for ranks in dim_ranks:
+            if self.rank in ranks:
+                # With preserve_rank_order=True, subgroup ranks follow the mesh tensor order.
+                self.assertEqual(ordered_global_ranks, ranks.tolist())
 
     @with_comms
     def test_device_mesh_hash(self):
@@ -685,7 +746,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
             return (
                 mesh.get_group(dim_idx)
-                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                ._get_backend(torch.device(self.device_type))
                 .options
             )
 
@@ -731,7 +792,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
             return (
                 mesh.get_group(dim_idx)
-                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                ._get_backend(torch.device(self.device_type))
                 .options
             )
 
@@ -1096,20 +1157,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         spmd_pg = mesh_2d["spmd"].get_group()
         self.assertEqual(spmd_pg._get_backend_name(), "nccl")
         w = spmd_pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertTrue(
-            spmd_pg._get_backend(
-                torch.device(f"cuda:{self.rank}")
-            )._verify_work_timeout(w, timedelta(seconds=30))
-        )
+        self.assertEqual(w.timeout, timedelta(seconds=30))
         w.wait()
         tp_pg = mesh_4d["tp"].get_group()
         self.assertEqual(tp_pg._get_backend_name(), "nccl")
         w = tp_pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertTrue(
-            tp_pg._get_backend(torch.device(f"cuda:{self.rank}"))._verify_work_timeout(
-                w, timedelta(seconds=60)
-            )
-        )
+        self.assertEqual(w.timeout, timedelta(seconds=60))
         w.wait()
 
     @with_comms
@@ -1352,7 +1405,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 contiguous=True,
             )
             local_tensor = tensor_padded_list[my_rank]
-            big_tensor = funcol.all_gather_tensor(
+            big_tensor = funcol.all_gather_single(
                 local_tensor, gather_dim=shard_dim, group=(device_mesh, 0)
             )
             big_tensor_chunks = list(
@@ -1447,7 +1500,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
 
-            scattered_tensor = funcol.reduce_scatter_tensor(
+            scattered_tensor = funcol.reduce_scatter_single(
                 tensor_to_reduce,
                 reduceOp="sum",
                 scatter_dim=shard_dim,
@@ -1610,9 +1663,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         )
         # This API directly calls the pybind API, so we need to manually track the comm for finalization.
         _world.comms.append(
-            split_group_2._get_backend(
-                torch.device(f"{self.device_type}:{self.rank}")
-            ).get_comm()
+            split_group_2._get_backend(torch.device(self.device_type)).get_comm()
         )
         gpu_tensor = torch.ones(3, 3, device=self.device_type)
         dist.all_reduce(gpu_tensor, group=split_group_2)
@@ -1708,7 +1759,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         fake_pg_name = mesh._dim_group_names[0]
         self.assertFalse(
             fake_pg_name.isdigit(),
-            f"Fake-backend PG name '{fake_pg_name}' is a sequential integer; "
+            lambda msg: f"{msg}\nFake-backend PG name '{fake_pg_name}' is a sequential integer; "
             f"expected a hash-based name for torchcomms compatibility.",
         )
 
@@ -2036,7 +2087,7 @@ class ProcessGroupOpaqueTypeTest(TestCase):
     def test_registered_members_exist_on_process_group(self):
         from torch._library.opaque_object import get_member_type
 
-        # Every member registered in _register_distributed_opaque_types()
+        # Every member registered in _register_process_group_opaque_type()
         # must actually exist on ProcessGroup. This catches renames or
         # removals of C++ attributes that would cause torch.compile
         # (fullgraph=True) to silently register a stale name while the
@@ -2052,13 +2103,13 @@ class ProcessGroupOpaqueTypeTest(TestCase):
         for member_name in registered_members:
             self.assertIsNotNone(
                 get_member_type(ProcessGroup, member_name),
-                f"'{member_name}' is not registered as a ProcessGroup opaque "
-                f"type member. Add it to _register_distributed_opaque_types() "
-                f"in torch/distributed/device_mesh.py",
+                lambda msg: f"{msg}\n'{member_name}' is not registered as a ProcessGroup opaque "
+                f"type member. Add it to _register_process_group_opaque_type() "
+                f"in torch/distributed/distributed_c10d.py",
             )
             self.assertTrue(
                 hasattr(ProcessGroup, member_name),
-                f"'{member_name}' is registered as a ProcessGroup opaque type "
+                lambda msg: f"{msg}\n'{member_name}' is registered as a ProcessGroup opaque type "
                 f"member but does not exist on the ProcessGroup class. "
                 f"Was it renamed or removed?",
             )
