@@ -1507,6 +1507,9 @@ py::object getCppFakeTensorModePyObj(
                        .attr("CppFakeTensorMode");
   py::object wrapper =
       cls.attr("_from_cpp_mode")(py::cast(mode), converter, shape_env);
+  // The Python wrapper owns the C++ mode, so retain only a Python weakref to
+  // avoid a cycle. SafePyObject owns that weakref with interpreter-safe
+  // lifetime management, and the shared_ptr owns the SafePyObject.
   PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
   TORCH_CHECK(weakref != nullptr, "failed to weakref CppFakeTensorMode");
   mode->fake_mode_pyobj_ =
