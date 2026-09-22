@@ -211,7 +211,7 @@ class StaticallyLaunchedTritonKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-    def reload_cubin_from_raw(self, filepath: str) -> str:
+    def reload_cubin_from_raw(self, filepath: str, *, force: bool = False) -> str:
         """
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
@@ -220,8 +220,10 @@ class StaticallyLaunchedTritonKernel:
         # bundled artifact even if a stale/truncated file already occupies the
         # expected cache path. Later device-agnostic loads can reuse a path that
         # this launcher has already established.
-        if not os.path.exists(filepath) or (
-            self.cubin_path is None and self.cubin_raw is not None
+        if (
+            force
+            or not os.path.exists(filepath)
+            or (self.cubin_path is None and self.cubin_raw is not None)
         ):
             if self.cubin_raw is None:
                 raise MissingTritonKernelError(
@@ -247,6 +249,21 @@ class StaticallyLaunchedTritonKernel:
         try:
             return self.C_impl._load_kernel(cubin_path, self.name, self.shared, device)
         except RuntimeError as error:
+            if self.cubin_raw is not None:
+                # A cache artifact can disappear or be truncated after its path
+                # was validated. Restore retained bytes atomically and retry the
+                # native load once; unrelated failures propagate from the retry.
+                self.reload_cubin_from_raw(cubin_path, force=True)
+                try:
+                    return self.C_impl._load_kernel(
+                        cubin_path, self.name, self.shared, device
+                    )
+                except RuntimeError as retry_error:
+                    if not os.path.exists(cubin_path):
+                        raise MissingTritonKernelError(
+                            f"Triton kernel binary disappeared while loading {cubin_path}"
+                        ) from retry_error
+                    raise
             if not os.path.exists(cubin_path):
                 raise MissingTritonKernelError(
                     f"Triton kernel binary disappeared while loading {cubin_path}"
