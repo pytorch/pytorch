@@ -360,7 +360,6 @@ class TritonBundler:
                                 )
                                 force_recompile = True
                                 break
-                            compile_result.set_cubin_path()
                             continue
 
                         resolution = binary_resolutions.get(compile_result)
@@ -371,8 +370,6 @@ class TritonBundler:
                                 "Ignoring untrusted bundled binary for %s",
                                 result.kernel_name,
                             )
-
-                        if reject_bundled_cubin:
                             force_recompile = True
                             break
 
@@ -381,7 +378,6 @@ class TritonBundler:
                         # binary may adopt a stable local snapshot.
                         if bundled_cubin is not None:
                             kernel.cubin_raw = bundled_cubin
-                            compile_result.set_cubin_path()
                             continue
 
                         compile_result.reload_cubin_path()

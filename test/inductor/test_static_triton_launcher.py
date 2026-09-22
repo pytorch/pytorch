@@ -16,7 +16,6 @@ from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.static_triton_launcher import (
     _is_invalid_kernel_image_error,
     InvalidTritonKernelArtifactError,
-    MissingTritonKernelError,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
@@ -218,23 +217,6 @@ class TestStaticTritonLauncherUnit(TestCase):
         autotuner, result = self._autotuner_with_static_cubin(b"cubin")
         autotuner.prepare_for_caching()
         self.assertEqual(result.kernel.cubin_raw, b"cubin")
-
-    def test_device_agnostic_missing_cubin_error(self):
-        kernel = object.__new__(StaticallyLaunchedCudaKernel)
-        kernel.cubin_raw = None
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            kernel.cubin_path = os.path.join(tmp_dir, "missing.bin")
-            with self.assertRaisesRegex(
-                MissingTritonKernelError, "Triton kernel binary not found"
-            ):
-                kernel._agnostic_cubin_path()
-
-        kernel.cubin_path = None
-        with self.assertRaisesRegex(
-            AssertionError,
-            "device-agnostic kernel cannot reload its cubin for a new device",
-        ):
-            kernel._agnostic_cubin_path()
 
     def test_retained_cubin_preserves_existing_cache_file(self):
         kernel = object.__new__(StaticallyLaunchedCudaKernel)

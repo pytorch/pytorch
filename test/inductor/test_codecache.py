@@ -1338,9 +1338,10 @@ class TestFxGraphCache(TestCase):
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
-        static_kernel = static_autotuner.kernel.compile_results[0].kernel
-        cubin_path = static_kernel.cubin_path
-        self.assertIsNotNone(cubin_path)
+        compile_result = static_autotuner.kernel.compile_results[0]
+        static_kernel = compile_result.kernel
+        cubin_path = compile_result.cubin_path()
+        self.assertIsNone(static_kernel.cubin_path)
         if cache_state == "present":
             original_inode = os.stat(cubin_path).st_ino
         else:
@@ -1522,8 +1523,8 @@ class TestFxGraphCache(TestCase):
         self.assertIn(
             static_autotuner.kernel_name, metadata.statically_launched_kernel_names
         )
-        cubin_path = compile_result.kernel.cubin_path
-        self.assertIsNotNone(cubin_path)
+        cubin_path = compile_result.cubin_path()
+        self.assertIsNone(compile_result.kernel.cubin_path)
         write_atomic(cubin_path, alternate_binary.payload, make_dirs=True)
         graph.after_deserialization(CompiledFxGraphConstants())
         loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
@@ -1554,9 +1555,9 @@ class TestFxGraphCache(TestCase):
 
         self.reset()
         TritonBundler.read_and_emit(bundle)
-        static_kernel = static_autotuner.kernel.compile_results[0].kernel
-        cubin_path = static_kernel.cubin_path
-        self.assertIsNotNone(cubin_path)
+        compile_result = static_autotuner.kernel.compile_results[0]
+        cubin_path = compile_result.cubin_path()
+        self.assertIsNone(compile_result.kernel.cubin_path)
         write_atomic(cubin_path, alternate_binary.payload, make_dirs=True)
         graph.after_deserialization(CompiledFxGraphConstants())
         loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
@@ -1636,7 +1637,8 @@ class TestFxGraphCache(TestCase):
         loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIs(loaded_autotuner, static_autotuner.kernel)
         static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
-        cubin_path = static_kernel._agnostic_cubin_path()
+        cubin_path = static_autotuner.kernel.compile_results[0].cubin_path()
+        self.assertIsNone(static_kernel.cubin_path)
         self.assertIsNotNone(static_kernel.cubin_raw)
         with torch.cuda.device(0):
             self.assertEqual(graph.current_callable([x0])[0], fn(x0))
@@ -1736,9 +1738,9 @@ class TestFxGraphCache(TestCase):
         TritonBundler.read_and_emit(bundle)
         cached_autotuner = static_autotuner.kernel
         static_kernel = compile_result.kernel
-        cubin_path = static_kernel.cubin_path
+        cubin_path = compile_result.cubin_path()
         expected_cubin = static_kernel.cubin_raw
-        self.assertIsNotNone(cubin_path)
+        self.assertIsNone(static_kernel.cubin_path)
         self.assertIsNotNone(expected_cubin)
         self.assertEqual(expected_cubin, original_binary.payload)
         with open(cubin_path, "wb") as file:
