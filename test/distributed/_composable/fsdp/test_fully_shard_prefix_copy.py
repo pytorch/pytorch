@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
-    _prepare_reduce_scatter_inputs,
+    _default_reduce_scatter_input_fn,
     AllGatherResult,
     foreach_reduce_scatter_copy_in,
 )
@@ -182,7 +182,7 @@ class TestPrefixCopy(TestCase):
             [shard[rank].flatten() for rank in range(world_size) for shard in shards]
         ).float()
         params = [Mock(fsdp_placement=Shard(dim)) for dim in shard_dims]
-        prepared = _prepare_reduce_scatter_inputs(params, grads, world_size)
+        prepared = _default_reduce_scatter_input_fn(params, grads, world_size)
         sizes = prepared.padded_unsharded_sizes
         use_direct_copy = nonzero_shards and world_size > 1
         if use_direct_copy:
