@@ -488,6 +488,7 @@ class TraceableWrapperSubclass(Protocol):
     ) -> torch.Tensor: ...
 
     shape: torch._C.Size
+    device: torch.device
 
     @overload
     def stride(self, dim: None = None) -> tuple[int, ...]: ...
