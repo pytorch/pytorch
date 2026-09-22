@@ -2257,9 +2257,7 @@ One-sided tensor transports (experimental)
 
 ``torch.distributed._transport`` moves registered tensor byte ranges between
 independently managed workers. It does not require a process group, global rank
-assignment, or matching receives. The initial backend is NIXL, installed separately
-with ``pip install nixl``. Its default UCX plugin supports CPU and CUDA memory,
-subject to the installed NIXL/UCX build and hardware.
+assignment, or matching receives.
 
 An endpoint connects to one peer. Exchange ``bind()`` bytes and remote memory
 descriptors through a trusted application control plane. Never unpickle descriptors
@@ -2273,9 +2271,33 @@ not that the remote application consumed or acknowledged the data. Asyncio calle
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
 until close, and tensors must not be resized or have their storage replaced.
 
+CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
+rank-based bootstrap helpers are outside this initial API.
+
+.. autofunction:: torch.distributed._transport.new_transport
+.. autoclass:: torch.distributed._transport.Transport
+   :members:
+.. autoclass:: torch.distributed._transport.Memory
+   :members:
+.. autoclass:: torch.distributed._transport.MemoryView
+   :members:
+.. autoclass:: torch.distributed._transport.MutableMemoryView
+.. autoclass:: torch.distributed._transport.RemoteBuffer
+.. autofunction:: torch.distributed._transport.wait_all
+.. autofunction:: torch.distributed._transport.available_transports
+.. autofunction:: torch.distributed._transport.register_transport
+
+NIXL backend
+~~~~~~~~~~~~
+
+The initial backend is NIXL, installed separately with ``pip install nixl``.
+Its default UCX plugin supports CPU and CUDA memory, subject to the installed
+NIXL/UCX build and hardware.
+
 NIXL transfers return Work objects that retain their request handles until
 completion. ``wait_all``, ``read_async``, and ``write_async`` await Work futures.
-The NIXL adapter resolves those futures by checking native transfer status. Each live transfer owns a distinct request handle.
+The NIXL adapter resolves those futures by checking native transfer status.
+Each live transfer owns a distinct request handle.
 Independent requests may overlap; explicitly wait before issuing dependent or
 overlapping reads/writes. Completion ordering is not implicit.
 
@@ -2299,22 +2321,8 @@ Native metadata, registration, request submission, status checks, and cleanup
 calls execute synchronously on the calling thread. Their timeouts bound lock
 acquisition and transfer completion waits, not execution inside NIXL. Python
 cannot interrupt a blocked native call, even when it releases the GIL.
-CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
-rank-based bootstrap helpers are outside this initial API.
 
 .. autoclass:: torch.distributed._transport._nixl.NIXLTransport
    :members: close_async
-.. autofunction:: torch.distributed._transport.new_transport
-.. autoclass:: torch.distributed._transport.Transport
-   :members:
-.. autoclass:: torch.distributed._transport.Memory
-   :members:
-.. autoclass:: torch.distributed._transport.MemoryView
-   :members:
-.. autoclass:: torch.distributed._transport.MutableMemoryView
-.. autoclass:: torch.distributed._transport.RemoteBuffer
-.. autofunction:: torch.distributed._transport.wait_all
-.. autofunction:: torch.distributed._transport.available_transports
-.. autofunction:: torch.distributed._transport.register_transport
 
 ```
