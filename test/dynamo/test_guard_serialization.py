@@ -1449,9 +1449,10 @@ class _KeyWithSub:
         return hash(self.name)
 
 
-class _TaggedTuple(tuple):
-    # A tuple subclass with instance state: == reads the elements, a subclass
-    # __eq__ may read the fields, so a by-value key of this shape needs both.
+class _TaggedTuple(tuple):  # noqa: SLOT001
+    # A tuple subclass with instance state (the dict SLOT001 would remove is the
+    # point): == reads the elements, a subclass __eq__ may read the fields, so
+    # a by-value key of this shape needs both.
     def __new__(cls, items, meta=None):
         self = super().__new__(cls, items)
         self.meta = meta
@@ -4559,6 +4560,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertEqual(state.local_scope["w"].scale, 2.0)
 
     def test_a_property_keeps_the_fields_it_is_computed_from(self):
+        # The load-time partner of the forwarder test: a pruned `a` or `b` would
+        # make `.total` raise on _Missing + _Missing while the guard tree is
+        # rebuilt; Dynamo inlines the getter, so both fields get their own source.
         def fn(t, x):
             return x * t.total
 
