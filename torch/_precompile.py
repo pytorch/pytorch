@@ -259,11 +259,10 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
-# ``precompile`` and ``PrecompileError`` are exposed under the compiler namespace as
-# ``torch.compiler.precompile`` / ``torch.compiler.precompile.PrecompileError``
-# (re-exported from torch/compiler/__init__.py and registered in
-# ``torch.compiler.__all__``); they are deliberately kept out of this private module's
-# ``__all__`` so test_public_bindings sees a consistent single public location.
+# The public types defined here (``Capture``, ``MakeFxTracer``, ``PrecompiledRunnable``)
+# are re-exported by torch/compiler/precompile.py and ``PrecompileError`` by
+# torch/compiler/__init__.py; they are deliberately kept out of this private module's
+# ``__all__`` so test_public_bindings sees a single public location for each.
 __all__: list[str] = []
 
 
