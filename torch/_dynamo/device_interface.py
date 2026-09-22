@@ -793,6 +793,15 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     return device_interfaces.items()
 
 
+def get_device_type_for_current_stream(current_stream_fn: Any) -> str | None:
+    """Reverse lookup in the interface registry: the device type that a
+    current_stream function belongs to (None for torch.accelerator's)."""
+    for device, interface in device_interfaces.items():
+        if getattr(interface, "current_stream", None) is current_stream_fn:
+            return device.split(":")[0]
+    return None
+
+
 def init_device_reg() -> None:
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
