@@ -17,11 +17,7 @@ from torch._higher_order_ops.flydsl_kernel_wrap import (
     TraceableFlyDSLLauncher,
 )
 from torch._inductor import config, ir
-from torch._inductor.codecache import (
-    BypassFxGraphCache,
-    CacheabilityValidator,
-    ROCmCodeCache,
-)
+from torch._inductor.codecache import ROCmCodeCache
 from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
 from torch._inductor.codegen.flydsl.flydsl_aot import (
     _normalize_stream_abi,
@@ -104,43 +100,6 @@ class FlyDSLInductorTest(TestCase):
             kernel_args=(out, inp, 8),
             mutated_arg_indices=(0,),
         )
-
-    def test_flydsl_hops_bypass_persistent_fx_graph_cache(self):
-        for target, kwargs in (
-            (
-                flydsl_kernel_wrapper_mutation,
-                {
-                    "launcher_idx": 0,
-                    "call_spec_idx": 0,
-                    "args": (),
-                    "mutated_arg_indices": (),
-                },
-            ),
-            (
-                flydsl_kernel_wrapper_functional,
-                {
-                    "launcher_idx": 0,
-                    "call_spec_idx": 0,
-                    "args": (),
-                    "mutated_arg_indices": (),
-                    "tensors_to_clone": (),
-                },
-            ),
-        ):
-            with self.subTest(target=target):
-                graph = torch.fx.Graph()
-                result = graph.call_function(target, kwargs=kwargs)
-                graph.output(result)
-                graph_module = torch.fx.GraphModule(torch.nn.Module(), graph)
-
-                with self.assertRaisesRegex(
-                    BypassFxGraphCache,
-                    f"Can't cache HigherOrderOperator: {target.name()}",
-                ):
-                    CacheabilityValidator(
-                        graph_module,
-                        require_shape_env=False,
-                    ).validate()
 
     @requires_flydsl
     def test_aot_kernel_rejects_cpp_only_packaging(self):

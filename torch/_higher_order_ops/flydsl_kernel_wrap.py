@@ -22,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.fx.node import has_side_effect
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -410,6 +411,12 @@ class FlyDSLKernelWrapperFunctional(HigherOrderOperator):
 
 flydsl_kernel_wrapper_mutation = FlyDSLKernelWrapperMutation()
 flydsl_kernel_wrapper_functional = FlyDSLKernelWrapperFunctional()
+
+# The mutation is represented in the HOP's nested ``args`` tuple rather than
+# its return value, so FX cannot infer this side effect from dataflow alone.
+# Do not use the effects-token system here: independent kernel launches do not
+# require a total order with every other effectful operator.
+has_side_effect(flydsl_kernel_wrapper_mutation)
 
 
 @flydsl_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
