@@ -236,8 +236,12 @@ static void col2im(
         stride_h, stride_w, dilation_h, dilation_w,
         data_im + begin * image_size, is_channels_last);
   };
-  if (!is_channels_last && channels > 1 && image_size * channels > 32768) {
-    at::parallel_for(0, channels, std::max<int64_t>(1, 32768 / image_size), run);
+  constexpr int64_t grain_size = 32768;
+  // Limit the estimate when most columns contain padding.
+  const int64_t work_size = std::max(
+      image_size, std::min(image_size, output_height * output_width) * kernel_h * kernel_w);
+  if (!is_channels_last && channels > 1 && work_size * channels > grain_size) {
+    at::parallel_for(0, channels, std::max<int64_t>(1, grain_size / work_size), run);
   } else {
     run(0, channels);
   }
