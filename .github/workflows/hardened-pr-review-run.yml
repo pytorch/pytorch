@@ -51,7 +51,7 @@ env:
   # the role it is paid for with. Matches .github/workflows/claude-code.yml.
   # The `model` column of the telemetry row is NOT set from this: it is read
   # back out of the run's own usage file, so the row records what answered.
-  REVIEW_MODEL: global.anthropic.claude-opus-5
+  REVIEW_MODEL: global.anthropic.claude-opus-5-5
   AWS_REGION: us-east-1
   S3_BUCKET: ossci-raw-job-status
   S3_PREFIX: pr_review_verdicts
