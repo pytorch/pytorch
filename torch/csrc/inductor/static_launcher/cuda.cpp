@@ -8,6 +8,7 @@
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #include <cstdint>
 
+#include <c10/util/ScopeExit.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <cstring>
 #include <filesystem>
@@ -184,6 +185,10 @@ std::pair<CUmodule, CUfunction> loadKernel(
   // HSACO. Load from memory to avoid retaining one FD per static launcher.
   auto image = readKernelImage(filePath);
   AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
+  auto unload_module_on_error = c10::make_scope_exit([mod]() {
+    // Cleanup must not replace the original exception.
+    hipModuleUnload(mod);
+  });
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
@@ -191,6 +196,10 @@ std::pair<CUmodule, CUfunction> loadKernel(
 
 #else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
+  auto unload_module_on_error = c10::make_scope_exit([mod]() {
+    // Cleanup must not replace the original exception.
+    nvrtc().cuModuleUnload(mod);
+  });
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
@@ -266,6 +275,7 @@ std::pair<CUmodule, CUfunction> loadKernel(
         shared_optin - shared_static));
 #endif
   }
+  unload_module_on_error.release();
   return {mod, func};
 }
 
