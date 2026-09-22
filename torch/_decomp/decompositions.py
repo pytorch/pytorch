@@ -217,6 +217,15 @@ def hardtanh_backward(
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
+@register_decomposition(aten._clamp_backward_tensor)
+def _clamp_backward_tensor(
+    grad_output: Tensor, self: Tensor, min: Tensor, max: Tensor
+) -> Tensor:
+    tie = ((self == min) | (self == max)) & (min < max)
+    inactive = (self < min) | (self > max)
+    return torch.where(inactive, 0, torch.where(tie, grad_output / 2, grad_output))
+
+
 @register_decomposition(aten.hardswish)
 @out_wrapper()
 @pw_cast_for_opmath
