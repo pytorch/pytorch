@@ -43,7 +43,6 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-
 def two_tensor_fsdp_pre_all_gather_v1(
     self, mesh: DeviceMesh
 ) -> tuple[tuple[torch.Tensor, ...], Any]:
