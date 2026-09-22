@@ -1465,7 +1465,7 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
 
 @instantiate_parametrized_tests
 class TestRangeIndex(torch._dynamo.test_case.TestCase):
-    @parametrize("value", [1.0, 1 + 0j])
+    @parametrize("value", [True, 1.0, 1 + 0j])
     def test_numeric_equality_returns_int(self, value):
         def fn():
             return range(3).index(value)
@@ -1503,6 +1503,24 @@ class TestRangeIndex(torch._dynamo.test_case.TestCase):
             return range(5).index(Match(99))
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 2)
+
+    def test_int_subclass_uses_inherited_equality(self):
+        class IntSubclass(int):
+            pass
+
+        def fn():
+            return range(3).index(IntSubclass(1))
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 1)
+
+    def test_symbolic_integer_needle(self):
+        def fn(x):
+            return x + range(10).index(x.shape[0])
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for size in (3, 4):
+            x = torch.zeros(size)
+            self.assertEqual(compiled(x), fn(x))
 
     def test_comparison_exception_propagates(self):
         seen = []
@@ -1554,7 +1572,7 @@ class TestRangeIndex(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 1)
 
-    def test_dynamic_bounds_and_search_value(self):
+    def test_recompiles_for_changed_bounds_and_search_value(self):
         class EqualTo:
             def __init__(self, target):
                 self.target = target
@@ -1565,13 +1583,17 @@ class TestRangeIndex(torch._dynamo.test_case.TestCase):
         def fn(x, values, needle):
             return x + values.index(needle)
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         x = torch.zeros(3)
         needle = EqualTo(3)
         self.assertEqual(compiled(x, range(-1, 8, 2), needle), x + 2)
+        self.assertEqual(counter.frame_count, 1)
         needle.target = 5
         self.assertEqual(compiled(x, range(-1, 8, 2), needle), x + 3)
+        self.assertEqual(counter.frame_count, 2)
         self.assertEqual(compiled(x, range(9, -2, -2), needle), x + 2)
+        self.assertEqual(counter.frame_count, 3)
 
 
 class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):
