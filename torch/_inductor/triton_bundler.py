@@ -11,7 +11,7 @@ from torch._utils_internal import justknobs_check
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from .runtime.runtime_utils import triton_cache_dir
+from .runtime.runtime_utils import triton_cache_dir, triton_hash_to_path_key
 from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
 
 
@@ -223,7 +223,9 @@ class TritonBundler:
 
     @classmethod
     def load_autotuners(
-        cls, static_autotuners: list[StaticallyLaunchedAutotuner] | None
+        cls,
+        static_autotuners: list[StaticallyLaunchedAutotuner] | None,
+        binary_payloads: dict[tuple[str, str], bytes] | None = None,
     ) -> list[str]:
         """
         Load statically launchable CachingAutotuners into async_compile.CompiledTritonKernels
@@ -245,6 +247,30 @@ class TritonBundler:
                 try:
                     # Make sure the cubin path exists and is valid
                     for compile_result in result.kernel.compile_results:
+                        device_type = compile_result.compile_meta.get(
+                            "device_type", "cuda"
+                        )
+                        if (
+                            binary_payloads is not None
+                            and compile_result.compile_meta.get("device") is None
+                            and (binary_ext := GPU_KERNEL_BIN_EXTS.get(device_type))
+                            is not None
+                            and (
+                                payload := binary_payloads.get(
+                                    (
+                                        triton_hash_to_path_key(
+                                            compile_result.kernel.hash
+                                        ),
+                                        f"{compile_result.kernel.name}{binary_ext}",
+                                    )
+                                )
+                            )
+                            is not None
+                        ):
+                            # The graph already retains this immutable payload.
+                            # Keep a reference on device-agnostic launchers so a
+                            # later device can recover without a runtime compiler.
+                            compile_result.kernel.cubin_raw = payload
                         compile_result.reload_cubin_path()
                 except MissingTritonKernelError:
                     log.warning(
@@ -379,6 +405,13 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
+            binary_payloads = {
+                (artifacts.kernel_hash, artifact.filename): artifact.payload
+                for artifacts in bundle.kernel_artifacts
+                for artifact in artifacts.artifacts
+                if os.path.splitext(artifact.filename)[1]
+                in GPU_KERNEL_BIN_EXTS.values()
+            }
 
             for artifacts in bundle.kernel_artifacts:
                 basedir = triton_cache_dir(artifacts.device)
@@ -430,7 +463,7 @@ class TritonBundler:
 
             if config.use_static_triton_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
-                    bundle.static_autotuners
+                    bundle.static_autotuners, binary_payloads
                 )
             else:
                 static_kernel_names = []
