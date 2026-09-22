@@ -682,9 +682,7 @@ def make_mxfp_tiled_mma(param):
         # TiledMma provides layouts only. One FP8 slot has the same 8-bit payload
         # as two packed FP4 values, so the proxy produces byte-identical fragments.
         layout_atom = fx.make_mma_atom(
-            fx.rocdl.MFMA(
-                param.mma_m, param.mma_n, param.mma_k // 2, fx.Float8E4M3FN
-            )
+            fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k // 2, fx.Float8E4M3FN)
         )
         k_layout = fx.make_layout((16, 4), (1, 16))
     else:

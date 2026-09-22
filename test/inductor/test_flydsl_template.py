@@ -1359,12 +1359,11 @@ class TestFlyDSLMXFPMetadata(TestCase):
             with self.subTest(tile=tile), self.assertRaisesRegex(ValueError, error):
                 _mxfp_param(mxfp_format, tile, 2048)
         for mma in ({"mma_m": 32}, {"mma_k": 192}):
-            with self.subTest(mma=mma), self.assertRaisesRegex(
-                ValueError, "requires mma=16x16x128"
+            with (
+                self.subTest(mma=mma),
+                self.assertRaisesRegex(ValueError, "requires mma=16x16x128"),
             ):
-                _mxfp_param(
-                    mxfp_format, (128, 128, 128, 2, 1, 1, 0), 2048, **mma
-                )
+                _mxfp_param(mxfp_format, (128, 128, 128, 2, 1, 1, 0), 2048, **mma)
 
 
 class TestFlyDSLMXFPDevice(TestCase):

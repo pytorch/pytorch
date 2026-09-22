@@ -125,6 +125,7 @@ def is_gemm_config_valid_for_shape(
     a_is_transposed: bool,
     b_is_transposed: bool,
     out_dtype_id: int | None = None,
+    has_bias: bool = False,
 ) -> bool:
     """Return whether a FlyDSL config supports this concrete GEMM shape."""
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
@@ -160,7 +161,7 @@ def is_gemm_config_valid_for_shape(
                 "use_half_tile_interleaved": use_half_tile_interleaved,
                 "a_is_transposed": a_is_transposed,
                 "b_is_transposed": b_is_transposed,
-                "has_bias": False,
+                "has_bias": has_bias,
                 "has_k_tail": has_k_tail,
             },
         )

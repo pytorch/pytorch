@@ -411,6 +411,7 @@ def get_flydsl_mm_template_kwargs(
         )
         extra["OUT_DTYPE_ID"] = out_dtype_id
         validity["out_dtype_id"] = out_dtype_id
+        validity["has_bias"] = has_bias
     # Filter shape-incompatible configs before autotuning.
     return [
         {
@@ -1323,25 +1324,16 @@ def _flydsl_mxfp_bias_supported(
 ) -> bool:
     if bias is None:
         return True
-    get_size = getattr(bias, "get_size", None)
-    get_dtype = getattr(bias, "get_dtype", None)
-    get_device = getattr(bias, "get_device", None)
-    if get_size is None or get_dtype is None or get_device is None:
+    if not isinstance(bias, IRNode):
         return False
-    if get_device() != mat_b.get_device():
-        return False
-    size = get_size()
+    size = bias.get_size()
     if len(size) != 1:
         return False
-    if get_dtype() != out_dtype:
+    if bias.get_device() != mat_b.get_device():
         return False
-    n = mat_b.get_size()[-1]
-    if isinstance(size[0], int) and isinstance(n, int):
-        return size[0] == n
-    try:
-        return bool(V.graph.sizevars.statically_known_equals(size[0], n))
-    except Exception:
+    if bias.get_dtype() != out_dtype:
         return False
+    return V.graph.sizevars.statically_known_equals(size[0], mat_b.get_size()[-1])
 
 
 def _get_rocm_mxfp_v2_format(
@@ -1368,8 +1360,8 @@ def _get_rocm_mxfp_v2_format(
         and swizzle_b == [SwizzleType.NO_SWIZZLE.value]
         and scale_a[0].get_dtype() == torch.float8_e8m0fnu
         and scale_b[0].get_dtype() == torch.float8_e8m0fnu
-        and _flydsl_mxfp_bias_supported(bias, mat_b, out_dtype)
         and out_dtype in (torch.bfloat16, torch.float16)
+        and _flydsl_mxfp_bias_supported(bias, mat_b, out_dtype)
         and not contraction_dim
         and use_fast_accum is False
     )
