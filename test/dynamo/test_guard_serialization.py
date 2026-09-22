@@ -1314,6 +1314,15 @@ class _RaisingGetattr:
         raise RuntimeError(name)
 
 
+class _DelegatingForwarder:
+    # The common forwarder: on a hollow instance every lookup recurses.
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+
 class _PermissiveGetattr:
     # Serves any name, so BUILD gets a __setstate__ to call and drops the state.
     def __init__(self):
@@ -1336,7 +1345,8 @@ _FINALIZED: list = []
 
 
 class _CountsDeletes:
-    # A finalizer that touches only a global, the shape a probe must not run.
+    # A finalizer that touches only a global; a pruned object's would run
+    # against the sentinels.
     def __init__(self):
         self.a = 1
 
@@ -2737,17 +2747,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # The predicate the attribute pruner will gate on: an object round-trips
         # as cls.__new__ plus __dict__ only when no pickle hook, no copyreg
         # registration and no state outside __dict__ (slots, container items,
-        # var-sized or C layout) is involved. One refusal fixture per conjunct;
-        # a __getattr__ that serves any name is refused (BUILD would call what it
-        # returns as __setstate__), one that raises reads as False rather than
-        # failing the dump.
+        # var-sized or C layout) is involved. One refusal fixture per conjunct.
+        # Every __getattr__ is refused by declaration; the two permissive ones
+        # show why in pickle's own terms: BUILD calls what the hollow instance
+        # resolves __setstate__ to, so the state is dropped or a None is called.
+        self.assertEqual(vars(pickle.loads(pickle.dumps(_PermissiveGetattr()))), {})
+        with self.assertRaisesRegex(TypeError, "NoneType.*not callable"):
+            pickle.loads(pickle.dumps(_NoneGetattr()))
         copyreg.pickle(_CopyregRegistered, lambda o: (_CopyregRegistered, ()))
         self.addCleanup(copyreg.dispatch_table.pop, _CopyregRegistered)
         self.assertTrue(_pickles_by_default(_HolderWithGenerator))
         self.assertTrue(_pickles_by_default(_GenericHolder))
         before = len(_FINALIZED)
         self.assertFalse(_pickles_by_default(_CountsDeletes))
-        self.assertEqual(len(_FINALIZED), before)  # the probe ran no finalizer
+        self.assertEqual(len(_FINALIZED), before)  # judged without an instance
         for obj in (
             _PipelineWithSetstate(),
             _WithGetstate(),
@@ -2759,6 +2772,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _PermissiveGetattr(),
             _NoneGetattr(),
             _RaisingGetattr(),
+            _DelegatingForwarder(_GenericHolder()),
             _SlottedHolder(),
             _PureSlots(),
             _AttrDict(a=1),
@@ -2825,6 +2839,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _PermissiveGetattr(),
             _NoneGetattr(),
             _RaisingGetattr(),
+            _DelegatingForwarder(_GenericHolder()),
             _CountsDeletes(),
             types.SimpleNamespace(a=1),
             Point(1, 2),
@@ -2858,7 +2873,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                     # hollow cls.__new__(cls), then BUILD asks that instance for
                     # __setstate__ before applying the dict. Run on a hollow
                     # instance given a picklable state, since the admitted zoo
-                    # entries hold a live generator by design.
+                    # entries hold a live generator by design; it is what would
+                    # catch a hook the type-level reads cannot see.
                     fn, args = obj.__reduce_ex__(protocol)[:2]
                     hollow = fn(*args)
                     vars(hollow)["probe"] = 1
