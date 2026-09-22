@@ -2375,17 +2375,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             torch._dynamo.config.patch(allow_empty_graphs=False),
         ):
             self.assertEqual(flags(), ambient)
-            with _capture_config(training=False):
-                self.assertEqual(flags(), (True, True, False, True))
-                # The inner scope's training wins while it is open, and the
-                # outer scope's setting comes back when it closes.
-                with _capture_config(training=True):
+            with _capture_config():
+                self.assertEqual(flags(), (True, True, True, True))
+                # A nested scope patches again and the outer one comes back
+                # when it closes.
+                with _capture_config():
                     self.assertEqual(flags(), (True, True, True, True))
-                self.assertEqual(flags(), (True, True, False, True))
+                self.assertEqual(flags(), (True, True, True, True))
             self.assertEqual(flags(), ambient)
 
             with self.assertRaisesRegex(RuntimeError, "boom"):
-                with _capture_config(training=True):
+                with _capture_config():
                     raise RuntimeError("boom")
             self.assertEqual(flags(), ambient)
 
@@ -2396,7 +2396,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
             def hold():
                 seen.append(flags())
-                with _capture_config(training=False):
+                with _capture_config():
                     seen.append(flags())
                     entered.set()
                     release.wait(10)
@@ -2409,7 +2409,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             release.set()
             worker.join(10)
             self.assertFalse(worker.is_alive())
-            self.assertEqual(seen[1], (True, True, False, True))
+            self.assertEqual(seen[1], (True, True, True, True))
             self.assertEqual(seen[0], seen[2])
             self.assertNotEqual(seen[0], seen[1])
 
@@ -2422,15 +2422,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # a capture with caches forced off would record nothing; say so up front.
         with torch.compiler.config.patch(force_disable_caches=True):
             with self.assertRaisesRegex(PackageError, "force_disable_caches"):
-                with _capture_config(training=False):
+                with _capture_config():
                     pass
 
         with functorch_config.patch(strict_autograd_cache=False):
             with torch._dynamo.config.patch(strict_precompile=False):
-                with _capture_config(training=False):
+                with _capture_config():
                     self.assertFalse(functorch_config.strict_autograd_cache)
             with torch._dynamo.config.patch(strict_precompile=True):
-                with _capture_config(training=False):
+                with _capture_config():
                     self.assertTrue(functorch_config.strict_autograd_cache)
             self.assertFalse(functorch_config.strict_autograd_cache)
 
