@@ -938,9 +938,14 @@ def run_gloo_test(test_module, test_directory, options):
     ):
         return run_test_with_subprocess(test_module, test_directory, options)
 
-    selected = "ProcessGroupGlooTest"
+    classes = (
+        "ProcessGroupGlooTest",
+        "ProcessGroupGlooLazyInitTest",
+        "ProcessGroupGlooFRTest",
+    )
+    selected = " or ".join(classes)
     for expression, handler in (
-        (selected, run_test),
+        *((name, run_test) for name in classes),
         (f"not ({selected})", run_test_with_subprocess),
     ):
         subset_options = copy.copy(options)
