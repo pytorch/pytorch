@@ -736,9 +736,6 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
-        # [device-as-parameter] the single coor::current_device_index observation
-        # for this graph, mirroring _current_device_edge's node cache on the tracer.
-        self.coor_current_device_index_var: VariableTracker | None = None
         # List of TensorVariables that are leaf tensors created in-graph
         # (e.g., nn.Parameter via tracable_create_parameter). These need to be
         # tracked separately from input_source_to_var for backward() auto-detection.
@@ -857,7 +854,9 @@ class OutputGraph(OutputGraphCommon):
         # are same, we don't want OBJECT_ALIASING guards on them. For these
         # objects, we have DICT_CONTAINS absent guards on the mro walk, so there
         # is no need of the OBJECT_ALIASING guards.
-        self.mro_source_cache: dict[tuple[int, str], DictGetItemSource] = {}
+        # Keyed on the class source too: one descriptor is reachable from
+        # objects with different sources, which need different sources for it.
+        self.mro_source_cache: dict[tuple[int, str, Source], DictGetItemSource] = {}
         # Tracks (id(klass), attr_name) pairs that already have a
         # DICT_CONTAINS absent guard installed during MRO walks.  When
         # multiple subclasses share the same intermediate MRO class, we
@@ -3895,6 +3894,11 @@ class SubgraphTracer(fx.Tracer):
         self.input_name_to_proxy: dict[str, fx.Proxy] = {}
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: dict[fx.Node, torch.Tensor] = {}
+        # [device-as-parameter] the single coor::current_device_index observation
+        # for this tracer, mirroring _current_device_edge's node cache. Per-tracer
+        # rather than per-graph: a HOP gives each subgraph its own tracer, and a
+        # proxy belonging to a sibling cannot be lifted into this one.
+        self.coor_current_device_index_var: VariableTracker | None = None
 
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
