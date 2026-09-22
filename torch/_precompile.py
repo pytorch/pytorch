@@ -79,10 +79,7 @@ it.
 # Note [precompile programming model]
 #
 # ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
-# or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step
-# (calls run in the caller's grad mode; with grad enabled, a dynamo capture lowers the
-# backward eagerly under ``training=True`` -- see the tracer note -- while a make_fx
-# capture traces THROUGH the backward, invariant 5).
+# or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step.
 # Among the positional args, the nn.Module arguments have their parameters and
 # buffers lifted to explicit graph inputs (via functional reparametrization), so
 # nothing live is baked in; the remaining args are the runtime inputs. The artifact
@@ -204,20 +201,7 @@ it.
 #    ``.backward()`` step), not the grads. The grad scatter is the ONLY mutation
 #    precompile performs, and it happens in Python outside the graph, so the graph stays
 #    functional. precompile does not own optimizer state; bring your own optimizer and
-#    zero grads as usual. The dynamo tracer accumulates by a different route (see the
-#    tracer note): a ``.backward()`` in ``fn`` graph-breaks, so at serve time the live
-#    autograd engine runs it through the compiled backward and does the accumulate
-#    itself; there is no harvested-output list (``training=True`` lowers that backward
-#    at capture even if ``fn`` never calls ``.backward()``).
-#    What matches make_fx: the in-place accumulate of the common path, frozen
-#    params keeping ``.grad = None``, and ``fn``'s own return value. What differs: the
-#    engine goes through AccumulateGrad, so tensor hooks and post-accumulate-grad hooks
-#    on the params fire; a make_fx capture silently drops them end to end (capture
-#    reparametrizes the module onto fresh fake params, so the hook stays behind on the
-#    real one, and the scatter above never runs AccumulateGrad). And ``requires_grad``
-#    is part of the params' TENSOR_MATCH guards, so a param flipped at runtime is a loud
-#    guard miss on a standalone artifact (an installed one compiles the call fresh)
-#    rather than make_fx's silent no-op (invariant 2).
+#    zero grads as usual.
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
@@ -251,7 +235,7 @@ it.
 #    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
 #    run. The code_hash binds the cache to its python_code:
-#    load() rejects a (code, cache) pair from different precompile captures (same
+#    load() rejects a (code, cache) pair from different precompile() calls (same
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
 # self-contained: ``python_code`` runs on its own -- it inlines the composed graph
@@ -269,7 +253,7 @@ it.
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair that did not come from the same precompile capture.
+# (python_code, cache) pair that did not come from the same precompile() call.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -297,7 +281,6 @@ from __future__ import annotations
 import base64
 import dataclasses
 import errno
-import functools
 import hashlib
 import inspect
 import io
@@ -369,12 +352,6 @@ _LeafBounds = dict[int, tuple[int | None, int | None]] | None
 _NO_MARKS: Mapping[int, Any] = MappingProxyType({})
 
 
-# Default of PrecompileError.result. Distinct from None because None is a real return
-# (the documented training step ends in .backward()); the sentinel means nothing ran.
-class _NoResult:
-    """Sentinel: the capture call never ran."""
-
-
 class PrecompileError(RuntimeError):
     """The error type raised by ``torch.compiler.precompile`` and its artifacts.
 
@@ -385,20 +362,12 @@ class PrecompileError(RuntimeError):
     non-tensor output the inductor backend cannot lower, or a runtime input whose shape or
     memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
-
-    ``result`` is what ``fn`` returned when the capture call that raised this had
-    already run before the refusal fired, so the return value is not lost: ``None``
-    means that call ran and returned ``None``. When nothing ran, ``result`` is a
-    private sentinel instead, never ``None``; compare against
-    ``PrecompileError.result`` (the class default) to test for it.
     """
 
     # Re-exported in torch.compiler.__all__, so pickle and test_public_bindings
     # resolve it there. Not in torch/compiler/precompile.py's re-homing loop, so its
     # string annotations resolve against torch.compiler: keep them to builtins.
     __module__ = "torch.compiler"
-
-    result: object = _NoResult
 
 
 @dataclasses.dataclass(frozen=True)
@@ -455,9 +424,7 @@ class Capture:
     capture, call it exactly as you would ``fn`` inside the block -- each call
     runs for real, folds what it exercised into the capture, and returns what
     ``fn`` returned -- and the artifact is written once, to the ``artifact_path``
-    / ``cache_path`` files, when the block exits. How many calls the block takes
-    depends on ``tracer``: the make_fx front-end takes exactly one and refuses a
-    second; the Dynamo front-end, when implemented, accumulates across calls.
+    / ``cache_path`` files, when the block exits.
     """
 
     def __enter__(self) -> Self:
@@ -468,55 +435,6 @@ class Capture:
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         raise NotImplementedError
-
-
-class _MakeFxCapture(Capture):
-    r"""Single-shot capture: the :class:`MakeFxTracer` front-end.
-
-    Takes the :class:`MakeFxTracer` the caller passed as ``tracer=`` and forwards
-    its ``decompositions`` to the ``PrecompiledModule`` it builds for ``fn``. Only
-    the constructor and ``__enter__`` exist so far: the constructor refuses a
-    partial and a ``tracer`` that is not a :class:`MakeFxTracer`, builds that module,
-    and records the state the capture will drive. ``__call__`` and ``__exit__``
-    still raise ``NotImplementedError`` from :class:`Capture`; the one-call rule
-    they will enforce is the one :class:`MakeFxTracer` documents.
-    """
-
-    def __init__(
-        self,
-        fn: Callable[..., object],
-        artifact_path: str,
-        cache_path: str,
-        *,
-        backend: str,
-        tracer: MakeFxTracer,
-        # Stored and not yet read: the follow-up's __call__ will select the grad mode
-        # of the one traced call from it.
-        training: bool,
-    ) -> None:
-        if isinstance(fn, functools.partial):
-            name = getattr(fn.func, "__qualname__", type(fn.func).__name__)
-            raise PrecompileError(
-                f"precompile cannot capture a partial of {name!r}. Pass the "
-                "underlying function and give its bound arguments as call arguments."
-            )
-        if not isinstance(tracer, MakeFxTracer):
-            raise PrecompileError(
-                f"precompile expects a MakeFxTracer instance as tracer, got {tracer!r}. "
-                "Pass MakeFxTracer(...); neither the bare class nor the tracer name "
-                "string is accepted here."
-            )
-        self._module = PrecompiledModule(
-            fn, backend=backend, tracer="make_fx", decompositions=tracer.decompositions
-        )
-        self._artifact_path = artifact_path
-        self._cache_path = cache_path
-        self._training = training
-        self._traced = False
-        self._rendered: tuple[str, bytes] | None = None
-
-    def __enter__(self) -> Self:
-        return self
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -1910,10 +1828,9 @@ class PrecompiledModule(PrecompiledRunnable):
         tracer: str = "make_fx",
         decompositions: dict | None = None,
     ) -> None:
-        # ``fn`` is the whole computation: a callable that takes the
-        # module(s) it uses as positional arguments (e.g. ``lambda m, x: m(x)``, or a
-        # training step that computes a loss and torch.autograd.grad); a module it
-        # closed over instead would be baked in as constants (invariant 1).
+        # ``fn`` is the whole computation: an nn.Module, or a callable that closes
+        # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
+        # step that computes a loss and torch.autograd.grad).
         self._fn = fn
         self._backend = backend
         self._tracer = tracer

@@ -41,7 +41,7 @@ append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
-    add_definitions(-DBUILDING_TESTS)
+    add_compile_definitions(BUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
       )
@@ -270,9 +270,11 @@ if(USE_DISTRIBUTED)
     endif()
     # Disable certain warnings for GCC-9.X
     if(CMAKE_COMPILER_IS_GNUCXX)
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
+        PROPERTIES COMPILE_OPTIONS -Wno-cast-function-type)
     endif()
     # NCCL is a private dependency of libtorch, but libtorch_python includes
     # some private headers of libtorch, which in turn include NCCL. As a hacky
@@ -395,8 +397,10 @@ set_source_files_properties(
 
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX)
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(
+    ${TORCH_SRC_DIR}/csrc/Module.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
+    PROPERTIES COMPILE_OPTIONS -Wno-cast-function-type)
 endif()
 
 # Preserve CUDA_GENCODE flags
