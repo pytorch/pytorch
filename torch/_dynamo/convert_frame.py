@@ -2002,11 +2002,14 @@ def _compile(
         # An explicit capture records only the filtered copy of its guards and
         # fails loudly where the ambient cache would bypass the compile.
         explicit_capture = package is not None and package.explicit_capture
+        # A serving package holds a loaded artifact that nothing will save
+        # again: a frame it does not cover still compiles, but records nothing.
+        record = package is not None and not package.serving
         with dynamo_timed("build_guards", log_pt2_compile_event=True), build_guards_ctx:
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
-                save=output.package is not None,
+                save=record and output.package is not None,
                 cache_entries=cache_entries,
                 serialization_guard_filter_fn=(
                     package.serialization_guard_filter_fn
@@ -2014,14 +2017,15 @@ def _compile(
                     else None
                 ),
                 explicit_capture=explicit_capture,
-                strict_error=explicit_capture,
+                strict_error=record and explicit_capture,
             )
 
         # bypass_package sets output.package to None when this compile cannot be
         # packaged (the local `package` still holds the object). Skip the whole
-        # block in that case: a bypassed compile contributes none of its guards,
-        # inlined source, or device type to the package.
-        if output.package is not None:
+        # block in that case, and for a serving package: neither contributes
+        # guards, inlined source, or device type to the package, and `save`
+        # above is gated identically so guards_state is deliberately None.
+        if record and output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
             output.package.add_guarded_code(check_fn.guards_state, out_code)
