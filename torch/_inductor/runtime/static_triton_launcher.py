@@ -247,15 +247,12 @@ class StaticallyLaunchedTritonKernel:
                 ) from error
             raise
 
-    def _load_device_agnostic_kernel(self, device: int):
-        return self._load_kernel_from_path(self._agnostic_cubin_path(), device)
-
     def load_kernel(self, device: int) -> None:
         if self.device_agnostic:
             if device in self.functions:
                 return
             (module, function, self.n_regs, self.n_spills) = (
-                self._load_device_agnostic_kernel(device)
+                self._load_kernel_from_path(self._agnostic_cubin_path(), device)
             )
             self.modules[device] = module
             self.functions[device] = function
@@ -572,8 +569,8 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         if self.device_agnostic:
             if device in self.functions:
                 return
-            (function, self.n_regs, self.n_spills) = self._load_device_agnostic_kernel(
-                device
+            (function, self.n_regs, self.n_spills) = self._load_kernel_from_path(
+                self._agnostic_cubin_path(), device
             )
             # XPU has no separate module handle (only the function capsule).
             self.functions[device] = function

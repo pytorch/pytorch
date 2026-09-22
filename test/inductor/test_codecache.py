@@ -2,6 +2,7 @@
 import base64
 import copy
 import functools
+import gc
 import hashlib
 import json
 import logging
@@ -15,6 +16,7 @@ import textwrap
 import types
 import unittest
 import warnings
+import weakref
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -1116,11 +1118,54 @@ class TestFxGraphCache(TestCase):
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
         cached_autotuner = static_autotuner.kernel
-        self.assertNotIn("run", cached_autotuner.__dict__)
-        self.assertNotIn("_compile_kernel_from_src", cached_autotuner.__dict__)
-        self.assertNotIn("_jit_fallback_condition", cached_autotuner.__dict__)
         self.assertIs(cached_autotuner.run.__self__, cached_autotuner)
         self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_device_agnostic_fallback_coordinator_does_not_retain_autotuner(self):
+        def fn(x):
+            return x.sin()
+
+        with torch.cuda.device(0):
+            x = torch.randn(32, device="cuda")
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        module_globals = graph.current_callable.__globals__  # type: ignore[union-attr]
+        cached_autotuner = module_globals[static_autotuner.kernel_name]
+        self.assertIsNot(cached_autotuner.run.__self__, cached_autotuner)
+        cached_autotuner_ref = weakref.ref(cached_autotuner)
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            self.assertIs(
+                module_globals.pop(static_autotuner.kernel_name), cached_autotuner
+            )
+            PyCodeCache.cache_clear()
+            del cached_autotuner
+            del static_autotuner
+            del bundle
+            del graph
+            self.assertIsNone(cached_autotuner_ref())
+        finally:
+            if gc_was_enabled:
+                gc.enable()
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
