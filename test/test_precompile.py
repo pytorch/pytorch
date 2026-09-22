@@ -2070,6 +2070,114 @@ class TestPrecompile(TestCase):
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    def test_concurrent_captures_are_serialized(self):
+        # Capture mutates process-global state (RNG snapshots, inductor's codegen
+        # config) and runs fn for real, so two captures in flight at once would
+        # interleave those mutations. One process-wide lock is what keeps a capture
+        # atomic with respect to another; assert no two are ever inside _capture.
+        import threading
+        import time
+        from unittest.mock import patch
+
+        import torch._precompile as precompile_impl
+
+        real = precompile_impl._capture
+        state_lock = threading.Lock()
+        active = 0
+        max_active = 0
+
+        def spy(*args, **kwargs):
+            nonlocal active, max_active
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.02)
+                return real(*args, **kwargs)
+            finally:
+                with state_lock:
+                    active -= 1
+
+        barrier = threading.Barrier(4)
+        results: list = [None] * 4
+
+        def worker(i):
+            barrier.wait()
+            results[i] = torch.compiler.precompile(
+                lambda a: a + 1, torch.ones(2), backend="eager"
+            )
+
+        with patch.object(precompile_impl, "_capture", spy):
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(max_active, 1)
+        for code, _cache in results:
+            self.assertIn("def forward", code)
+
+    def test_nested_capture_does_not_deadlock(self):
+        # Capture runs fn for real, so fn is free to ask for a capture of its own. The
+        # process-wide lock is therefore reentrant: a plain Lock would deadlock the
+        # thread against itself the moment a traced function precompiled anything.
+        def inner(a):
+            return a * 2
+
+        def outer(a):
+            torch.compiler.precompile(inner, torch.ones(2), backend="eager")
+            return a + 1
+
+        code, _cache = torch.compiler.precompile(outer, torch.ones(2), backend="eager")
+        self.assertIn("def forward", code)
+
+    @unittest.skipIf(not hasattr(os, "fork"), "needs os.fork")
+    def test_capture_lock_survives_a_fork(self):
+        # The capture lock is process-global, and fork copies it in whatever state the
+        # parent left it: a child forked while another parent thread held it inherits a
+        # lock that is held by a thread that does not exist, and its first capture
+        # blocks forever. Run out of process -- forking a worker that may already have
+        # initialized CUDA is not safe -- and bound the child with an alarm so the
+        # regression is a failure rather than a hang.
+        code = textwrap.dedent(
+            """
+            import os, signal, sys, threading, torch
+            import torch._precompile as impl
+
+            held = threading.Event()
+            release = threading.Event()
+
+            def holder():
+                with impl._CAPTURE_LOCK:
+                    held.set()
+                    release.wait(60)
+
+            t = threading.Thread(target=holder)
+            t.start()
+            if not held.wait(60):
+                sys.exit(3)
+            pid = os.fork()
+            if pid == 0:
+                signal.alarm(60)
+                try:
+                    torch.compiler.precompile(
+                        lambda a: a + 1, torch.ones(2), backend="eager"
+                    )
+                except BaseException:
+                    os._exit(2)
+                os._exit(0)
+            _, status = os.waitpid(pid, 0)
+            release.set()
+            t.join()
+            sys.exit(os.waitstatus_to_exitcode(status))
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
