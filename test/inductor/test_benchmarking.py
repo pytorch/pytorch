@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -515,6 +516,49 @@ class TestBenchmarker(TestCase):
                 "exit",
             ],
         )
+
+    def test_cudagraph_recursion_guard_is_thread_local(self):
+        from torch._inductor.runtime.benchmarking import Benchmarker
+
+        benchmarker = InductorBenchmarker()
+        both_entered = threading.Barrier(2)
+        first_finished = threading.Event()
+        observed = []
+        errors = []
+
+        def benchmark_with_cuda_graph(_self, _callable, **kwargs):
+            both_entered.wait(timeout=5)
+            if threading.current_thread().name == "second":
+                self.assertTrue(first_finished.wait(timeout=5))
+                observed.append(benchmarker._in_cudagraph_benchmark)
+            return 1.0
+
+        def run(name):
+            try:
+                benchmarker.benchmark_gpu_with_cuda_graph(lambda: None)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                if name == "first":
+                    first_finished.set()
+
+        with patch.object(
+            Benchmarker,
+            "benchmark_gpu_with_cuda_graph",
+            benchmark_with_cuda_graph,
+        ):
+            first = threading.Thread(target=run, args=("first",), name="first")
+            second = threading.Thread(target=run, args=("second",), name="second")
+            first.start()
+            second.start()
+            first.join(timeout=5)
+            second.join(timeout=5)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(observed, [True])
+        self.assertFalse(benchmarker._in_cudagraph_benchmark)
 
     @parametrize(
         "return_mode, expected",
