@@ -15,6 +15,7 @@ from torch._dynamo.eval_frame import (
     _get_total_cache_entry_count,
 )
 from torch._dynamo.exc import FailOnRecompileLimitHit
+from torch._dynamo.types import FrameAction, FrameExecStrategy
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1116,6 +1117,71 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(_get_cache_entries_for_region(f, id_b)), 1)
 
     # ===== Default strategy × region: SKIP inherited, RUN_ONLY not =====
+
+    @parametrize("region_exists", (False, True))
+    @parametrize("global_action", ("default", "run_only", "skip"))
+    def test_isolate_recompiles_global_strategy_precedence(
+        self, region_exists, global_action
+    ):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        torch._dynamo.eval_frame.reset_code(f.__code__)
+        try:
+            opt = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+            region = opt._isolate_recompiles_id
+            expected_compiles = 0
+            if region_exists:
+                opt(torch.randn(3))
+                expected_compiles = 1
+
+            action = {
+                "default": FrameAction.DEFAULT,
+                "run_only": FrameAction.RUN_ONLY,
+                "skip": FrameAction.SKIP,
+            }[global_action]
+            torch._dynamo.eval_frame.set_code_exec_strategy(
+                f.__code__, FrameExecStrategy(action, action)
+            )
+            opt(torch.randn(4))
+
+            if action != FrameAction.SKIP:
+                expected_compiles += 1
+            self.assertEqual(cnt.frame_count, expected_compiles)
+            self.assertEqual(
+                len(_get_cache_entries_for_region(f, region)), expected_compiles
+            )
+        finally:
+            torch._dynamo.eval_frame.reset_code(f.__code__)
+
+    @parametrize("region_exists", (False, True))
+    def test_isolate_recompiles_global_recursive_skip_precedence(self, region_exists):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y.cos()
+
+        torch._dynamo.eval_frame.reset_code(f.__code__)
+        try:
+            opt = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+            expected_compiles = 0
+            if region_exists:
+                opt(torch.randn(3))
+                expected_compiles = 2
+
+            torch._dynamo.eval_frame.set_code_exec_strategy(
+                f.__code__,
+                FrameExecStrategy(FrameAction.DEFAULT, FrameAction.SKIP),
+            )
+            opt(torch.randn(4))
+
+            self.assertEqual(cnt.frame_count, expected_compiles + 1)
+        finally:
+            torch._dynamo.eval_frame.reset_code(f.__code__)
 
     def test_isolate_recompiles_inherits_default_skip(self):
         """Global SKIP (from skip_code / @torch._dynamo.skip / FX plumbing /
