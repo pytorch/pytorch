@@ -22,8 +22,8 @@ and with CONTRIBUTING.md, which states them for users:
   * the interpreter has no published DSL wheel and none is installed
   * a static torch_cuda, which cannot take the version script
   * nothing declares kernels (no torch/_native/ops/*/aot.py)
-  * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
-    with it unset, on-device export runs if a supported GPU is present
+  * TORCH_CUDA_ARCH_LIST matches no target declared by an op; with it unset,
+    on-device export runs if a supported GPU is present
 
 Two modes, split by the skip list.
 
@@ -467,34 +467,28 @@ def should_run() -> bool:
         if not archs:
             _report(
                 f"skipped (TORCH_CUDA_ARCH_LIST={arch_list!r} has no "
-                f"exportable arch; exportable: "
-                f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
+                f"compatible native-AOT declaration target)"
             )
             return False
         if len(archs) > 1:
             # Supported (export nests one tree per arch and the generated stub
-            # selects a compatible target at runtime); reported because it embeds
-            # one full kernel set per arch.
+            # selects a compatible target at runtime); reported because several
+            # compile-target trees will be embedded.
             _report(f"multi-arch: {' '.join(archs)}")
     elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")
         return False
     else:
-        # On-device export compiles for whatever GPU is present, so check it
-        # BEFORE committing: a dev box outside EXPORTABLE_ARCHES exported for its
-        # own arch and then failed in generation, after a successful build.
+        # Check the detected device before committing to stage 2: an unsupported
+        # device would export nothing after a successful main build.
         # Through a subprocess, not export._detected_arch(), which would
         # initialize CUDA here -- what _torch_probe exists to avoid.
         local = _torch_value("'sm_%d%d' % torch.cuda.get_device_capability()")
-        target = (
-            export_mod._claimed_spelling(local, export_mod.EXPORTABLE_ARCHES)
-            if local
-            else None
-        )
-        if target is None:
+        targets = export_mod.targets_for_arches([local]) if local else []
+        if not targets:
             _report(
-                f"skipped (local GPU is {local or 'undetectable'}; exportable: "
-                f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
+                f"skipped (local GPU is {local or 'undetectable'}; no compatible "
+                f"native-AOT declaration target)"
             )
             return False
 
@@ -909,8 +903,8 @@ def main(argv: list[str] | None = None) -> int:
     # The archive the generator names in the CMake it emits.
     if archive := _dsl_runtime_archive():
         gen += ["--dsl-runtime", archive]
-    # Name the arches THIS build targets, so a tree left by a build with a different
-    # TORCH_CUDA_ARCH_LIST is ignored. Omitted for an on-device export.
+    # Name the AOT targets selected for THIS build, so a tree left by a build with a
+    # different TORCH_CUDA_ARCH_LIST is ignored. Omitted for an on-device export.
     if arch_list:
         from tools.native_aot import export as export_mod
 

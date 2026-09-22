@@ -373,11 +373,7 @@ def gen_op(
     # tree, ahead of the tie-break below: a disowned tree of the same capability as
     # a claimed one loses that tie-break, and would pass unnoticed.
     declared_archs = decl.archs_of(d)
-    if unclaimed := {
-        sc["arch"]
-        for sc in sidecars
-        if not decl.declaration_accepts_compile_target(declared_archs, sc["arch"])
-    }:
+    if unclaimed := {sc["arch"] for sc in sidecars if sc["arch"] not in declared_archs}:
         # Name the directories and say DELETE: export skips targets the declaration
         # does not permit, so it never prunes these trees and every later build fails
         # identically.
@@ -391,9 +387,8 @@ def gen_op(
             f"{', '.join(trees) or 'those arch trees'} -- export.py skips "
             f"unsupported arches, so it will not remove them -- then re-export. "
             f"A bare re-export will NOT clear this; only deleting the tree does. "
-            f"(A backstop: export resolves an on-device arch to the spelling the "
-            f"declaration claims, so reaching this means the tree predates that or "
-            f"ARCHS was narrowed since.)"
+            f"(A backstop: export only emits targets named by the declaration, so "
+            f"reaching this means the tree predates that or ARCHS was narrowed since.)"
         )
 
     # Only the tie-break survivors get launchers: one for a dropped candidate is

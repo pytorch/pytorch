@@ -32,8 +32,9 @@ class AotDeclaration(Protocol):
     KERNEL_MODULE: str
     # Canonical compile targets this op supports (sm strings, e.g.
     # ("sm_90", "sm_100f")). OPTIONAL in source declarations, so read it
-    # through archs_of(d), never d.ARCHS. Explicit compatible targets may
-    # specialize these; gen_aot_lib gates on the artifacts actually shipped.
+    # through archs_of(d), never d.ARCHS. The exporter chooses the widest target
+    # compatible with each device architecture supported by the containing build;
+    # gen_aot_lib gates on the artifacts actually shipped.
     ARCHS: tuple[str, ...]
 
     def kernel_precompile_grid(self) -> list[dict]: ...
@@ -78,22 +79,20 @@ _OPTIONAL_FNS = {
 
 @dataclass(frozen=True)
 class ArchFamily:
-    """An ordered CUDA architecture family and its standard portable target."""
+    """An ordered CUDA architecture family."""
 
     name: str
     members: tuple[tuple[int, int], ...]
-    portable_target: str
 
 
 # Family membership is CUDA compatibility metadata, not something inferred from a
 # compute capability's major number. An f target serves its member and every later
 # member in this tuple.
-ARCH_FAMILIES = (ArchFamily("sm_100f", ((10, 0), (10, 3), (10, 7)), "sm_100f"),)
+ARCH_FAMILIES = (ArchFamily("sm_10x", ((10, 0), (10, 3), (10, 7))),)
 
 
-# Every compiler target this tooling accepts. Runtime-only family members need not
-# appear here. This is wider than EXPORTABLE_ARCHES because an explicit --arch can
-# request a target the standard build omits.
+# Compiler targets offered by the default ARCHS. Runtime-only family members need
+# not appear here; a build architecture selects among an op's declared targets.
 KNOWN_ARCHES = (
     "sm_90",
     "sm_90a",
@@ -104,15 +103,6 @@ KNOWN_ARCHES = (
     "sm_103f",
     "sm_103a",
 )
-
-# Which targets the standard build ships. archs_from_cuda_arch_list() maps each
-# device architecture onto its family's portable target where one exists.
-EXPORTABLE_ARCHES = ("sm_90", "sm_100f")
-if not set(EXPORTABLE_ARCHES) <= set(KNOWN_ARCHES):
-    raise AssertionError(
-        f"EXPORTABLE_ARCHES names arches this tooling cannot target: "
-        f"{sorted(set(EXPORTABLE_ARCHES) - set(KNOWN_ARCHES))}"
-    )
 
 # Default ARCHS covers every compiler target known to native-AOT. Declarations
 # override it to state their own ISA and tuning constraints.
@@ -164,11 +154,9 @@ _SM_SPELLING = re.compile(r"sm_([1-9][0-9]{1,2})([af]?)")
 def cc_of(arch: str) -> tuple[int, int]:
     """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103f" -> (10, 3).
 
-    Shared, because the exporter (matching a detected arch against ARCHS) and the
-    generator (routing sidecars by compatible target) must agree what an sm string
-    means: they disagreed while one compared capabilities and the other strings,
-    and a declaration pinning ('sm_100a',) disowned the 'sm_100' its own on-device
-    export produced.
+    Shared, because the exporter (selecting an ARCHS candidate for a supported
+    device) and the generator (routing sidecars by compatible target) must agree
+    what an sm string means.
 
     Refuses what it cannot parse rather than computing a capability: "sm_9" gives
     (0, 9) and "sm_1000" (100, 0), each a gate no device satisfies, so the op
@@ -234,43 +222,8 @@ def target_can_run_on(target: str, device_cc: tuple[int, int]) -> bool:
     return device_cc in target_devices(target)
 
 
-def compile_target_satisfies(compile_target: str, declared_target: str) -> bool:
-    """Whether an explicit compile target can specialize a declared target."""
-    if compile_target == declared_target:
-        return True
-    declared_suffix = suffix_of(declared_target)
-    compile_suffix = suffix_of(compile_target)
-    if declared_suffix == "a":
-        return False
-    if declared_suffix == "":
-        return cc_of(compile_target) == cc_of(declared_target) and compile_suffix in (
-            "a",
-            "f",
-        )
-    return cc_of(compile_target) in target_devices(
-        declared_target
-    ) and compile_suffix in ("a", "f")
-
-
-def declaration_accepts_compile_target(
-    declared_targets: tuple[str, ...] | list[str], compile_target: str
-) -> bool:
-    """Whether any target in a declaration permits ``compile_target``."""
-    return any(
-        compile_target_satisfies(compile_target, target) for target in declared_targets
-    )
-
-
-def portable_target_for(device_cc: tuple[int, int]) -> str | None:
-    """The standard portable target for a device family, if it has one."""
-    family = family_for_cc(device_cc)
-    if family is None:
-        return None
-    target = family.portable_target
-    return target if target_can_run_on(target, device_cc) else None
-
-
 _SUFFIX_STRENGTH = {"": 0, "f": 1, "a": 2}
+_WIDEST_SUFFIX_ORDER = {"f": 0, "": 1, "a": 2}
 
 
 def target_order_key(target: str) -> tuple[int, int, int, int]:
@@ -296,6 +249,28 @@ def compatible_targets(
     )
 
 
+def widest_compatible_target(
+    targets: tuple[str, ...] | list[str], device_cc: tuple[int, int]
+) -> str | None:
+    """The broadest declared target that can run on ``device_cc``."""
+    compatible = [target for target in targets if target_can_run_on(target, device_cc)]
+    if not compatible:
+        return None
+    return min(
+        compatible,
+        key=lambda target: (
+            -len(target_devices(target)),
+            _WIDEST_SUFFIX_ORDER[suffix_of(target)],
+            *cc_of(target),
+        ),
+    )
+
+
+def known_device_capabilities() -> frozenset[tuple[int, int]]:
+    """Device capabilities covered by at least one known compile target."""
+    return frozenset(cc for target in KNOWN_ARCHES for cc in target_devices(target))
+
+
 def _validate_arch_families() -> None:
     seen: dict[tuple[int, int], str] = {}
     for family in ARCH_FAMILIES:
@@ -308,14 +283,6 @@ def _validate_arch_families() -> None:
                     f"{family.name}"
                 )
             seen[cc] = family.name
-        if suffix_of(family.portable_target) != "f":
-            raise AssertionError(
-                f"{family.name}: portable target must be family-specific"
-            )
-        if cc_of(family.portable_target) != family.members[0]:
-            raise AssertionError(
-                f"{family.name}: portable target must anchor the first family member"
-            )
     for target in KNOWN_ARCHES:
         target_devices(target)
 
@@ -364,12 +331,9 @@ def _validate(d, path: str, label: str) -> None:
             f"{path}: {label} ARCHS must be a non-empty sequence of sm "
             f"strings (e.g. ('sm_90', 'sm_100f')), got {archs!r}"
         )
-    # ...and each one must name a capability, not merely look like an sm string.
-    # _SM_RE accepts "sm_9" and "sm_1000", which cc_of refuses -- and export
-    # compares ARCHS entries by STRING, so a typo silently matched nothing: the
-    # declaration exported no kernels, generation had no tree to complain about,
-    # and the build shipped without that op, green. Refused here because this is
-    # the only place that knows which file to name.
+    # ...and each one must name a target with known device coverage, not merely look
+    # like an sm string. _SM_RE accepts "sm_9" and "sm_1000", which cc_of refuses.
+    # Refused here because this is the only place that knows which file to name.
     for a in archs:
         try:
             target_devices(a)

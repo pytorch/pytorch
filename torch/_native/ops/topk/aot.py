@@ -15,8 +15,8 @@ DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "cutedsl_kernels.py"
 # Stated rather than defaulted: the declared ranges and work rungs are measured
 # against aten on Hopper and Blackwell.
-# These kernels require no architecture-conditional instructions. Explicit exports
-# may specialize these targets, while standard builds use them directly.
+# These kernels require no architecture-conditional instructions. The exporter
+# chooses the widest compatible target for the build's supported devices.
 ARCHS = ("sm_90", "sm_100f")
 
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}

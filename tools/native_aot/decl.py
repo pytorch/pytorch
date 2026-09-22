@@ -60,11 +60,12 @@ loud "'empty' is not a member of 'at'" at build time, not a silent one.
 
 Optional exports:
 
-  ARCHS: tuple[str, ...]      canonical compile targets the op supports (sm
-                              strings). An explicit target may specialize a
-                              baseline target for the same device or an ``f``
-                              target for a later family member; an ``a`` target
-                              is exact-only. Defaults to all known sm90+ targets.
+  ARCHS: tuple[str, ...]      candidate compile targets the op supports (sm
+                              strings). For each device architecture supported
+                              by the containing build, export chooses the widest
+                              compatible candidate, preferring an ``f`` family
+                              target. An ``a`` target is exact-only. Defaults to
+                              all known sm90+ targets.
                               Codegen derives runtime device gates from the
                               targets actually shipped, so declarations never
                               hand-write architecture checks.
