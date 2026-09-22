@@ -7,6 +7,7 @@ import io
 import os
 import pickle
 import stat
+import subprocess
 import sys
 import tempfile
 import typing
@@ -16,6 +17,7 @@ import torch
 from torch._dynamo.decorators import mark_unbacked
 from torch._precompile import _make_inlined_forward, _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.compiler.precompile import load, PrecompiledRunnable
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -365,7 +367,13 @@ class TestPrecompile(TestCase):
     def test_precompile_public_members_are_the_exported_types(self):
         # Pins the list the parametrized tests below iterate over: an emptied
         # export list would otherwise generate no cases and pass vacuously.
-        exported = {"Capture", "MakeFxTracer", "PrecompileSummary"}
+        exported = {
+            "load",
+            "Capture",
+            "MakeFxTracer",
+            "PrecompiledRunnable",
+            "PrecompileSummary",
+        }
         members = set(_PRECOMPILE_PUBLIC_MEMBERS)
         self.assertEqual(set(torch.compiler.precompile.__all__), exported)
         self.assertEqual(members, exported | {"PrecompileError"})
@@ -1465,6 +1473,135 @@ class TestPrecompileCaptureFiles(TestCase):
         with self.assertRaises(PrecompileError) as cm:
             read(self.cache, self.artifact)
         self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
+
+
+_FRESH_PROCESS_LOADER = """
+import sys
+import torch
+
+class M(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        return torch.relu(self.lin(x))
+
+artifact, cache, state = sys.argv[1:4]
+saved = torch.load(state)
+model = M()
+model.load_state_dict(saved["state_dict"])
+f = torch.compiler.precompile.load(artifact, cache)
+torch.testing.assert_close(f(model, saved["x"]), saved["expected"])
+print("served")
+"""
+
+
+@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileLoad(TestCase):
+    """load() over the on-disk pair a capture writes."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.artifact = os.path.join(self.dir, "m.py")
+        self.cache = os.path.join(self.dir, "m.cache")
+        self.model = _FilesModel()
+        self.x = torch.randn(2, 4)
+
+    def _write(self, artifact, cache, backend="eager", x=None):
+        pair = _precompile_pair(
+            _files_fn, self.model, self.x if x is None else x, backend=backend
+        )
+        _write_artifact(artifact, cache, *pair)
+        return pair
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_load_round_trips_the_pair(self, backend):
+        self._write(self.artifact, self.cache, backend=backend)
+        f = load(self.artifact, self.cache)
+        self.assertIsInstance(f, PrecompiledRunnable)
+        self.assertFalse(f.installed)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+        # No weights are baked in: a structurally identical model with other
+        # weights serves its own answer.
+        other = _FilesModel()
+        self.assertEqual(f(other, self.x), other(self.x))
+        # A standalone artifact installs nothing, so the handle's context
+        # manager and unload() are no-ops.
+        with f as entered:
+            self.assertIs(entered, f)
+        f.unload()
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_load_in_a_fresh_process(self, backend):
+        self._write(self.artifact, self.cache, backend=backend)
+        state = os.path.join(self.dir, "state.pt")
+        expected = _make_inlined_forward(self._read(self.artifact), warn=False)(
+            self.model, self.x
+        )
+        torch.save(
+            {"state_dict": self.model.state_dict(), "x": self.x, "expected": expected},
+            state,
+        )
+        out = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                _FRESH_PROCESS_LOADER,
+                self.artifact,
+                self.cache,
+                state,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("served", out.stdout)
+
+    def _read(self, path):
+        with open(path, "rb") as f:
+            return f.read().decode()
+
+    def test_load_refuses_a_pair_from_two_captures_or_a_missing_half(self):
+        self._write(self.artifact, self.cache)
+        other_artifact = os.path.join(self.dir, "other.py")
+        other_cache = os.path.join(self.dir, "other.cache")
+        self._write(other_artifact, other_cache, x=torch.randn(3, 4))
+        with self.assertRaisesRegex(PrecompileError, "does not match"):
+            load(self.artifact, other_cache)
+        with self.assertRaisesRegex(PrecompileError, "could not read"):
+            load(self.artifact, os.path.join(self.dir, "missing.cache"))
+
+    def test_load_pairs_the_cache_on_its_tracer_tag(self):
+        # The envelope names the tracer that produced it; a tag that differs from
+        # the python_code's is a wrong pairing, and a pair written before the tag
+        # (absent on both sides) still reads as make_fx.
+        _, cache = self._write(self.artifact, self.cache)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertEqual(blob["tracer"], "make_fx")
+        blob["tracer"] = "dynamo"
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        _write_artifact(
+            self.artifact, self.cache, self._read(self.artifact), buf.getvalue()
+        )
+        with self.assertRaisesRegex(PrecompileError, "tracer"):
+            load(self.artifact, self.cache)
+        del blob["tracer"]
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        _write_artifact(
+            self.artifact, self.cache, self._read(self.artifact), buf.getvalue()
+        )
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
 
 
 if __name__ == "__main__":
