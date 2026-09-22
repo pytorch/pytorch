@@ -1217,6 +1217,7 @@ CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # Missing support for batched tensors
         "test_cp_flex_attention_document_mask",
+        "test_cp_flex_attention_preserves_block_size",
     ],
 )
 
