@@ -2,6 +2,7 @@
 import copy
 import errno
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -1710,6 +1711,28 @@ class TestPrecompile(TestCase):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
         with self.assertRaisesRegex(ValueError, "tracer must be 'make_fx' or 'dynamo'"):
             _precompile_pair(lambda x, y: x + y, a, b, tracer="nope")
+
+    def test_artifact_backend_value_is_validated_before_exec(self):
+        # A source whose BACKEND tag names an unknown backend is refused as a
+        # malformed artifact, with the loader's own error type and before any
+        # exec; the cache tag is tampered to match so the pairing check does not
+        # fire first.
+        from torch._precompile import _parse_artifact_metadata
+
+        code, cache = _precompile_pair(
+            _files_fn, _FilesModel(), torch.randn(2, 4), backend="eager"
+        )
+        bad_code = code.replace("BACKEND = 'eager'", "BACKEND = 'nope'")
+        self.assertNotEqual(bad_code, code)
+        with self.assertRaisesRegex(PrecompileError, "unknown backend 'nope'"):
+            _parse_artifact_metadata(bad_code)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["backend"] = "nope"
+        blob["code_hash"] = hashlib.sha256(bad_code.encode()).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertRaisesRegex(PrecompileError, "unknown backend 'nope'"):
+            _load_pair(bad_code, buf.getvalue())
 
     def test_backend_default_is_inductor(self):
         # The default lowers through Inductor: the generated code inlines the Inductor
@@ -4305,6 +4328,47 @@ class TestPrecompileCapture(TestCase):
             y = cap(self.model, self.x)
         self.assertTrue(called)
         self.assertEqual(y, self.model(self.x))
+
+    def test_a_capture_is_over_once_its_block_exits(self):
+        # After the block, a call would trace and serve with nothing left to
+        # write it; it is refused the same way as a call before the block, on
+        # both a clean and a raising exit.
+        cap = self._capture(backend="eager")
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with cap:
+                raise RuntimeError("boom")
+        with self.assertRaisesRegex(PrecompileError, "not active"):
+            cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        with self._capture(backend="eager") as cap:
+            cap(self.model, self.x)
+        with self.assertRaisesRegex(PrecompileError, "not active"):
+            cap(self.model, self.x)
+
+    def test_a_serve_that_raises_leaves_the_capture_retryable(self):
+        # The pair is recorded only once the serve has returned: a call whose
+        # serve raised writes nothing at exit and can be made again.
+        with self._capture(backend="eager") as cap:
+            with mock.patch(
+                "torch._precompile._runnable_from_pair",
+                side_effect=RuntimeError("serve failed"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "serve failed"):
+                    cap(self.model, self.x)
+            self.assertFalse(os.path.exists(self.artifact))
+            self.assertEqual(cap(self.model, self.x), self.model(self.x))
+        self.assertTrue(os.path.exists(self.artifact))
+
+    def test_capture_takes_pathlike_paths_and_the_default_tracer(self):
+        import pathlib
+
+        artifact = pathlib.Path(self.dir) / "sub" / "m.py"
+        cache = pathlib.Path(self.dir) / "sub" / "m.cache"
+        with capture(
+            _files_fn, artifact_path=artifact, cache_path=cache, backend="eager"
+        ) as cap:
+            cap(self.model, self.x)
+        self.assertEqual(load(artifact, cache)(self.model, self.x), self.model(self.x))
 
     def test_a_block_without_a_call_or_that_raises_writes_nothing(self):
         with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
