@@ -3058,6 +3058,13 @@ class RandomVariable(VariableTracker):
         "randrange",
         "uniform",
     }
+    _stateful_fn_names = _supported_fn_names | {
+        "seed",
+        "getstate",
+        "setstate",
+        "shuffle",
+        "sample",
+    }
 
     def __init__(
         self,
@@ -3087,9 +3094,7 @@ class RandomVariable(VariableTracker):
     def is_supported_random_obj(val: Random) -> bool:
         if type(val) is not random.Random:
             return False
-        for name in itertools.chain(
-            RandomVariable._supported_fn_names, ("seed", "getstate", "setstate")
-        ):
+        for name in RandomVariable._stateful_fn_names:
             if not hasattr(val, name):
                 return False
             meth = getattr(val, name)
@@ -3278,6 +3283,26 @@ class RandomVariable(VariableTracker):
         "randrange": Method(_randrange),
         "uniform": Method(_uniform),
     }
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.source is not None and name in self._stateful_fn_names:
+            unimplemented(
+                gb_type="Stateful random.Random method",
+                context=f"method: random.Random.{name}",
+                explanation=(
+                    f"Dynamo cannot trace random.Random.{name}() on a persistent "
+                    "random number generator because its behavior depends on state "
+                    "that changes between calls."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(

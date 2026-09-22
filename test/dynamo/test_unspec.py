@@ -399,7 +399,7 @@ else:
             return y, rand2, rand3
 
         inp = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="eager")
         random.seed(0)
         y_1, rand2_1, rand3_1 = fn(inp, random.Random(12))
         state_1 = random.getstate()
@@ -426,7 +426,7 @@ else:
             return x + r1 + r2 + r3 + r4
 
         inp = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="eager")
         rand1_1 = random.Random(1)
         rand2_1 = random.Random(2)
         rand3_1 = random.Random(3)
@@ -491,44 +491,144 @@ else:
         with self.assertRaises(ValueError):
             opt_fn()
 
-    def test_random_module_shuffle_sample(self):
-        # Module-level random.shuffle/random.sample must trace under fullgraph
-        # (exercised by the CPython dict/list tests). Like an explicit Random
-        # object, the global RNG state is snapshotted at compile time, so assert
-        # structural correctness rather than cross-run reproducibility.
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            items = list(range(10))
-            random.shuffle(items)
-            picks = random.sample("abcdefghij", 4)
-            return items, picks, x + 1
+    @parametrize("method", ("shuffle", "sample"))
+    def test_random_module_shuffle_sample(self, method):
+        if method == "shuffle":
 
-        random.seed(0)
-        items, picks, _ = fn(torch.zeros(2))
-        self.assertEqual(sorted(items), list(range(10)))
-        self.assertEqual(len(picks), 4)
-        self.assertEqual(len(set(picks)), 4)
-        self.assertTrue(all(p in "abcdefghij" for p in picks))
+            def fn(x, values):
+                result = random.shuffle(values)
+                return x + values[0], result
+
+        else:
+
+            def fn(x, values):
+                result = random.sample(values, 3)
+                return x + result[0], result
+
+        def run(call_fn):
+            outputs = []
+            for _ in range(torch._dynamo.config.recompile_limit + 1):
+                values = list(range(10))
+                outputs.append((call_fn(torch.zeros(1), values), values))
+            return outputs, random.getstate()
+
+        random.seed(7)
+        expected, expected_state = run(fn)
+        random.seed(7)
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        actual, actual_state = run(opt_fn)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_state, expected_state)
+        self.assertLess(cnts.frame_count, torch._dynamo.config.recompile_limit)
+
+        torch._dynamo.reset()
+        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Stateful random.Random method"
+        ):
+            fullgraph_fn(torch.zeros(1), list(range(10)))
+
+    def test_persistent_random_object_shuffle_sample(self):
+        def fn(x, rand):
+            initial_position = rand.getstate()[1][-1]
+            first_draw = rand.random()
+            values = list(range(10))
+            shuffle_result = rand.shuffle(values)
+            picks = rand.sample(range(20), 3)
+            last_draw = rand.random()
+            final_position = rand.getstate()[1][-1]
+            return (
+                x + first_draw + values[0] + picks[0] + last_draw,
+                initial_position,
+                first_draw,
+                shuffle_result,
+                values,
+                picks,
+                last_draw,
+                final_position,
+            )
+
+        def run(call_fn, rand):
+            outputs = [
+                call_fn(torch.zeros(1), rand)
+                for _ in range(torch._dynamo.config.recompile_limit + 1)
+            ]
+            return outputs, rand.getstate()
+
+        expected, expected_state = run(fn, random.Random(7))
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        actual, actual_state = run(opt_fn, random.Random(7))
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_state, expected_state)
+        self.assertLess(cnts.frame_count, torch._dynamo.config.recompile_limit)
+
+    def test_persistent_random_object_restore_state(self):
+        def fn(x, rand):
+            state = rand.getstate()
+            seed = rand.random()
+            rand.setstate(state)
+            restored_draw = rand.random()
+            rand.seed(seed)
+            seeded_draw = rand.random()
+            return (
+                x + seed + restored_draw + seeded_draw,
+                seed,
+                restored_draw,
+                seeded_draw,
+            )
+
+        def run(call_fn, rand):
+            outputs = [
+                call_fn(torch.zeros(1), rand)
+                for _ in range(torch._dynamo.config.recompile_limit + 1)
+            ]
+            return outputs, rand.getstate()
+
+        expected, expected_state = run(fn, random.Random(7))
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        actual, actual_state = run(opt_fn, random.Random(7))
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_state, expected_state)
+        self.assertLess(cnts.frame_count, torch._dynamo.config.recompile_limit)
+
+        torch._dynamo.reset()
+        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Stateful random.Random method"
+        ):
+            fullgraph_fn(torch.zeros(1), random.Random(7))
 
     def test_random_module_seed_shuffle(self):
-        # Module-level random.seed is bound to the global random.Random instance
-        # and must trace under fullgraph rather than graph-breaking on a skipped
-        # function. A seed() inside the compiled region makes the subsequent
-        # shuffle deterministic, matching the CPython test_sort
-        # TestOptimizedCompares pattern (seed(0) then shuffle).
-        @torch.compile(backend="eager", fullgraph=True)
+        # Both stateful calls execute eagerly at graph breaks, so the first
+        # compiled call must use the seeded state.
         def fn(x):
             items = list(range(10))
             random.seed(0)
             random.shuffle(items)
             return items, x + 1
 
-        compiled_items, _ = fn(torch.zeros(2))
+        def run(call_fn):
+            outputs = [
+                call_fn(torch.zeros(2))
+                for _ in range(torch._dynamo.config.recompile_limit + 1)
+            ]
+            return outputs, random.getstate()
 
-        expected = list(range(10))
-        random.seed(0)
-        random.shuffle(expected)
-        self.assertEqual(compiled_items, expected)
+        random.seed(123)
+        expected, expected_state = run(fn)
+        random.seed(123)
+        cnts = CompileCounter()
+        actual, actual_state = run(torch.compile(fn, backend=cnts))
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_state, expected_state)
+        self.assertLessEqual(cnts.frame_count, 2)
 
     def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash

@@ -4068,6 +4068,16 @@
       ]
     }
   ],
+  "GB4078": [
+    {
+      "Gb_type": "Stateful random.Random method",
+      "Context": "method: random.Random.{name}",
+      "Explanation": "Dynamo cannot trace random.Random.{name}() on a persistent random number generator because its behavior depends on state that changes between calls.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0245": [
     {
       "Gb_type": "Attempted to use `nested_tensor` with non-list input",
