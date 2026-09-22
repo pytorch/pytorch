@@ -5017,7 +5017,7 @@ from user code:
     def test_aot_compile_module_restores_torch_function_after_the_report_throws(self):
         # The test above throws out of check() in both passes, so the report
         # quotes the dispatch record and never calls check_verbose, the module
-        # path's only direct call of it, which has the same non-RAII exit. Here
+        # path's only direct call of it and the other scope-exit restore. Here
         # check() refuses cleanly and the tree throws only when the report
         # describes it: TENSOR_MATCH's verbose failure branch calls is_parameter,
         # which runs the Parameter metaclass's __instancecheck__, patched to
