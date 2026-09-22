@@ -892,7 +892,6 @@
 # /torch/csrc/jit/mobile/
 #
 # [mobile_android]
-# /android/
 # /test/mobile/custom_build/
 #
 # [mobile_delegates]
