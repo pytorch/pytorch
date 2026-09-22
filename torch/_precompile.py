@@ -1820,9 +1820,9 @@ class PrecompiledModule(PrecompiledRunnable):
         self._grad_param_indices: list[int] = []
         # Per user-input-leaf example shape, dtype, and device (None for a non-tensor
         # leaf, shape None for a subclass leaf; a marked-dynamic dim is None within the
-        # shape tuple); the drivers reject a runtime mismatch (invariants 3 and 6). Stride / memory format is enforced
-        # by the inductor artifact's own assert_size_stride, not recorded here. Populated by
-        # _compile().
+        # shape tuple); the drivers reject a runtime mismatch (invariants 3 and 6).
+        # Stride / memory format is enforced by the inductor artifact's own
+        # assert_size_stride, not recorded here. Populated by _compile().
         self._user_input_shapes: list[tuple[int | None, ...] | None] = []
         self._user_input_dtypes: list[str | None] = []
         self._user_input_devices: list[str | None] = []
