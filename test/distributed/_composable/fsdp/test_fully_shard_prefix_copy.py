@@ -352,6 +352,63 @@ class TestPrefixCopy(TestCase):
         )
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], 0)
 
+    @parametrize("shard_dim", [0, 1, 2])
+    def test_all_gather_changing_payload_size(self, device, shard_dim):
+        world_size = 2
+        local = torch.arange(2**shard_dim, device=device, dtype=torch.float32)
+        local = local.repeat_interleave(2).view((2,) * (shard_dim + 1))
+        outer_size = math.prod(local.shape[:shard_dim])
+        expected = torch.cat([local] * world_size, dim=shard_dim)
+        param = self._make_extension_param(world_size, shard_dim, local.size(), ())
+        param.sharded_param.requires_grad = False
+        param.param_dtype, param.orig_dtype = None, local.dtype
+        param._orig_size = expected.size()
+        param._contiguous_orig_stride = expected.stride()
+        param.is_spmd_types = False
+        param._unsharded_dtensor_spec = None
+
+        def post_hook(outputs, length, dtype, *, out=None):
+            packed = outputs[0].view(outer_size, world_size, -1).transpose(0, 1)
+            encoded = packed.flatten()[: world_size * length].view(world_size, -1)
+            decoded = encoded.repeat_interleave(local.numel() // length, dim=1)
+            decoded = torch.cat(
+                decoded.view(world_size, *local.shape).unbind(), dim=shard_dim
+            )
+            if out is not None:
+                with torch.autograd._unsafe_preserve_version_counter(out):
+                    out.copy_(decoded)
+                return None
+            return decoded, (decoded,)
+
+        inner = param.sharded_param._local_tensor
+        inner.fsdp_pre_all_gather = lambda mesh: ((payload,), payload.numel())
+        inner.fsdp_post_all_gather = post_hook
+        output = None
+        for compressed in (False, True, False):
+            local.add_(10)
+            payload = local.flatten()[::2].contiguous() if compressed else local
+            expected = torch.cat([local] * world_size, dim=shard_dim)
+            inputs = param.all_gather_inputs
+            result = AllGatherResult(
+                torch.cat(inputs * world_size),
+                None,
+                None,
+                [[local.dtype]],
+                [[payload.numel()]],
+                [payload.numel()],
+            )
+            with torch.no_grad():
+                _default_all_gather_output_fn([param], result, world_size)
+                param.init_unsharded_param()
+            self.assertEqual(param.unsharded_param, expected, atol=0, rtol=0)
+            if output is None:
+                (output,) = param.all_gather_outputs
+                pointer, version = output.data_ptr(), output._version
+            self.assertIs(param.all_gather_outputs[0], output)
+            self.assertEqual(output.numel(), expected.numel())
+            self.assertEqual(output.data_ptr(), pointer)
+            self.assertEqual(output._version, version)
+
     @parametrize("num_chunks", [1, 4])
     @parametrize("outer_size", [1, 128])
     @parametrize("inference", [False, True])
@@ -414,6 +471,43 @@ class TestPrefixCopy(TestCase):
 
         self.assertEqual(outputs, expected, atol=0, rtol=0)
 
+    @parametrize("byte_input", [False, True])
+    @parametrize("all_empty", [False, True])
+    def test_split_copy_cached_output_size(self, device, byte_input, all_empty):
+        num_chunks = 2
+        dtypes = [torch.float32, torch.bfloat16, torch.int64, torch.float32]
+        if not byte_input:
+            dtypes = [torch.float32] * len(dtypes)
+        buffers = [torch.full((22,), 7, device=device, dtype=dtype) for dtype in dtypes]
+        outputs = [buffer[3:-3] for buffer in buffers]
+        outer_sizes = [32 if byte_input else 2, 2, 4, 1]
+        splits = [32 if byte_input else 8, 3, 1, 0]
+        if all_empty:
+            splits = [0] * len(splits)
+        dtype = torch.uint8 if byte_input else torch.float32
+        source = torch.arange(num_chunks * sum(splits), device=device, dtype=dtype)
+        parts = source.view(num_chunks, -1).split(splits, dim=1)
+        versions = [output._version for output in outputs]
+        pointers = [output.data_ptr() for output in outputs]
+
+        torch.ops.fsdp._all_gather_copy_out_(
+            outputs, source, splits, outer_sizes, num_chunks
+        )
+
+        for output, part, outer_size, buffer, version, pointer in zip(
+            outputs, parts, outer_sizes, buffers, versions, pointers
+        ):
+            packed = output.view(dtype).view(outer_size, num_chunks, -1)
+            packed = packed.transpose(0, 1).flatten()
+            self.assertEqual(packed[: part.numel()], part.flatten(), atol=0, rtol=0)
+            if part.numel() == 0:
+                self.assertEqual(output, output.new_full(output.shape, 7))
+            self.assertEqual(output.size(), (16,))
+            self.assertEqual(output.data_ptr(), pointer)
+            self.assertGreater(output._version, version)
+            self.assertEqual(buffer[:3], buffer.new_full((3,), 7))
+            self.assertEqual(buffer[-3:], buffer.new_full((3,), 7))
+
     @parametrize("all_empty", [False, True])
     def test_split_copy_empty(self, device, all_empty):
         source = torch.arange(12, device=device, dtype=torch.float32)
@@ -438,6 +532,7 @@ class TestPrefixCopy(TestCase):
             ("indivisible_outer_size", "divisible"),
             ("input_size", "divisible"),
             ("output_size", "output size"),
+            ("output_outer_size", "output size"),
             ("dtype", "dtype"),
             ("input_contiguity", "contiguous"),
             ("output_contiguity", "contiguous"),
@@ -464,6 +559,8 @@ class TestPrefixCopy(TestCase):
         elif invalid == "input_size":
             source = source[:-1]
         elif invalid == "output_size":
+            outputs = [outputs[0][:-1]]
+        elif invalid == "output_outer_size":
             outputs = [outputs[0][:-2]]
         elif invalid == "dtype":
             outputs = [outputs[0].to(torch.float64)]

@@ -1,6 +1,4 @@
 #include <ATen/core/Tensor.h>
-#include <ATen/ops/_chunk_cat.h>
-#include <ATen/ops/split_with_sizes_copy.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
@@ -11,9 +9,18 @@
 #include <algorithm>
 #include <utility>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_chunk_cat.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/split_with_sizes_copy.h>
+#endif
+
 namespace c10d::fsdp {
 
-void check_all_gather_copy_out_inputs(
+bool check_all_gather_copy_out_inputs(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
@@ -31,14 +38,14 @@ void check_all_gather_copy_out_inputs(
       "input size must be divisible by num_chunks");
 
   int64_t remaining = input.numel() / num_chunks;
+  bool needs_resize = false;
+  const bool byte_input = input.scalar_type() == at::kByte;
   for (const auto i : c10::irange(out.size())) {
     TORCH_CHECK(
         split_sizes[i] >= 0 && split_sizes[i] <= remaining,
         "split sizes must be non-negative and sum to the input chunk size");
     remaining -= split_sizes[i];
-    TORCH_CHECK(
-        outer_sizes[i] > 0 && split_sizes[i] % outer_sizes[i] == 0,
-        "split size must be divisible by its positive outer size");
+    TORCH_CHECK(outer_sizes[i] > 0, "expected a positive outer size");
     TORCH_CHECK(
         out[i].layout() == at::kStrided && out[i].is_contiguous(),
         "expected contiguous strided outputs");
@@ -46,16 +53,67 @@ void check_all_gather_copy_out_inputs(
         out[i].device() == input.device(),
         "input and outputs must be on the same device");
     TORCH_CHECK(
-        input.scalar_type() == at::kByte || out[i].dtype() == input.dtype(),
+        byte_input || out[i].dtype() == input.dtype(),
         "output dtype must match the input unless the input has dtype uint8");
     TORCH_CHECK(
-        out[i].numel() % num_chunks == 0 &&
-            out[i].numel() / num_chunks * out[i].element_size() ==
-                split_sizes[i] * input.element_size(),
-        "output size must match the split size times num_chunks");
+        out[i].numel() % num_chunks == 0,
+        "output size must be divisible by num_chunks");
+    const int64_t output_chunk_size =
+        out[i].numel() / num_chunks * (byte_input ? out[i].element_size() : 1);
+    TORCH_CHECK(
+        output_chunk_size % outer_sizes[i] == 0,
+        "output size per chunk must be divisible by its outer size");
+    needs_resize |= output_chunk_size != split_sizes[i];
   }
   TORCH_CHECK(remaining == 0, "split sizes must sum to the input chunk size");
+  return needs_resize;
 }
+
+namespace {
+
+void all_gather_copy_out_with_resize(
+    at::TensorList out,
+    const at::Tensor& input,
+    at::IntArrayRef split_sizes,
+    at::IntArrayRef outer_sizes,
+    int64_t num_chunks) {
+  // Hooks may change payload sizes while reusing cached outputs. Resize only
+  // the rank-major copy views, then reassemble using the cached output layout.
+  std::vector<at::Tensor> buffers;
+  std::vector<at::Tensor> outputs;
+  buffers.reserve(out.size());
+  outputs.reserve(out.size());
+  for (const auto i : c10::irange(out.size())) {
+    buffers.push_back(outer_sizes[i] == 1 ? out[i] : at::empty_like(out[i]));
+    auto output = buffers.back().view({num_chunks, -1});
+    if (input.scalar_type() == at::kByte) {
+      output = output.view(at::kByte);
+    }
+    outputs.push_back(std::move(output));
+  }
+  if (input.numel() > 0) {
+    at::split_with_sizes_copy_out(
+        outputs, input.view({num_chunks, -1}), split_sizes, 1);
+  }
+  for (const auto i : c10::irange(out.size())) {
+    if (outer_sizes[i] != 1 && split_sizes[i] > 0) {
+      auto output = out[i].view({-1});
+      auto buffer = buffers[i].view({-1});
+      if (input.scalar_type() == at::kByte) {
+        output = output.view(at::kByte);
+        buffer = buffer.view(at::kByte);
+      }
+      auto chunks = buffer.view({num_chunks, outer_sizes[i], -1}).unbind(0);
+      auto target = output.view({outer_sizes[i], -1});
+      at::cat_out(target, chunks, 1);
+    }
+    if (!out[i].is_inference()) {
+      torch::autograd::impl::bump_version(out[i]);
+    }
+  }
+}
+
+} // namespace
 
 void all_gather_copy_out(
     at::TensorList out,
@@ -63,8 +121,13 @@ void all_gather_copy_out(
     at::IntArrayRef split_sizes,
     at::IntArrayRef outer_sizes,
     int64_t num_chunks) {
-  check_all_gather_copy_out_inputs(
+  const bool needs_resize = check_all_gather_copy_out_inputs(
       out, input, split_sizes, outer_sizes, num_chunks);
+  if (needs_resize) {
+    all_gather_copy_out_with_resize(
+        out, input, split_sizes, outer_sizes, num_chunks);
+    return;
+  }
   std::vector<int64_t> sizes;
   std::vector<at::Tensor> outputs;
   for (const auto i : c10::irange(out.size())) {

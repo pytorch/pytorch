@@ -4,7 +4,8 @@
 
 namespace c10d::fsdp {
 
-TORCH_API void check_all_gather_copy_out_inputs(
+// Returns whether copying requires resizing views of cached outputs.
+TORCH_API bool check_all_gather_copy_out_inputs(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
