@@ -5214,7 +5214,20 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
 _WALK_BUDGET = 20000
 
 
-def _offending_value_path(state: Any, target: Any) -> str:
+def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
+    """The scope seeds for the diagnostic walk: the two scopes' named values."""
+    return [
+        (f"local_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "local_scope", None) or {}).items()
+    ] + [
+        (f"global_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "global_scope", None) or {}).items()
+    ]
+
+
+def _offending_value_path(
+    state: Any, target: Any, roots: list[tuple[str, Any]] | None = None
+) -> str:
     """Best-effort attribute path to the value that could not be pickled.
 
     The error names WHAT failed and never WHERE it lives, which in a large model
@@ -5233,7 +5246,9 @@ def _offending_value_path(state: Any, target: Any) -> str:
     value, then ``state`` for what is reachable only through it, with the scope
     dicts already marked seen so a wide scope cannot starve the guards in turn.
     The cap stays at 20,000 because the module skip is what makes the whole
-    state fit: a module's dict leads to all of sys.modules.
+    state fit: a module's dict leads to all of sys.modules. ``roots`` are the
+    scope seeds, captured by the caller before pruning emptied ``global_scope``
+    (by default read off ``state`` as it is now).
     Guards are slotted dataclasses whose create_fn is a functools.partial, so
     slots and partials are descended too; modules are not, since they pickle
     by name and their dicts lead to the whole of sys.modules.
@@ -5248,6 +5263,8 @@ def _offending_value_path(state: Any, target: Any) -> str:
     try:
         if target is None:
             return ""
+        if roots is None:
+            roots = _scope_roots(state.output_graph)
         graph = state.output_graph
         seen: set[int] = set()
 
@@ -5366,9 +5383,7 @@ def _offending_value_path(state: Any, target: Any) -> str:
         # Two passes with a budget each: the scopes first, so a value a user can
         # name is reported by that name and a wide state cannot starve a deep
         # scope path, then the state, for what is reachable only through it.
-        scopes = [(f"local_scope[{k!r}]", v) for k, v in graph.local_scope.items()]
-        scopes += [(f"global_scope[{k!r}]", v) for k, v in graph.global_scope.items()]
-        if path := walk(collections.deque(scopes)):
+        if path := walk(collections.deque(roots)):
             return path
         # Pass one covered the scopes' contents; charging the dicts again
         # would let a wide scope starve the guards, which is what this pass
@@ -5388,6 +5403,7 @@ def pickle_guards_state(
     missing_values = {}
     guard_tree_values = builder.guard_tree_values
     pickler: GuardsStatePickler | None = None
+    scope_roots: list[tuple[str, Any]] | None = None
 
     # Anything raised while walking or dumping the state means a guarded value
     # cannot be serialized, which is a bypass (an error under
@@ -5426,6 +5442,18 @@ def pickle_guards_state(
                 ]
             )
         ):
+            # Snapshot the diagnostic's search roots before the pruning below
+            # empties global_scope: a value that also lives on a global is then
+            # still named by that global binding, which is what a user
+            # recognises even though the pruned scope itself is not in the
+            # artifact, rather than by a long path through the output graph.
+            # Only this branch needs it: with the scopes intact the walk reads
+            # them live. Best-effort like the walk itself: a scope whose read
+            # raises must not fail a good dump.
+            try:
+                scope_roots = _scope_roots(state.output_graph)
+            except Exception:
+                pass
             # Prune more values in AOT precompile when complex pickling
             # structure is not needed.
             state.output_graph.guard_on_key_order = set()
@@ -5437,7 +5465,7 @@ def pickle_guards_state(
         # is appended in place and the same exception re-raised, so its
         # traceback still ends in the refusing reducer.
         last = pickler.last_reduced if pickler is not None else None
-        path = _offending_value_path(state, last)
+        path = _offending_value_path(state, last, scope_roots)
         if path:
             e.args = (f"{e}{path}",)
         raise
@@ -5461,7 +5489,7 @@ def pickle_guards_state(
         # a model with a thousand-frame guard tree.
         last = pickler.last_reduced if pickler is not None else None
         raise torch._dynamo.exc.PackageError(
-            f"{type(e).__name__}: {e}{_offending_value_path(state, last)}"
+            f"{type(e).__name__}: {e}{_offending_value_path(state, last, scope_roots)}"
         ) from e
     return buf.getvalue()
 
