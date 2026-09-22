@@ -204,19 +204,20 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       xpu_event =
           new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
     }
-  }
-  *event = reinterpret_cast<void*>(xpu_event);
+    *event = reinterpret_cast<void*>(xpu_event);
 
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_event_record(
-        c10::kXPU,
-        reinterpret_cast<uintptr_t>(xpu_event),
-        reinterpret_cast<uintptr_t>(&xpu_stream.queue()));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_record(
+          c10::kXPU,
+          reinterpret_cast<uintptr_t>(xpu_event),
+          reinterpret_cast<uintptr_t>(&xpu_stream.queue()));
+    }
   }
-}
 
   void block(void* event, const Stream& stream) const override {
+<<<<<<< HEAD
+=======
 <<<<<<< HEAD
   if (!event)
     return;
@@ -231,11 +232,15 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         reinterpret_cast<uintptr_t>(xpu_event),
         reinterpret_cast<uintptr_t>(&xpu_stream.queue()));
 =======
+>>>>>>> 813931e765b (Add XPU IPC support for c10::Event)
     if (!event)
       return;
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
     std::vector<sycl::event> event_list{*xpu_event};
     const XPUStream xpu_stream(stream);
+<<<<<<< HEAD
+    xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
+=======
 
     bool reusable = false;
 #if SYCL_COMPILER_VERSION >= 20260200
@@ -254,6 +259,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
     }
 
+>>>>>>> 813931e765b (Add XPU IPC support for c10::Event)
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_wait(
@@ -261,72 +267,30 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
           reinterpret_cast<uintptr_t>(xpu_event),
           reinterpret_cast<uintptr_t>(&xpu_stream.queue()));
     }
+<<<<<<< HEAD
+=======
 >>>>>>> 91a1f11f3f3 (Add XPU IPC support for c10::Event)
+>>>>>>> 813931e765b (Add XPU IPC support for c10::Event)
   }
-}
 
-bool queryEvent(void* event) const override {
-  using namespace sycl::info;
-  if (!event)
-    return true;
-  auto* xpu_event = reinterpret_cast<sycl::event*>(event);
-  return xpu_event->get_info<event::command_execution_status>() ==
-      event_command_status::complete;
-}
-
-double elapsedTime(
-    void* start_event,
-    void* end_event,
-    const DeviceIndex device_index) const override {
-  TORCH_CHECK(
-      start_event && end_event,
-      "Both events must be recorded before calculating elapsed time.");
-  auto* xpu_start_event = reinterpret_cast<sycl::event*>(start_event);
-  auto* xpu_end_event = reinterpret_cast<sycl::event*>(end_event);
-
-  using namespace sycl::info::event_profiling;
-  // Block until both of the recorded events are completed.
-  uint64_t end_time_ns = xpu_end_event->get_profiling_info<command_end>();
-  uint64_t start_time_ns = xpu_start_event->get_profiling_info<command_end>();
-  // Return the eplased time in milliseconds.
-  return 1e-6 *
-      (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
-}
-
-// Stream-related functions
-bool queryStream(const Stream& stream) const override {
-  const XPUStream xpu_stream{stream};
-  return xpu_stream.query();
-}
-
-void synchronizeStream(const Stream& stream) const override {
-  const XPUStream xpu_stream{stream};
-  xpu_stream.synchronize();
-}
-
-bool isStreamCapturing(const Stream& stream) const override {
-  const XPUStream xpu_stream{stream};
-  return xpu_stream.is_capturing();
-}
-
-void synchronizeEvent(void* event) const override {
-  if (!event)
-    return;
-  auto* xpu_event = reinterpret_cast<sycl::event*>(event);
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_event_synchronization(
-        c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
+  bool queryEvent(void* event) const override {
+    using namespace sycl::info;
+    if (!event)
+      return true;
+    auto* xpu_event = reinterpret_cast<sycl::event*>(event);
+    return xpu_event->get_info<event::command_execution_status>() ==
+        event_command_status::complete;
   }
-  xpu_event->wait_and_throw();
-}
 
+<<<<<<< HEAD
+=======
 <<<<<<< HEAD
 void synchronizeDevice(const c10::DeviceIndex device_index) const override {
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kXPU);
 =======
+>>>>>>> 813931e765b (Add XPU IPC support for c10::Event)
   double elapsedTime(
       void* start_event,
       void* end_event,
@@ -341,14 +305,20 @@ void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = xpu_end_event->get_profiling_info<command_end>();
     uint64_t start_time_ns = xpu_start_event->get_profiling_info<command_end>();
+<<<<<<< HEAD
+    // Return the eplased time in milliseconds.
+    return 1e-6 *
+        (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
+=======
     // Return the elapsed time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
 >>>>>>> 91a1f11f3f3 (Add XPU IPC support for c10::Event)
+>>>>>>> 813931e765b (Add XPU IPC support for c10::Event)
   }
-  c10::xpu::syncStreamsOnDevice(device_index);
-}
 
+<<<<<<< HEAD
+=======
 <<<<<<< HEAD
 void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
     const override {
@@ -419,6 +389,7 @@ void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
 #endif
   }
 
+>>>>>>> 813931e765b (Add XPU IPC support for c10::Event)
   // Stream-related functions
   bool queryStream(const Stream& stream) const override {
     const XPUStream xpu_stream{stream};
@@ -435,6 +406,21 @@ void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
     return xpu_stream.is_capturing();
   }
 
+<<<<<<< HEAD
+  void synchronizeEvent(void* event) const override {
+    if (!event)
+      return;
+    auto* xpu_event = reinterpret_cast<sycl::event*>(event);
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_synchronization(
+          c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
+    }
+    xpu_event->wait_and_throw();
+  }
+
+=======
+>>>>>>> 813931e765b (Add XPU IPC support for c10::Event)
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
@@ -448,7 +434,10 @@ void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
     const XPUStream xpu_stream{stream};
     XPUCachingAllocator::recordStream(data_ptr, xpu_stream);
   }
+<<<<<<< HEAD
+=======
 >>>>>>> 91a1f11f3f3 (Add XPU IPC support for c10::Event)
+>>>>>>> 813931e765b (Add XPU IPC support for c10::Event)
 };
 
 } // namespace c10::xpu::impl
