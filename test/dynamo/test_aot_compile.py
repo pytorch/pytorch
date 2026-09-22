@@ -39,12 +39,15 @@ import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.aot_compile import (
+    _AOT_COMPILE_FORMAT_VERSION,
+    _AOT_COMPILE_MAGIC,
     _GuardScope,
     _names_a_missing_global,
     _resolve_guard_scope,
     _warn_dropped_module_dispatch,
     AOTCompiledFunction,
     AOTCompiledModel,
+    AOTCompileUnpickler,
     ModelInput,
     SerializableCallable,
 )
@@ -52,6 +55,7 @@ from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallab
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
+from torch._dynamo.hooks import Hooks
 from torch._dynamo.package import (
     _collapse_device_types,
     DynamoCache,
@@ -78,6 +82,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.torch_version import TorchVersion
 from torch.utils.checkpoint import checkpoint
 
 
@@ -1954,6 +1959,162 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         rebuilt = cell.cell_contents
         self.assertFalse(hasattr(rebuilt.__wrapped__, "lock"))
         self.assertEqual(set(rebuilt.__dict__), {"__wrapped__"})
+
+    def test_aot_compile_basic_model(self):
+        mod = SimpleLinearModule()
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.randn(3, 3),)
+        compiled_mod = torch._dynamo.aot_compile.aot_compile_module(
+            mod,
+            [ModelInput(inputs, {}, [])],
+            Hooks(),
+            backend,
+        )
+        expected = mod(*inputs)
+        self.assertEqual(compiled_mod(*inputs), expected)
+
+        data = compiled_mod.serialize()
+        torch._dynamo.reset()
+        loaded_mod = AOTCompiledModel.deserialize(mod, data)
+        self.assertEqual(loaded_mod(*inputs), expected)
+
+    def test_aot_compile_header_roundtrip(self):
+        system_info = SystemInfo(
+            python_version="3.13.1",
+            torch_version="2.15.0",
+            toolkit_version="12.8",
+            triton_version=(3, 4),
+            gpu_name="Test GPU",
+        )
+        payload = b"payload"
+        f = io.BytesIO()
+        torch._dynamo.aot_compile._write_aot_compile_header(f, system_info, "cuda")
+        f.write(payload)
+        f.seek(0)
+
+        with patch.object(torch._dynamo.aot_compile, "_check_compatibility") as check:
+            loaded_system_info, loaded_device_type = (
+                torch._dynamo.aot_compile._load_aot_compile_header(f)
+            )
+
+        self.assertEqual(loaded_system_info, system_info)
+        self.assertEqual(loaded_device_type, "cuda")
+        self.assertEqual(f.read(), payload)
+        check.assert_called_once_with(system_info, "cuda")
+
+    @parametrize("entry_point", ["function", "model"])
+    def test_compatibility_checked_before_compiled_payload(self, entry_point):
+        def fn(x):
+            return x + 1
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend=backend).aot_compile(
+            ((torch.randn(3, 4),), {})
+        )
+        compatible_data = AOTCompiledFunction.serialize(compiled_fn).serialized_data
+        compiled_fn._artifacts.system_info = dataclasses.replace(
+            compiled_fn._artifacts.system_info,
+            torch_version="incompatible",
+        )
+        incompatible_data = AOTCompiledFunction.serialize(compiled_fn).serialized_data
+        if entry_point == "model":
+            data = pickle.dumps([compatible_data, incompatible_data])
+            deserialize = functools.partial(
+                AOTCompiledModel.deserialize, torch.nn.Module(), data
+            )
+        else:
+            deserialize = functools.partial(
+                AOTCompiledFunction.deserialize, incompatible_data
+            )
+
+        with (
+            patch.object(
+                pickle,
+                "load",
+                side_effect=AssertionError("header used pickle"),
+            ) as pickle_load,
+            patch.object(
+                TorchVersion,
+                "__new__",
+                side_effect=AssertionError("TorchVersion was constructed"),
+            ) as torch_version_new,
+            patch.object(
+                AOTCompileUnpickler,
+                "load",
+                side_effect=AttributeError("compiled payload was decoded"),
+            ) as payload_load,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "different PyTorch version"):
+                deserialize()
+        pickle_load.assert_not_called()
+        torch_version_new.assert_not_called()
+        payload_load.assert_not_called()
+
+    @parametrize("entry_point", ["function", "model"])
+    @parametrize("format_kind", ["legacy", "newer"])
+    def test_rejects_unsupported_aot_compile_format(self, entry_point, format_kind):
+        if format_kind == "legacy":
+            function_data = pickle.dumps({})
+        else:
+            function_data = _AOT_COMPILE_MAGIC + bytes(
+                [_AOT_COMPILE_FORMAT_VERSION + 1]
+            )
+
+        if entry_point == "model":
+            data = pickle.dumps([function_data])
+            deserialize = functools.partial(
+                AOTCompiledModel.deserialize, torch.nn.Module(), data
+            )
+        else:
+            deserialize = functools.partial(
+                AOTCompiledFunction.deserialize, function_data
+            )
+
+        with patch.object(
+            AOTCompileUnpickler,
+            "load",
+            side_effect=AssertionError("compiled payload was decoded"),
+        ) as load:
+            with self.assertRaisesRegex(
+                RuntimeError, "unsupported serialization format"
+            ):
+                deserialize()
+        load.assert_not_called()
+
+    @parametrize("entry_point", ["function", "model"])
+    @parametrize("header_kind", ["short_length", "truncated", "oversized"])
+    def test_rejects_truncated_aot_compile_header(self, entry_point, header_kind):
+        prefix = _AOT_COMPILE_MAGIC + bytes([_AOT_COMPILE_FORMAT_VERSION])
+        if header_kind == "short_length":
+            function_data = prefix + b"\x00"
+        elif header_kind == "truncated":
+            function_data = prefix + (4).to_bytes(8, "big") + b"{}"
+        else:
+            function_data = prefix + b"\xff" * 8
+
+        if entry_point == "model":
+            data = pickle.dumps([function_data])
+            deserialize = functools.partial(
+                AOTCompiledModel.deserialize, torch.nn.Module(), data
+            )
+        else:
+            deserialize = functools.partial(
+                AOTCompiledFunction.deserialize, function_data
+            )
+
+        with patch.object(
+            AOTCompileUnpickler,
+            "load",
+            side_effect=AssertionError("compiled payload was decoded"),
+        ) as load:
+            with self.assertRaisesRegex(RuntimeError, "truncated header"):
+                deserialize()
+        load.assert_not_called()
 
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
