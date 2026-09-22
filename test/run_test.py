@@ -1148,7 +1148,8 @@ def test_distributed(test_module, test_directory, options):
                     test_module,
                     test_directory,
                     options,
-                    extra_unittest_args=["--subprocess"],
+                    # Each test already creates fresh rank processes.
+                    extra_unittest_args=[],
                 )
             if return_code != 0:
                 return return_code
