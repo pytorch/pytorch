@@ -11,6 +11,9 @@ module level compiles serially, in process, on its first launch, instead of fann
 to the compile worker pool. And every hoisted kernel names itself by the wrapper's
 ``__file__``, so they all share one autotune-cache key; that cache is effectively off in
 this mode (its configs_hash check keeps a wrong config from being applied).
+
+Only kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel is
+still emitted as a source string passed to ``async_compile.triton``.
 """
 
 import re

@@ -229,7 +229,7 @@ fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 # (torch.compiler.export_python), not for a normal compile. Hoisted kernels also all
 # carry the wrapper's __file__ as their filename, so they share one autotune-cache key
 # and that cache is effectively off in this mode (its configs_hash check keeps a wrong
-# config from being applied).
+# config from being applied). User-defined @triton.jit kernels stay source strings.
 readable_wrapper: bool = os.environ.get("TORCHINDUCTOR_READABLE_WRAPPER", "0") == "1"
 
 # Controls automatic precompiling of common include files for codecache.CppCodeCache

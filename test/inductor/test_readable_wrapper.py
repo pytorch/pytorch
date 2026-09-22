@@ -108,6 +108,32 @@ class TestReadableWrapperCodegen(TestCase):
             return ns["call"](args)  # type: ignore[operator]
 
     @requires_cuda_and_triton
+    @parametrize(
+        "cfg",
+        [
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"},
+            {"combo_kernels": True},
+        ],
+        name_fn=lambda cfg: next(iter(cfg)),
+    )
+    def test_template_and_combo_kernels_run_standalone(self, cfg):
+        # Both reach emit_triton_kernel_definition by their own route, with source of a
+        # different shape from a pointwise kernel's: a Triton matmul template, and a
+        # combo kernel with its module-level device functions.
+        def fn(a, b, x, y):
+            return a @ b, x.sin(), y.cos()
+
+        a, b = torch.randn(64, 64, device="cuda"), torch.randn(64, 64, device="cuda")
+        x, y = torch.randn(128, device="cuda"), torch.randn(96, device="cuda")
+        result, code = _code_for(fn, a, b, x, y, readable_wrapper=True, **cfg)
+        self.assertNotIn("async_compile.triton", code)
+        marker = "triton_tem_" if "max_autotune" in cfg else "pid_offset"
+        self.assertIn(marker, code)
+        expected = fn(a, b, x, y)
+        self.assertEqual(result, expected)
+        self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
+
+    @requires_cuda_and_triton
     def test_same_named_helpers_do_not_shadow(self):
         # Scan helpers are named by op sequence and numbered per kernel, so these two
         # combine_fns emit the same helper name with different constants.
