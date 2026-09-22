@@ -588,6 +588,17 @@ autotune_cudagraph_benchmarking: bool = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
 )
 
+# Number of calls of the benchmarked callable captured into each CUDA graph by
+# benchmark_gpu_with_cuda_graph; the replay time is divided by this count so the
+# graph launch and inter-kernel gaps are amortized. With 1 (the default) each
+# timed sample is a full graph launch, which for microsecond kernels exceeds the
+# kernel time and hides the differences between autotune choices. Counts above
+# 1 trade cold-cache fidelity for launch-overhead rejection: the L2 flush in
+# benchmark_gpu runs once per replay, so only the first captured call is cold.
+autotune_cudagraph_benchmarking_iters: int = int(
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING_ITERS", "1")
+)
+
 
 # Modifies the number of autotuning choices displayed, set to None for all
 def _autotune_num_choices_displayed_default() -> int | None:
@@ -2127,6 +2138,12 @@ class triton:
     # inputs into stable replay buffers; "skip" runs that edge eagerly.
     cudagraph_managed_input_rerecord_limit = 5
     cudagraph_managed_input_rerecord_action: Literal["copy", "skip"] = "copy"
+
+    # If set, allocate this many GiB in the cudagraph memory pool when the
+    # pool is created (once per device). The upfront allocation reserves one
+    # large contiguous segment for later recordings to carve up, rather than
+    # growing the pool a segment at a time, which reduces fragmentation.
+    cudagraph_initial_mempool_allocation_gb: float | None = None
 
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
