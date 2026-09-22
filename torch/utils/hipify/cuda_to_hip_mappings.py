@@ -324,6 +324,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("curand_poisson.h", "hiprand/hiprand_kernel.h"),
     ("curand_precalc.h", "hiprand/hiprand_kernel.h"),
     ("curand_uniform.h", "hiprand/hiprand_kernel.h"),
+    ("cusolverDn.h", "hipsolver/hipsolver.h"),
     ("cusparse.h", "hipsparse/hipsparse.h"),
     ("cusparseLt.h", "hipsparselt/hipsparselt.h"),
     ("cufft.h", "hipfft/hipfft.h"),
@@ -3443,6 +3444,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("nvshmem_malloc", "rocshmem::rocshmem_malloc"),
     ("nvshmem_free", "rocshmem::rocshmem_free"),
     ("nvshmem_ptr", "rocshmem::rocshmem_ptr"),
+    ("nvshmem_barrier_all", "rocshmem::rocshmem_barrier_all"),
     ("nvshmem_team_t", "rocshmem::rocshmem_team_t"),
     ("nvshmem_team_split_strided", "rocshmem::rocshmem_team_split_strided"),
 

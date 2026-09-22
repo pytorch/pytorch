@@ -50,6 +50,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
@@ -122,6 +123,30 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
+    @parametrize("backend_precision", ("bfx9", "tf32"))
+    def test_precompile_cache_key_handles_bfx9(self, backend_precision):
+        from torch._inductor.select_algorithm import create_precompile_key
+
+        choice = types.SimpleNamespace(kernel_hash_key=lambda: "choice")
+        with (
+            mock.patch.object(
+                torch._C,
+                "_get_fp32_precision_getter",
+                return_value=backend_precision,
+            ),
+            mock.patch.object(
+                torch,
+                "get_float32_matmul_precision",
+                return_value="high",
+            ) as legacy_getter,
+        ):
+            expected = f"cuda:{backend_precision},mkldnn:{backend_precision}"
+            self.assertEqual(
+                create_precompile_key("op", "inputs", [choice]),
+                f"op:inputs:{expected}:choice",
+            )
+            self.assertEqual(legacy_getter.call_count, 0)
+
     def _compact_sha256(self, data: bytes) -> str:
         return (
             base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
@@ -3776,15 +3801,15 @@ class TestFxGraphCacheHashing(TestCase):
         # A region's inductor_config_patches must be part of the cache key,
         # otherwise two regions differing only in their patches would collide
         # and reuse a stale compiled artifact.
-        same1 = self._nested_region_gm({"max_autotune": True})
-        same2 = self._nested_region_gm({"max_autotune": True})
-        different = self._nested_region_gm({"max_autotune": False})
+        same1 = self._nested_region_gm({"fallback_by_default": True})
+        same2 = self._nested_region_gm({"fallback_by_default": True})
+        different = self._nested_region_gm({"fallback_by_default": False})
 
         self.assertEqual(
             FxGraphHashDetails(
                 same1, [], cast(Any, {}), []
             ).nested_inductor_config_patches,
-            (("", (("max_autotune", True),)),),
+            (("", (("fallback_by_default", True),)),),
         )
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
@@ -3796,40 +3821,16 @@ class TestFxGraphCacheHashing(TestCase):
         )
 
     def test_nested_region_uncacheable_config_bypasses_cache(self):
-        # A callable patch value can't be hashed into the cache key.
-        def custom_pass(graph):
-            return graph
+        # Config annotations are not enforced when a patch is applied, so an
+        # allowed key can still carry a callable value that cannot be cached.
+        def invalid_value():
+            pass
 
         with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
             CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                self._nested_region_gm({"fallback_by_default": invalid_value}),
                 require_shape_env=False,
             ).validate()
-
-        # A non-callable value under a custom-pass key is uncacheable too.
-        with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
-            CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
-                require_shape_env=False,
-            ).validate()
-
-        # A callable hidden inside a list value (e.g.
-        # _fuse_ddp_communication_passes) is uncacheable too.
-        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
-            CacheabilityValidator(
-                self._nested_region_gm(
-                    {"_fuse_ddp_communication_passes": [custom_pass]}
-                ),
-                require_shape_env=False,
-            ).validate()
-
-        # A list of non-callables stays cacheable.
-        CacheabilityValidator(
-            self._nested_region_gm(
-                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
-            ),
-            require_shape_env=False,
-        ).validate()
 
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
@@ -3863,17 +3864,17 @@ class TestFxGraphCacheHashing(TestCase):
         # Backward config replaces (does not merge with) the forward config.
         bw_config = get_backward_nested_region_config(
             get_invoke_subgraph_compile_options(
-                bw_inductor_config_patches={"max_autotune": True}
+                bw_inductor_config_patches={"fallback_by_default": True}
             )
         )
         self.assertEqual(
             bw_config.inductor_config_patches,
-            {"max_autotune": True},
+            {"fallback_by_default": True},
         )
 
-        same1 = self._nested_region_bw_gm({"max_autotune": True})
-        same2 = self._nested_region_bw_gm({"max_autotune": True})
-        different = self._nested_region_bw_gm({"max_autotune": False})
+        same1 = self._nested_region_bw_gm({"fallback_by_default": True})
+        same2 = self._nested_region_bw_gm({"fallback_by_default": True})
+        different = self._nested_region_bw_gm({"fallback_by_default": False})
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
             self._fx_graph_cache_key(same2, []),
@@ -4832,6 +4833,79 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
+    def setUp(self):
+        super().setUp()
+        cuda_compile_utils._cuda_driver_lib_dirs.cache_clear()
+        self.addCleanup(cuda_compile_utils._cuda_driver_lib_dirs.cache_clear)
+
+    def test_cuda_driver_lib_dirs_from_ldconfig(self):
+        ldconfig_output = (
+            b"\tlibcuda.so.1 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libcuda.so.1\n"
+        )
+        with (
+            mock.patch("subprocess.check_output", return_value=ldconfig_output),
+            mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": ""}),
+        ):
+            self.assertEqual(
+                cuda_compile_utils._cuda_driver_lib_dirs(),
+                ["/usr/lib/x86_64-linux-gnu"],
+            )
+
+    def test_cuda_driver_lib_dirs_from_ld_library_path(self):
+        with tempfile.TemporaryDirectory() as cuda_dir:
+            open(os.path.join(cuda_dir, "libcuda.so.1"), "w").close()
+            with (
+                mock.patch("subprocess.check_output", return_value=b""),
+                mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": cuda_dir}),
+            ):
+                self.assertEqual(
+                    cuda_compile_utils._cuda_driver_lib_dirs(),
+                    [cuda_dir],
+                )
+
+    def test_cuda_lib_options_uses_versioned_driver_soname(self):
+        with (
+            mock.patch(
+                "torch.utils.cpp_extension.library_paths",
+                return_value=["/fake/cuda/lib64"],
+            ),
+            mock.patch.object(
+                cuda_compile_utils, "_transform_cuda_paths", lambda lpaths: None
+            ),
+            mock.patch.object(cuda_compile_utils, "is_linux", lambda: True),
+            mock.patch.object(
+                cuda_compile_utils,
+                "_cuda_driver_lib_dirs",
+                return_value=["/usr/lib/x86_64-linux-gnu"],
+            ),
+        ):
+            flags = cuda_compile_utils._cuda_lib_options()
+
+        self.assertIn("-L/usr/lib/x86_64-linux-gnu", flags)
+        self.assertIn("-l:libcuda.so.1", flags)
+        self.assertNotIn("-lcuda", flags)
+        self.assertIn("-lcudart", flags)
+
+    def test_cuda_lib_options_keeps_stub_fallback_without_driver_soname(self):
+        with (
+            mock.patch(
+                "torch.utils.cpp_extension.library_paths",
+                return_value=["/fake/cuda/lib64", "/fake/cuda/lib64/stubs"],
+            ),
+            mock.patch.object(
+                cuda_compile_utils, "_transform_cuda_paths", lambda lpaths: None
+            ),
+            mock.patch.object(cuda_compile_utils, "is_linux", lambda: True),
+            mock.patch.object(
+                cuda_compile_utils, "_cuda_driver_lib_dirs", return_value=[]
+            ),
+        ):
+            flags = cuda_compile_utils._cuda_lib_options()
+
+        self.assertIn("-lcuda", flags)
+        self.assertNotIn("-l:libcuda.so.1", flags)
+        self.assertIn("-lcudart", flags)
+
     @requires_cuda_and_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(

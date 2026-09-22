@@ -331,6 +331,8 @@ from .user_defined import (
     FrozenDataClassVariable,
     InspectVariable,
     IntWrapperVariable,
+    is_generic_ctx_manager_cls,
+    is_reconstructable_decorator_ctx_manager_clone,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
     SimpleNamespaceVariable,
@@ -1339,7 +1341,11 @@ class VariableBuilder:
                 for i, v in enumerate(L)
             ]
             result = set_var_cls(items, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            # Value mutation, like the literal-set path through wrap_literal:
+            # track_object_existing would give AttributeMutationExisting, which
+            # SideEffects.mutation never flags, so add/discard/|= on a
+            # passed-in set or OrderedSet would silently not reach the caller.
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
@@ -1365,6 +1371,8 @@ class VariableBuilder:
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ) or is_pybind11_enum_member(value):
             self.install_guards(GuardBuilder.ID_MATCH)
+            # _call_impl registers this object with SideEffects after _wrap returns,
+            # so sourced enum members support attribute mutation.
             return UserDefinedObjectVariable(value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
             # Put this above builtin_callable so that print() can be handled
@@ -5395,11 +5403,42 @@ class SourcelessBuilder:
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:
-                # Instance method — look up the VT for __self__ via side effects
+                # Instance method - look up the VT for __self__ via side
+                # effects. Build a sourceless receiver only for allowlisted
+                # clone/class pairs whose clone reconstruction does not read
+                # or mutate it. inference_mode.clone is excluded because it
+                # requires a source for self.mode.
                 obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
+                if obj_vt is None and isinstance(
+                    value.__self__, torch.utils._contextlib._DecoratorContextManager
+                ):
+                    if is_reconstructable_decorator_ctx_manager_clone(
+                        value.__func__, type(value.__self__)
+                    ) and (
+                        value.__func__
+                        is not torch.autograd.grad_mode.inference_mode.clone
+                    ):
+                        obj_vt = UserDefinedObjectVariable(value.__self__)
+                    else:
+                        unimplemented(
+                            gb_type="Sourceless _DecoratorContextManager method reconstruction unsupported",
+                            context=f"{type(value.__self__)}.{value.__func__.__name__}",
+                            explanation=(
+                                f"{type(value.__self__)} was reached without a "
+                                "source (e.g. via a closure cell) and "
+                                f"{value.__func__.__name__} cannot be "
+                                "reconstructed safely, so "
+                                "Dynamo cannot safely inline it without risking "
+                                "a mutation on an object it can't track."
+                            ),
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                 if obj_vt is not None:
                     return torch._dynamo.variables.UserMethodVariable(
-                        value.__func__, obj_vt
+                        torch._dynamo.variables.UserFunctionVariable(
+                            value.__func__, source=None
+                        ),
+                        obj_vt,
                     )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
@@ -5462,6 +5501,19 @@ class SourcelessBuilder:
             return SliceVariable(items, tx)  # pyrefly: ignore[bad-argument-type]
         elif isinstance(value, torch.nn.parallel.distributed.DistributedDataParallel):
             return UnspecializedNNModuleVariable(value)
+        # A sourceless context manager cannot safely replay mutations.
+        elif is_generic_ctx_manager_cls(type(value)):
+            unimplemented(
+                gb_type="Sourceless context manager without mutation support",
+                context=f"{value_type.__module__}.{value_type.__qualname__}",
+                explanation=(
+                    f"{value_type} was reached without a source (e.g. via a "
+                    "closure cell) and Dynamo cannot safely enter it or call "
+                    "its methods without a way to replay any resulting "
+                    "mutation on the real object."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         elif istype(value, object):
             return ObjectVariable(value)
         elif (

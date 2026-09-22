@@ -19,7 +19,12 @@ class MPSEvent {
   // records an event on the stream
   void record(bool needsLock, bool syncEvent = false);
   // makes all future work submitted to the stream wait for this event.
-  bool wait(bool needsLock, bool syncEvent = false);
+  // If `stream` is null, wait on the stream this event was last recorded or
+  // reset on.
+  bool wait(
+      bool needsLock,
+      bool syncEvent = false,
+      MPSStream* stream = nullptr);
   // checks if events are already signaled.
   bool query() const;
   // blocks the CPU thread until all the GPU work that were scheduled
@@ -66,7 +71,7 @@ class MPSEvent {
   double m_completion_time = 0.0;
 
   void recordLocked(bool syncEvent);
-  bool waitLocked(bool syncEvent);
+  bool waitLocked(bool syncEvent, MPSStream* stream);
   void notifyCpuSync(uint64_t timingGeneration, double completionTime);
   // assumes timing is enabled and waits for the latest recording's timestamp
   double waitForTiming();
@@ -117,8 +122,10 @@ class MPSEventPool {
   // these are mainly used for MPSHooks and torch.mps.Event() bindings
   id_t acquireEvent(bool enable_timing);
   void releaseEvent(id_t event_id);
+  // rebinds an already-acquired event to `stream`
+  void resetEvent(id_t event_id, MPSStream* stream, bool enable_timing);
   void recordEvent(id_t event_id, bool syncEvent);
-  void waitForEvent(id_t event_id, bool syncEvent);
+  void waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
   void synchronizeEvent(id_t event_id);
   bool queryEvent(id_t event_id);
   // returns elapsed time between two recorded events in milliseconds
