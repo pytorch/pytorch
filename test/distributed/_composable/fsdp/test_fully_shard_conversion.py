@@ -7,8 +7,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.fsdp._fully_shard._fsdp_grad import FSDPGrad
-from torch.distributed.tensor import DTensor, Partial
+from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
@@ -67,13 +66,7 @@ class TestFullyShardConversion(TestCase):
             self.assertEqual(actual.dtype, value.dtype)
             self.assertIs(actual.grad, grad)
             if grad is not None:
-                if isinstance(grad, FSDPGrad):
-                    for component in ("reduced", "unreduced", "partial"):
-                        self.assertEqual(
-                            getattr(grad, component), getattr(grad_value, component)
-                        )
-                else:
-                    self.assertEqual(grad, grad_value)
+                self.assertEqual(grad, grad_value)
                 self.assertEqual(grad.dtype, grad_value.dtype)
             self.assertEqual(actual.grad_dtype, grad_dtype)
             self.assertEqual(actual._has_grad_dtype_override, override)
@@ -209,24 +202,62 @@ class TestFullyShardConversion(TestCase):
         group = model._get_fsdp_state()._fsdp_param_groups[0]
         param = group.fsdp_params[0]
         self.assertTrue(group.is_unsharded)
-        self.assertIsInstance(model.weight.grad, FSDPGrad)
-        self.assertIsNotNone(model.weight.grad.unreduced)
-        self.assertEqual(model.weight.grad.unreduced.placements, (Partial("avg"),))
+        pending, partial = model.get_pending_gradients()[param.sharded_param]
+        self.assertIs(pending, param.unsharded_param.grad)
+        self.assertIsNone(partial)
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending.dtype, torch.float32)
+        self.assertNotIsInstance(pending, DTensor)
         storage_size = param.unsharded_param.untyped_storage().nbytes()
-        pending_component = model.weight.grad.unreduced
-        pending_spec = pending_component._spec
+        pending_value = pending.clone()
         self._assert_conversion_requires_clear(model, torch.bfloat16)
         self.assertTrue(group.is_unsharded)
         self.assertEqual(param.unsharded_param.untyped_storage().nbytes(), storage_size)
-        self.assertIs(model.weight.grad.unreduced, pending_component)
-        self.assertIs(model.weight.grad.unreduced._spec, pending_spec)
+        self.assertIs(param.unsharded_accumulated_grad, pending)
+        self.assertIs(model.get_pending_gradients()[param.sharded_param][0], pending)
+        self.assertEqual(pending, pending_value)
 
         model.zero_grad(set_to_none=True)
         model.to(torch.bfloat16)
         model.set_requires_gradient_sync(True)
         model(inp).sum().backward()
+        model.reshard()
         self.assertEqual(model.weight.dtype, torch.bfloat16)
         self.assertIsNotNone(model.weight.grad)
+
+    def test_no_op_conversion_preserves_pending_grad(self, device):
+        model = nn.Linear(4, 4, bias=False, device=device)
+        fully_shard(
+            model,
+            mesh=self.mesh,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+            ),
+        )
+        sharded_param = model.weight
+        model.set_requires_gradient_sync(False)
+        inp = torch.ones(2, 4, device=device, dtype=torch.bfloat16)
+        model(inp).sum().backward()
+        self.assertIs(model.weight, sharded_param)
+        self.assertEqual(sharded_param.dtype, torch.float32)
+        self.assertIsNone(sharded_param.grad)
+        pending, partial = model.get_pending_gradients()[sharded_param]
+        self.assertIsNone(partial)
+        self.assertEqual(pending.dtype, torch.bfloat16)
+        pending_value = pending.clone()
+
+        model.float()
+        self.assertIs(model.weight, sharded_param)
+        self.assertIs(model.get_pending_gradients()[sharded_param][0], pending)
+        self.assertEqual(pending, pending_value)
+
+        model.set_requires_gradient_sync(True)
+        model(inp).sum().backward()
+        self.assertEqual(sharded_param.grad.dtype, torch.float32)
+        self.assertEqual(
+            sharded_param.grad.full_tensor(),
+            torch.full((4, 4), 4.0, device=device),
+        )
 
     @parametrize("grad_dtype", [torch.float32, None])
     def test_device_only_conversion_requires_clear(self, device, grad_dtype):

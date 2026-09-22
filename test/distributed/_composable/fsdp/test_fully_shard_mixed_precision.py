@@ -17,8 +17,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
     foreach_reduce_scatter_copy_in,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_grad import FSDPGrad
-from torch.distributed.tensor import DTensor, Partial, Shard
+from torch.distributed.tensor import DTensor, Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -538,22 +537,23 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     model.set_requires_gradient_sync(sync)
                 loss.backward()
                 if not sync:
+                    pending = model.get_pending_gradients()
                     if all_reduce_only:
                         self.assertEqual(copy_dtypes, [(torch.float32, torch.float32)])
                         for param in model.parameters():
-                            self.assertIsInstance(param.grad, FSDPGrad)
-                            self.assertIsNone(param.grad.unreduced)
-                            self.assertEqual(param.grad.partial.dtype, torch.float32)
+                            self.assertIsNone(param.grad)
+                            unreduced, partial = pending[param]
+                            self.assertIsNone(unreduced)
+                            self.assertIsNotNone(partial)
+                            self.assertEqual(partial.dtype, torch.float32)
                         continue
                     self.assertEqual(copy_dtypes, [])
                     self.assertIsNone(model.second.weight.grad)
-                    self.assertEqual(
-                        model.first.weight.grad.unreduced.placements, (Partial("avg"),)
-                    )
-                    self.assertEqual(model.first.weight.grad.dtype, torch.float32)
-                    self.assertEqual(
-                        model.first.weight.grad.unreduced.to_local(), local_grad
-                    )
+                    self.assertIsNone(model.first.weight.grad)
+                    unreduced, partial = pending[model.first.weight]
+                    self.assertIsNone(partial)
+                    self.assertEqual(unreduced.dtype, torch.float32)
+                    self.assertEqual(unreduced, local_grad)
                     continue
                 self.assertEqual(copy_dtypes, [(torch.float32, torch.float32)])
                 for index, param in enumerate(model.parameters()):
@@ -597,8 +597,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             reshard_after_forward=reshard_after_backward,
             mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
         )
-        optim = torch.optim.SGD(model.parameters(), lr=0.1)
-        for param in model.parameters():
+        sharded_params = tuple(model.parameters())
+        for param in sharded_params:
             self.assertEqual(param.grad_dtype, grad_dtype)
 
         def check_unsharded_grad_dtype(module: nn.Module, _inputs):
@@ -619,12 +619,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     microbatch_inp = inp * (128 if microbatch_idx == 0 else 1 / 16)
                     model(microbatch_inp).sum().backward()
                     ref_model(microbatch_inp).sum().backward()
-                    for param, ref_param in zip(
-                        model.parameters(), ref_model.parameters()
-                    ):
-                        self.assertIsInstance(param.grad, DTensor)
+                    pending = model.get_pending_gradients()
+                    for param, ref_param in zip(sharded_params, ref_model.parameters()):
+                        self.assertEqual(param.grad_dtype, grad_dtype)
                         if sync:
-                            self.assertEqual(param.grad_dtype, grad_dtype)
+                            self.assertIsInstance(param.grad, DTensor)
                             self.assertEqual(param.grad.dtype, grad_dtype)
                             self.assertEqual(param.grad.placements, param.placements)
                             expected_grad = ref_param.grad.clone()
@@ -636,32 +635,19 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                                 param.grad.to_local(), expected_grad.to(grad_dtype)
                             )
                         else:
-                            self.assertIsInstance(param.grad, FSDPGrad)
-                            self.assertEqual(param.grad.dtype, grad_dtype)
-                            self.assertEqual(
-                                param.grad.unreduced.dtype, unsharded_grad_dtype
-                            )
-                            self.assertEqual(
-                                param.grad.unreduced.placements, (Partial("avg"),)
-                            )
-                            self.assertEqual(
-                                param.grad.unreduced.to_local(), ref_param.grad
-                            )
-                # Clearing a visible pending gradient must also clear the next
-                # backward's accumulation.
-                zero_grad = (
-                    optim.zero_grad if reshard_after_backward else model.zero_grad
-                )
-                zero_grad(set_to_none=set_to_none)
+                            unreduced, partial = pending[param]
+                            self.assertIsNone(partial)
+                            self.assertEqual(unreduced.dtype, unsharded_grad_dtype)
+                            self.assertEqual(unreduced, ref_param.grad)
+                model.zero_grad(set_to_none=set_to_none)
                 ref_model.zero_grad(set_to_none=set_to_none)
-                for param in model.parameters():
-                    if set_to_none:
-                        self.assertIsNone(param.grad)
-                    else:
-                        self.assertEqual(
-                            param.grad.to_local(),
-                            torch.zeros_like(param.grad.to_local()),
-                        )
+                pending = model.get_pending_gradients()
+                for param in sharded_params:
+                    for grad in (param.grad, *pending.get(param, (None, None))):
+                        if set_to_none:
+                            self.assertIsNone(grad)
+                        elif grad is not None:
+                            self.assertEqual(grad, torch.zeros_like(grad))
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_hsdp", [False, True])
@@ -689,6 +675,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 param_dtype=torch.bfloat16, reduce_dtype=torch.float32
             ),
         )
+        sharded_params = tuple(model.parameters())
         if sum_reduction:
             model.set_gradient_divide_factor(1.0)
 
@@ -705,18 +692,19 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             microbatch_inp = inp + microbatch_idx / 16
             model(microbatch_inp).sum().backward()
             ref_model(microbatch_inp).sum().backward()
+            pending = model.get_pending_gradients()
             for param, ref_param, grad_dtype in zip(
-                model.parameters(), ref_model.parameters(), grad_dtypes
+                sharded_params, ref_model.parameters(), grad_dtypes
             ):
-                self.assertIsInstance(param.grad, DTensor)
-                expected_grad = ref_param.grad.clone()
-                dist.all_reduce(expected_grad)
-                if not sum_reduction:
-                    expected_grad.div_(self.world_size)
+                self.assertEqual(param.grad_dtype, grad_dtype)
                 if sync:
-                    self.assertEqual(param.grad_dtype, grad_dtype)
+                    self.assertIsInstance(param.grad, DTensor)
                     self.assertEqual(param.grad.dtype, grad_dtype)
                     self.assertEqual(param.grad.placements, param.placements)
+                    expected_grad = ref_param.grad.clone()
+                    dist.all_reduce(expected_grad)
+                    if not sum_reduction:
+                        expected_grad.div_(self.world_size)
                     expected_grad = expected_grad.chunk(mesh["shard"].size())[
                         mesh["shard"].get_local_rank()
                     ]
@@ -724,17 +712,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                         param.grad.to_local(), expected_grad.to(grad_dtype)
                     )
                 else:
-                    self.assertIsInstance(param.grad, FSDPGrad)
-                    self.assertEqual(param.grad.dtype, grad_dtype)
-                    self.assertEqual(param.grad.unreduced.dtype, torch.float32)
-                    self.assertEqual(
-                        param.grad.unreduced.placements,
-                        (Partial("sum" if sum_reduction else "avg"),) * mesh.ndim,
-                    )
-                    self.assertEqual(param.grad.unreduced.to_local(), ref_param.grad)
-                    self.assertEqual(
-                        param.grad.full_tensor(), expected_grad.to(grad_dtype)
-                    )
+                    self.assertIsNone(param.grad)
+                    unreduced, partial = pending[param]
+                    self.assertIsNone(partial)
+                    self.assertEqual(unreduced.dtype, torch.float32)
+                    self.assertEqual(unreduced, ref_param.grad)
 
     @skip_if_lt_x_gpu(2)
     def test_grad_dtype_unused_last_microbatch(self):
@@ -758,21 +740,24 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         )
         for module in (model.first, model.second, model):
             fully_shard(module, mp_policy=mp_policy)
+        sharded_params = tuple(model.parameters())
         inp = torch.arange(16, device=device_type, dtype=torch.bfloat16).reshape(2, 8)
         inp = inp / 16 + self.rank / 8
         model.set_requires_gradient_sync(False)
         model(inp, True).sum().backward()
-        for param in model.parameters():
-            self.assertIsInstance(param.grad, FSDPGrad)
-            self.assertEqual(param.grad.unreduced.placements, (Partial("avg"),))
-            self.assertEqual(param.grad.dtype, torch.bfloat16)
-            self.assertEqual(param.grad.unreduced.dtype, torch.float32)
+        pending = model.get_pending_gradients()
+        for param in sharded_params:
+            self.assertIsNone(param.grad)
+            self.assertEqual(param.grad_dtype, torch.bfloat16)
+            unreduced, partial = pending[param]
+            self.assertIsNone(partial)
+            self.assertEqual(unreduced.dtype, torch.float32)
 
         model.set_requires_gradient_sync(True)
         model(inp * 2, False).sum().backward()
         expected_grad = inp.float().sum(dim=0).expand(8, -1).clone()
         dist.all_reduce(expected_grad, op=dist.ReduceOp.AVG)
-        for param, factor in zip(model.parameters(), (3, 1)):
+        for param, factor in zip(sharded_params, (3, 1)):
             self.assertIsInstance(param.grad, DTensor)
             self.assertEqual(param.grad_dtype, torch.bfloat16)
             self.assertEqual(param.grad.dtype, torch.bfloat16)
@@ -803,6 +788,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     param_dtype=torch.float16, reduce_dtype=torch.float16
                 ),
             )
+            sharded_param = model.weight
             inp = torch.full((1, 1), 40000.0, device=device_type)
             model(inp).sum().backward()
             self.assertEqual(model.weight.grad.full_tensor(), inp)
@@ -811,16 +797,18 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             model.set_requires_gradient_sync(False)
             loss = model(torch.zeros_like(inp)).sum()
             loss.backward()
-            self.assertIsInstance(model.weight.grad, FSDPGrad)
-            self.assertEqual(model.weight.grad.dtype, torch.float32)
-            self.assertEqual(model.weight.grad.unreduced.dtype, torch.float16)
-            self.assertEqual(
-                model.weight.grad.unreduced.to_local(), torch.zeros_like(inp).half()
-            )
+            unreduced, partial = model.get_pending_gradients()[sharded_param]
+            self.assertIsNone(partial)
+            self.assertEqual(unreduced.dtype, torch.float16)
+            self.assertEqual(unreduced, torch.zeros_like(inp).half())
             expected = torch.zeros_like(inp) if clear_grad else inp
-            self.assertEqual(model.weight.grad.full_tensor(), expected)
+            if clear_grad:
+                self.assertIsNone(sharded_param.grad)
+            else:
+                self.assertEqual(sharded_param.grad.dtype, torch.float32)
+                self.assertEqual(sharded_param.grad.full_tensor(), expected)
             model.synchronize_gradients()
-            self.assertEqual(model.weight.grad.full_tensor(), expected)
+            self.assertEqual(sharded_param.grad.full_tensor(), expected)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("reshard_after_forward", [False, True])
@@ -834,6 +822,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 reshard_after_forward=reshard_after_forward,
                 mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
             )
+            sharded_params = tuple(model.parameters())
             model.set_requires_gradient_sync(False)
             inp = torch.arange(16, device=device_type, dtype=torch.bfloat16).reshape(
                 2, 8
@@ -849,11 +838,13 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 inp.float().sum(dim=0).expand(8, -1),
                 torch.full((8,), 2.0, device=device_type),
             )
-            for param, expected_grad in zip(model.parameters(), expected_grads):
-                self.assertIsInstance(param.grad, FSDPGrad)
-                self.assertEqual(param.grad.unreduced.placements, (Partial("avg"),))
-                self.assertEqual(param.grad.dtype, torch.float32)
-                self.assertEqual(param.grad.unreduced.to_local(), expected_grad)
+            pending = model.get_pending_gradients()
+            for param, expected_grad in zip(sharded_params, expected_grads):
+                self.assertIsNone(param.grad)
+                unreduced, partial = pending[param]
+                self.assertIsNone(partial)
+                self.assertEqual(unreduced.dtype, torch.float32)
+                self.assertEqual(unreduced, expected_grad)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("grad_dtype", ["default", torch.float32, None])
@@ -868,6 +859,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             ),
         )
         model.to(torch.bfloat16)
+        sharded_param = model.weight
         expected_dtype = torch.bfloat16 if isinstance(grad_dtype, str) else grad_dtype
         self.assertEqual(model.weight.grad_dtype, expected_dtype)
         inp = torch.ones(2, 8, device=device_type, dtype=torch.bfloat16)
@@ -875,14 +867,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             model.set_requires_gradient_sync(sync)
             model(inp).sum().backward()
             if not sync:
-                self.assertIsInstance(model.weight.grad, FSDPGrad)
-                self.assertEqual(
-                    model.weight.grad.unreduced.placements, (Partial("avg"),)
-                )
-                self.assertEqual(model.weight.grad.unreduced.dtype, torch.float32)
-                self.assertEqual(
-                    model.weight.grad.dtype, expected_dtype or torch.float32
-                )
+                self.assertIsNone(sharded_param.grad)
+                unreduced, partial = model.get_pending_gradients()[sharded_param]
+                self.assertIsNone(partial)
+                self.assertEqual(unreduced.dtype, torch.float32)
         self.assertEqual(model.weight.grad_dtype, expected_dtype)
         self.assertEqual(model.weight.grad.dtype, expected_dtype or torch.float32)
         self.assertEqual(

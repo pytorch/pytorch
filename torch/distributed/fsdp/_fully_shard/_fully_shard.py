@@ -133,7 +133,7 @@ def fully_shard(
     Configure parameter dtypes before the first forward. For module conversions,
     clear existing gradients with ``module.zero_grad(set_to_none=True)`` if the
     conversion would conflict with an explicit ``grad_dtype`` or change the dtype
-    of pending unreduced gradients.
+    of pending gradients.
     Device conversions also require clearing gradients whose dtype differs from
     the converted parameter dtype.
 
@@ -426,23 +426,23 @@ class FSDPModule:
         both reduce-scatter and all-reduce together. This is the equivalence of
         `no_sync` in FSDP1.
 
-        After a backward without synchronization, ``model.parameters()`` exposes
-        composite gradients containing both previously reduced gradients and
-        pending contributions. Reduced gradients keep each parameter's sharded
-        ``grad_dtype``; pending contributions accumulate in the effective
-        ``MixedPrecisionPolicy.reduce_dtype``. The composite's public dtype is
-        the sharded gradient dtype. HSDP may also retain contributions that have
-        been reduce-scattered but still require all-reduce.
+        Without synchronization, gradients accumulate on the native unsharded
+        parameters in the effective ``MixedPrecisionPolicy.reduce_dtype``.
+        Previously reduced gradients remain on the sharded parameters in their
+        configured ``grad_dtype``. HSDP may also retain reduce-scattered gradients
+        that still require all-reduce. These contributions remain separate.
 
-        Clearing a composite gradient clears every contribution. Scalar
-        multiplication and division update every contribution in its own dtype.
-        Reading a materialized value may communicate and returns an independent
-        snapshot; it does not change subsequent accumulation. Such reads must
-        run on all participating ranks. A replacement sharded or replicated
-        DTensor in the sharded gradient dtype replaces every contribution.
-        Call :meth:`synchronize_gradients` before an optimizer step or
-        unsupported in-place operations. Custom communication callbacks may
-        require explicit synchronization before a materialized value can be read.
+        Which gradients ``model.parameters()`` exposes depends on whether the
+        parameters are sharded or unsharded. Use :meth:`get_pending_gradients` to
+        access pending contributions independently of that state. With CPU
+        offload, pending gradients stay on the compute device; only fully reduced
+        sharded gradients are offloaded.
+
+        Assigning ``param.grad`` or calling ``optimizer.zero_grad()`` affects
+        only the addressed parameters. Use :meth:`zero_grad` on the FSDP module
+        to clear all contributions. Synchronize pending gradients before global
+        gradient clipping or an optimizer step, and reshard parameters before
+        updating them.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
@@ -475,19 +475,122 @@ class FSDPModule:
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
 
+    def get_pending_gradients(
+        self, *, recurse: bool = True
+    ) -> dict[nn.Parameter, tuple[torch.Tensor | None, torch.Tensor | None]]:
+        """Return pending gradients keyed by their sharded parameters.
+
+        Each value is ``(unreduced, partial)``. ``unreduced`` is the native
+        unsharded parameter's gradient. ``partial`` is a local HSDP shard that
+        has been reduce-scattered but still requires all-reduce and any final
+        division. Both retain their native accumulation dtype. Only parameters
+        with at least one pending contribution are included; already reduced
+        gradients remain accessible through the key parameter's ``grad``.
+
+        This method does not communicate or combine contributions. It waits on
+        the current device stream for pending partial reductions. Returned
+        tensors reference the actual buffers, so compatible in-place operations
+        modify those contributions only. Assigning dictionary entries does not
+        replace gradients. Obtain new references after backward, synchronization,
+        or gradient clearing. Under CPU offload, pending tensors remain on the
+        compute device.
+
+        Args:
+            recurse (bool): Whether to include all FSDP submodules or only this
+                module. A grouped FSDP module includes its entire parameter group.
+        """
+        self_module = cast(nn.Module, self)
+        modules = self_module.modules() if recurse else (self_module,)
+        seen_groups: set[FSDPParamGroup] = set()
+        pending = {}
+        for module in modules:
+            if not isinstance(module, FSDPModule):
+                continue
+            for group in module._get_fsdp_state()._fsdp_param_groups:
+                if group in seen_groups:
+                    continue
+                seen_groups.add(group)
+                if any(param._partial_grad is not None for param in group.fsdp_params):
+                    group._wait_for_post_backward()
+                for param in group.fsdp_params:
+                    unreduced = param.unsharded_accumulated_grad
+                    partial = param._partial_grad
+                    if unreduced is not None or partial is not None:
+                        pending[param.sharded_param] = (unreduced, partial)
+        return pending
+
+    def zero_grad(self, set_to_none: bool = True) -> None:
+        """Reset reduced and pending gradients of this module's parameters.
+
+        This includes gradients on hidden sharded or unsharded parameters and
+        HSDP contributions awaiting all-reduce. In contrast, assigning
+        ``param.grad`` or calling ``optimizer.zero_grad()`` affects only the
+        addressed parameters. No gradient reductions are performed.
+
+        Args:
+            set_to_none (bool): Whether to discard gradients or zero their
+                existing buffers, as in :meth:`nn.Module.zero_grad`.
+        """
+        self_module = cast(nn.Module, self)
+        modules = set(self_module.modules())
+        groups: set[FSDPParamGroup] = set()
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                groups.update(module._get_fsdp_state()._fsdp_param_groups)
+        for group in groups:
+            group._wait_for_post_backward()
+            for param in group.fsdp_params:
+                if param.grad_offload_event is not None:
+                    param.grad_offload_event.synchronize()
+                    param.grad_offload_event = None
+        seen_params = set(self_module.parameters())
+        super().zero_grad(set_to_none=set_to_none)  # type: ignore[misc]
+        for group in groups:
+            for param in group.fsdp_params:
+                if param._module_info.module not in modules and not any(
+                    module in modules for module in param._module_info.shared_modules
+                ):
+                    continue
+                owners = (param.sharded_param, getattr(param, "_unsharded_param", None))
+                for owner in owners:
+                    if owner is None or owner in seen_params:
+                        continue
+                    seen_params.add(owner)
+                    grad = owner.grad
+                    if grad is None:
+                        continue
+                    if set_to_none:
+                        owner.grad = None
+                    else:
+                        if grad.grad_fn is not None:
+                            grad.detach_()
+                        else:
+                            grad.requires_grad_(False)
+                        grad.zero_()
+                partial = param._partial_grad
+                if partial is not None:
+                    if set_to_none:
+                        param._partial_grad = None
+                    else:
+                        if partial.grad_fn is not None:
+                            partial.detach_()
+                        else:
+                            partial.requires_grad_(False)
+                        partial.zero_()
+
     def synchronize_gradients(self, *, recurse: bool = True) -> None:
         """Complete pending gradient reductions without running another backward.
 
         Call this method on all participating ranks after backward. It consumes
         pending contributions, adds them to any previously reduced gradients,
-        and exposes ordinary sharded DTensor gradients in each parameter's
-        sharded ``grad_dtype``. Custom communication hooks execute as part of
+        and stores sharded DTensor gradients in each parameter's sharded
+        ``grad_dtype``. Custom communication hooks execute as part of
         this reduction. Future backward synchronization settings are unchanged.
 
-        Call this method before an optimizer step when gradients still contain
-        pending contributions, or before unsupported in-place gradient operations.
-        When retaining unsharded parameters, also call :meth:`reshard` before
-        updating those parameters.
+        Call this method before global gradient clipping or an optimizer step
+        when gradients still contain pending contributions. When retaining
+        unsharded parameters, also call :meth:`reshard` on each FSDP module before
+        reading or updating the sharded parameters and their gradients.
 
         Args:
             recurse (bool): Whether to synchronize all FSDP submodules or only
