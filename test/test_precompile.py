@@ -2,7 +2,6 @@
 import copy
 import errno
 import functools
-import hashlib
 import importlib
 import inspect
 import io
@@ -1705,8 +1704,7 @@ class TestPrecompile(TestCase):
     def test_artifact_backend_value_is_validated_before_exec(self):
         # A source whose BACKEND tag names an unknown backend is refused as a
         # malformed artifact, with the loader's own error type and before any
-        # exec; the cache tag is tampered to match so the pairing check does not
-        # fire first.
+        # exec: the source is parsed before the cache is read.
         from torch._precompile import _parse_artifact_metadata
 
         code, cache = _precompile_pair(
@@ -1716,13 +1714,8 @@ class TestPrecompile(TestCase):
         self.assertNotEqual(bad_code, code)
         with self.assertRaisesRegex(PrecompileError, "unknown backend 'nope'"):
             _parse_artifact_metadata(bad_code)
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["backend"] = "nope"
-        blob["code_hash"] = hashlib.sha256(bad_code.encode()).hexdigest()
-        buf = io.BytesIO()
-        torch.save(blob, buf)
         with self.assertRaisesRegex(PrecompileError, "unknown backend 'nope'"):
-            _load_pair(bad_code, buf.getvalue())
+            _load_pair(bad_code, cache)
 
     def test_backend_default_is_inductor(self):
         # The default lowers through Inductor: the generated code inlines the Inductor
@@ -4046,7 +4039,7 @@ class TestPrecompileLoad(TestCase):
         other_artifact = os.path.join(self.dir, "other.py")
         other_cache = os.path.join(self.dir, "other.cache")
         self._write(other_artifact, other_cache, x=torch.randn(3, 4))
-        with self.assertRaisesRegex(PrecompileError, "does not match"):
+        with self.assertRaisesRegex(PrecompileError, "its code_hash"):
             load(self.artifact, other_cache)
         with self.assertRaisesRegex(PrecompileError, "could not read"):
             load(self.artifact, os.path.join(self.dir, "missing.cache"))
