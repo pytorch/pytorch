@@ -285,6 +285,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const DeviceIndex device_index,
       const std::string& handle_string) const override {
 #if SYCL_COMPILER_VERSION >= 20260200
+#ifdef _WIN32
+    TORCH_CHECK(false, "XPU IPC events are not supported on Windows.");
+#endif
     auto& device = c10::xpu::get_raw_device(device_index);
     // IPC is only supported for reusable events.
     bool reusable = device.has(sycl::aspect::ext_oneapi_ipc_event);
