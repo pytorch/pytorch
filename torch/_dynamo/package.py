@@ -623,12 +623,17 @@ class _DynamoCodeCacheEntry:
          artifact was missing when the package was saved. install() then leaves
          the frame to be traced fresh rather than skipping it as trivial.
          Cleared once a compile records a guarded code. The save-time writer,
-         PrecompileCacheEntry.from_cache_entry, flags the whole entry when any
-         one of its backend artifacts is missing; CompilePackage.initialize then
+         PrecompileCacheEntry.from_cache_entry, flags a saved copy of the whole
+         entry when any one of its backend artifacts is missing (the live entry
+         keeps serving this process); CompilePackage.initialize then
          loads it without its stale guarded codes and backend ids, every variant
          of that code object included, since install() would have used none.
          TODO(#196773): prune only the guarded codes whose bytecode names the
          missing backend at write time, so the other variants stay installable.
+      11. Why the entry is bypassed, while it is: the reason the last compile
+         gave up, known at the bypass site and otherwise only reachable via
+         tlparse. None whenever the entry is not bypassed; the save-time
+         bypass above names the backend artifact that was missing.
     """
 
     python_code: SerializedCode
@@ -641,6 +646,12 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    bypass_reason: str | None = None
+
+
+# A bypass reason can embed repr() of user objects; cap it before it is
+# pickled into the artifact so a pathological repr cannot bloat the file.
+_BYPASS_REASON_MAX_CHARS = 2048
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -893,7 +904,7 @@ class _DynamoCacheEntry:
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
     fn_name: str | None = None
-    fn_first_lineno: str | None = None
+    fn_first_lineno: int | None = None
 
     @property
     def backend_ids(self) -> set[_BackendId]:
@@ -950,7 +961,13 @@ class PrecompileCacheEntry:
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
     ) -> Optional["PrecompileCacheEntry"]:
         backend_content: dict[_BackendId, Any] = {}
-
+        # Non-mutating: the entry handed in may be the live one still serving
+        # this process, so a code whose backend is missing is bypassed on a copy.
+        # The copy is shallow: the returned entry shares the live containers
+        # (guarded_codes, backend_ids, import_sources, function_names), which
+        # suits the one caller, which pickles it at once. Detaching them is the
+        # load path's job (CompilePackage.initialize).
+        codes: list[_DynamoCodeCacheEntry] = []
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
                 if backend_id not in backends:
@@ -970,12 +987,17 @@ class PrecompileCacheEntry:
                         payload_fn=lambda: debug_str,
                         expect_trace_id=False,
                     )
-                    code.bypassed = True
+                    code = dataclasses.replace(
+                        code,
+                        bypassed=True,
+                        bypass_reason=f"backend artifact {backend_id} missing at save time",
+                    )
                     break
-                else:
-                    backend_content[backend_id] = backends[backend_id]
+                backend_content[backend_id] = backends[backend_id]
+            codes.append(code)
 
-        return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
+        dynamo = dataclasses.replace(cache_entry, codes=codes)
+        return PrecompileCacheEntry(dynamo=dynamo, backends=backend_content)
 
 
 def _hash_source(source: str) -> str:
@@ -1230,6 +1252,7 @@ class CompilePackage:
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
         self._current_entry.bypassed = False
+        self._current_entry.bypass_reason = None
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
@@ -1247,7 +1270,7 @@ class CompilePackage:
         # must not erase the accelerator an earlier frame named.
         self._device_types |= _graph_device_types(graph)
 
-    def bypass_current_compile(self) -> None:
+    def bypass_current_compile(self, reason: str | None = None) -> None:
         """Drop the backend ids the current compile registered on its entry.
 
         Only this compile is lost: its guarded code is never recorded
@@ -1257,7 +1280,8 @@ class CompilePackage:
         installable, so a reload keeps them and only re-traces the inputs that
         would have matched the dropped one. An entry left with no guarded code
         is marked bypassed so install() re-traces the frame instead of skipping
-        it as trivial.
+        it as trivial, and `reason` is recorded on it; an entry that keeps an
+        installable variant records none.
         """
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_compile")
@@ -1266,6 +1290,12 @@ class CompilePackage:
             self._cached_backends.pop(backend_id, None)
         self._current_backend_ids = []
         self._current_entry.bypassed = not self._current_entry.guarded_codes
+        if reason is not None and len(reason) > _BYPASS_REASON_MAX_CHARS:
+            suffix = " ... (truncated)"
+            reason = reason[: _BYPASS_REASON_MAX_CHARS - len(suffix)] + suffix
+        self._current_entry.bypass_reason = (
+            (reason or None) if self._current_entry.bypassed else None
+        )
 
     def add_resume_function(
         self,
