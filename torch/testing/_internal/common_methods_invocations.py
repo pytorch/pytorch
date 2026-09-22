@@ -16378,10 +16378,16 @@ op_db: list[OpInfo] = [
     OpInfo('constant_pad_nd',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.float8_e4m3fn),
            sample_inputs_func=sample_inputs_constant_pad_nd,
            supports_out=False,
            skips=(
+               # SchemaCheckMode uses allclose, which does not support float8.
+               DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+               # FP8 comparisons do not support the nonzero tolerances used by NNC.
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
                # bool can't be passed to Scalar arguments in JIT tracer because
                # BoolType is not a subtype of ScalarType.
                DecorateInfo(
@@ -16395,9 +16401,17 @@ op_db: list[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.float8_e4m3fn),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='constant'),
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # SchemaCheckMode uses allclose, which does not support float8.
+               DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+               # FP8 comparisons do not support the nonzero tolerances used by NNC.
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+           )),
     OpInfo('nn.functional.pad',
            variant_test_name='reflect',
            supports_forward_ad=True,
@@ -17468,8 +17482,10 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         # TODO: Skip because it produces a CUDA illegal memory access for some reason
         skip_cow_input_backward=True,
+        # FIXME: mask_type == 2 (LowerRight)
         decorators=[
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
+            skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2"),
             skipXPU],
         skips=(
             # Checking the scaler value of the philox seed and offset
