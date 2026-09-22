@@ -5189,13 +5189,6 @@ class CheckFunctionManager:
             separate_save_build = save_guards and (
                 explicit_capture or serialization_filter is not None
             )
-            # Snapshot the entries before the runtime and save builds, so both
-            # filters see one consistent build over all guards and the
-            # inspection build never overwrites the export info of the build
-            # that gets serialized.
-            if guard_filter_fn is not None or serialization_filter is not None:
-                build_filter_entries()
-
             runtime_guards = (
                 apply_filter(guard_filter_fn) if guard_filter_fn else all_guards
             )
@@ -5210,11 +5203,11 @@ class CheckFunctionManager:
 
             serialized_guards = runtime_guards
             serialization_builder = builder
-            serialization_guard_manager = guard_manager
+            save_guard_manager = guard_manager
             if separate_save_build:
                 if serialization_filter is not None:
                     serialized_guards = apply_filter(serialization_filter)
-                serialization_builder, serialization_guard_manager = self.build_guards(
+                serialization_builder, save_guard_manager = self.build_guards(
                     serialized_guards,
                     existing_diff_guard_sources,
                     f_code,
@@ -5223,26 +5216,7 @@ class CheckFunctionManager:
                     guard_filter_fn=serialization_filter,
                 )
             self.guard_manager = guard_manager
-            values_before_check: set[int] = (
-                set(builder.guard_tree_values) if separate_save_build else set()
-            )
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
-
-            if separate_save_build:
-                # DuplicateInputs/StorageOverlap fetch their guard managers
-                # inside compile_check_fn, which registers the tensors they name
-                # on the RUNTIME builder only. Hand exactly those to the
-                # serialization builder. Nothing more: value pruning keys off
-                # guard_tree_values, so a value the saved copy's guards do not
-                # reach stays prunable, which is what dropping a guard from the
-                # artifact is for.
-                serialization_builder.guard_tree_values.update(
-                    {
-                        k: v
-                        for k, v in builder.guard_tree_values.items()
-                        if k not in values_before_check
-                    }
-                )
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -5271,14 +5245,6 @@ class CheckFunctionManager:
             and not output_graph.export
             and not torch.compiler._is_non_strict_tracing()
         ):
-            # The saved copy may hold guards the live manager does not, so it
-            # gets the same-frame check of its own.
-            if serialization_guard_manager is not guard_manager and (
-                not serialization_guard_manager.check(output_graph.local_scope)
-            ):
-                raise AssertionError(
-                    "Serialized guard failed on the same frame it was created. This is a bug - please create an issue."
-                )
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
                     self.guard_manager,
@@ -5290,6 +5256,18 @@ class CheckFunctionManager:
                     "Guard failed on the same frame it was created. This is a bug - please create an issue."
                     f"Guard fail reason: {reasons}"
                 )
+            # The saved copy may hold leaf and accessor guards the live manager
+            # does not, so those get the same-frame check of their own. It never
+            # ran compile_check_fn, so the guards installed there (aliasing,
+            # DuplicateInputs, StorageOverlap) are not part of it; load rebuilds
+            # them through a fresh CheckFunctionManager.
+            if save_guard_manager is not guard_manager:
+                info = save_guard_manager.check_verbose(output_graph.local_scope)
+                if not info.result:
+                    raise AssertionError(
+                        "Serialized guard failed on the same frame it was created. This is a bug - please create an issue."
+                        f"Guard fail reason: {info.verbose_code_parts}"
+                    )
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
