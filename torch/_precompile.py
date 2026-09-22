@@ -475,12 +475,46 @@ class _MakeFxCapture(Capture):
         # capture retryable and nothing for exit or save() to write. The trace runs
         # with grad enabled and the drivers pin their own grad mode, so the caller's
         # ambient mode is not consulted.
-        self._module._compile(args)
+        self._trace_without_side_effects(args)
         python_code = self._module.to_python_code()
         rendered = (python_code, self._module.to_cache_bytes(python_code))
         result = _runnable_from_pair(*rendered, _trusted=True)(*args)
         self._rendered = rendered
         return result
+
+    def _trace_without_side_effects(self, args: tuple[object, ...]) -> None:
+        # A static trace runs fn on the real example tensors, so an in-place update in
+        # fn (a BatchNorm's running stats, ``x.add_(1)``) would land once in the trace
+        # and again in the serve that follows. Put the buffers and tensor inputs the
+        # trace mutated back, so the serve is the one execution the caller sees
+        # (``.grad`` gets the same treatment inside _capture). A parameter updated in
+        # place, e.g. by an optimizer step inside fn, is refused rather than every
+        # parameter being cloned up front.
+        mods = [a for a in args if isinstance(a, torch.nn.Module)]
+        params = {id(p): p for m in mods for p in m.parameters()}
+        tensors = [*(b for m in mods for b in m.buffers()), *pytree.tree_leaves(args)]
+        saved = {
+            id(t): (t, t.detach().clone())
+            for t in tensors
+            if isinstance(t, torch.Tensor) and id(t) not in params
+        }
+        param_versions = {k: p._version for k, p in params.items()}
+        try:
+            self._module._compile(args)
+        finally:
+            # Compared by value: under make_fx a kernel's in-place running-stat
+            # update does not bump the buffer's version counter.
+            with torch.no_grad():
+                for t, value in saved.values():
+                    if not torch.equal(t, value):
+                        t.copy_(value)
+        if any(p._version != param_versions[k] for k, p in params.items()):
+            raise PrecompileError(
+                "MakeFxTracer cannot capture a fn that updates a parameter in place "
+                "(e.g. an optimizer step): serving the capture would apply the update "
+                "a second time, and the trace has already applied it once. Step the "
+                "optimizer outside the captured fn."
+            )
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:

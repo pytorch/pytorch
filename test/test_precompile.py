@@ -4215,6 +4215,35 @@ class TestPrecompileCapture(TestCase):
         self.assertEqual(runtime.lin.weight.grad, expected.lin.weight.grad)
         self.assertEqual(runtime.lin.bias.grad, expected.lin.bias.grad)
 
+    @parametrize("backend", ["inductor", "eager"])
+    def test_a_capture_applies_in_place_updates_once(self, backend):
+        # The trace and the serve both run fn; only the serve's updates may land.
+        def step(model, x):
+            y = model(x)
+            x.add_(1)
+            return y.sum()
+
+        model, expected = torch.nn.BatchNorm1d(4).train(), torch.nn.BatchNorm1d(4)
+        x = torch.randn(3, 4)
+        expected_x = x.clone()
+        expected_out = step(expected.train(), expected_x)
+        with self._capture(step, backend=backend) as cap:
+            self.assertEqual(cap(model, x), expected_out)
+        self.assertEqual(model.num_batches_tracked, 1)
+        self.assertEqual(model.running_mean, expected.running_mean)
+        self.assertEqual(x, expected_x)
+
+    def test_a_capture_refuses_an_in_place_parameter_update(self):
+        def step(model, x):
+            with torch.no_grad():
+                model.lin.weight.add_(1)
+            return model(x)
+
+        with self.assertRaisesRegex(PrecompileError, "updates a parameter in place"):
+            with self._capture(step, backend="eager") as cap:
+                cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+
 
 if __name__ == "__main__":
     run_tests()
