@@ -4374,6 +4374,12 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    // Relational guards accumulate state across the tree; reset it on every
+    // exit, a C++ throw included, or the next check of this tree starts from
+    // a half-recorded run.
+    auto reset_relational_guards =
+        c10::make_scope_exit([this] { _reset_relational_guard_state(); });
+
     // Clean up dict pointer recording for tag safe roots
     reset_dict_tag_recording_variables();
 
@@ -4384,7 +4390,6 @@ class RootGuardManager : public GuardManager {
     }
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
-      _reset_relational_guard_state();
       return false;
     }
 
@@ -4404,19 +4409,16 @@ class RootGuardManager : public GuardManager {
     });
 
     if (!GuardManager::check_accessors_nopybind(value)) {
-      _reset_relational_guard_state();
       return false;
     }
 
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        _reset_relational_guard_state();
         return false;
       }
     }
 
-    _reset_relational_guard_state();
     return true;
   }
 
@@ -4438,6 +4440,10 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    // Same scope-exit reset as check_nopybind_template above.
+    auto reset_relational_guards =
+        c10::make_scope_exit([this] { _reset_relational_guard_state(); });
+
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
       LocalState state;
@@ -4454,7 +4460,6 @@ class RootGuardManager : public GuardManager {
             value, num_guards_executed);
 
     if (!debug_info_leaf.result) {
-      _reset_relational_guard_state();
       return debug_info_leaf;
     }
 
@@ -4471,7 +4476,6 @@ class RootGuardManager : public GuardManager {
             value, num_guards_executed);
 
     if (!debug_info_accessors.result) {
-      _reset_relational_guard_state();
       return debug_info_accessors;
     }
 
@@ -4481,7 +4485,6 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
-        _reset_relational_guard_state();
         return GuardDebugInfo(
             false,
             tmp_debug_info.verbose_code_parts,
@@ -4489,7 +4492,6 @@ class RootGuardManager : public GuardManager {
             tmp_debug_info.user_stack);
       }
     }
-    _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
 

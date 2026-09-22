@@ -560,6 +560,67 @@ user_stack=None)
                 root.check_verbose({"x": nested})
             self.assertEqual(torch._C._get_torch_function_state(), state)
 
+    def _throwing_two_tensor_tree(self):
+        # x is a plain tensor; y is a strided nested tensor whose TENSOR_MATCH
+        # fires a TORCH_CHECK reading its strides (check) or sizes
+        # (check_verbose). Callers install a relational guard across both
+        # managers AFTER this, so y's leaf order is TENSOR_MATCH first: the
+        # throw lands after x is recorded and before y is.
+        a = torch.randn(3)
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        root = RootGuardManager()
+        x_mgr = root.dict_getitem_manager("x", "L['x']", a, default_mgr_enum)
+        y_mgr = root.dict_getitem_manager("y", "L['y']", nested, default_mgr_enum)
+        y_mgr.add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "y",
+            ["check_tensor(y)"],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        return root, x_mgr, y_mgr, {"x": a, "y": nested}
+
+    def _assert_tree_throws_repeatedly(self, root, f_locals):
+        # The root resets relational guard state on scope exit, so every call
+        # sees a fresh run and reaches the same throw. check and check_verbose
+        # alternate so each one's exit is checked by the other's entry.
+        for _ in range(2):
+            with self.assertRaisesRegex(
+                RuntimeError, "NestedTensorImpl doesn't support"
+            ):
+                root.check(f_locals)
+            with self.assertRaisesRegex(
+                RuntimeError, "NestedTensorImpl doesn't support"
+            ):
+                root.check_verbose(f_locals)
+
+    def test_no_tensor_aliasing_guard_state_resets_after_the_tree_throws(self):
+        # NO_TENSOR_ALIASING records every tensor it is handed. A reset that
+        # ran only on returning exits would leave x behind, and the next check
+        # would fail on "Duplicate tensor" instead of reaching the throw.
+        root, x_mgr, y_mgr, f_locals = self._throwing_two_tensor_tree()
+        install_no_tensor_aliasing_guard(
+            [x_mgr, y_mgr], ["x", "y"], ["no_aliasing(x, y)"], None
+        )
+        self._assert_tree_throws_repeatedly(root, f_locals)
+
+    def test_storage_overlapping_guard_state_resets_after_the_tree_throws(self):
+        # STORAGE_OVERLAPPING INCREFs every tensor it is handed and only its
+        # reset lets go. With x left behind, the next check pushes the
+        # overlapping list past the one tensor the checker expects and its own
+        # TORCH_CHECK fires at x, a different error from the one this asserts,
+        # on every later check of the tree.
+        root, x_mgr, y_mgr, f_locals = self._throwing_two_tensor_tree()
+        install_storage_overlapping_guard(
+            [x_mgr], [y_mgr], ["x does not overlap y"], None
+        )
+        self._assert_tree_throws_repeatedly(root, f_locals)
+
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
