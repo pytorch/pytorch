@@ -269,18 +269,18 @@ class TestStaticTritonLauncherUnit(TestCase):
         ):
             kernel._agnostic_cubin_path()
 
-    def test_retained_cubin_replaces_corrupt_existing_cache_file(self):
+    def test_retained_cubin_preserves_existing_cache_file(self):
         kernel = object.__new__(StaticallyLaunchedCudaKernel)
         kernel.cubin_raw = b"valid bundled cubin"
         kernel.cubin_path = None
         with tempfile.TemporaryDirectory() as tmp_dir:
             cubin_path = os.path.join(tmp_dir, "kernel.cubin")
             with open(cubin_path, "wb") as file:
-                file.write(b"truncated")
+                file.write(b"existing cubin")
 
             self.assertEqual(kernel.reload_cubin_from_raw(cubin_path), cubin_path)
             with open(cubin_path, "rb") as file:
-                self.assertEqual(file.read(), kernel.cubin_raw)
+                self.assertEqual(file.read(), b"existing cubin")
 
 
 @requires_gpu_and_triton

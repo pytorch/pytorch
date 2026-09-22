@@ -216,15 +216,10 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        # A newly deserialized launcher with retained bytes must restore the
-        # bundled artifact even if a stale/truncated file already occupies the
-        # expected cache path. Later device-agnostic loads can reuse a path that
-        # this launcher has already established.
-        if (
-            force
-            or not os.path.exists(filepath)
-            or (self.cubin_path is None and self.cubin_raw is not None)
-        ):
+        # Preserve an existing cache artifact until the native loader proves it
+        # unusable. This keeps valid read-only caches usable. A failed native
+        # load forces one atomic replacement from the retained bundled bytes.
+        if force or not os.path.exists(filepath):
             if self.cubin_raw is None:
                 raise MissingTritonKernelError(
                     f"Triton kernel binary not found at {filepath}"
