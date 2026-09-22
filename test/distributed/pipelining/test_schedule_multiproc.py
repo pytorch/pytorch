@@ -46,7 +46,7 @@ from torch.distributed.pipelining.schedules import (
     FORWARD,
     OVERLAP_F_B,
 )
-from torch.distributed.pipelining.stage import _PipelineStageBase  # noqa: TC002
+from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.nn.attention.flex_attention import BlockMask, create_block_mask
 from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
@@ -239,6 +239,15 @@ def make_none_grad_flags(pattern: str, device: torch.device) -> torch.Tensor:
             for value in values
         ]
     )
+
+
+def assert_recv_buffers_drained(test_case, stages: list[_PipelineStageBase]) -> None:
+    """Assert that a completed pipeline step transferred every recv buffer."""
+    for stage in stages:
+        for recv_info_by_chunk in (stage.args_recv_info, stage.grad_recv_info):
+            for recv_infos in recv_info_by_chunk.values():
+                for info in recv_infos:
+                    test_case.assertIsNone(info.buffer)
 
 
 def setup_none_grad_model_and_data(config: PipelineTestConfig, n_layers: int):
@@ -611,6 +620,8 @@ class ScheduleTest(MultiProcContinuousTest):
             else:
                 schedule.step()
 
+            assert_recv_buffers_drained(self, [stage])
+
         dist.barrier(device_ids=[self.rank])
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -877,6 +888,7 @@ class ScheduleTest(MultiProcContinuousTest):
             0,
             "Found leaked tensors, check logs above for debug info",
         )
+        assert_recv_buffers_drained(self, stages)
         dist.barrier()
 
         # Verify results
@@ -1147,6 +1159,7 @@ class ScheduleTest(MultiProcContinuousTest):
                 out = schedule.step(x, target=target, losses=losses)
             else:
                 schedule.step()
+            assert_recv_buffers_drained(self, stages)
 
         # Verify results (rank 0 has both first and last stages)
         if self.rank == 0:
@@ -1469,6 +1482,7 @@ class ScheduleTest(MultiProcContinuousTest):
         else:
             schedule.step()
 
+        assert_recv_buffers_drained(self, stages)
         dist.barrier()
         check_gradients(
             self.config, stage_modules, ref_mod, submod_names, rtol=1e-5, atol=1e-5
