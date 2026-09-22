@@ -1148,8 +1148,7 @@ class TestPrecompile(TestCase):
         # The artifact is the only compiled blob; the rest is the integrity tag (the
         # format/version/backend tag plus a code_hash binding the cache to its python_code).
         self.assertEqual(
-            set(blob),
-            {"artifact", "format", "version", "backend", "code_hash"},
+            set(blob), {"artifact", "format", "version", "backend", "code_hash"}
         )
         self.assertEqual(blob["format"], _CACHE_FORMAT)
         self.assertEqual(blob["version"], _CACHE_VERSION)
@@ -1195,8 +1194,7 @@ class TestPrecompile(TestCase):
         _code, cache = _precompile_pair(lambda model, x: model(x), m, x)
         blob = torch.load(io.BytesIO(cache), weights_only=True)  # must not raise
         self.assertEqual(
-            set(blob),
-            {"artifact", "format", "version", "backend", "code_hash"},
+            set(blob), {"artifact", "format", "version", "backend", "code_hash"}
         )
         self.assertEqual(blob["format"], _CACHE_FORMAT)
         self.assertEqual(blob["version"], _CACHE_VERSION)
@@ -1821,8 +1819,7 @@ class TestPrecompile(TestCase):
 
         blob = torch.load(io.BytesIO(cache), weights_only=False)
         self.assertEqual(
-            set(blob),
-            {"artifact", "format", "version", "backend", "code_hash"},
+            set(blob), {"artifact", "format", "version", "backend", "code_hash"}
         )
         self.assertIsNone(blob["artifact"])  # eager has no compiled blob to bundle
         self.assertEqual(blob["format"], _CACHE_FORMAT)
@@ -3997,9 +3994,8 @@ class TestPrecompileLoad(TestCase):
     @parametrize("backend", ["inductor", "eager"])
     def test_load_in_a_fresh_process(self, backend):
         state = os.path.join(self.dir, "state.pt")
-        expected = _load_pair(*self._write(self.artifact, self.cache, backend=backend))(
-            self.model, self.x
-        )
+        self._write(self.artifact, self.cache, backend=backend)
+        expected = self.model(self.x)
         torch.save(
             {"state_dict": self.model.state_dict(), "x": self.x, "expected": expected},
             state,
@@ -4019,10 +4015,6 @@ class TestPrecompileLoad(TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
-
-    def _read(self, path):
-        with open(path, "rb") as f:
-            return f.read().decode()
 
     def test_load_refuses_a_pair_from_two_captures_or_a_missing_cache(self):
         self._write(self.artifact, self.cache)
