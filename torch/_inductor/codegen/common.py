@@ -572,20 +572,25 @@ def get_wrapper_codegen_for_device(
         else:
             python_wrapper_codegen = wrapper_codegen_obj.wrapper_codegen
             # readable_wrapper is a per-compile config, so like allow_stack_allocation
-            # above it is resolved here rather than at registration. The identity guard
-            # keeps an out-of-tree python wrapper (or PythonWrapperMtia) from being
-            # silently replaced by one that knows nothing about that backend.
+            # above it is resolved here rather than at registration.
             from .wrapper import PythonWrapperCodegen
-            from .wrapper_readable import readable_wrapper_requested
+            from .wrapper_readable import (
+                readable_wrapper_requested,
+                ReadablePythonWrapperCodegen,
+            )
 
-            if (
-                python_wrapper_codegen is PythonWrapperCodegen
-                and readable_wrapper_requested()
-            ):
-                from .wrapper_readable import ReadablePythonWrapperCodegen
-
-                return ReadablePythonWrapperCodegen
-            return python_wrapper_codegen
+            if not readable_wrapper_requested():
+                return python_wrapper_codegen
+            if python_wrapper_codegen is not PythonWrapperCodegen:
+                # An out-of-tree python wrapper (or PythonWrapperMtia) cannot be
+                # replaced by one that knows nothing about that backend, and keeping it
+                # would silently ignore the flag.
+                raise RuntimeError(
+                    "torch._inductor.config.readable_wrapper replaces the stock python "
+                    f"wrapper, but {device} registers {python_wrapper_codegen.__name__}; "
+                    "disable readable_wrapper for this device."
+                )
+            return ReadablePythonWrapperCodegen
     return None
 
 
