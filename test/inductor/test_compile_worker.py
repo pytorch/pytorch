@@ -13,7 +13,7 @@ import unittest
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from concurrent.futures.process import BrokenProcessPool
 from threading import Event
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
@@ -1301,6 +1301,112 @@ class TestSubprocessEnv(TestCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+
+    def test_worker_nvgemm_precompile_separates_output_scale(self):
+        import torch
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm_kernel as nvgemm_kernel,
+        )
+
+        matrix_meta = types.SimpleNamespace(
+            sizes=(4, 4), strides=(4, 1), device="cpu", dtype=torch.float32
+        )
+        scale_meta = types.SimpleNamespace(
+            sizes=(1,), strides=(1,), device="cpu", dtype=torch.float32
+        )
+        cuda_ctx = types.SimpleNamespace(
+            max_active_clusters=None, device_capability=(10, 0)
+        )
+        metadata = types.SimpleNamespace(
+            operator_class=Mock(side_effect=RuntimeError("reconstruction failed")),
+            design=types.SimpleNamespace(use_prefetch=True, use_pdl=True),
+        )
+
+        with (
+            patch.object(
+                nvgemm_kernel,
+                "_compile_nvgemm",
+                return_value=(object(), None, None, False),
+            ) as compile_nvgemm,
+            patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
+            patch.object(nvgemm_kernel, "_patch_max_active_clusters", return_value=[]),
+            patch.object(
+                nvgemm_kernel,
+                "_get_scaled_gemm_modes",
+                return_value=(None, None, None, None),
+            ),
+        ):
+            nvgemm_kernel._worker_nvgemm_autotuning_precompile(
+                "kernel",
+                "SCALED_GEMM",
+                "accumulator",
+                (matrix_meta, matrix_meta, scale_meta, scale_meta, scale_meta),
+                matrix_meta,
+                {},
+                cuda_ctx,
+                has_output_scale=True,
+                metadata=metadata,
+            )
+
+        args, kwargs = compile_nvgemm.call_args
+        self.assertEqual(len(args[1]), 4)
+        self.assertEqual(kwargs["output_scale"].shape, (1,))
+        self.assertEqual(kwargs["prefetch_mode"], "1")
+        self.assertTrue(kwargs["use_pdl"])
+
+    def test_generated_nvgemm_precompile_loads_named_output_scale(self):
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm_kernel as nvgemm_kernel,
+        )
+
+        shapes = {
+            "in_ptr0": (4, 4),
+            "in_ptr1": (4, 4),
+            "scale_a": (1,),
+            "scale_b": (1,),
+            "output_scale": (1,),
+            "output": (4, 4),
+        }
+        strides = {
+            name: tuple(reversed(range(1, len(shape) + 1)))
+            for name, shape in shapes.items()
+        }
+        dtypes = dict.fromkeys(shapes, "float32")
+        artifact = types.SimpleNamespace(compiled_obj=object())
+
+        with (
+            patch.object(
+                nvgemm_kernel,
+                "_compile_nvgemm",
+                return_value=(artifact, None, None, False),
+            ) as compile_nvgemm,
+            patch.object(nvgemm_kernel, "_patch_max_active_clusters", return_value=[]),
+            patch.object(nvgemm_kernel, "_restore_max_active_clusters"),
+            patch("torch._inductor.runtime.cutedsl_cache.disk_cache_set"),
+        ):
+            nvgemm_kernel._nvgemm_precompile(
+                shapes,
+                strides,
+                dtypes,
+                variant_name="SCALED_GEMM",
+                kernel_name="kernel",
+                accumulator_type="accumulator",
+                compiled_cache={},
+                disk_fn_cache={},
+                module_path="module",
+                disk_config_key=(),
+                input_param_names=["in_ptr0", "in_ptr1", "scale_a", "scale_b"],
+                max_active_clusters=1,
+                output_scale_param_name="output_scale",
+                prefetch_mode="1",
+                use_pdl=True,
+            )
+
+        args, kwargs = compile_nvgemm.call_args
+        self.assertEqual(len(args[1]), 4)
+        self.assertEqual(kwargs["output_scale"].shape, (1,))
+        self.assertEqual(kwargs["prefetch_mode"], "1")
+        self.assertTrue(kwargs["use_pdl"])
 
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:

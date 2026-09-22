@@ -232,11 +232,14 @@ def _compile_nvgemm(
     kernel_obj=None,
     kernel_name: str | None = None,
     args_kwargs=None,
+    output_scale=None,
     epilogue_args=None,
     epilogue_source="",
     fallback_fn=None,
     cc: int | None = None,
     base_kernel=None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
@@ -261,6 +264,7 @@ def _compile_nvgemm(
         input_tensors,
         out,
         accumulator_type,
+        output_scale=output_scale,
         epilogue=epilogue_args,
         **(args_kwargs or {}),
     )
@@ -274,6 +278,8 @@ def _compile_nvgemm(
             args=args if cc is not None else None,
             cc=cc,
             base_kernel=base_kernel,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
             epilogue_specialization=_local_reduce_specialization(args_kwargs),
         )
 
@@ -369,6 +375,7 @@ def _worker_nvgemm_autotuning_precompile(
     swizzle_type_a=None,
     swizzle_type_b=None,
     has_bias_epilogue=False,
+    has_output_scale=False,
     swap_ab=False,
     metadata=None,
 ):
@@ -407,6 +414,12 @@ def _worker_nvgemm_autotuning_precompile(
             device=output_tensor_meta.device,
             dtype=output_tensor_meta.dtype,
         )
+    logical_m = out.shape[-2]
+
+    output_scale = None
+    if has_output_scale:
+        *gemm_list, output_scale = input_tensors
+        input_tensors = tuple(gemm_list)
 
     # swap_ab: the kernel was selected for the transposed (N, M) problem, so the
     # worker must swap operands here too -- both to resolve the kernel via the
@@ -422,19 +435,21 @@ def _worker_nvgemm_autotuning_precompile(
             input_tensors = (b.t(), a.t()) + input_tensors[2:]
         out = out.t()
 
-    helper_kwargs: dict[str, Any] = {}
+    helper_kwargs: dict[str, Any] = {"logical_m": logical_m}
     if variant_name == "SCALED_GEMM":
         scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b = (
             _get_scaled_gemm_modes(
                 scale_type_a, swizzle_type_a, scale_type_b, swizzle_type_b
             )
         )
-        helper_kwargs = {
-            "scale_mode_a": scale_mode_a,
-            "swizzle_mode_a": swizzle_mode_a,
-            "scale_mode_b": scale_mode_b,
-            "swizzle_mode_b": swizzle_mode_b,
-        }
+        helper_kwargs.update(
+            {
+                "scale_mode_a": scale_mode_a,
+                "swizzle_mode_a": swizzle_mode_a,
+                "scale_mode_b": scale_mode_b,
+                "swizzle_mode_b": swizzle_mode_b,
+            }
+        )
 
     # For an addmm bias choice the last input is the bias, consumed by a
     # bias-add epilogue; the rest are the GEMM operands. Building the epilogue
@@ -458,6 +473,7 @@ def _worker_nvgemm_autotuning_precompile(
         has_epilogue=has_bias_epilogue,
         aux_tensors=aux_tensors,
         epilogue_source=epilogue_source,
+        logical_m=logical_m,
     )
     dev_idx = input_tensors[0].device.index or 0
     disk_config_key = _make_disk_config_key(
@@ -485,7 +501,12 @@ def _worker_nvgemm_autotuning_precompile(
         # operator space. Done inside the patched region since construction may
         # query max_active_clusters, which the worker can't get from the driver.
         base_kernel = None
+        prefetch_mode = None
+        use_pdl = None
         if metadata is not None:
+            design = getattr(metadata, "design", None)
+            prefetch_mode = "1" if getattr(design, "use_prefetch", False) else "0"
+            use_pdl = getattr(design, "use_pdl", False)
             try:
                 base_kernel = metadata.operator_class(metadata)
             except Exception:
@@ -503,10 +524,13 @@ def _worker_nvgemm_autotuning_precompile(
             accumulator_type,
             kernel_name=kernel_name,
             args_kwargs=helper_kwargs,
+            output_scale=output_scale,
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
             cc=worker_cc,
             base_kernel=base_kernel,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
         )
 
         if was_compiled:
@@ -556,8 +580,10 @@ def _create_gemm_arguments(
     swizzle_mode_a: Any | None = None,
     scale_mode_b: Any | None = None,
     swizzle_mode_b: Any | None = None,
+    output_scale: Any | None = None,
     epilogue: Any | None = None,
     local_reduce: GemmReductionArguments | None = None,
+    logical_m: Any | None = None,
 ):
     import cutlass.operators
 
@@ -579,6 +605,13 @@ def _create_gemm_arguments(
             return TensorWrapper(output, alignment_bytes=4)
 
         args.local_reduce = local_reduce.map_tensors(wrap)
+        if output_scale is not None:
+            # The block-scaled kernel consumes one FP32 value. A scalar tensor
+            # has no stride metadata for TensorWrapper, so expose it as a
+            # one-element view without allocating or launching another kernel.
+            args.alpha = TensorWrapper(output_scale.reshape(1), alignment_bytes=4)
+        if logical_m is not None:
+            args.logical_m = logical_m
         return args
 
     if epilogue is not None and variant_name == "GROUPED_GEMM":
@@ -636,6 +669,8 @@ def _lookup_gemm_kernel(
     args: Any | None = None,
     cc: int | None = None,
     base_kernel: Any | None = None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
     epilogue_specialization: tuple = (),
 ):
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
@@ -658,7 +693,13 @@ def _lookup_gemm_kernel(
         # args (e.g. a swap_ab kernel selected for the transposed problem while
         # the worker holds the original operands); fall back to the manifest.
         if kernel is None and fast:
-            kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+            kernel = get_kernel_by_name_via_args(
+                kernel_name,
+                args,
+                cc,
+                prefetch_mode=prefetch_mode,
+                use_pdl=use_pdl,
+            )
         if kernel is None:
             kernel = get_kernel_by_name(kernel_name)
         if kernel is None:
@@ -666,7 +707,13 @@ def _lookup_gemm_kernel(
         return kernel
 
     if base_kernel is None and fast:
-        base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+        base_kernel = get_kernel_by_name_via_args(
+            kernel_name,
+            args,
+            cc,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
+        )
     epilogue_args = getattr(args, "epilogue", None) or epilogue_args
     kernel = get_efc_kernel_with_epilogue(
         kernel_name,
@@ -706,9 +753,12 @@ def _create_gemm_cache_key(
     aux_tensors: tuple = (),
     epilogue_source: str = "",
     epilogue_specialization: tuple = (),
+    logical_m: Any | None = None,
 ):
     cache_key = tuple(s for t in input_tensors for s in _tensor_sig(t))
     cache_key = (*cache_key, *_tensor_sig(out))
+    if logical_m is not None:
+        cache_key = (*cache_key, "logical_m", logical_m)
 
     if has_epilogue:
         aux_sig = tuple(_tensor_sig(t) for t in aux_tensors)
@@ -794,7 +844,13 @@ def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
 
 
 def _update_reuse_args_tensors(
-    variant_name, args, input_tensors, out, epilogue_args, args_kwargs=None
+    variant_name,
+    args,
+    input_tensors,
+    out,
+    epilogue_args,
+    args_kwargs=None,
+    output_scale=None,
 ) -> bool:
     """Redirect the cached args at this call's runtime tensors.
 
@@ -806,19 +862,33 @@ def _update_reuse_args_tensors(
     """
     if variant_name == "GROUPED_GEMM":
         return False
+
+    def redirect(wrapper, tensor) -> None:
+        # Some CuTeDSL operators launch through TVM-FFI and read
+        # ``runtime_tensor`` while others construct raw pointers from
+        # ``TensorWrapper.data_ptr``.  Keep both representations in sync when
+        # reusing a compiled argument object.  Updating only _runtime_tensor
+        # makes pointer-based kernels keep writing to the tensor from their
+        # first invocation; a subsequently captured CUDA graph then records a
+        # stale output address.
+        wrapper._runtime_tensor = tensor
+        wrapper._data_ptr = tensor.data_ptr()
+
     if variant_name == "SCALED_GEMM":
         a, b, scale_a, scale_b = input_tensors
-        args.A.quantized.tensor._runtime_tensor = a
-        args.A.scale.tensor._runtime_tensor = scale_a
-        args.B.quantized.tensor._runtime_tensor = b
-        args.B.scale.tensor._runtime_tensor = scale_b
-        args.out.tensor._runtime_tensor = out
+        redirect(args.A.quantized.tensor, a)
+        redirect(args.A.scale.tensor, scale_a)
+        redirect(args.B.quantized.tensor, b)
+        redirect(args.B.scale.tensor, scale_b)
+        redirect(args.out.tensor, out)
     else:
         # GEMM: dense mm and the EFC bias/epilogue addmm path.
         a, b = input_tensors
-        args.A.tensor._runtime_tensor = a
-        args.B.tensor._runtime_tensor = b
-        args.out.tensor._runtime_tensor = out
+        redirect(args.A.tensor, a)
+        redirect(args.B.tensor, b)
+        redirect(args.out.tensor, out)
+    if output_scale is not None:
+        redirect(args.alpha, output_scale.reshape(1))
     epilogue = getattr(args, "epilogue", None)
     if epilogue is not None:
         source = epilogue.epilogue_fn
@@ -830,13 +900,13 @@ def _update_reuse_args_tensors(
             runtime_tensor = getattr(val, "runtime_tensor", val)
             if name in input_names:
                 runtime_tensor = _normalize_epilogue_input_tensor(runtime_tensor)
-            wrapper._runtime_tensor = runtime_tensor
+            redirect(wrapper, runtime_tensor)
     runtime_reduce = args_kwargs.get("local_reduce") if args_kwargs else None
     for field, output in args.local_reduce.tensor_items():
         if output is not None:
             if runtime_reduce is None:
                 raise AssertionError("expected runtime local-reduction arguments")
-            output._runtime_tensor = getattr(runtime_reduce, field)
+            redirect(output, getattr(runtime_reduce, field))
     return True
 
 
@@ -848,20 +918,27 @@ def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
     references is safe. Required for cudagraph capture, which fails if a cached
     object retains a tensor from the graph pool between iterations.
     """
+
+    def clear(wrapper) -> None:
+        wrapper._runtime_tensor = None
+        wrapper._data_ptr = 0
+
     if variant_name == "SCALED_GEMM":
-        args.A.quantized.tensor._runtime_tensor = None
-        args.A.scale.tensor._runtime_tensor = None
-        args.B.quantized.tensor._runtime_tensor = None
-        args.B.scale.tensor._runtime_tensor = None
-        args.out.tensor._runtime_tensor = None
+        clear(args.A.quantized.tensor)
+        clear(args.A.scale.tensor)
+        clear(args.B.quantized.tensor)
+        clear(args.B.scale.tensor)
+        clear(args.out.tensor)
     else:
-        args.A.tensor._runtime_tensor = None
-        args.B.tensor._runtime_tensor = None
-        args.out.tensor._runtime_tensor = None
+        clear(args.A.tensor)
+        clear(args.B.tensor)
+        clear(args.out.tensor)
+    if getattr(args, "alpha", None) is not None:
+        clear(args.alpha)
     epilogue = getattr(args, "epilogue", None)
     if epilogue is not None:
         for wrapper in epilogue.tensors.values():
-            wrapper._runtime_tensor = None
+            clear(wrapper)
         # kernel.run traces the epilogue on first launch, and the trace retains
         # the real output/aux tensors in example_inputs (used only for tracing,
         # not the launch). Replace them with meta tensors so the cached args
@@ -879,7 +956,7 @@ def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
                     )
     for _, output in args.local_reduce.tensor_items():
         if output is not None:
-            output._runtime_tensor = None
+            clear(output)
 
 
 def _nvgemm_run(
@@ -901,15 +978,17 @@ def _nvgemm_run(
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
     swap_ab: bool = False,
+    output_scale=None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
 ):
+    variant_kwargs = dict(variant_kwargs or {})
+    variant_kwargs["logical_m"] = out.shape[-2]
     if swap_ab and len(input_tensors) >= 2:
         import torch
 
-        reduction = variant_kwargs.get("local_reduce") if variant_kwargs else None
+        reduction = variant_kwargs.get("local_reduce")
         if isinstance(reduction, GemmReductionArguments) and reduction.enabled:
-            if variant_kwargs is None:
-                raise AssertionError("expected local-reduction keyword arguments")
-            variant_kwargs = dict(variant_kwargs)
             variant_kwargs["local_reduce"] = _transpose_local_reduce_tensors(reduction)
         a, b = input_tensors[0], input_tensors[1]
         if len(input_tensors) >= 4:
@@ -956,6 +1035,7 @@ def _nvgemm_run(
         aux_tensors=aux_tensors,
         epilogue_source=epilogue_source,
         epilogue_specialization=epilogue_specialization,
+        logical_m=variant_kwargs["logical_m"],
     )
     dev_idx = input_tensors[0].device.index or 0
     mem_key = (cache_key, dev_idx)
@@ -981,6 +1061,7 @@ def _nvgemm_run(
                     out,
                     epilogue_args,
                     variant_kwargs,
+                    output_scale,
                 ):
                     try:
                         kernel.run(
@@ -1000,6 +1081,7 @@ def _nvgemm_run(
             input_tensors,
             out,
             accumulator_type,
+            output_scale=output_scale,
             epilogue=epilogue_args,
             **(variant_kwargs or {}),
         )
@@ -1031,12 +1113,15 @@ def _nvgemm_run(
             input_tensors,
             out,
             accumulator_type,
+            output_scale=output_scale,
             kernel_name=kernel_name,
             args_kwargs=variant_kwargs,
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
             fallback_fn=disk_fallback,
             cc=_current_target_sm(dev_idx).cc,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
         )
 
         if was_compiled:
@@ -1061,6 +1146,7 @@ def _nvgemm_run(
         out,
         epilogue_args,
         variant_kwargs,
+        output_scale,
     )
     if reuse_supported:
         # Publish and launch under the lock so a concurrent reuse-path caller
@@ -1120,6 +1206,10 @@ def _nvgemm_precompile(
     input_param_names: list[str],
     variant_kwargs: dict | None = None,
     max_active_clusters: int | None = None,
+    swap_ab: bool = False,
+    output_scale_param_name: str | None = None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
 ):
     """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
 
@@ -1141,7 +1231,11 @@ def _nvgemm_precompile(
     device = f"cuda:{device_index}"
     with FakeTensorMode():
         tensors = {}
-        for name in [*input_param_names, "output"]:
+        tensor_names = [*input_param_names]
+        if output_scale_param_name is not None:
+            tensor_names.append(output_scale_param_name)
+        tensor_names.append("output")
+        for name in tensor_names:
             tensors[name] = torch.empty_strided(
                 tuple(precompile_shapes[name]),
                 tuple(precompile_strides[name]),
@@ -1151,12 +1245,40 @@ def _nvgemm_precompile(
 
     input_tensors = tuple(tensors[n] for n in input_param_names)
     out = tensors["output"]
+    variant_kwargs = dict(variant_kwargs or {})
+    variant_kwargs["logical_m"] = out.shape[-2]
+
+    output_scale = (
+        tensors[output_scale_param_name]
+        if output_scale_param_name is not None
+        else None
+    )
+
+    # The generated runtime wrapper applies swap_ab before constructing GEMM
+    # arguments.  Precompile must use the identical tensor signatures so its
+    # artifact/cache entry can be consumed by that runtime path.  In
+    # particular, scaled GEMM also swaps the per-operand scale tensors.
+    if swap_ab and len(input_tensors) >= 2:
+        a, b = input_tensors[0], input_tensors[1]
+        if len(input_tensors) >= 4:
+            scale_a, scale_b = input_tensors[2], input_tensors[3]
+            input_tensors = (b.t(), a.t(), scale_b, scale_a) + input_tensors[4:]
+        else:
+            input_tensors = (b.t(), a.t()) + input_tensors[2:]
+        out = out.t()
 
     patched = _patch_max_active_clusters(max_active_clusters)
     try:
-        cache_key = _create_gemm_cache_key(input_tensors, out)
+        cache_key = _create_gemm_cache_key(
+            input_tensors, out, logical_m=variant_kwargs["logical_m"]
+        )
         mem_key = (cache_key, device_index)
         if mem_key not in compiled_cache:
+            cc = (
+                device_capability[0] * 10 + device_capability[1]
+                if device_capability is not None
+                else None
+            )
             artifact, _, _, _ = _compile_nvgemm(
                 variant_name,
                 input_tensors,
@@ -1164,6 +1286,10 @@ def _nvgemm_precompile(
                 accumulator_type,
                 kernel_name=kernel_name,
                 args_kwargs=variant_kwargs,
+                output_scale=output_scale,
+                cc=cc,
+                prefetch_mode=prefetch_mode,
+                use_pdl=use_pdl,
             )
             disk_cache_set(
                 disk_fn_cache,
@@ -1273,6 +1399,7 @@ class NVUniversalGemmKernel(Kernel):
         local_reduce: GemmReductionPlan | None = None,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
+        output_scale_node: Buffer | None = None,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -1289,6 +1416,18 @@ class NVUniversalGemmKernel(Kernel):
         self.epilogue = epilogue or GemmEpiloguePlan()
         self.local_reduce = local_reduce
         self.swap_ab = swap_ab
+
+        if output_scale_node is not None:
+            if self.epilogue.source:
+                raise NotImplementedError(
+                    "native NVGEMM output scale cannot be combined with another epilogue"
+                )
+            output_scale_name = output_scale_node.get_name()
+            self.epilogue = dataclasses.replace(
+                self.epilogue,
+                reads=tuple(dict.fromkeys((*self.epilogue.reads, output_scale_name))),
+                output_scale=output_scale_name,
+            )
 
         # An addmm bias baked into the choice becomes a bias-add epilogue. With
         # no scheduler-fused epilogue it's a standalone bias-add; when the
@@ -1313,6 +1452,8 @@ class NVUniversalGemmKernel(Kernel):
     def render(self) -> str:
         """Render the Python source for the NVGEMM kernel wrapper."""
         kernel_name_str = self.kernel_metadata["kernel_name"]
+        prefetch_mode = "1" if self.kernel_metadata.get("use_prefetch", False) else "0"
+        use_pdl = bool(self.kernel_metadata.get("use_pdl", False))
         acc_dtype_str = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
             self.accumulator_type, "cutlass.Float32"
         )
@@ -1333,7 +1474,15 @@ class NVUniversalGemmKernel(Kernel):
             input_tensors_expr = f"({', '.join(input_tensor_names)})"
 
         workspace_arg = "workspace" if self.workspace_size > 0 else "None"
-        has_epilogue = bool(self.epilogue.source) or self.local_reduce is not None
+        direct_output_scale = (
+            self.epilogue.output_scale
+            if self.variant.name == "SCALED_GEMM"
+            and self.kernel_metadata.get("supports_output_scale", False)
+            else None
+        )
+        has_epilogue = (
+            bool(self.epilogue.source) and direct_output_scale is None
+        ) or self.local_reduce is not None
 
         # Build variant_kwargs dict expression for SCALED_GEMM
         variant_kwargs_expr = "None"
@@ -1397,7 +1546,7 @@ class NVUniversalGemmKernel(Kernel):
         code.writeline("")
 
         # -- Epilogue function definition (must be module-level for cutlass.operators) --
-        epilogue_fn_code = self.epilogue.source
+        epilogue_fn_code = self.epilogue.source if direct_output_scale is None else None
         epilogue_source_hash = ""
         if has_epilogue and epilogue_fn_code is not None:
             epilogue_source_hash = hashlib.sha256(epilogue_fn_code.encode()).hexdigest()
@@ -1458,7 +1607,7 @@ class NVUniversalGemmKernel(Kernel):
             epi_args_expr = "None"
             epi_source_expr = '""'
             aux_tensors: list[str] = []
-            if self.epilogue.source:
+            if self.epilogue.source and direct_output_scale is None:
                 epilogue_kwargs = self._render_epilogue_kwargs()
                 if view_gemm_out:
                     epilogue_kwargs = epilogue_kwargs.replace(
@@ -1542,8 +1691,15 @@ class NVUniversalGemmKernel(Kernel):
             with code.indent():
                 code.writeline(f'"{self.variant.name}", _KERNEL_NAME,')
                 code.writeline(f"{input_tensors_expr}, {gemm_out}, _ACC_TYPE,")
+                # Use the operator name as the persistent-cache namespace.  The
+                # subprocess precompiler uses this same stable name, whereas
+                # ``__file__`` changes when an AOT artifact is relocated (for
+                # example into vLLM's compile cache).  Keying by the generated
+                # module path made the runtime miss the precompiled artifact and
+                # JIT-compile during inference.
                 code.writeline(
-                    "_compiled_cache, _disk_fn_cache, __file__, _DISK_CACHE_CONFIG_KEY,"
+                    "_compiled_cache, _disk_fn_cache, _KERNEL_NAME, "
+                    "_DISK_CACHE_CONFIG_KEY,"
                 )
                 code.writeline(f"stream=stream, workspace={workspace_arg},")
                 code.writeline(f"variant_kwargs={run_variant_kwargs},")
@@ -1553,6 +1709,10 @@ class NVUniversalGemmKernel(Kernel):
                 code.writeline(f"aux_tensors={aux_tensors_expr},")
                 if self.swap_ab:
                     code.writeline("swap_ab=True,")
+                if direct_output_scale is not None:
+                    code.writeline(f"output_scale={direct_output_scale},")
+                code.writeline(f"prefetch_mode={prefetch_mode!r},")
+                code.writeline(f"use_pdl={use_pdl!r},")
             code.writeline(")")
 
         # -- Precompile hook --
@@ -1576,11 +1736,17 @@ class NVUniversalGemmKernel(Kernel):
                     "compiled_cache=_compiled_cache, disk_fn_cache=_disk_fn_cache,"
                 )
                 code.writeline(
-                    "module_path=__file__, disk_config_key=_DISK_CACHE_CONFIG_KEY,"
+                    "module_path=_KERNEL_NAME, disk_config_key=_DISK_CACHE_CONFIG_KEY,"
                 )
                 code.writeline("input_param_names=_INPUT_PARAM_NAMES,")
                 code.writeline("variant_kwargs=_VARIANT_KWARGS,")
                 code.writeline("max_active_clusters=kwargs.get('max_active_clusters'),")
+                if self.swap_ab:
+                    code.writeline("swap_ab=True,")
+                if direct_output_scale is not None:
+                    code.writeline(f"output_scale_param_name={direct_output_scale!r},")
+                code.writeline(f"prefetch_mode={prefetch_mode!r},")
+                code.writeline(f"use_pdl={use_pdl!r},")
             code.writeline(")")
 
         return code.getvalue()
