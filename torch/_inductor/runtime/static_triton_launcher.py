@@ -14,6 +14,64 @@ class MissingTritonKernelError(RuntimeError):
     pass
 
 
+class InvalidTritonKernelArtifactError(MissingTritonKernelError):
+    pass
+
+
+def _read_cubin_snapshot(
+    cubin_path: str,
+) -> tuple[tuple[int, int, int, int], bytes] | None:
+    """Read bytes with enough file identity to detect an atomic replacement."""
+    try:
+        before = os.stat(cubin_path)
+        with open(cubin_path, "rb") as file:
+            payload = file.read()
+        after = os.stat(cubin_path)
+    except OSError:
+        return None
+
+    before_identity = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    after_identity = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    )
+    if before_identity != after_identity:
+        return None
+    return after_identity, payload
+
+
+def _is_invalid_kernel_image_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "invalid image",
+            "invalid kernel image",
+            "invalid device function",
+            "kernel image is invalid",
+            "kernel image is empty",
+            "no kernel image is available",
+            "named symbol not found",
+            "cuda driver error: 98",
+            "cuda driver error: 200",
+            "cuda driver error: 209",
+            "cuda driver error: 218",
+            "cuda driver error: 500",
+            "l0 runtime error: 70000004",
+            "l0 runtime error: 78000008",
+            "l0 runtime error: 7800000f",
+            "l0 runtime error: 78000011",
+        )
+    )
+
+
 @functools.lru_cache(None)
 def _tma_arg_helpers():
     """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
@@ -230,6 +288,20 @@ class StaticallyLaunchedTritonKernel:
         self.cubin_path = filepath
         return self.cubin_path
 
+    def retain_cubin_from_path(self) -> None:
+        """Retain an existing cache artifact for later device loads."""
+        if self.cubin_raw is not None:
+            return
+        if self.cubin_path is None:
+            raise MissingTritonKernelError("Triton kernel binary path is not set")
+        try:
+            with open(self.cubin_path, "rb") as file:
+                self.cubin_raw = file.read()
+        except OSError as error:
+            raise MissingTritonKernelError(
+                f"Triton kernel binary not readable at {self.cubin_path}"
+            ) from error
+
     def _agnostic_cubin_path(self) -> str:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
         # Keep it available (the single-device path frees it after one load) and rewrite
@@ -241,29 +313,56 @@ class StaticallyLaunchedTritonKernel:
         return self.reload_cubin_from_raw(self.cubin_path)
 
     def _load_kernel_from_path(self, cubin_path: str, device: int):
+        attempted_snapshot = _read_cubin_snapshot(cubin_path)
         try:
-            return self.C_impl._load_kernel(cubin_path, self.name, self.shared, device)
+            loaded_kernel = self.C_impl._load_kernel(
+                cubin_path, self.name, self.shared, device
+            )
         except RuntimeError as error:
-            if self.cubin_raw is not None:
+            invalid_image = _is_invalid_kernel_image_error(error)
+            path_missing = not os.path.exists(cubin_path)
+            if (
+                self.cubin_raw is not None
+                and (path_missing or invalid_image)
+                and (
+                    attempted_snapshot is None
+                    or attempted_snapshot[1] != self.cubin_raw
+                )
+            ):
                 # A cache artifact can disappear or be truncated after its path
-                # was validated. Restore retained bytes atomically and retry the
-                # native load once; unrelated failures propagate from the retry.
+                # was validated. Restore the retained bytes and retry once.
                 self.reload_cubin_from_raw(cubin_path, force=True)
                 try:
                     return self.C_impl._load_kernel(
                         cubin_path, self.name, self.shared, device
                     )
                 except RuntimeError as retry_error:
-                    if not os.path.exists(cubin_path):
+                    invalid_image = _is_invalid_kernel_image_error(retry_error)
+                    if not os.path.exists(cubin_path) or invalid_image:
+                        if invalid_image:
+                            raise InvalidTritonKernelArtifactError(
+                                f"Triton kernel binary is unusable at {cubin_path}"
+                            ) from retry_error
                         raise MissingTritonKernelError(
-                            f"Triton kernel binary disappeared while loading {cubin_path}"
+                            f"Triton kernel binary is unusable at {cubin_path}"
                         ) from retry_error
                     raise
-            if not os.path.exists(cubin_path):
+            if invalid_image:
+                raise InvalidTritonKernelArtifactError(
+                    f"Triton kernel binary is unusable at {cubin_path}"
+                ) from error
+            if path_missing:
                 raise MissingTritonKernelError(
-                    f"Triton kernel binary disappeared while loading {cubin_path}"
+                    f"Triton kernel binary is unusable at {cubin_path}"
                 ) from error
             raise
+        if self.device_agnostic and attempted_snapshot is not None:
+            # Prefer bytes that the native loader just proved valid. Recheck
+            # identity so an atomic replacement cannot become our recovery
+            # payload accidentally.
+            if _read_cubin_snapshot(cubin_path) == attempted_snapshot:
+                self.cubin_raw = attempted_snapshot[1]
+        return loaded_kernel
 
     def load_kernel(self, device: int) -> None:
         if self.device_agnostic:

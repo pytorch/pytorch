@@ -68,7 +68,12 @@ from torch._inductor.triton_bundler import (
     TritonKernelArtifact,
     TritonKernelArtifacts,
 )
-from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
+from torch._inductor.utils import (
+    _set_env,
+    clear_caches,
+    fresh_cache,
+    GPU_KERNEL_BIN_EXTS,
+)
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import (
@@ -755,21 +760,25 @@ class TestFxGraphCache(TestCase):
             compile_result.kernel.cubin_raw = None
 
     @staticmethod
-    def add_conflicting_bundled_binary(bundle, *, device, payload):
-        """Add a conflicting binary with an existing bundle identity."""
+    def find_bundled_binary(bundle):
         binary_exts = tuple(GPU_KERNEL_BIN_EXTS.values())
         match = next(
             (
-                (artifacts, artifact)
+                (artifacts, index, artifact)
                 for artifacts in bundle.kernel_artifacts
-                for artifact in artifacts.artifacts
+                for index, artifact in enumerate(artifacts.artifacts)
                 if artifact.filename.endswith(binary_exts)
             ),
             None,
         )
         if match is None:
             raise AssertionError("bundle has no GPU binary")
-        artifacts, artifact = match
+        return match
+
+    @classmethod
+    def add_conflicting_bundled_binary(cls, bundle, *, device, payload):
+        """Add a conflicting binary with an existing bundle identity."""
+        artifacts, _, artifact = cls.find_bundled_binary(bundle)
         bundle.kernel_artifacts.append(
             TritonKernelArtifacts(
                 artifacts.kernel_hash,
@@ -1052,7 +1061,7 @@ class TestFxGraphCache(TestCase):
             "use_static_triton_launcher": True,
         }
     )
-    def test_bundle_without_cubin_falls_back_to_jit(self):
+    def test_bundle_without_cubin_uses_local_binary(self):
         def fn(x):
             return x.sin()
 
@@ -1065,13 +1074,57 @@ class TestFxGraphCache(TestCase):
         self.reset()
         triton_dir = os.path.join(cache_dir(), "triton")
         self.assertTrue(os.path.isdir(triton_dir))
+        _, _, bundled_binary = self.find_bundled_binary(bundle)
         self.clear_retained_static_binaries(bundle, static_autotuner.kernel)
+        metadata = TritonBundler.read_and_emit(bundle)
+        self.assertIsNotNone(metadata)
+        self.assertIn(
+            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
+        )
+        self.assertEqual(
+            static_autotuner.kernel.compile_results[0].kernel.cubin_raw,
+            bundled_binary.payload,
+        )
+
+        missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
+        self.assertFalse(os.path.exists(missing_libdevice_path))
+        with _set_env("TRITON_LIBDEVICE_PATH", missing_libdevice_path):
+            graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        self.assertIs(loaded_autotuner, static_autotuner.kernel)
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_bundle_and_cache_without_cubin_falls_back_to_jit(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(32, device="cuda")
+        expected = fn(x)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+
+        self.reset()
+        triton_dir = os.path.join(cache_dir(), "triton")
+        self.clear_retained_static_binaries(bundle, static_autotuner.kernel)
+        shutil.rmtree(triton_dir)
         metadata = TritonBundler.read_and_emit(bundle)
         self.assertIsNotNone(metadata)
         self.assertNotIn(
             static_autotuner.kernel_name, metadata.statically_launched_kernel_names
         )
-        self.assertTrue(os.path.isdir(triton_dir))
         shutil.rmtree(triton_dir)
 
         graph.after_deserialization(CompiledFxGraphConstants())
@@ -1091,6 +1144,138 @@ class TestFxGraphCache(TestCase):
         )
         actual = graph.current_callable([x.clone()])
         self.assertEqual(actual[0], expected)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_invalid_bundled_cubin_falls_back_to_jit(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(32, device="cuda")
+        expected = fn(x)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        artifacts, index, binary = self.find_bundled_binary(bundle)
+        invalid_payload = b"invalid bundled binary"
+        artifacts.artifacts[index] = TritonKernelArtifact(
+            binary.filename, invalid_payload
+        )
+
+        self.reset()
+        triton_dir = os.path.join(cache_dir(), "triton")
+        shutil.rmtree(triton_dir)
+        metadata = TritonBundler.read_and_emit(bundle)
+        self.assertIsNotNone(metadata)
+        self.assertIn(
+            static_autotuner.kernel_name,
+            metadata.statically_launched_kernel_names,
+        )
+        cubin_path = static_autotuner.kernel.compile_results[0].kernel.cubin_path
+        self.assertIsNotNone(cubin_path)
+        with open(cubin_path, "rb") as file:
+            self.assertEqual(file.read(), invalid_payload)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
+        self.assertEqual(graph.current_callable([x.clone()])[0], expected)
+        with open(cubin_path, "rb") as file:
+            self.assertNotEqual(file.read(), invalid_payload)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_loader_oom_does_not_rewrite_bundled_cubin(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(32, device="cuda")
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        artifacts, index, binary = self.find_bundled_binary(bundle)
+        artifacts.artifacts[index] = TritonKernelArtifact(
+            binary.filename, b"different bundled binary"
+        )
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        static_kernel = static_autotuner.kernel.compile_results[0].kernel
+        cubin_path = static_kernel.cubin_path
+        self.assertIsNotNone(cubin_path)
+        original_inode = os.stat(cubin_path).st_ino
+        static_kernel.shared = 1 << 30
+
+        with self.assertRaisesRegex(
+            RuntimeError, "No valid triton configs.*OutOfMemoryError"
+        ):
+            graph.after_deserialization(CompiledFxGraphConstants())
+        self.assertEqual(os.stat(cubin_path).st_ino, original_inode)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "keep_static_cubin_raw": False,
+            "use_static_triton_launcher": True,
+        }
+    )
+    def test_device_agnostic_retains_successful_local_binary(self):
+        def fn(x):
+            return x.sin()
+
+        with torch.cuda.device(0):
+            x0 = torch.randn(32, device="cuda")
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x0), fn(x0))
+        graph, bundle, static_autotuner = self.load_cached_graph_and_static_autotuner()
+        artifacts, index, binary = self.find_bundled_binary(bundle)
+        expected_cubin = binary.payload
+        artifacts.artifacts[index] = TritonKernelArtifact(
+            binary.filename, b"invalid bundled binary"
+        )
+
+        self.reset()
+        TritonBundler.read_and_emit(bundle)
+        graph.after_deserialization(CompiledFxGraphConstants())
+        loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        self.assertIs(loaded_autotuner, static_autotuner.kernel)
+        static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
+        self.assertEqual(static_kernel.cubin_raw, expected_cubin)
+
+        shutil.rmtree(os.path.join(cache_dir(), "triton"))
+        missing_libdevice_path = os.path.join(cache_dir(), "missing-libdevice.10.bc")
+        self.assertFalse(os.path.exists(missing_libdevice_path))
+        with (
+            _set_env("TRITON_LIBDEVICE_PATH", missing_libdevice_path),
+            torch.cuda.device(1),
+        ):
+            x1 = torch.randn(32, device="cuda")
+            self.assertEqual(graph.current_callable([x1])[0], fn(x1))
+        self.assertEqual(static_kernel.cubin_raw, expected_cubin)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
@@ -1179,7 +1364,7 @@ class TestFxGraphCache(TestCase):
         loaded_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
             static_autotuner.kernel_name
         ]
-        self.assertIs(loaded_autotuner.run.__self__, loaded_autotuner)
+        self.assertIs(loaded_autotuner, static_autotuner.kernel)
         static_kernel = loaded_autotuner.launchers[0].__globals__["runner"].__self__
         cubin_path = static_kernel._agnostic_cubin_path()
         self.assertIsNotNone(static_kernel.cubin_raw)
@@ -1204,7 +1389,6 @@ class TestFxGraphCache(TestCase):
                     del os.environ["TRITON_LIBDEVICE_PATH"]
                 else:
                     os.environ["TRITON_LIBDEVICE_PATH"] = old_libdevice_path
-        self.assertIs(loaded_autotuner.run.__self__, loaded_autotuner)
         with open(cubin_path, "rb") as file:
             self.assertEqual(file.read(), static_kernel.cubin_raw)
 
@@ -1230,8 +1414,10 @@ class TestFxGraphCache(TestCase):
         self.reset()
         TritonBundler.read_and_emit(bundle)
         graph.after_deserialization(CompiledFxGraphConstants())
-        cached_autotuner = static_autotuner.kernel
-        self.assertIs(cached_autotuner.run.__self__, cached_autotuner)
+        cached_autotuner = graph.current_callable.__globals__[  # type: ignore[union-attr]
+            static_autotuner.kernel_name
+        ]
+        self.assertIs(cached_autotuner, static_autotuner.kernel)
         self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
 
     @requires_cuda_and_triton
@@ -1279,7 +1465,6 @@ class TestFxGraphCache(TestCase):
             static_autotuner.kernel_name
         ]
         self.assertIs(loaded_autotuner, cached_autotuner)
-        self.assertIs(loaded_autotuner.run.__self__, loaded_autotuner)
         self.assertEqual(graph.current_callable([x.clone()])[0], fn(x))
         with open(cubin_path, "rb") as file:
             self.assertEqual(file.read(), expected_cubin)

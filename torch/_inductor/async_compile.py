@@ -486,14 +486,8 @@ class AsyncCompile:
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
 
-        def compile_kernel_in_parent() -> CachingAutotuner:
-            with dynamo_timed(
-                "async_compile.precompile",
-                log_pt2_compile_event=True,
-                dynamo_compile_column_us="triton_compile_time_us",
-                log_waitcounter=True,
-                waitcounter_name_override="compile_triton",
-            ):
+        def compile_kernel_in_parent(force_recompile: bool = False) -> CachingAutotuner:
+            def compile_kernel() -> CachingAutotuner:
                 fail = None
                 try:
                     start_ns = time_ns()
@@ -513,6 +507,21 @@ class AsyncCompile:
                     raise
                 finally:
                     log_triton_builds(fail=fail)
+
+            with dynamo_timed(
+                "async_compile.precompile",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="triton_compile_time_us",
+                log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
+            ):
+                if not force_recompile:
+                    return compile_kernel()
+                from torch._dynamo.convert_frame import compile_lock
+                from torch._inductor.utils import _set_env
+
+                with compile_lock, _set_env("TRITON_ALWAYS_COMPILE", "1"):
+                    return compile_kernel()
 
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1

@@ -270,16 +270,17 @@ class TritonBundler:
                                         (device, kernel_hash, filename), OrderedSet()
                                     )
                                 )
-                        if len(matches) == 1:
+                        if len(matches) > 1:
+                            raise MissingTritonKernelError(
+                                "static kernel has ambiguous bundled binaries"
+                            )
+                        if matches:
                             # The graph already retains this immutable payload.
                             # Single-device launchers release it after loading;
                             # device-agnostic launchers retain it for new devices.
                             compile_result.kernel.cubin_raw = matches.pop()
-                        if compile_result.kernel.cubin_raw is None:
-                            raise MissingTritonKernelError(
-                                "static kernel has no unambiguous bundled binary"
-                            )
                         compile_result.reload_cubin_path()
+                        compile_result.kernel.retain_cubin_from_path()
                 except MissingTritonKernelError:
                     log.warning(
                         "Failed to reload cubin file statically launchable autotuner %s",

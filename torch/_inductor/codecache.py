@@ -5674,13 +5674,16 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # We don't store the source code on the CachingAutotuner itself
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
-        self.compile_kernel_from_src: Callable[[], CachingAutotuner] | None = None
+        self.compile_kernel_from_src: Callable[[bool], CachingAutotuner] | None = None
 
     def result(self, timeout: float | None = None) -> CachingAutotuner:
         # timeout is accepted for interface parity with other CodeCacheFuture
         # subclasses; this work is synchronous in-process and has no pending
         # future to wait on.
-        from .runtime.static_triton_launcher import MissingTritonKernelError
+        from .runtime.static_triton_launcher import (
+            InvalidTritonKernelArtifactError,
+            MissingTritonKernelError,
+        )
 
         if self.reload_kernel_from_src is None or self.compile_kernel_from_src is None:
             raise AssertionError(
@@ -5697,11 +5700,13 @@ class StaticAutotunerFuture(CodeCacheFuture):
                     static_triton_bundle_key=None,  # no need to save again
                 )
                 return self.static_autotuner
-            except MissingTritonKernelError:
+            except MissingTritonKernelError as error:
                 log.warning(
-                    "Bundled Triton kernel disappeared before loading; "
+                    "Bundled Triton kernel is unavailable or invalid; "
                     "falling back to JIT compilation"
                 )
                 compile_kernel_from_src = self.compile_kernel_from_src
                 self.static_autotuner.release_benchmark_artifacts()
-                return compile_kernel_from_src()
+                return compile_kernel_from_src(
+                    isinstance(error, InvalidTritonKernelArtifactError)
+                )

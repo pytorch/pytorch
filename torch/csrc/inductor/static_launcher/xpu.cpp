@@ -18,6 +18,7 @@
 #include <ATen/Context.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
@@ -256,6 +257,10 @@ inline sycl::kernel* _createKernel(
     uint32_t* nSpillsPtr = nullptr) {
   assert(module);
   assert(kernelName);
+  auto destroy_module_on_error = c10::make_scope_exit([module]() {
+    // Cleanup must not replace the original exception.
+    ze().zeModuleDestroy(module);
+  });
   ze_kernel_handle_t kernel = nullptr;
   ze_kernel_desc_t kernelDescription = {};
   kernelDescription.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
@@ -263,6 +268,10 @@ inline sycl::kernel* _createKernel(
   kernelDescription.flags = ZE_KERNEL_FLAG_FORCE_RESIDENCY;
   kernelDescription.pKernelName = kernelName;
   ZE_CHECK(ze().zeKernelCreate(module, &kernelDescription, &kernel));
+  auto destroy_kernel_on_error = c10::make_scope_exit([kernel]() {
+    // Cleanup must not replace the original exception.
+    ze().zeKernelDestroy(kernel);
+  });
   if (nSpillsPtr) {
     ze_kernel_properties_t props;
     props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
@@ -276,11 +285,12 @@ inline sycl::kernel* _createKernel(
       sycl::bundle_state::executable>(
       {module, sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
-  auto fun =
-      new sycl::kernel(sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
-          {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
-          syclContext));
-  return fun;
+  destroy_module_on_error.release();
+  auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
+      {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
+      syclContext);
+  destroy_kernel_on_error.release();
+  return new sycl::kernel(std::move(fun));
 }
 
 sycl::kernel* loadKernel(
