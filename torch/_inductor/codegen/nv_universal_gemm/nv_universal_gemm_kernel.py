@@ -15,6 +15,7 @@ import hashlib
 import importlib
 import logging
 import re
+import threading
 from collections import OrderedDict
 from typing import Any, cast, TYPE_CHECKING
 
@@ -153,6 +154,9 @@ class CuTeDSLEpilogueArguments:
         result.traced_epilogue = None
         return result
 
+    def copy(self) -> CuTeDSLEpilogueArguments:
+        return self.with_tensors(self.tensors)
+
     @property
     def parameters(self) -> list[Any]:
         return list(self.tensors.values())
@@ -277,44 +281,11 @@ def _compile_nvgemm(
     if fallback_fn is not None:
         artifact = fallback_fn(kernel)
     if artifact is None:
-        artifact = _compile_nvgemm_kernel(kernel, args)
+        with CUTEDSL_COMPILE_LOCK:
+            artifact = kernel.compile(args)
         was_compiled = True
 
     return artifact, args, kernel, was_compiled
-
-
-def _compile_nvgemm_kernel(kernel, args):
-    """Compile while preserving CuTe DSL's subscriptable compile protocol.
-
-    Runtime JIT monitors sometimes wrap ``cute.compile`` with an ordinary
-    function.  CUTLASS operators use ``cute.compile[options](...)``, so such a
-    wrapper turns a legitimate cache miss into ``'function' object is not
-    subscriptable``.  If the wrapper retained ``__wrapped__`` (as
-    ``functools.wraps`` does), temporarily restore the underlying compiler for
-    the duration of this already-serialized compilation.
-    """
-    import cutlass.cute as cute
-
-    with CUTEDSL_COMPILE_LOCK:
-        if hasattr(cute.compile, "__getitem__"):
-            return kernel.compile(args)
-
-        wrapped_compile = cute.compile
-        unwrapped_compile = wrapped_compile
-        while not hasattr(unwrapped_compile, "__getitem__"):
-            next_compile = getattr(unwrapped_compile, "__wrapped__", None)
-            if next_compile is None:
-                return kernel.compile(args)
-            unwrapped_compile = next_compile
-
-        log.warning(
-            "Temporarily unwrapping cute.compile for NVGEMM runtime compilation"
-        )
-        cute.compile = unwrapped_compile
-        try:
-            return kernel.compile(args)
-        finally:
-            cute.compile = wrapped_compile
 
 
 class CUDAContextMetadata:
@@ -696,6 +667,7 @@ def _lookup_gemm_kernel(
 
     if base_kernel is None and fast:
         base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+    epilogue_args = getattr(args, "epilogue", None) or epilogue_args
     kernel = get_efc_kernel_with_epilogue(
         kernel_name,
         epilogue_args,
@@ -1419,7 +1391,8 @@ class NVUniversalGemmKernel(Kernel):
                 )
             else:
                 code.writeline(
-                    "from cutlass.operators.arguments import EpilogueArguments"
+                    "from cutlass.operators.arguments import "
+                    "EpilogueArguments as CuTeDSLEpilogueArguments"
                 )
         code.writeline("")
 
@@ -1494,12 +1467,7 @@ class NVUniversalGemmKernel(Kernel):
                 epi_kwargs_str = "epilogue_fn=_EPILOGUE_FN_SRC"
                 if epilogue_kwargs:
                     epi_kwargs_str += f", {epilogue_kwargs}"
-                epilogue_args_type = (
-                    "CuTeDSLEpilogueArguments"
-                    if not self.epilogue.is_evt_fallback
-                    else "EpilogueArguments"
-                )
-                code.writeline(f"epi_args = {epilogue_args_type}({epi_kwargs_str})")
+                code.writeline(f"epi_args = CuTeDSLEpilogueArguments({epi_kwargs_str})")
                 epi_args_expr = "epi_args"
                 epi_source_expr = "_EPILOGUE_FN_SOURCE"
                 aux_tensors.extend(self.epilogue.reads)
