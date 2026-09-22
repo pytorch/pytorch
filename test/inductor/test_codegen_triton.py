@@ -365,6 +365,7 @@ def helper(x):
         kernel = TritonKernel(
             {"x": xnumel, "r0_": rnumel},
             features=SIMDKernelFeatures([], xnumel, rnumel),
+            fixed_config=FixedTritonConfig({"XBLOCK": 128, "R0_BLOCK": 1}),
             mix_order_reduction=True,
             optimize_mask=optimize_mask,
             override_persistent_reduction=True,
