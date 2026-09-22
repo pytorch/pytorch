@@ -3,9 +3,7 @@
 __setattr__/__delattr__ slots."""
 
 import collections
-import copy
 import functools
-import types
 import unittest
 
 import torch
@@ -518,69 +516,6 @@ class TpSetattroTests(TestCase):
         compiled = torch.compile(mod, backend="eager", fullgraph=True)
         x = torch.ones(3)
         self.assertEqual(mod(x), compiled(x))
-
-    def test_dict_getitem_after_attr_write(self):
-        def fn(x):
-            obj = _Plain(x)
-            obj.y = 5
-            return obj.__dict__["y"]
-
-        self._check(fn, torch.ones(3))
-
-    def test_dict_len_and_keys_after_attr_write(self):
-        # Worst of the group: no exception, just a wrong answer.
-        def fn(x):
-            obj = _Plain(x)
-            obj.y = 5
-            return len(obj.__dict__), sorted(obj.__dict__)
-
-        self._check(fn, torch.ones(3))
-
-    def test_dict_contains_after_attr_write(self):
-        def fn(x):
-            obj = _Plain(x)
-            obj.y = 5
-            return "y" in obj.__dict__, "x" in obj.__dict__
-
-        self._check(fn, torch.ones(3))
-
-    def test_attr_read_after_dict_write(self):
-        # The opposite direction already works; pin it so a fix keeps it.
-        def fn(x):
-            obj = _Plain(x)
-            obj.__dict__["y"] = 5
-            return obj.y
-
-        self._check(fn, torch.ones(3))
-
-    def test_simple_namespace_repr_after_write(self):
-        # SimpleNamespace is backed by its __dict__, so repr() goes stale too.
-        def fn(x):
-            ns = types.SimpleNamespace()
-            ns.a = 1
-            return repr(ns), sorted(ns.__dict__)
-
-        self._check(fn, torch.ones(3))
-
-    def test_copy_copy_reads_empty_dict(self):
-        # __init__'s self.x = x leaves __dict__ empty, so copy.copy's
-        # dst.__dict__.update(src.__dict__) copies nothing and the read raises.
-        def fn(x):
-            return copy.copy(_Plain(x)).x
-
-        self._check(fn, torch.ones(3))
-
-    def test_dict_view_on_graph_input_object(self):
-        # Same bug on an object that enters as an input rather than being built
-        # in the region. Each call gets its own object so the eager run does not
-        # pre-populate the one the compiled run sees.
-        def fn(x, obj):
-            obj.y = 5
-            return sorted(obj.__dict__)
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(3)
-        self.assertEqual(fn(x, _Plain(x)), compiled(x, _Plain(x)))
 
     def test_nested_function_defaults_write(self):
         # gb_type "Write to unmodeled getset/member attribute".

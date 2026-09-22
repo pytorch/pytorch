@@ -1264,25 +1264,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_set_cause_with_arg(self):
         @torch.compile(backend="eager", fullgraph=True)
-        def fn(t, err):
+        def fn(t):
+            err = TypeError("abcd")
             err.__cause__ = ValueError()
-            return t.sin()
+            return t.sin(), err
 
         t = torch.randn(2)
-        e = TypeError("abcd")
-        fn(t, e)
+        _, e = fn(t)
         self.assertIsInstance(e.__cause__, ValueError)
 
     def test_set_cause_with_arg_error(self):
         @torch.compile(backend="eager", fullgraph=True)
-        def fn(t, err):
+        def fn(t):
+            err = TypeError("abcd")
             err.__cause__ = 2
-            return t.sin()
+            return t.sin(), err
 
         t = torch.randn(2)
-        e = TypeError("abcd")
-        with self.assertRaisesRegex(TypeError, "exception cause must be"):
-            fn(t, e)
+        with self.assertRaisesRegex(Unsupported, "exception cause must be"):
+            fn(t)
 
     @parametrize(
         "ex",

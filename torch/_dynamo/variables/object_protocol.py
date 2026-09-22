@@ -2528,6 +2528,29 @@ def object_generic_setattr_str(
     else:
         se = tx.output.side_effects
         if not se.is_attribute_mutation(obj):
+            if isinstance(obj, variables.UserDefinedObjectVariable):
+                # A user-defined object reaches a write untracked only when it
+                # predates tracing but arrived without a source, so there is no
+                # way to reload it afterwards and replay the write onto it.
+                from ..side_effects import SideEffects
+
+                if SideEffects.cls_supports_mutation_side_effects(type(obj.value)):
+                    if obj.source is not None:
+                        unimplemented(
+                            gb_type="Attribute mutation on a sourced but untracked user-defined object",
+                            context=f"object={obj}, name={name}, value={value}",
+                            explanation="Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+                            hints=[*graph_break_hints.DYNAMO_BUG],
+                            log_warning=True,
+                        )
+                    unimplemented(
+                        gb_type="Attribute mutation on an untracked user-defined object",
+                        context=f"object={obj}, name={name}, value={value}",
+                        explanation="Dynamo cannot replay this mutation after the "
+                        "graph: the object predates tracing but has no source to "
+                        "reload it from.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
             se.track_attribute_mutation_new(obj)
         se.store_attr(
             obj,

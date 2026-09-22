@@ -434,6 +434,28 @@ fn_known_dunder_attrs = {
 }
 
 
+# GetSet setters for the function slots whose write is the same for every
+# function VT: the value goes to the side effects table, keyed on the VT.
+def _set_name(
+    vt: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    value: "VariableTracker | None",
+) -> None:
+    if value is not None and not issubclass(value.python_type(), str):
+        raise_type_error(tx, "__name__ must be set to a string object")
+    store_attr_mutation(tx, vt, "__name__", value)
+
+
+def _set_qualname(
+    vt: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    value: "VariableTracker | None",
+) -> None:
+    if value is not None and not issubclass(value.python_type(), str):
+        raise_type_error(tx, "__qualname__ must be set to a string object")
+    store_attr_mutation(tx, vt, "__qualname__", value)
+
+
 class BaseUserFunctionVariable(VariableTracker):
     def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
@@ -828,24 +850,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         store_attr_mutation(tx, self, "__annotations__", value)
         return ConstantVariable.create(None)
 
-    def _set_name(
-        self,
-        tx: "InstructionTranslatorBase",
-        value: "VariableTracker | None",
-    ) -> None:
-        if value is not None and not issubclass(value.python_type(), str):
-            raise_type_error(tx, "__name__ must be set to a string object")
-        store_attr_mutation(tx, self, "__name__", value)
-
-    def _set_qualname(
-        self,
-        tx: "InstructionTranslatorBase",
-        value: "VariableTracker | None",
-    ) -> None:
-        if value is not None and not issubclass(value.python_type(), str):
-            raise_type_error(tx, "__qualname__ must be set to a string object")
-        store_attr_mutation(tx, self, "__qualname__", value)
-
     def _get_closure(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(
             tx,
@@ -856,17 +860,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     tp_members = {
         "__doc__": Member(
             getset_load_or_build(
-                lambda s: s.get_doc(),
+                lambda vt: vt.get_doc(),
                 "__doc__",
-                source=lambda s: s.source and AttrSource(s.source, "__doc__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__doc__"),
             ),
             getset_set("__doc__"),
         ),
         "__module__": Member(
             getset_load_or_build(
-                lambda s: s.get_module(),
+                lambda vt: vt.get_module(),
                 "__module__",
-                source=lambda s: s.source and AttrSource(s.source, "__module__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__module__"),
             ),
             getset_set("__module__"),
         ),
@@ -877,25 +881,25 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         "__get__": GetSet(_get_dunder_get, readonly_setter),
         "__name__": GetSet(
             getset_load_or_build(
-                lambda s: s.get_name(),
+                lambda vt: vt.get_name(),
                 "__name__",
-                source=lambda s: s.source and AttrSource(s.source, "__name__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__name__"),
             ),
             _set_name,
         ),
         "__qualname__": GetSet(
             getset_load_or_build(
-                lambda s: s.get_qualname(),
+                lambda vt: vt.get_qualname(),
                 "__qualname__",
-                source=lambda s: s.source and AttrSource(s.source, "__qualname__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__qualname__"),
             ),
             _set_qualname,
         ),
         "__code__": GetSet(
             getset_load_or_build(
-                lambda s: s.get_code(),
+                lambda vt: vt.get_code(),
                 "__code__",
-                source=lambda s: s.source and AttrSource(s.source, "__code__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__code__"),
             ),
             unmodeled_setter,
         ),
@@ -2071,14 +2075,6 @@ class UserMethodVariable(BaseUserFunctionVariable):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L61
         return super().call_function(tx, args, kwargs)
 
-    def read_func_slot(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker | None":
-        # method_getattro forwards slot reads to __func__, so __defaults__,
-        # __kwdefaults__, __closure__ and friends come off the function.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L269
-        return self.im_func.read_func_slot(tx, name)
-
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2094,16 +2090,60 @@ class UserMethodVariable(BaseUserFunctionVariable):
     tp_members = {
         "__self__": Member(lambda s, _: s.im_self, readonly_setter),
         "__func__": Member(lambda s, _: s.im_func, readonly_setter),
+        "__doc__": Member(
+            getset_load_or_build(
+                lambda vt: vt.get_doc(),
+                "__doc__",
+                lambda vt: vt.source and AttrSource(vt.source, "__doc__"),
+            ),
+            getset_set("__doc__"),
+        ),
+        "__module__": Member(
+            getset_load_or_build(
+                lambda vt: vt.get_module(),
+                "__module__",
+                lambda vt: vt.source and AttrSource(vt.source, "__module__"),
+            ),
+            getset_set("__module__"),
+        ),
+    }
+
+    # method_getattro forwards everything else to __func__; these accessors
+    # already do that through the get_code()/get_globals() delegation above.
+    tp_getset = {
+        "__name__": GetSet(
+            getset_load_or_build(
+                lambda vt: vt.get_name(),
+                "__name__",
+                lambda vt: vt.source and AttrSource(vt.source, "__name__"),
+            ),
+            _set_name,
+        ),
+        "__qualname__": GetSet(
+            getset_load_or_build(
+                lambda vt: vt.get_qualname(),
+                "__qualname__",
+                lambda vt: vt.source and AttrSource(vt.source, "__qualname__"),
+            ),
+            _set_qualname,
+        ),
+        "__code__": GetSet(
+            getset_load_or_build(
+                lambda vt: vt.get_code(),
+                "__code__",
+                lambda vt: vt.source and AttrSource(vt.source, "__code__"),
+            ),
+            unmodeled_setter,
+        ),
+        "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx), unmodeled_setter),
     }
 
     if "__get__" not in types.MethodType.__dict__:
         # 3.11 and 3.12: method has no __get__, so method_getattro forwards the
         # attribute to __func__, whose __get__ re-binds.
-        tp_getset = {
-            "__get__": GetSet(
-                lambda s, tx: s.im_func._get_dunder_get(tx), readonly_setter
-            )
-        }
+        tp_getset["__get__"] = GetSet(
+            lambda s, tx: s.im_func._get_dunder_get(tx), readonly_setter
+        )
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -2329,38 +2369,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         c = self.closure
         return c if c is not None else ConstantVariable.create(None)
 
-    def _set_name(
-        self,
-        tx: "InstructionTranslatorBase",
-        value: "VariableTracker | None",
-    ) -> None:
-        if value is not None and not issubclass(value.python_type(), str):
-            raise_type_error(tx, "__name__ must be set to a string object")
-        store_attr_mutation(tx, self, "__name__", value)
-
-    def _set_qualname(
-        self,
-        tx: "InstructionTranslatorBase",
-        value: "VariableTracker | None",
-    ) -> None:
-        if value is not None and not issubclass(value.python_type(), str):
-            raise_type_error(tx, "__qualname__ must be set to a string object")
-        store_attr_mutation(tx, self, "__qualname__", value)
-
     tp_members = {
         "__doc__": Member(
             getset_load_or_build(
-                lambda s: s.get_doc(),
+                lambda vt: vt.get_doc(),
                 "__doc__",
-                source=lambda s: s.source and AttrSource(s.source, "__doc__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__doc__"),
             ),
             getset_set("__doc__"),
         ),
         "__module__": Member(
             getset_load_or_build(
-                lambda s: s.get_module(),
+                lambda vt: vt.get_module(),
                 "__module__",
-                source=lambda s: s.source and AttrSource(s.source, "__module__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__module__"),
             ),
             getset_set("__module__"),
         ),
@@ -2371,25 +2393,25 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         "__defaults__": GetSet(_get_defaults, _set_defaults),
         "__name__": GetSet(
             getset_load_or_build(
-                lambda s: s.get_name(),
+                lambda vt: vt.get_name(),
                 "__name__",
-                source=lambda s: s.source and AttrSource(s.source, "__name__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__name__"),
             ),
             _set_name,
         ),
         "__qualname__": GetSet(
             getset_load_or_build(
-                lambda s: s.get_qualname(),
+                lambda vt: vt.get_qualname(),
                 "__qualname__",
-                source=lambda s: s.source and AttrSource(s.source, "__qualname__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__qualname__"),
             ),
             _set_qualname,
         ),
         "__code__": GetSet(
             getset_load_or_build(
-                lambda s: s.get_code(),
+                lambda vt: vt.get_code(),
                 "__code__",
-                source=lambda s: s.source and AttrSource(s.source, "__code__"),
+                lambda vt: vt.source and AttrSource(vt.source, "__code__"),
             ),
             unmodeled_setter,
         ),
@@ -3115,6 +3137,60 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_code(self) -> types.CodeType:
         return self.get_function().__code__
+
+    # The wrapper is not a function object, so these must not fall through to
+    # the function getsets the MRO walk would find (python_type() reports
+    # FunctionType). They read the wrapper via the get_* accessors above; the
+    # function-only slots (__defaults__ et al.) are deliberately absent.
+    tp_members = {
+        "__doc__": Member(
+            getset_load_or_build(
+                lambda vt: vt.get_doc(),
+                "__doc__",
+                lambda vt: vt.source and AttrSource(vt.source, "__doc__"),
+            ),
+            getset_set("__doc__"),
+        ),
+        "__module__": Member(
+            getset_load_or_build(
+                lambda vt: vt.get_module(),
+                "__module__",
+                lambda vt: vt.source and AttrSource(vt.source, "__module__"),
+            ),
+            getset_set("__module__"),
+        ),
+    }
+
+    tp_getset = {
+        "__name__": GetSet(
+            getset_load_or_build(
+                lambda vt: vt.get_name(),
+                "__name__",
+                lambda vt: vt.source and AttrSource(vt.source, "__name__"),
+            ),
+            _set_name,
+        ),
+        "__qualname__": GetSet(
+            getset_load_or_build(
+                lambda vt: vt.get_qualname(),
+                "__qualname__",
+                lambda vt: vt.source and AttrSource(vt.source, "__qualname__"),
+            ),
+            _set_qualname,
+        ),
+        "__code__": GetSet(
+            getset_load_or_build(
+                lambda vt: vt.get_code(),
+                "__code__",
+                lambda vt: vt.source and AttrSource(vt.source, "__code__"),
+            ),
+            unmodeled_setter,
+        ),
+        "__dict__": GetSet(
+            lambda s, tx: s.get_dict_vt(tx),
+            unmodeled_setter,
+        ),
+    }
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -5588,7 +5664,10 @@ class TupleGetterVariable(VariableTracker):
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L2717-L2721
     tp_members = {
         "__doc__": Member(
-            getset_load_or_build(lambda s: s.descriptor.__doc__, "__doc__"),
+            # The doc is read off the descriptor, which carries no source here.
+            getset_load_or_build(
+                lambda s: s.descriptor.__doc__, "__doc__", lambda s: None
+            ),
             getset_set("__doc__"),
         )
     }

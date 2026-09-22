@@ -4499,6 +4499,14 @@
   "GB1392": [
     {
       "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
+      "Context": "object={obj}, name={name}, value={value}",
+      "Explanation": "Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
+    {
+      "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
       "Context": "object={self}, name={name_str}, value={value}",
       "Explanation": "Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
       "Hints": [
@@ -6476,6 +6484,14 @@
     }
   ],
   "GB1940": [
+    {
+      "Gb_type": "Attribute mutation on an untracked user-defined object",
+      "Context": "object={obj}, name={name}, value={value}",
+      "Explanation": "Dynamo cannot replay this mutation after the graph: the object predates tracing but has no source to reload it from.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Attribute mutation on an untracked user-defined object",
       "Context": "object={self}, name={name_str}, value={value}",
