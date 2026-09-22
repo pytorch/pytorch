@@ -1,6 +1,5 @@
 import functools
 import inspect
-import logging
 import os
 import threading
 from functools import cached_property
@@ -10,9 +9,6 @@ from typing_extensions import Unpack
 from ..utils import is_rocm
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
-
-
-log = logging.getLogger(__name__)
 
 
 class MissingTritonKernelError(RuntimeError):
@@ -275,21 +271,12 @@ class StaticallyLaunchedTritonKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-    def reload_cubin_from_raw(self, filepath: str, *, force: bool = False) -> str:
+    def reload_cubin_from_raw(self, filepath: str) -> str:
         """
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        # Usually preserve an existing cache artifact until the native loader
-        # proves it unusable. When a cached graph already retains the binary,
-        # that payload is authoritative and must replace any differing file
-        # before native loading can silently accept it.
-        if force:
-            snapshot = _read_cubin_snapshot(filepath)
-            needs_write = snapshot is None or snapshot != self.cubin_raw
-        else:
-            needs_write = not os.path.exists(filepath)
-        if needs_write:
+        if not os.path.exists(filepath):
             if self.cubin_raw is None:
                 raise MissingTritonKernelError(
                     f"Triton kernel binary not found at {filepath}"
