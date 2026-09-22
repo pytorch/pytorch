@@ -303,11 +303,76 @@ def _node_arg(node: torch.fx.Node, name: str) -> object:
     return None
 
 
+# nondeterministic_seeded marks ops that MAY draw. For these an argument decides, and
+# they sit in the middle of every attention, dropout and RNN call site, so treating
+# them as unconditional draws would put essentially every real model on the
+# rewind-anything-concurrent path. The named argument ("dropout_p", "train" or
+# "training") is falsy iff the op cannot draw; None marks an op that never draws.
+# Qualified names: a custom op that merely shares a base name must not inherit a gate.
+# This is every tagged aten op taking one of those arguments;
+# test_rng_gate_table_matches_the_op_registry keeps it honest against the registry.
+_RNG_GATED_BY_ARG: dict[str, str | None] = {
+    "aten::_cudnn_attention_backward": "dropout_p",
+    "aten::_cudnn_attention_forward": "dropout_p",
+    # Tagged, but its kernel hardcodes dropout_p=0.0 (the flash sibling takes one).
+    "aten::_cudnn_attention_forward_no_dropout_inplace": None,
+    "aten::_cudnn_init_dropout_state": "train",
+    "aten::_cudnn_rnn": "train",
+    "aten::_efficient_attention_forward": "dropout_p",
+    "aten::_fill_mem_eff_dropout_mask_": "dropout_p",
+    "aten::_flash_attention_forward": "dropout_p",
+    "aten::_flash_attention_forward_no_dropout_inplace": "dropout_p",
+    "aten::_fused_sdp_choice": "dropout_p",
+    "aten::_lstm_mps": "train",
+    "aten::_scaled_dot_product_attention_math": "dropout_p",
+    "aten::_scaled_dot_product_attention_math_for_mps": "dropout_p",
+    "aten::_scaled_dot_product_cudnn_attention": "dropout_p",
+    "aten::_scaled_dot_product_cudnn_attention_backward": "dropout_p",
+    "aten::_scaled_dot_product_efficient_attention": "dropout_p",
+    "aten::_scaled_dot_product_efficient_attention_backward": "dropout_p",
+    "aten::_scaled_dot_product_flash_attention": "dropout_p",
+    "aten::_scaled_dot_product_flash_attention_for_cpu": "dropout_p",
+    "aten::_scaled_dot_product_fused_attention_overrideable": "dropout_p",
+    "aten::_triton_scaled_dot_attention": "dropout_p",
+    "aten::alpha_dropout": "train",
+    "aten::alpha_dropout_": "train",
+    "aten::dropout": "train",
+    "aten::dropout_": "train",
+    "aten::feature_alpha_dropout": "train",
+    "aten::feature_alpha_dropout_": "train",
+    "aten::feature_dropout": "train",
+    "aten::feature_dropout_": "train",
+    "aten::gru": "train",
+    "aten::lstm": "train",
+    "aten::miopen_rnn": "train",
+    "aten::native_dropout": "train",
+    "aten::rnn_relu": "train",
+    "aten::rnn_tanh": "train",
+    "aten::rrelu": "training",
+    "aten::rrelu_": "training",
+    "aten::rrelu_with_noise": "training",
+    "aten::rrelu_with_noise_": "training",
+    "aten::rrelu_with_noise_functional": "training",
+    "aten::scaled_dot_product_attention": "dropout_p",
+}
+
+
 def _op_can_draw(node: torch.fx.Node) -> bool:
     target = node.target
     if not isinstance(target, torch._ops.OpOverload):
         return False
-    return torch.Tag.nondeterministic_seeded in target.tags
+    if torch.Tag.nondeterministic_seeded not in target.tags:
+        return False
+    name = target._schema.name
+    if name not in _RNG_GATED_BY_ARG:
+        return True
+    arg_name = _RNG_GATED_BY_ARG[name]
+    if arg_name is None:
+        return False
+    value = _node_arg(node, arg_name)
+    # Anything not a plain constant (a symbolic or traced value) has to be assumed
+    # live; only a literal zero/False proves this call site cannot draw.
+    return not isinstance(value, (bool, int, float)) or bool(value)
 
 
 def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
@@ -2605,18 +2670,19 @@ class _PrecompileApi:
         Capture restores the generator state it consumed, and only that: a graph
         containing no op that can draw leaves the generators untouched even if a
         concurrent thread advanced them. Every op tagged ``nondeterministic_seeded``
-        counts as a draw on its output's device, even one configured not to draw, and an
-        op that is not an aten op (a custom op, a higher-order op) could draw from any
-        generator, so every saved one is restored. A draw through an explicit
-        ``torch.Generator`` is left advanced with a warning, and no default generator is
-        rewound for it. When a restore does happen it rewinds any draw a concurrent
-        thread made while capture ran, so precompile random computations before starting
-        threads that share the default generator. The restore happens once the graph is
-        traced, so a capture rejected after that still restores; one that fails
-        mid-trace has no graph to attribute draws to and restores nothing. The CPU
-        generator is always saved; of the current accelerator (CUDA, XPU, MPS, ...) only
-        an already-initialized current device and the devices reachable from the
-        arguments are, and a draw on any other device warns and is left as-is.
+        counts as a draw on its output's device unless a literal argument proves it
+        cannot (``dropout_p=0.0``, ``train=False``), and an op that is not an aten op (a
+        custom op, a higher-order op) could draw from any generator, so every saved one
+        is restored. A draw through an explicit ``torch.Generator`` is left advanced
+        with a warning, and no default generator is rewound for it. When a restore does
+        happen it rewinds any draw a concurrent thread made while capture ran, so
+        precompile random computations before starting threads that share the default
+        generator. The restore happens once the graph is traced, so a capture rejected
+        after that still restores; one that fails mid-trace has no graph to attribute
+        draws to and restores nothing. The CPU generator is always saved; of the current
+        accelerator (CUDA, XPU, MPS, ...) only an already-initialized current device and
+        the devices reachable from the arguments are, and a draw on any other device
+        warns and is left as-is.
 
         ``backend`` selects how the captured graph is realized:
 
