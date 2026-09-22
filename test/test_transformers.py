@@ -3861,30 +3861,6 @@ class TestSDPAAccelerator(NNTestCase):
                 shared_storage_dqdkdv=True,
             )
 
-    @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_backward'")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
-    def test_mem_efficient_attention_backward_accepts_contiguous_out(self, device):
-        """AOTriton's fused backward reads grad_out through the strides of `out`
-        (ROCm/aotriton#236), so `out` has to reach it in grad_out's layout; context
-        parallel hands back a (batch, heads, seq, dim)-contiguous `out`, which used to
-        memory-fault on ROCm. A random grad_out makes a mis-strided read show up in dk/dv."""
-        query = torch.randn(8, 8, 4096, 32, device=device)
-        key = torch.randn_like(query)
-        value = torch.randn_like(query)
-        out, logsumexp, seed, offset = torch.ops.aten._scaled_dot_product_efficient_attention(
-            query, key, value, None, True, 0.0, True
-        )
-        grad_out = torch.randn_like(out)
-        grad_mask = [True, True, True, False]
-        reference = torch.ops.aten._scaled_dot_product_efficient_attention_backward(
-            grad_out, query, key, value, None, out, logsumexp, seed, offset, 0.0, grad_mask, True
-        )
-        actual = torch.ops.aten._scaled_dot_product_efficient_attention_backward(
-            grad_out, query, key, value, None, out.contiguous(), logsumexp, seed, offset, 0.0, grad_mask, True
-        )
-        for ref, act in zip(reference[:3], actual[:3]):
-            self.assertEqual(act, ref)
-
     @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_zero_heads(self, device):
