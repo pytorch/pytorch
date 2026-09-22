@@ -1804,10 +1804,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
      * Also note that this is enabled for mobile only because blas
      * implementation for non-mobile build is already multithreaded.
      */
-    // Benchmarking was done as follows:
-    // bmm_test: operator benchmark under
-    // benchmarks/operator_benchmarks/pt/bmm_test.py Ran this benchmark for
-    // various matrix sizes on Samsung S8U
+    // Benchmarked with various matrix sizes on Samsung S8U.
     const bool enable_multithreaded_bmm = c10::InferenceMode::is_enabled() &&
         bs >= 4 && res_rows >= 4 && res_cols >= 16 && contraction_size >= 16;
 #else
