@@ -1,13 +1,12 @@
 """Plain-data types the multi-graph precompile capture reports through.
 
 A leaf module on purpose. ``import torch`` loads ``torch.compiler``, and through
-it ``torch._precompile`` (and, once ``torch.compiler.precompile`` is a module
-later in this stack, this module too), without loading ``torch._dynamo``, so a
-type that public surface exports cannot live in the Dynamo-side internals,
-``torch/_dynamo/precompile_package.py`` (which imports this module at load time
-later in this stack), without an import cycle. Import-wise the types could live
-in ``torch/_precompile.py``; keeping them out of it is layering: the Dynamo
-internals must not depend on the make_fx capture module, which the follow-up
+it ``torch._precompile`` and the public types defined here, without loading
+``torch._dynamo``, so a type that public surface exports cannot live in the
+Dynamo-side internals, ``torch/_dynamo/precompile_package.py`` (which imports
+this module), without an import cycle. Import-wise the types could live in
+``torch/_precompile.py``; keeping them out of it is layering: the Dynamo
+internals must not depend on the make_fx capture module, which the multi-graph
 capture session makes an importer of those internals. The types are frozen
 dataclasses of immutable fields, so they pickle, compare by value and hash.
 """
@@ -22,9 +21,8 @@ class GuardFact:
 
     Attributes:
         guard_type: The Dynamo guard type, e.g. ``"TENSOR_MATCH"``.
-        source: The guarded source, spelled as ``GuardFilterEntry.name``, i.e.
-            the ``Guard.name`` with local scope stripped (``L['x']`` -> ``x``),
-            the same spelling as the ``(guard_type, source)`` slots of
+        source: The guarded source with the local scope stripped (``L['x']`` ->
+            ``x``), the same spelling as the ``(guard_type, source)`` slots of
             ``PrecompileSummary``: ``"x"``, ``"self.eps"``, ``"G['CFG'].width"``.
             Empty for a guard checked against no source.
         code: The rendered check parts, with the addresses Dynamo interpolates
@@ -36,6 +34,8 @@ class GuardFact:
             an identity guard. Empty when the code says it all.
         enforced: Whether the artifact still checks this guard (it was serialized).
     """
+
+    # source is GuardFilterEntry.name: Guard.name with the local scope stripped.
 
     guard_type: str
     source: str
@@ -102,11 +102,11 @@ class PrecompileSummary:
         resume_functions: Of those, the graph-break continuations.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
-        bypassed: ``co_name`` of the frames the package holds nothing installable
+        bypassed: ``co_name``s of frames the package holds nothing installable
             for: no compile of the frame recorded a guarded code and one was
             bypassed (its guards could not be serialized, or its graph held
-            parameters by static address), or a
-            backend artifact was missing when the package was saved. Not an
+            parameters by static address), or a backend artifact was missing
+            when the package was saved. Not an
             eager fallback: the frame ran compiled during capture, the package
             kept no variant of it a load can serve, and an install re-traces it
             rather than skipping it as trivial.
@@ -115,15 +115,15 @@ class PrecompileSummary:
             as ``>=``: from a limit hit on, that frame and the frames it calls
             run without tracing, so a limit hit that would follow it there is
             never recorded.
-        uncovered_frames: ``co_name`` of the frames the capture ran that ended with
-            no guarded code and were not bypassed, so the artifact cannot serve
+        uncovered_frames: ``co_name``s of frames the capture ran that ended with no
+            guarded code and were not bypassed, so the artifact cannot serve
             them: a thin wrapper whose graphs all landed in an inner frame, a
             frame Dynamo gave up on, or a frame whose compile raised (its
             message is in ``capture_errors``, so one failure shows in both
             digest clauses). A different cause and remedy from ``bypassed``
             (an install leaves an uncovered frame to run eagerly, so only a
-            re-capture recovers it, where it re-traces a bypassed one), never the same
-            frame; a frame that hit the recompile limit before it recorded a
+            re-capture recovers it, where it re-traces a bypassed one), never
+            the same frame; a frame that hit the recompile limit before it recorded a
             guarded code is in ``truncated`` too. Not a remainder: which frames
             count as a gap is the producer's decision, and a frame the package
             holds an entry for but never ran is not one, so this is not
@@ -140,9 +140,9 @@ class PrecompileSummary:
             variant cannot notice whatever it checked. Which guards a filter
             rejects is that filter's own contract and not repeated here; a
             caller-supplied filter decides its own set. A slot is listed under
-            the guard's own type
-            whatever the reason for the drop, so a ``TENSOR_MATCH`` rejected for
-            what its check derives is a dropped ``TENSOR_MATCH``.
+            the guard's own type whatever the reason for the drop, so a
+            ``TENSOR_MATCH`` rejected for what its check derives is a dropped
+            ``TENSOR_MATCH``.
         kept_guards: Slots the serialized copy's guard filter kept and the
             invariance policy left in place.
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
@@ -158,8 +158,7 @@ class PrecompileSummary:
             of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
             rendered a check (how the check is installed does not predict that,
             and a slot whose guard rendered none has no entry). One rendering
-            however many
-            variants dropped the slot: where the check embeds the guarded value
+            however many variants dropped the slot: where the check embeds the guarded value
             (``EQUALS_MATCH`` renders ``L['n'] == 3``) it is one variant's, the
             producer's pick rather than a merge, so it tells the form of the
             check and not the value; that the slot varied at all is what
