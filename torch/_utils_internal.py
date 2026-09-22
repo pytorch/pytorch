@@ -239,11 +239,14 @@ def is_fb_unit_test() -> bool:
 
 
 @functools.cache
-def max_clock_rate():
+def max_clock_rate(device: int | None = None):
     """
     unit: MHz
     """
     if not torch.version.hip:
+        if device is not None:
+            return torch.cuda.get_device_properties(device).clock_rate / 1000
+
         from triton.testing import nvsmi
 
         try:
@@ -260,7 +263,10 @@ def max_clock_rate():
         # Manually set max-clock speeds on ROCm until equivalent nvmsi
         # functionality in triton.testing or via pyamdsmi enablement. Required
         # for test_snode_runtime unit tests.
-        gcn_arch = str(torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0])
+        device = torch.cuda.current_device() if device is None else device
+        gcn_arch = str(
+            torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+        )
         if "gfx94" in gcn_arch:
             return 1700
         elif "gfx90a" in gcn_arch:
