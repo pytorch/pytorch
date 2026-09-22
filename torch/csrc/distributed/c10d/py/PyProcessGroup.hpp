@@ -1,5 +1,8 @@
 #pragma once
 
+#include <c10/util/ScopeExit.h>
+#include <unordered_set>
+
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
@@ -89,6 +92,36 @@ class PyProcessGroup : public ProcessGroup {
   };
 
   using ProcessGroup::ProcessGroup;
+
+  bool supportsReconfigure() const override {
+    pybind11::gil_scoped_acquire gil;
+    auto self = pybind11::cast(static_cast<const ProcessGroup*>(this));
+    auto cls = pybind11::type::of(self);
+    auto base = pybind11::type::of<ProcessGroup>();
+    // Unlike methods, a property must be inspected before evaluating it:
+    // evaluating the inherited C++ descriptor would reenter this virtual.
+    if (cls.attr("supports_reconfigure")
+            .is(base.attr("supports_reconfigure"))) {
+      return ProcessGroup::supportsReconfigure();
+    }
+    // A Python property may itself delegate to super().supports_reconfigure.
+    static thread_local std::unordered_set<const PyProcessGroup*> active;
+    if (!active.insert(this).second) {
+      return ProcessGroup::supportsReconfigure();
+    }
+    auto guard = c10::make_scope_exit([this] { active.erase(this); });
+    return self.attr("supports_reconfigure").cast<bool>();
+  }
+
+  ReconfigureHandle get_reconfigure_handle() const override {
+    PYBIND11_OVERRIDE(
+        ReconfigureHandle, ProcessGroup, get_reconfigure_handle, );
+  }
+
+  c10::intrusive_ptr<Work> reconfigure(
+      const ReconfigureOptions& opts) override {
+    WORK_OVERRIDE(ProcessGroup, reconfigure, opts);
+  }
 
   const std::string getBackendName() const override {
     PYBIND11_OVERRIDE(
