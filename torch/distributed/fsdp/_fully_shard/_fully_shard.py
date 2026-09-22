@@ -1006,12 +1006,6 @@ class FSDPModule:
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
         state = self._get_fsdp_state()
-        with torch.no_grad():
-            for group in state._fsdp_param_groups:
-                for param in group.fsdp_params:
-                    if not param._sharded_grad_dtype_initialized:
-                        # Conversion may replace the parameter's policy metadata.
-                        param.reset_sharded_param()
         ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
         if not state._fsdp_param_groups:
             return ret

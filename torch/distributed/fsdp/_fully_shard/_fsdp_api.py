@@ -38,7 +38,8 @@ class MixedPrecisionPolicy:
             gradients without casting before reduction. If ``None``, this uses
             the compute dtype. Reduced sharded gradients use each parameter's
             ``grad_dtype`` as specified before calling
-            :func:`fully_shard`. (Default: ``None``)
+            :func:`fully_shard`. Changing this policy afterward is unsupported,
+            including before the first forward. (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed

@@ -275,6 +275,54 @@ class TestFullyShardPendingGrad(FSDPTest):
         self.assertEqual(model.weight.grad.full_tensor(), before)
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("boundary", ["backward", "unshard", "synchronize"])
+    def test_grad_dtype_edit_after_forward_rejected(self, device, boundary):
+        device = torch.device(device).type
+        model = nn.Linear(1, 2, bias=False, device=device)
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device, (self.world_size,)),
+            reshard_after_forward=False,
+        )
+        model.set_reshard_after_backward(False)
+        model.set_requires_gradient_sync(False)
+        output = model(torch.ones(1, 1, device=device))
+        if boundary != "backward":
+            output.sum().backward()
+            self.assertIsInstance(model.weight.grad, FSDPGrad)
+        param = model.weight
+        grad = param.grad
+        param.grad_dtype = None
+        with self.assertRaisesRegex(RuntimeError, "grad_dtype.*fully_shard"):
+            if boundary == "backward":
+                output.sum().backward()
+            elif boundary == "unshard":
+                model.unshard()
+            else:
+                model.synchronize_gradients()
+        self.assertIs(param.grad, grad)
+        self.assertIsNone(param.grad_dtype)
+
+    @skip_if_lt_x_gpu(2)
+    def test_none_grad_dtype_preserved_with_pending_conversion(self, device):
+        device = torch.device(device).type
+        model = nn.Linear(1, 2, bias=False, device=device)
+        model.weight.grad_dtype = None
+        fully_shard(model, mesh=init_device_mesh(device, (self.world_size,)))
+        model.set_requires_gradient_sync(False)
+        inp = torch.ones(1, 1, device=device)
+        model(inp).sum().backward()
+        self.assertIsInstance(model.weight.grad, FSDPGrad)
+        model.to(device=device)
+        self.assertIsNone(model.weight.grad_dtype)
+        model.set_requires_gradient_sync(True)
+        model(inp).sum().backward()
+        self.assertIsNone(model.weight.grad_dtype)
+        self.assertEqual(
+            model.weight.grad.full_tensor(), torch.full((2, 1), 2.0, device=device)
+        )
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("callback", ["hook", "reduce_scatter", "packing"])
     def test_custom_hook_runs_only_on_synchronization(self, device, callback):
         device = torch.device(device).type

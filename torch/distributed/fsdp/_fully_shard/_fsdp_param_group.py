@@ -322,12 +322,13 @@ class FSDPParamGroup:
         # Users may change or register parameters after construction time.
         # For example, DoRA (https://arxiv.org/abs/2402.09353) initializes linear magnitudes based on
         # other parameters (e.g. loaded from the state dict).
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.check_grad_dtype()
         if not hasattr(self.comm_ctx, "device_handle"):
             self.comm_ctx.device_handle = _get_device_handle(self.device.type)
         if self.is_sharded and not self._reset_sharded_params:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.reset_sharded_param()
-                fsdp_param._sharded_grad_dtype_initialized = True
                 fsdp_param._init_extensions()  # allow monkey patch after init
             self._reset_sharded_params = True
         self._validate_no_meta_params()
@@ -395,6 +396,8 @@ class FSDPParamGroup:
     # Runtime #
     @_disable_functorch_if_active
     def unshard(self, async_op: bool = False):
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.check_grad_dtype()
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
@@ -646,6 +649,8 @@ class FSDPParamGroup:
     @_dynamo_disable
     def post_backward(self, *unused: Any):
         with _spmd_no_typecheck():
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.check_grad_dtype()
             # This method should be idempotent and safe to call even when this
             # FSDP parameter group was not used in backward (should be a no-op)
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))
@@ -956,6 +961,7 @@ class FSDPParamGroup:
         owner_spec: DTensorSpec,
         owner_device: torch.device,
     ) -> DTensor:
+        param.check_grad_dtype()
         if (
             param._sharding_spec != owner_spec
             or param.sharded_param.device != owner_device

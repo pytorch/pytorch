@@ -7,6 +7,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fully_shard._fsdp_grad import FSDPGrad
 from torch.distributed.tensor import DTensor, Partial
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
@@ -66,7 +67,13 @@ class TestFullyShardConversion(TestCase):
             self.assertEqual(actual.dtype, value.dtype)
             self.assertIs(actual.grad, grad)
             if grad is not None:
-                self.assertEqual(grad, grad_value)
+                if isinstance(grad, FSDPGrad):
+                    for component in ("reduced", "unreduced", "partial"):
+                        self.assertEqual(
+                            getattr(grad, component), getattr(grad_value, component)
+                        )
+                else:
+                    self.assertEqual(grad, grad_value)
                 self.assertEqual(grad.dtype, grad_value.dtype)
             self.assertEqual(actual.grad_dtype, grad_dtype)
             self.assertEqual(actual._has_grad_dtype_override, override)
@@ -202,7 +209,9 @@ class TestFullyShardConversion(TestCase):
         group = model._get_fsdp_state()._fsdp_param_groups[0]
         param = group.fsdp_params[0]
         self.assertTrue(group.is_unsharded)
-        self.assertEqual(model.weight.grad.placements, (Partial("avg"),))
+        self.assertIsInstance(model.weight.grad, FSDPGrad)
+        self.assertIsNotNone(model.weight.grad.unreduced)
+        self.assertEqual(model.weight.grad.unreduced.placements, (Partial("avg"),))
         storage_size = param.unsharded_param.untyped_storage().nbytes()
         pending_spec = param._pending_grad_spec
         self._assert_conversion_requires_clear(model, torch.bfloat16)
@@ -236,14 +245,50 @@ class TestFullyShardConversion(TestCase):
             module(inp).sum().backward()
         self._assert_parity(model, reference, check_override=True)
 
-    @parametrize("grad_dtype", ["default", torch.float32, torch.bfloat16, None])
-    @parametrize("convert", [False, True])
-    def test_grad_dtype_change_before_first_forward(self, device, grad_dtype, convert):
+    @parametrize(
+        "initial_policy,replacement_policy,boundary",
+        [
+            ("default", torch.float32, "forward"),
+            (torch.float32, None, "forward"),
+            (None, torch.float32, "forward"),
+            ("default", torch.bfloat16, "forward_after_warmup"),
+            ("default", torch.float32, "conversion"),
+            (torch.float32, None, "load_state_dict"),
+        ],
+    )
+    def test_grad_dtype_change_after_fully_shard_rejected(
+        self, device, initial_policy, replacement_policy, boundary
+    ):
+        model = nn.Linear(4, 4, bias=False, device=device)
+        if initial_policy != "default":
+            model.weight.grad_dtype = initial_policy
+        fully_shard(model, mesh=self.mesh)
+        inp = torch.ones(2, 4, device=device)
+        if boundary == "forward_after_warmup":
+            model(inp).sum().backward()
+            model.zero_grad(set_to_none=True)
+        state_dict = model.state_dict() if boundary == "load_state_dict" else None
+
+        # Setting the default's current dtype explicitly also changes policy:
+        # future parameter conversions would otherwise stop following dtype.
+        model.weight.grad_dtype = replacement_policy
+        with self.assertRaisesRegex(RuntimeError, "grad_dtype.*fully_shard"):
+            if boundary == "conversion":
+                model.to(torch.bfloat16)
+            elif boundary == "load_state_dict":
+                model.load_state_dict(state_dict, assign=True)
+            else:
+                model(inp)
+
+    @parametrize("grad_dtype", ["default", torch.float32, None])
+    def test_grad_dtype_policy_preserved_after_conversion_and_replacement(
+        self, device, grad_dtype
+    ):
         reference = nn.Linear(4, 4, bias=False, device=device)
         model = copy.deepcopy(reference)
-        if grad_dtype is None:
+        if grad_dtype != "default":
             for module in (model, reference):
-                module.weight.grad_dtype = torch.float32
+                module.weight.grad_dtype = grad_dtype
         fully_shard(
             model,
             mesh=self.mesh,
@@ -252,18 +297,34 @@ class TestFullyShardConversion(TestCase):
             ),
         )
         for module in (model, reference):
-            if grad_dtype != "default":
-                module.weight.grad_dtype = grad_dtype
-            if convert:
-                module.to(torch.bfloat16)
+            module.to(torch.bfloat16)
         self._assert_parity(model, reference, check_override=True)
+        previous = model.weight
+        state_dict = model.state_dict()
+        replacement = nn.Parameter(state_dict["weight"])
+        replacement.grad_dtype = torch.float64
+        state_dict["weight"] = replacement
+        model.load_state_dict(state_dict, assign=True)
+        self.assertIsNot(model.weight, previous)
+        self.assertIs(model.weight, replacement)
+        self._assert_parity(model, reference, check_override=grad_dtype != "default")
+        for module in (model, reference):
+            module.to(torch.float32)
+        self._assert_parity(model, reference, check_override=grad_dtype != "default")
         dtype = reference.weight.dtype
         inp = torch.arange(8, device=device, dtype=dtype).view(2, 4) / 8
         for _ in range(2):
             for module in (model, reference):
                 module.zero_grad(set_to_none=True)
                 module(inp).sum().backward()
-            self._assert_parity(model, reference, check_override=True)
+            self._assert_parity(
+                model, reference, check_override=grad_dtype != "default"
+            )
+            for group in model._get_fsdp_state()._fsdp_param_groups:
+                for param in group.fsdp_params:
+                    self.assertEqual(
+                        param._has_sharded_grad_dtype_override, grad_dtype != "default"
+                    )
 
 
 instantiate_device_type_tests(

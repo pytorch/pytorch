@@ -218,6 +218,7 @@ class FSDPParam:
     _orig_param_uid: int
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
+    _installed_grad_dtype_policy: tuple[bool, torch.dtype | None]
     unsharded_grad_dtype: torch.dtype
     param_group: "FSDPParamGroup"
 
@@ -241,7 +242,6 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        self._sharded_grad_dtype_initialized = False
         self._grad_is_partial = False
         self._pending_gradient: FSDPGrad | None = None
         self._partial_grad: DTensor | None = None
@@ -256,6 +256,11 @@ class FSDPParam:
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
         self._param_fqn: str | None = None  # prefixed from root module
+        self._pre_load_hook_handle = (
+            module_info.module.register_load_state_dict_pre_hook(
+                lambda *args: self.check_grad_dtype()
+            )
+        )
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
         self._post_load_hook_handle = (
@@ -295,6 +300,10 @@ class FSDPParam:
         # Snapshot before any rewrite of `param` (e.g. spmd_types -> DTensor).
         self._has_sharded_grad_dtype_override = param._has_grad_dtype_override
         self.sharded_grad_dtype = param.grad_dtype
+        self._installed_grad_dtype_policy = (
+            self._has_sharded_grad_dtype_override,
+            self.sharded_grad_dtype if self._has_sharded_grad_dtype_override else None,
+        )
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -982,6 +991,7 @@ class FSDPParam:
         )
 
     def to_sharded(self) -> None:
+        self.check_grad_dtype()
         if not (
             self.param_group._training_state == TrainingState.POST_BACKWARD
             and self.param_group.reduce_grads
@@ -1037,6 +1047,7 @@ class FSDPParam:
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:
+        self.check_grad_dtype()
         # Assume that the data has been allocated and all-gathered
         if (
             self.sharded_state == ShardedState.UNSHARDED
@@ -1563,16 +1574,36 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
+    def check_grad_dtype(self) -> None:
+        # Direct grad_dtype edits after fully_shard(), including before lazy
+        # init, are intentionally unsupported. Conversion and state-dict loading
+        # restore the captured policy instead of adopting a new user policy.
+        owners = [(self.sharded_param, *self._installed_grad_dtype_policy)]
+        if (param := getattr(self, "_unsharded_param", None)) is not None:
+            owners.append((param, True, self.unsharded_grad_dtype))
+        if (
+            self.sharded_state == ShardedState.SHARDED_POST_FORWARD
+            and (param := self._sharded_post_forward_param) is not None
+        ):
+            owners.append((param, True, self.sharded_grad_dtype))
+        for param, has_override, dtype in owners:
+            if param._has_grad_dtype_override != has_override or (
+                has_override and param.grad_dtype != dtype
+            ):
+                raise RuntimeError(
+                    "Changing grad_dtype after fully_shard() is not supported. "
+                    "Configure grad_dtype before calling fully_shard()."
+                )
+
     def check_gradient_conversion(
         self,
         converted_dtype: Callable[[torch.Tensor], torch.dtype],
         converted_device: Callable[[torch.Tensor], torch.device] | None = None,
     ) -> None:
+        self.check_grad_dtype()
         param = self.sharded_param
         has_override = self._has_sharded_grad_dtype_override
         grad_dtype = self.sharded_grad_dtype
-        if not self._sharded_grad_dtype_initialized and param._has_grad_dtype_override:
-            has_override, grad_dtype = True, param.grad_dtype
         unsharded_param = getattr(self, "_unsharded_param", None)
         for owner in (param, unsharded_param):
             if owner is None or owner.grad is None:
@@ -1613,13 +1644,6 @@ class FSDPParam:
                 )
 
     def reset_sharded_param(self):
-        if (
-            not self._sharded_grad_dtype_initialized
-            and self.sharded_param._has_grad_dtype_override
-        ):
-            # Capture user overrides before a replacement can lose the metadata.
-            self._has_sharded_grad_dtype_override = True
-            self.sharded_grad_dtype = self.sharded_param.grad_dtype
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the
         # sharded local tensor and re-save the reference.
@@ -1634,16 +1658,19 @@ class FSDPParam:
             self.sharded_param = new_param
         if not self._has_sharded_grad_dtype_override:
             self.sharded_grad_dtype = new_param.dtype
-        grad_dtype = (
-            new_param.grad.dtype
-            if self._grad_is_partial and new_param.grad is not None
-            else self.sharded_grad_dtype
-        )
+        grad_dtype = self.sharded_grad_dtype
         if self.sharded_param.grad_dtype != grad_dtype or (
             self._has_sharded_grad_dtype_override
             and not self.sharded_param._has_grad_dtype_override
         ):
             self.sharded_param.grad_dtype = grad_dtype
+        # Parameter-valued checkpoints may bring explicit metadata even when
+        # FSDP's captured policy follows the parameter dtype.
+        has_override = self.sharded_param._has_grad_dtype_override
+        self._installed_grad_dtype_policy = (
+            has_override,
+            grad_dtype if has_override else None,
+        )
 
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
