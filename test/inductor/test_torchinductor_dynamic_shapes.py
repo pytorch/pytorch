@@ -39,7 +39,12 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, patch_inductor_backend
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_GPU,
+    HAS_MPS,
+    patch_inductor_backend,
+)
 from torch.utils._triton import has_triton
 
 
@@ -154,7 +159,7 @@ class DynamicShapesOpTests:
 if HAS_CPU:
 
     class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
-        hw_classification = HardwareClassification.GENERIC
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -218,18 +223,6 @@ class DynamicShapesGPUTests(
         self.device = self.device_type
 
 
-if hasattr(DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes"):
-    # gfx950 shows a deterministic numerical mismatch for this generated test.
-    DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes = skipIfRocmArch(
-        MI350_ARCH
-    )(DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes)
-
-if hasattr(DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes"):
-    # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
-    DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes = skipIfRocmArch(
-        MI350_ARCH
-    )(DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes)
-
 if not TEST_WITH_ASAN:
     instantiate_device_type_tests(
         DynamicShapesGPUTests,
@@ -273,6 +266,28 @@ if not TEST_WITH_ASAN:
                 else unittest.expectedFailure
             )
             setattr(_variant_cls, _name, _marker(_copy))
+
+    # gfx950 shows deterministic mismatches for these two generated tests
+    # (conv_with_as_strided numerical mismatch, randint64 distribution for
+    # high bounds). The guards are applied per variant after instantiation:
+    # doing it before would put the guarded methods into the generic class's
+    # own __dict__, and instantiate_device_type_tests would then generate
+    # per-device suffixed copies on top of the unguarded MRO-exposed
+    # template methods (duplicated tests, unguarded copy reachable).
+    for _name in list(globals().keys()):
+        if not _name.startswith("DynamicShapesGPUTests"):
+            continue
+        _cls = globals()[_name]
+        for _gfx_name in (
+            "test_conv_with_as_strided_dynamic_shapes",
+            "test_randint_distribution_dynamic_shapes",
+        ):
+            if hasattr(_cls, _gfx_name):
+                setattr(
+                    _cls,
+                    _gfx_name,
+                    skipIfRocmArch(MI350_ARCH)(getattr(_cls, _gfx_name)),
+                )
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
@@ -1628,5 +1643,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
