@@ -549,7 +549,7 @@ class Barrier:
 
             if time.time() - start_time > timeout:
                 raise RuntimeError("barrier timeout")
-            time.sleep(0.1)
+            time.sleep(0.01)
 
 
 class TestDistBackend(MultiProcessTestCase):
@@ -560,6 +560,13 @@ class TestDistBackend(MultiProcessTestCase):
         super().setUpClass()
 
     def setUp(self):
+        test = getattr(self, self._testMethodName)
+        if (
+            getattr(test, "_skip_small_worldsize_before_spawn", False)
+            and os.environ["BACKEND"] != "mpi"
+            and int(os.environ["WORLD_SIZE"]) < 8
+        ):
+            self.skipTest(TEST_SKIPS["small_worldsize"].message)
         super().setUp()
         # initialize temp directories
         initialize_temp_directories()
