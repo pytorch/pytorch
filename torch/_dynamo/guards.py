@@ -4318,14 +4318,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             if id(value) in self._verbatim_elements:
                 continue
             self._verbatim_elements.add(id(value))
-            if isinstance(value, (list, tuple, set, frozenset)):
-                stack.extend(value)
-            elif isinstance(value, dict):
-                # Keys too: missing_values prunes hashable objects (a frozen
-                # dataclass), so a key can be one or hold one.
-                stack.extend(value)
-                stack.extend(value.values())
-            elif inspect.ismodule(value) or isinstance(
+            if inspect.ismodule(value) or isinstance(
                 value, (torch.Tensor, torch.nn.Module)
             ):
                 # A module is pickled by name and its dict leads into every other
@@ -4335,10 +4328,18 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # equal to the run-time object anyway (an nn.Module compares by
                 # identity). Descending would only switch pruning off for
                 # everything they hold.
-                pass
-            elif (fields := _instance_dict(value)) is not None:
+                continue
+            if isinstance(value, dict):
+                # Keys too: missing_values prunes hashable objects (a frozen
+                # dataclass), so a key can be one or hold one.
+                stack.extend(value)
+                stack.extend(value.values())
+            elif isinstance(value, (list, tuple, set, frozenset)):
+                stack.extend(value)
+            if (fields := _instance_dict(value)) is not None:
                 # A by-value comparison reads every field, so the protection
-                # is transitive through an object's instance dict.
+                # is transitive through an object's instance dict; a container
+                # subclass with instance state gets its elements and its fields.
                 stack.extend(fields.values())
 
     @classmethod
