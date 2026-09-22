@@ -96,7 +96,7 @@ trace under the contract of Note [precompile programming model] in `torch/_preco
    :members: save
 
 .. autoclass:: torch.compiler.precompile.PrecompiledRunnable
-   :members: unload
+   :members: installed, unload
 
 .. autoclass:: torch.compiler.precompile.PrecompileSummary
    :members: complete, dropped_guard_types, kept_guard_types
