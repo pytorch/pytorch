@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import inspect
+import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
@@ -368,10 +369,21 @@ class Benchmarker:
         which eliminates kernel launch overhead for fair comparison between different
         implementations.
         """
+
+        def clear_grads() -> None:
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+
         if cudagraph_unroll is None:
-            cudagraph_unroll = inductor_config.autotune_cudagraph_unroll
-        if cudagraph_unroll < 1:
-            raise ValueError("cudagraph_unroll must be at least 1")
+            # Preserve the historical config behavior: invalid global values
+            # fall back to one replay. Per-call overrides are a stricter API
+            # and reject invalid values below.
+            n_iters = max(1, inductor_config.autotune_cudagraph_benchmarking_iters)
+        else:
+            n_iters = cudagraph_unroll
+            if n_iters < 1:
+                raise ValueError("cudagraph_unroll must be at least 1")
 
         # Warmup
         torch.cuda.synchronize()
@@ -382,9 +394,7 @@ class Benchmarker:
         stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
+            clear_grads()
             _callable()
         stream.synchronize()
 
@@ -392,10 +402,8 @@ class Benchmarker:
         with torch.cuda.graph(
             cuda_graph, stream=stream, capture_error_mode="thread_local"
         ):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
-            for _ in range(cudagraph_unroll):
+            for _ in range(n_iters):
+                clear_grads()
                 _callable()
 
         torch.cuda.current_stream().wait_stream(stream)
@@ -404,8 +412,8 @@ class Benchmarker:
         # grad clearing is captured in the graph, don't pass it through.
         result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
         if isinstance(result, list):
-            return [timing / cudagraph_unroll for timing in result]  # type: ignore[return-value]
-        return result / cudagraph_unroll
+            return [t / n_iters for t in result]  # type: ignore[return-value]
+        return result / n_iters
 
 
 # Make built-in defaults explicit via the registry
@@ -571,7 +579,11 @@ class TritonBenchmarker(Benchmarker):
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def __init__(self: Self) -> None:
         super().__init__()
-        self._in_cudagraph_benchmark = False
+        self._cudagraph_benchmark_state = threading.local()
+
+    @property
+    def _in_cudagraph_benchmark(self: Self) -> bool:
+        return getattr(self._cudagraph_benchmark_state, "depth", 0) > 0
 
     @cached_property
     def L2_cache_size(self: Self) -> int:
@@ -631,7 +643,8 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     ) -> float:
         # Prevent benchmark_gpu from re-entering this method
         # when autotune_cudagraph_benchmarking is enabled.
-        self._in_cudagraph_benchmark = True
+        previous_depth = getattr(self._cudagraph_benchmark_state, "depth", 0)
+        self._cudagraph_benchmark_state.depth = previous_depth + 1
         try:
             result = super().benchmark_gpu_with_cuda_graph(
                 _callable,
@@ -640,7 +653,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 **kwargs,
             )
         finally:
-            self._in_cudagraph_benchmark = False
+            self._cudagraph_benchmark_state.depth = previous_depth
         return result
 
     @may_distort_benchmarking_result
