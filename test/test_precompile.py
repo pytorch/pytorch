@@ -922,6 +922,77 @@ class TestPrecompile(TestCase):
             self.assertEqual(build()(model, x), expected)
         self.assertNotIn("__resume_at_dead", scope)
 
+    def test_trivial_continuation_is_served_as_plain_python(self):
+        # The continuation after a trailing .backward() reaches no tensor, so
+        # Dynamo skips it before tracing and it runs as plain Python during
+        # capture. Its record says so, a standalone artifact counts it as
+        # covered, and the driver rebuilds it as the plain function it was.
+        import inspect
+        from unittest import mock
+
+        from torch import _precompile_driver as driver
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _b64, _multigraph_frames, _serving_mode
+
+        def step(model, x):
+            (model(x) * _MULTIGRAPH_SCALE).sum().backward()
+
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        package = CompilePackage(step)
+        compiled = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)
+        compiled(model, x)
+        expected = torch.nn.Linear(4, 4)
+        expected.load_state_dict(model.state_dict())
+        step(expected, x)
+        frames = _multigraph_frames(package.cache_entry())
+        self.assertEqual([f["trivial"] for f in frames], [False, True])
+        self.assertEqual([len(f["variants"]) for f in frames], [1, 0])
+        self.assertEqual(_serving_mode(frames), "standalone")
+        # Only a continuation Dynamo never traced is served that way: one it
+        # compiled but kept no variant of still sends the capture to installing.
+        frames[1]["trivial"] = False
+        self.assertEqual(_serving_mode(frames), "installed")
+        frames[1]["trivial"] = True
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=backend)
+            for backend_id, backend in package.cached_backends.items()
+        }
+        torch._dynamo.reset()
+        scope = step.__globals__
+        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
+
+        def scrub():
+            return {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
+
+        removed = scrub()
+        self.addCleanup(lambda: (scrub(), scope.update(removed)))
+        module = "precompile_test_captured_module"
+        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
+        self.addCleanup(alias.stop)
+        alias.start()
+        for frame in frames:
+            frame["python_module"] = module
+        ns = {
+            "__name__": "precompile_test_artifact",
+            "_FRAMES": _b64(frames),
+            "_BACKENDS": _b64(backends),
+            "_ENTRY_BINDING": _b64({"defaults": None, "kwdefaults": None}),
+            "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
+            "TORCH_VERSION": torch.__version__,
+        }
+        exec(inspect.getsource(driver._build_multigraph_forward), ns)
+        forward = ns["_build_multigraph_forward"]()
+        served = torch.nn.Linear(4, 4)
+        served.load_state_dict(model.state_dict())
+        self.assertIsNone(forward(served, x))
+        self.assertEqual(served.weight.grad, expected.weight.grad)
+        self.assertEqual(served.bias.grad, expected.bias.grad)
+
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
         # than the raw internal error one produces further down (a static capture has no

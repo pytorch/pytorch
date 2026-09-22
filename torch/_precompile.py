@@ -1714,6 +1714,10 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
         {
             "is_entry": i == 0,
             "bypassed": code.bypassed,
+            # Never entered Dynamo: skipped before tracing (no tensor in the
+            # frame, e.g. the continuation after a trailing .backward()), so
+            # it ran eager during capture and the driver runs it eager too.
+            "trivial": not code.has_compile_id and not code.bypassed,
             "code": code.python_code,
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
@@ -1776,10 +1780,16 @@ def _serving_mode(frames: list[dict[str, Any]]) -> str:
     A frame it cannot reach would run eager, silently giving up the compiled
     variant; a frame it reaches but has no variant of (a bypassed continuation)
     would raise on the very path capture exercised. Either way the capture is
-    served by installing instead, which has a compiler behind it.
+    served by installing instead, which has a compiler behind it. A trivial
+    continuation -- one Dynamo never traced because no tensor reached it --
+    ran eager during capture and is served eager, so it counts as covered.
     """
     reachable = _reachable_frames(frames)
-    covered = {i for i, frame in enumerate(frames) if frame["variants"]}
+    covered = {
+        i
+        for i, frame in enumerate(frames)
+        if frame["variants"] or (frame.get("trivial") and not frame["is_entry"])
+    }
     return "standalone" if covered == reachable else "installed"
 
 
