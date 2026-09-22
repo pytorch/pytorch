@@ -6819,23 +6819,15 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             vmap(vmap(vmap(f)))(x)
 
 
-only_for = ("cpu", "cuda")
 instantiate_parametrized_tests(TestVmapOperatorsOpInfoGeneric)
 instantiate_parametrized_tests(TestRandomnessGeneric)
 instantiate_parametrized_tests(TestTransformFailure)
-instantiate_device_type_tests(
-    TestVmapAutocast, globals(), only_for=only_for, allow_mps=True
-)
-instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
-
-instantiate_device_type_tests(
-    TestVmapBatchedGradient,
-    globals(),
-    only_for=only_for,
-)
-instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
-instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
-instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
+instantiate_device_type_tests(TestVmapAutocast, globals(), allow_mps=True)
+instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals())
+instantiate_device_type_tests(TestVmapBatchedGradient, globals())
+instantiate_device_type_tests(TestRandomness, globals())
+instantiate_device_type_tests(TestVmapDeviceType, globals())
+instantiate_device_type_tests(TestVmapNestedTensor, globals())
 
 if __name__ == "__main__":
     run_tests()
