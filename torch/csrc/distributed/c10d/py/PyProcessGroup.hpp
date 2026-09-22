@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/util/ScopeExit.h>
-#include <unordered_set>
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -105,11 +104,19 @@ class PyProcessGroup : public ProcessGroup {
       return ProcessGroup::supportsReconfigure();
     }
     // A Python property may itself delegate to super().supports_reconfigure.
-    static thread_local std::unordered_set<const PyProcessGroup*> active;
-    if (!active.insert(this).second) {
-      return ProcessGroup::supportsReconfigure();
+    struct ActiveCall {
+      const PyProcessGroup* group;
+      ActiveCall* previous;
+    };
+    static thread_local ActiveCall* active = nullptr;
+    for (auto* call = active; call != nullptr; call = call->previous) {
+      if (call->group == this) {
+        return ProcessGroup::supportsReconfigure();
+      }
     }
-    auto guard = c10::make_scope_exit([this] { active.erase(this); });
+    ActiveCall call{this, active};
+    active = &call;
+    auto guard = c10::make_scope_exit([&call] { active = call.previous; });
     return self.attr("supports_reconfigure").cast<bool>();
   }
 
