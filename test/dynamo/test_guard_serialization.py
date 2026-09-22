@@ -1254,6 +1254,11 @@ class _KeyWithBystanders:
         return 0
 
 
+class _Color(enum.Enum):
+    RED = 1
+    BLUE = 2
+
+
 class _NetWithTags(torch.nn.Module):
     def __init__(self, tags):
         super().__init__()
@@ -3996,6 +4001,47 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m, "d": d, "x": x}, True)
         state = load_guards_state(self._cached_guards_state).output_graph
         self.assertEqual(next(iter(state.local_scope["d"])).sub, sub)
+
+    def test_a_set_contains_comparand_shared_with_a_module_attribute_stays_real(
+        self,
+    ):
+        # SET_CONTAINS bakes a sourceless constant (an enum member built by a
+        # constant-folded call) and asks the set for it by hash and __eq__ at run
+        # time. The member is a process-wide singleton, so an unguarded module
+        # attribute holding it registers the very object as missing; baked as
+        # the sentinel the guard would be False forever (NOT_CONTAINS: True).
+        # The module's TYPE_MATCH is kept so the module travels and prunes.
+        def fn(m, s, x):
+            if _Color(1) in s:
+                x = x + 1
+            return m(x)
+
+        m, s, x = _NetWithTags(_Color.RED), {_Color.RED}, torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("SET_CONTAINS", "TYPE_MATCH"), fn, m, s, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "s": s, "x": x}, True)
+        self._test_check_fn(ref, loaded, {"m": m, "s": {_Color.BLUE}, "x": x}, False)
+
+    def test_a_dict_keys_comparand_shares_a_key_with_a_module_attribute(self):
+        # EQUALS_MATCH on a dict_keys view compares every key by value, and the
+        # view's reducer pickles each key as its own object, so a key that is
+        # also an unguarded module attribute must be marked through the view. A
+        # torch.Size, not a tuple: pickle writes an exact tuple natively, so only
+        # a subclass ever reaches the missing_values branch.
+        def fn(m, ks, x):
+            for k in ks:
+                x = x + k[0]
+            return m(x)
+
+        dims = torch.Size([1, 2])
+        m, ks, x = _NetWithTags(dims), {dims: 0}.keys(), torch.randn(2)
+        ref, loaded = self._test_serialization(
+            ("EQUALS_MATCH", "TYPE_MATCH"), fn, m, ks, x
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "ks": ks, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertEqual(list(state.local_scope["ks"]), [torch.Size([1, 2])])
 
     def test_grad_mode(self):
         def fn(x):
