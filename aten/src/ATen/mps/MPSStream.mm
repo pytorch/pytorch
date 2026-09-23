@@ -194,7 +194,7 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
 
       // profilerId has a value only if copy profiling is enabled
       if (profileId) {
-        getMPSProfiler().endProfileCopy(profileId, syncType);
+        getMPSProfiler().endProfileCopy(profileId, syncType, this);
       } else {
         synchronize(syncType);
       }
@@ -227,7 +227,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
     if (isGraphProfilingEnabled) {
       // this function call is only relevant for interval-based Signposts
       // which exclude schedule time (only includes GPU run time)
-      profiler.beginProfileGPUInterval(mpsGraph);
+      profiler.beginProfileGPUInterval(mpsGraph, this);
     }
     // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
     [mpsGraph encodeToCommandBuffer:commandBuffer()
@@ -245,7 +245,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
     // check if graph execution profiling is enabled
     if (isGraphProfilingEnabled) {
       // with profiler enabled, we commit after adding the completedHandler in MPSProfiler
-      profiler.endProfileKernel(mpsGraph, _syncType);
+      profiler.endProfileKernel(mpsGraph, this, _syncType);
     } else {
       synchronize(_syncType);
     }
@@ -325,6 +325,15 @@ void initStreamPool() {
 MPSStream* getStreamFromPool() {
   c10::call_once(stream_pool_flag, initStreamPool);
   return stream_pool[stream_pool_counter++ % kMPSStreamsPerPool];
+}
+
+MPSStream* getStreamByID(int64_t stream_id) {
+  if (stream_id == 0) {
+    return at::mps::getDefaultMPSStream();
+  }
+  TORCH_CHECK(stream_id >= 1 && stream_id <= kMPSStreamsPerPool, "stream_id=", stream_id, " not found");
+  c10::call_once(stream_pool_flag, initStreamPool);
+  return stream_pool[stream_id - 1];
 }
 
 void synchronizeAllMPSStreams(SyncType syncType) {

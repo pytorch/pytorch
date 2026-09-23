@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 """FuzzTemplate subclasses provided by the CUDA device plugin.
 
 These templates are returned by ``torchfuzz.cuda.register_codegen()`` and
@@ -13,13 +12,18 @@ import random
 
 import torch
 
-from torchfuzz.codegen import FuzzTemplate
+from torchfuzz.codegen import (
+    ArgOperations,
+    ConstantOperations,
+    FuzzTemplate,
+    SpecDistribution,
+)
 from torchfuzz.ops_fuzzer import OperationGraph
 from torchfuzz.tensor_fuzzer import ScalarSpec, TensorSpec
 
 
 class DefaultFuzzTemplate(FuzzTemplate):
-    def __init__(self):
+    def __init__(self) -> None:
         from torchfuzz.cuda._checks import EagerVsFullGraphDynamicCompileCheck
 
         super().__init__(
@@ -76,7 +80,7 @@ class DefaultFuzzTemplate(FuzzTemplate):
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
 
-    def spec_distribution(self):
+    def spec_distribution(self) -> SpecDistribution:
         """Default template: tensor-only (no scalars)."""
         return {
             "tensor_prob": 1.0,
@@ -85,23 +89,23 @@ class DefaultFuzzTemplate(FuzzTemplate):
             "allow_scalars": False,
         }
 
-    def imports_codegen(self):
+    def imports_codegen(self) -> list[str]:
         return [
             "import torch",
         ]
 
-    def flags_codegen(self):
+    def flags_codegen(self) -> list[str]:
         return [
             "torch.set_default_device('cuda')",
             "torch._dynamo.config.capture_scalar_outputs = True",
         ]
 
-    def epilogue_codegen(self):
+    def epilogue_codegen(self) -> list[str]:
         return []
 
 
 class DTensorFuzzTemplate(FuzzTemplate):
-    def __init__(self):
+    def __init__(self) -> None:
         from torchfuzz.cuda._checks import EagerVsFullGraphDynamicCompileCheck
 
         super().__init__(
@@ -118,7 +122,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
 
-    def supported_dtypes(self):
+    def supported_dtypes(self) -> list[torch.dtype]:
         """Return list of DTensor-compatible dtypes (no complex types)."""
         return [
             torch.float32,
@@ -132,7 +136,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
             torch.bool,
         ]
 
-    def spec_distribution(self):
+    def spec_distribution(self) -> SpecDistribution:
         """DTensor template: tensor-only (no scalars)."""
         return {
             "tensor_prob": 1.0,
@@ -141,7 +145,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
             "allow_scalars": False,
         }
 
-    def imports_codegen(self):
+    def imports_codegen(self) -> list[str]:
         return [
             "import torch",
             "from torch.distributed.tensor.placement_types import Replicate, Shard",
@@ -149,14 +153,18 @@ class DTensorFuzzTemplate(FuzzTemplate):
             "from torch.distributed.tensor import DTensor",
         ]
 
-    def flags_codegen(self):
+    def flags_codegen(self) -> list[str]:
         return [
             "torch._dynamo.config.capture_scalar_outputs = True",
             "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
             "torch._inductor.config.emulate_precision_casts = True",
         ]
 
-    def args_codegen(self, arg_operations, constant_operations=None):
+    def args_codegen(
+        self,
+        arg_operations: ArgOperations,
+        constant_operations: ConstantOperations | None = None,
+    ) -> list[str]:
         """Generate DTensor argument creation code with proper mesh setup."""
         code_lines = []
 
@@ -187,7 +195,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
         )
 
         if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
+            for i, (_node_id, spec) in enumerate(arg_operations):
                 arg_name = f"arg_{i}"
 
                 if isinstance(spec, ScalarSpec):
@@ -237,7 +245,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
 
         return code_lines
 
-    def epilogue_codegen(self):
+    def epilogue_codegen(self) -> list[str]:
         return ["torch.distributed.destroy_process_group()"]
 
     def return_codegen(self, final_var_name: str) -> list[str]:
@@ -260,7 +268,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
 
 
 class UnbackedFuzzTemplate(FuzzTemplate):
-    def __init__(self):
+    def __init__(self) -> None:
         from torchfuzz.cuda._checks import EagerVsFullGraphDynamicCompileCheck
 
         super().__init__(
@@ -308,7 +316,7 @@ class UnbackedFuzzTemplate(FuzzTemplate):
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
 
-    def supported_dtypes(self):
+    def supported_dtypes(self) -> list[torch.dtype]:
         """Return list of dtypes good for data-dependent operations."""
         # Focus on dtypes that work well with data-dependent ops and arithmetic
         # Exclude bool since arithmetic operations don't work with boolean tensors
@@ -319,7 +327,7 @@ class UnbackedFuzzTemplate(FuzzTemplate):
             torch.int64,
         ]
 
-    def spec_distribution(self):
+    def spec_distribution(self) -> SpecDistribution:
         """Unbacked template: 50% tensors, 50% scalars."""
         return {
             "tensor_prob": 0.5,
@@ -328,19 +336,19 @@ class UnbackedFuzzTemplate(FuzzTemplate):
             "allow_scalars": True,
         }
 
-    def imports_codegen(self):
+    def imports_codegen(self) -> list[str]:
         return [
             "import torch",
         ]
 
-    def flags_codegen(self):
+    def flags_codegen(self) -> list[str]:
         return [
             "torch.set_default_device('cuda')",
             "torch._dynamo.config.capture_scalar_outputs = True",
             "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
         ]
 
-    def epilogue_codegen(self):
+    def epilogue_codegen(self) -> list[str]:
         return []
 
 
@@ -352,7 +360,7 @@ class StreamFuzzTemplate(DefaultFuzzTemplate):
     synchronization between dependent operations on different streams.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         from torchfuzz.cuda._checks import (
             EagerVsFullGraphDynamicCompileWithBackwardCheck,
@@ -360,18 +368,22 @@ class StreamFuzzTemplate(DefaultFuzzTemplate):
 
         self.check = EagerVsFullGraphDynamicCompileWithBackwardCheck()
 
-    def imports_codegen(self):
+    def imports_codegen(self) -> list[str]:
         return [
             "import torch",
         ]
 
-    def flags_codegen(self):
+    def flags_codegen(self) -> list[str]:
         return [
             "torch.set_default_device('cuda')",
             "torch._dynamo.config.capture_scalar_outputs = True",
         ]
 
-    def args_codegen(self, arg_operations, constant_operations=None):
+    def args_codegen(
+        self,
+        arg_operations: ArgOperations,
+        constant_operations: ConstantOperations | None = None,
+    ) -> list[str]:
         """Generate args with requires_grad=True on float tensors.
 
         This ensures the backward pass traces through stream-wrapped operations,
@@ -379,7 +391,7 @@ class StreamFuzzTemplate(DefaultFuzzTemplate):
         """
         code_lines = super().args_codegen(arg_operations, constant_operations)
         if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
+            for i, (_node_id, spec) in enumerate(arg_operations):
                 if isinstance(spec, TensorSpec) and spec.dtype in [
                     torch.float32,
                     torch.float64,
@@ -408,8 +420,8 @@ class StreamFuzzTemplate(DefaultFuzzTemplate):
         topo_order = graph.get_topological_order()
 
         # Identify leaf vs non-leaf node ids
-        leaf_ids = set()
-        non_leaf_ids = []
+        leaf_ids: set[str] = set()
+        non_leaf_ids: list[str] = []
         for nid in topo_order:
             node = graph.nodes[nid]
             if (
@@ -528,7 +540,7 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
     using fixed (Replicate(), Replicate()) for all tensors.
     """
 
-    def fuzz_spec_custom(self):
+    def fuzz_spec_custom(self) -> TensorSpec:
         """Generate tensor specs with minimum 1 dimension for proper DTensor sharding."""
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
 
@@ -543,7 +555,7 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
 
         return TensorSpec(size=size, stride=stride, dtype=dtype)
 
-    def imports_codegen(self):
+    def imports_codegen(self) -> list[str]:
         """Add Partial to imports."""
         base_imports = super().imports_codegen()
         # Update the placement imports to include Partial
@@ -564,7 +576,7 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
         """Constants are materialized in args_codegen for this template."""
         return f"# {output_name} is created globally"
 
-    def _generate_random_placement(self, tensor_size):
+    def _generate_random_placement(self, tensor_size: tuple[int, ...]) -> str:
         """Generate random placement tuple (Replicate, Shard, or Partial)."""
         placements = []
         for _ in range(2):  # 2D mesh
@@ -578,7 +590,11 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
                 placements.append("Partial()" if placement_type == 2 else "Replicate()")
         return f"({', '.join(placements)})"
 
-    def args_codegen(self, arg_operations, constant_operations=None):
+    def args_codegen(
+        self,
+        arg_operations: ArgOperations,
+        constant_operations: ConstantOperations | None = None,
+    ) -> list[str]:
         """Generate args with randomized placements using dist_tensor API."""
 
         code_lines = []
@@ -610,7 +626,7 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
 
         # Args with random placements using dist_tensor API
         if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
+            for i, (_node_id, spec) in enumerate(arg_operations):
                 if isinstance(spec, TensorSpec):
                     size_str = str(spec.size)
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
@@ -636,7 +652,7 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
 
         # Constants (if any) - use same dist_tensor approach
         if constant_operations:
-            for node_id, var_name, spec in constant_operations:
+            for _node_id, var_name, spec in constant_operations:
                 if isinstance(spec, TensorSpec):
                     size_str = str(spec.size)
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")

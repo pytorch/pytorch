@@ -6,7 +6,10 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import (
+    _get_legacy_float32_matmul_precision, _set_legacy_float32_matmul_precision, LazyVal, TEST_NUMBA, TEST_WITH_ROCM,
+    TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU)
+from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -26,15 +29,33 @@ else:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
-ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
-# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+def _rocm_version_str():
+    """ROCm release version string, or None when this is not a ROCm build.
+
+    torch.version.hip is the HIP runtime version. It tracks the ROCm release
+    version on shipped ROCm but not on preview builds, so prefer
+    torch.version.rocm and fall back only for builds that never recorded it.
+    """
+    if torch.version.hip is None:
+        return None
+    return getattr(torch.version, 'rocm', None) or torch.version.hip
+
+def _rocm_major_minor():
+    version = _rocm_version_str()
+    if version is None:
+        return (0, 0)
+    return tuple(int(v) for v in version.split('.')[:2])
+
+ROCM_VERSION = LazyVal(_rocm_major_minor)
+
+# Cuspy needs both the cupti-python bindings and the build-generated
 # _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
     _check_module_exists("cupti")
-    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and _check_module_exists("torch.profiler._cuspy._cupti_stubs")
     and not TEST_WITH_ROCM
 )
 
@@ -42,7 +63,7 @@ def _cupti_version():
     if not TEST_CUPTI:
         return 0
     try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
+        from torch.profiler._cuspy.cupti_python import pylibcupti
         return pylibcupti().get_version()
     except Exception:
         return 0
@@ -74,6 +95,15 @@ SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
+BF16X9_API_SUPPORTED = LazyVal(
+    lambda: TEST_CUDA
+    and not TEST_WITH_ROCM
+    and _get_torch_cuda_version() >= (12, 9)
+)
+BF16X9_SUPPORTED = LazyVal(
+    lambda: BF16X9_API_SUPPORTED
+    and torch.cuda.get_device_capability() in ((10, 0), (10, 3))
+)
 
 IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
@@ -88,12 +118,28 @@ IS_SM90 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available(
                   torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability() == (10, 0))
-IS_SM103 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
-                   torch.cuda.get_device_capability() == (10, 3))
 IS_SM10X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability()[0] == 12)
+
+# Substrings a subprocess prints when it dies from a device-side assert, or
+# from the GPU fault ROCm reports instead when device-side asserts are not
+# enabled. Tests that trigger a device assert in a child process should check
+# its output with has_device_side_assert rather than growing a local copy.
+DEVICE_ASSERT_MARKERS = (
+    "device-side assert triggered",  # CUDA
+    "Assertion `",  # CUDA/ROCm device-side printf: Assertion `cond` failed.
+    "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
+    "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
+    "hipErrorLaunchFailure",
+    "launch failure",  # covers "unspecified launch failure"
+    "illegal memory access",
+    "Memory access fault",  # ROCm 7.14+ VM fault abort
+)
+
+def has_device_side_assert(output):
+    return any(marker in output for marker in DEVICE_ASSERT_MARKERS)
 
 @contextlib.contextmanager
 def blas_library_context(backend):
@@ -150,9 +196,9 @@ def evaluate_platform_supports_flash_attention():
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
-        return not IS_WINDOWS and SM80OrLater
+        return SM80OrLater
     if TEST_XPU:
-        return True
+        return PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
     return False
 
 def evaluate_platform_supports_ck_sdpa():
@@ -247,10 +293,11 @@ def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
             archs = ['gfx94']
-            if ROCM_VERSION >= (6, 3):
-                archs.extend(['gfx120'])
             if ROCM_VERSION >= (6, 5):
-                archs.append('gfx95')
+                # OCP fp8 (e4m3fn/e5m2) in scaled_mm requires ROCm 6.5+; see
+                # the ROCM_VERSION checks in aten/src/ATen/native/cuda/ScaledBlas.cpp.
+                # gfx120 and gfx95 only support OCP, so gate them on 6.5.
+                archs.extend(['gfx95', 'gfx120'])
             if ROCM_VERSION >= (7, 14):
                 archs.append('gfx1250')
             for arch in archs:
@@ -297,10 +344,23 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def hipsparselt_supported_archs():
+    # Keep in sync with hipSparseLtSupportedArchs() in
+    # aten/src/ATen/native/sparse/cuda/cuSPARSELtOps.cpp. Gating on a wider set
+    # than the runtime supports turns a skip into a hard TORCH_CHECK failure.
+    if ROCM_VERSION >= (7, 14):
+        return ['gfx942', 'gfx950', 'gfx1250']
+    elif ROCM_VERSION >= (7, 12):
+        return ['gfx942', 'gfx950']
+    return []
+
+def evaluate_platform_supports_hipsparselt():
+    return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
+
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
         if torch.version.hip:
-            return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+            return evaluate_platform_supports_hipsparselt()
         else:
             return (
                 (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
@@ -348,6 +408,27 @@ _tf32_off_saved_precision = None
 _tf32_off_cudnn_ctx = None
 
 
+# The allow_tf32 setter writes both the legacy Float32MatmulPrecision enum and
+# the backend-specific fp32_precision values. Restoring only one of them leaves
+# the two disagreeing, and every later read of allow_tf32 in the process then
+# raises "mix of the legacy and new APIs".
+def _save_matmul_precision():
+    return (_get_legacy_float32_matmul_precision(),
+            torch.backends.cuda.matmul.fp32_precision,
+            torch.backends.mkldnn.matmul.fp32_precision)
+
+
+def _restore_matmul_precision(saved):
+    legacy, cuda_precision, mkldnn_precision = saved
+    # set_float32_matmul_precision overwrites both backend-specific values, so
+    # it goes first. Restoring those as fp32_precision strings rather than as
+    # allow_tf32 booleans also preserves the "none" default, which allow_tf32
+    # cannot express (it yields "ieee", which the leak detector flags on ROCm).
+    _set_legacy_float32_matmul_precision(legacy)
+    torch.backends.cuda.matmul.fp32_precision = cuda_precision
+    torch.backends.mkldnn.matmul.fp32_precision = mkldnn_precision
+
+
 @contextlib.contextmanager
 def tf32_off():
     # First-in saves state and disables tf32; last-out restores. Multithreaded
@@ -358,10 +439,7 @@ def tf32_off():
     global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
     with _tf32_off_lock:
         if _tf32_off_depth == 0:
-            # Snapshot fp32_precision (a string), not allow_tf32 (a bool):
-            # writing allow_tf32 back can't reproduce the "none" default (it
-            # yields "ieee"), which the leak detector would flag on ROCm.
-            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
+            _tf32_off_saved_precision = _save_matmul_precision()
             torch.backends.cuda.matmul.allow_tf32 = False
             _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
             _tf32_off_cudnn_ctx.__enter__()
@@ -374,13 +452,13 @@ def tf32_off():
             if _tf32_off_depth == 0:
                 _tf32_off_cudnn_ctx.__exit__(None, None, None)
                 _tf32_off_cudnn_ctx = None
-                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
+                _restore_matmul_precision(_tf32_off_saved_precision)
                 _tf32_off_saved_precision = None
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    old_matmul_precision = _save_matmul_precision()
     old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -388,7 +466,7 @@ def tf32_on(self, tf32_precision=1e-5):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        _restore_matmul_precision(old_matmul_precision)
         self.precision = old_precision
 
 
@@ -398,7 +476,7 @@ def tf32_enabled():
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
     """
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    old_matmul_precision = _save_matmul_precision()
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         with torch.backends.cudnn.flags(
@@ -406,7 +484,7 @@ def tf32_enabled():
         ):
             yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        _restore_matmul_precision(old_matmul_precision)
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -494,11 +572,18 @@ def _get_torch_cuda_version():
     return tuple(int(x) for x in cuda_version.split("."))
 
 def _get_torch_rocm_version():
-    if not TEST_WITH_ROCM or torch.version.hip is None:
+    rocm_version = _rocm_version_str()
+    if not TEST_WITH_ROCM or rocm_version is None:
         return (0, 0)
-    rocm_version = str(torch.version.hip)
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
+
+def rocm_mx_swizzle(mat_dtype):
+    """Whether this device takes MX block scales for `mat_dtype` in the swizzled layout."""
+    if not torch.version.hip or not evaluate_gfx_arch_within(["gfx950"]):
+        return False
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    return _get_torch_rocm_version() >= min_version
 
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:
@@ -586,11 +671,6 @@ def xfailIfSM120OrLater(func):
         return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
-def skipIfSM103(func):
-    if TEST_WITH_ROCM:
-        return func
-    return unittest.skip("Test skipped on SM103")(func) if IS_SM103 else func
-
 def xfailIfSM12X(func):
     return func if not IS_SM12X else unittest.expectedFailure(func)
 
@@ -628,7 +708,7 @@ def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
     return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
 
 
-# When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
+# When using nvcc from the CUDA toolkit its version must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
                                                and torch.version.hip is None
