@@ -2542,6 +2542,19 @@ class aot_inductor:
     # and del'd at their last consumer (faster but higher peak memory).
     autotune_per_kernel_alloc: bool = False
 
+    # Offload graph constants to disk across the autotune block once they occupy
+    # this share of the device. AOT only.
+    #
+    # Defaults to 1.0, which never fires: constants are resident on the card, so
+    # they cannot reach 100% of its capacity. The offload is opt-in until it has
+    # more production mileage; set it to e.g. 0.10 to enable.
+    #
+    # A fraction rather than an absolute size so a chosen threshold scales with
+    # the card: 0.10 is ~9.5 GiB on a 95 GiB H100 but ~29 GiB on a 288 GiB
+    # MI350X, which should not pay the spill for a working set that only
+    # threatens the smaller card.
+    autotune_offload_constants_min_device_fraction: float = 1.0
+
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
