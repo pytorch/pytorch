@@ -66,8 +66,9 @@ FILE_TMPL = """\
 // AT_PER_OPERATOR_HEADERS exists to avoid. TensorIterator.h and ops/empty.h are
 // unconditional because preludes commonly need them and there is no
 // per-declaration include hook yet; a body calling another at:: FACTORY needs its
-// op header added here. torch/library.h is emitted only when registering generated
-// coverage predicates, and it pulls the whole dispatcher (~110 headers).
+// op header added here. torch/library.h is emitted only for ops with cpp_covers,
+// its sole consumer being the registration below, and it pulls the whole dispatcher
+// (~110 headers).
 #include <ATen/core/Tensor.h>
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
@@ -87,7 +88,6 @@ bool {op}_{key_lc}_aot_kernel({params}) {{
 {guards}
   return false;
 }}
-{runtime_covers_fn}
 {covers_fn}
 }} // namespace
 
@@ -96,7 +96,6 @@ bool {op}_{key_lc}_aot_kernel({params}) {{
 namespace at::native {{
 REGISTER_{key_uc}_DISPATCH({op}_aot_stub, &::{op}_{key_lc}_aot_kernel)
 }} // namespace at::native
-{runtime_covers_reg}
 {covers_reg}"""
 
 # Emitted only into files whose kind narrows shapes (see
@@ -129,20 +128,6 @@ TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
   m.def("{schema}", &::{op}_{key_lc}_covers);
 }}
 """
-
-RUNTIME_COVERS_FN_TMPL = """
-bool {op}_{key_lc}_runtime_covers({params}) {{
-{body}
-  return true;
-}}
-"""
-
-RUNTIME_COVERS_REG_TMPL = """
-TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
-  m.def("{schema}", &::{op}_{key_lc}_runtime_covers);
-}}
-"""
-
 
 from tools.native_aot import toolchains
 
@@ -222,60 +207,6 @@ _OPTIONAL_TENSOR_LIST_TYPES = {
     "c10::List<std::optional<at::Tensor>>",
     "c10::List<::std::optional<at::Tensor>>",
 }
-
-
-def _device_tensor_setup(params: str) -> str | None:
-    """C++ that selects a tensor-bearing argument for the runtime device gate."""
-    lines = ["  at::Tensor _naot_device_tensor;"]
-    found = False
-    for p in _split_params(params):
-        ctype, name = _param_type_and_name(p)
-        if ctype == "at::Tensor":
-            lines.append(
-                f"  if (!_naot_device_tensor.defined() && {name}.defined()) "
-                f"_naot_device_tensor = {name};"
-            )
-        elif ctype in _OPTIONAL_TENSOR_TYPES:
-            lines.append(
-                f"  if (!_naot_device_tensor.defined() && {name}.has_value()) "
-                f"_naot_device_tensor = *{name};"
-            )
-        elif ctype in _TENSOR_LIST_TYPES:
-            lines.extend(
-                (
-                    "  if (!_naot_device_tensor.defined()) {",
-                    f"    for (const auto& _naot_tensor : {name}) {{",
-                    "      if (_naot_tensor.defined()) {",
-                    "        _naot_device_tensor = _naot_tensor;",
-                    "        break;",
-                    "      }",
-                    "    }",
-                    "  }",
-                )
-            )
-        elif ctype in _OPTIONAL_TENSOR_LIST_TYPES:
-            lines.extend(
-                (
-                    "  if (!_naot_device_tensor.defined()) {",
-                    f"    for (const auto _naot_tensor : {name}) {{",
-                    "      if (_naot_tensor.has_value()) {",
-                    "        _naot_device_tensor = *_naot_tensor;",
-                    "        break;",
-                    "      }",
-                    "    }",
-                    "  }",
-                )
-            )
-        else:
-            continue
-        found = True
-    if not found:
-        return None
-    lines.append(
-        "  if (!_naot_device_tensor.defined() || "
-        "!_naot_device_tensor.is_cuda()) return false;"
-    )
-    return "\n".join(lines) + "\n"
 
 
 def _device_match(arch: str) -> str:
@@ -430,7 +361,6 @@ def gen_op(
     covers: tuple[str, str, str] | None = None,
     precomputed: list[str] | None = None,
     decl_path: str = "",
-    runtime_covers: tuple[str, str] | None = None,
 ) -> str:
     def _branch(s: dict, pad: str) -> str:
         spec = _spec_from_json(s["spec"])
@@ -504,35 +434,6 @@ def gen_op(
     narrows = any(
         toolchains.get_toolchain(sc["kind"]).NARROWS_SHAPES_TO_INT32 for sc in sidecars
     )
-    runtime_covers_fn = runtime_covers_reg = ""
-    if runtime_covers is not None:
-        runtime_params, runtime_schema = runtime_covers
-        device_setup = _device_tensor_setup(runtime_params)
-        if device_setup is None:
-            raise RuntimeError(
-                f"{op}: runtime coverage needs a tensor-bearing parameter to read "
-                f"the device from, and this signature has none ({runtime_params})."
-            )
-        runtime_props = (
-            "at::cuda::getDeviceProperties(_naot_device_tensor.device().index())"
-        )
-        runtime_body = (
-            device_setup
-            + _gate_for(runtime_props)
-            + (_int32_size_gate(runtime_params) if narrows else "")
-        )
-        runtime_covers_fn = RUNTIME_COVERS_FN_TMPL.format(
-            op=op,
-            key_lc=key.lower(),
-            params=runtime_params,
-            body=runtime_body,
-        )
-        runtime_covers_reg = RUNTIME_COVERS_REG_TMPL.format(
-            op=op,
-            key_lc=key.lower(),
-            schema=runtime_schema.replace("\\", "\\\\").replace('"', '\\"'),
-        )
-
     covers_fn = covers_reg = ""
     if covers is not None:
         covers_params, covers_schema, covers_body = covers
@@ -594,14 +495,10 @@ def gen_op(
         key_uc=key.upper(),
         decl_path=decl_path or f"the declaration for aten::{op}",
         precompute_note=note,
-        runtime_covers_fn=runtime_covers_fn,
-        runtime_covers_reg=runtime_covers_reg,
         covers_fn=covers_fn,
         covers_reg=covers_reg,
         covers_include=(
-            "#include <torch/library.h>\n\n"
-            if covers is not None or runtime_covers is not None
-            else "\n"
+            "#include <torch/library.h>\n\n" if covers is not None else "\n"
         ),
         kernel_includes="\n".join(
             dict.fromkeys(  # ordered dedup across sidecars
@@ -661,7 +558,7 @@ def precomputed_args(op: str) -> list[str]:
     return sorted(pre.replace.keys()) if pre is not None else []
 
 
-def covers_signature(op: str, name: str | None = None) -> tuple[str, str]:
+def covers_signature(op: str) -> tuple[str, str]:
     """(C++ params, torch.library schema) for generated coverage predicates.
 
     Uses the FUNCTIONAL schema arguments (SymInt degraded to int -- symbolic sizes
@@ -689,11 +586,9 @@ def covers_signature(op: str, name: str | None = None) -> tuple[str, str]:
         params.append(f"const std::optional<at::Tensor>& {a.name}")
         pieces.append(f"Tensor? {a.name}=None")
     schema_args = ", ".join(pieces)
-    # Dots are illegal in custom-op names, so the default uses decl_id.
-    name = name or f"covers_{decl.decl_id_for_op(op)}"
     return (
         ", ".join(params),
-        f"{name}({schema_args}) -> bool",
+        f"covers_{decl.decl_id_for_op(op)}({schema_args}) -> bool",
     )
 
 
@@ -1313,11 +1208,6 @@ def main(argv: list[str] | None = None) -> None:
         covers_fn = getattr(d, "cpp_covers", None)
         covers_body = (covers_fn() or "") if covers_fn else ""
         covers = (covers_params, covers_schema, covers_body) if covers_body else None
-        runtime_covers = (
-            covers_signature(d.ATEN_OP, f"runtime_covers_{did}")
-            if covers is None
-            else None
-        )
         # Every refusal runs before anything is written, and sources are buffered to
         # the end of the loop: a refusal partway through must not leave earlier
         # declarations' fresh sources paired with the previous run's link set, which
@@ -1353,7 +1243,6 @@ def main(argv: list[str] | None = None) -> None:
             covers,
             precomputed_args(d.ATEN_OP),
             decl_path,
-            runtime_covers,
         )
         # The source covers every target this declaration shipped, so it belongs to
         # no single target tree: always <root>/<decl_id>/.

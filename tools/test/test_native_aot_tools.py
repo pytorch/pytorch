@@ -1237,7 +1237,7 @@ class TestInt32SizeGate(unittest.TestCase):
         # The comparison, not just the signature: a helper that can never fire leaves
         # every oversized dim to truncate through the launcher's static_cast.
         self.assertIn("return d > std::numeric_limits<int32_t>::max();", src)
-        # _FakeDecl declares no cpp_covers, so there is exactly one gate site.
+        # gen_op was called without a covers predicate, so there is one gate site.
         self.assertEqual(src.count("// Size gate:"), 1)
         self.assertIn("self.sizes().begin()", src)
 
@@ -1403,7 +1403,7 @@ class TestAotSourceGeneration(unittest.TestCase):
             fn,
         )
 
-    def test_cpp_covers_absent_no_registration(self):
+    def test_no_covers_argument_emits_no_registration(self):
         sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
         src = gen_aot_lib.gen_op(
             "fakeop", "CUDA", _FakeDecl, [sidecar], "const at::Tensor & self, int64_t k"
@@ -1422,8 +1422,6 @@ class TestAotSourceGeneration(unittest.TestCase):
             schema,
             "covers_topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, Tensor? values=None, Tensor? indices=None) -> bool",
         )
-        _, runtime_schema = gen_aot_lib.covers_signature("topk", "runtime_covers_topk")
-        self.assertTrue(runtime_schema.startswith("runtime_covers_topk("))
 
     def test_covers_signature_kwarg_only_and_defaults(self):
         # The schema shapes per-argument rendering must handle: a kwarg-only section,
@@ -1444,11 +1442,10 @@ class TestAotSourceGeneration(unittest.TestCase):
             "covers_add_Tensor(Tensor self, Tensor other, *, Scalar alpha=1, Tensor? out=None) -> bool",
         )
 
-    def test_runtime_gates_accept_real_tensor_list_signatures(self):
+    def test_size_gates_accept_real_tensor_list_signatures(self):
         for op in ("cat", "index.Tensor"):
             with self.subTest(op=op):
                 params, _ = gen_aot_lib.covers_signature(op)
-                self.assertIsNotNone(gen_aot_lib._device_tensor_setup(params))
                 self.assertTrue(gen_aot_lib._int32_size_gate(params))
 
 
@@ -5799,44 +5796,6 @@ class TestArchScopedGeneration(unittest.TestCase):
                 src = f.read()
         self.assertIn("bool fakeop_cuda_covers(", src)
         self.assertIn('m.def("covers_fakeop(Tensor self, int k) -> bool"', src)
-        self.assertNotIn("runtime_covers_fakeop", src)
-
-    def test_declaration_without_cpp_covers_emits_runtime_coverage(self):
-        class _RuntimeDecl(_FakeDecl):
-            ARCHS = ("sm_100f",)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            self._tree(tmpdir, "sm_100f", "fakeop_p__sm100f")
-            with tempfile.TemporaryDirectory() as ops:
-                os.makedirs(os.path.join(ops, "fakeop"))
-                open(os.path.join(ops, "fakeop", "aot.py"), "w").close()
-                with _patched_generation(ops, declarations=(_RuntimeDecl,)):
-                    gen_aot_lib.main(["--artifacts-dir", tmpdir])
-            with open(os.path.join(tmpdir, "fakeop", "aot_fakeop_cuda.cpp")) as f:
-                src = f.read()
-        self.assertIn("bool fakeop_cuda_runtime_covers(", src)
-        self.assertIn('m.def("runtime_covers_fakeop(Tensor self, int k) -> bool"', src)
-        self.assertIn("_naot_device_tensor.is_cuda()", src)
-        for minor in (0, 3, 7):
-            self.assertIn(f"_naot_props->minor == {minor}", src)
-
-    def test_runtime_coverage_accepts_a_tensor_list_signature(self):
-        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
-        params = "const at::ITensorListRef & tensors, int64_t k"
-        src = gen_aot_lib.gen_op(
-            "fakeop",
-            "CUDA",
-            _FakeDecl,
-            [sidecar],
-            params,
-            runtime_covers=(
-                params,
-                "runtime_covers_fakeop(Tensor[] tensors, int k) -> bool",
-            ),
-        )
-        self.assertIn("for (const auto& _naot_tensor : tensors)", src)
-        self.assertIn("_naot_device_tensor = _naot_tensor;", src)
-        self.assertIn("getDeviceProperties(_naot_device_tensor.device().index())", src)
 
     def test_the_dsl_runtime_reaches_the_emitted_cmake(self):
         # Through main(), not write_cmake_include directly, so both hops are pinned.
