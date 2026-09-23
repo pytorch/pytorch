@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
 from threading import RLock
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -21,6 +21,10 @@ from ._memory import (
     NIXLRemoteBuffer,
 )
 from ._work import _live_transports, _NIXLWork
+
+
+if TYPE_CHECKING:
+    from .._api import Memory
 
 
 def _load_backend() -> Any:
@@ -192,7 +196,32 @@ class NIXLTransport(Transport):
         self._registrations[key] = registration
         return NIXLMemory(self, registration, reused=False)
 
+    def unregister_memory(
+        self, memory: Memory, *, timeout: float | None = None
+    ) -> None:
+        with self._locked(timeout):
+            agent = self._ensure_open()
+            if not isinstance(memory, NIXLMemory) or memory._transport is not self:
+                raise TypeError("memory was not registered by this transport")
+            registration = memory._registration
+            if not registration.active:
+                return
+            if any(
+                work._buffers[0]._memory._registration is registration
+                for work in self._pending.values()
+            ):
+                raise RuntimeError(
+                    "memory has pending transfers; wait before unregistering"
+                )
+            agent.deregister_memory(registration.descs, backends=[self._plugin])
+            registration.active = False
+            key = next(
+                k for k, value in self._registrations.items() if value is registration
+            )
+            del self._registrations[key]
+
     def _remote_buffer(self, registration: _Registration) -> NIXLRemoteBuffer:
+        registration.ensure_active()
         metadata = self._ensure_open().get_partial_agent_metadata(
             registration.descs,
             inc_conn_info=True,
@@ -229,6 +258,7 @@ class NIXLTransport(Transport):
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
         registration = local_buffer._memory._registration
+        registration.ensure_active()
         if registration.tensor.data_ptr() != registration.address or (
             registration.tensor.numel() * registration.tensor.element_size()
             != registration.length
@@ -439,6 +469,7 @@ class NIXLTransport(Transport):
             del self._transfers[key]
         for key, registration in list(self._registrations.items()):
             agent.deregister_memory(registration.descs, backends=[self._plugin])
+            registration.active = False
             del self._registrations[key]
         if self._peer_name is not None:
             agent.remove_remote_agent(self._peer_name)
