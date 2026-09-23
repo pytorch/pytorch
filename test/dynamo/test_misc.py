@@ -16008,6 +16008,22 @@ fn
         res = opt_fn(t)
         self.assertEqual(ref, res)
 
+    @staticmethod
+    def _make_sourceless_cls_getter(cls):
+        class _Meta(type):
+            __dict__ = property(lambda c: type.__dict__["__dict__"].__get__(c))
+
+        class _Holder(metaclass=_Meta):
+            target = cls.method
+
+        _get_dunder_dict = type.__dict__["__dict__"].__get__
+
+        class _Proxy:
+            def method(self, x):
+                return _get_dunder_dict(_Holder)["target"](cls(), x)
+
+        return lambda: _Proxy
+
     @parametrize(
         "grad_mode_decorator",
         ["no_grad", "enable_grad", "dual_level"],
@@ -16021,8 +16037,10 @@ fn
                 def method(self, x):
                     return x + 1
 
+            get_A = self._make_sourceless_cls_getter(A)
+
             def fn(x):
-                return A().method(x)
+                return get_A()().method(x)
 
         elif grad_mode_decorator == "enable_grad":
 
@@ -16031,9 +16049,11 @@ fn
                 def method(self, x):
                     return x + 1
 
+            get_A = self._make_sourceless_cls_getter(A)
+
             def fn(x):
                 with torch.no_grad():
-                    return A().method(x)
+                    return get_A()().method(x)
 
         else:
 
@@ -16042,8 +16062,10 @@ fn
                 def method(self, x):
                     return x + torch.autograd.forward_ad._current_level
 
+            get_A = self._make_sourceless_cls_getter(A)
+
             def fn(x):
-                return A().method(x)
+                return get_A()().method(x)
 
         x = torch.tensor(1.0, requires_grad=True)
         ref = fn(x)
@@ -16061,8 +16083,10 @@ fn
             def method(self, x):
                 return x + 1
 
+        get_A = self._make_sourceless_cls_getter(A)
+
         def fn(x):
-            return A().method(x)
+            return get_A()().method(x)
 
         x = torch.tensor(1.0, requires_grad=True)
         ref = fn(x)
@@ -16087,8 +16111,10 @@ fn
             def method(self, x):
                 return x + 1
 
+        get_A = self._make_sourceless_cls_getter(A)
+
         def fn(x):
-            return A().method(x)
+            return get_A()().method(x)
 
         x = torch.tensor(1.0, requires_grad=True)
         ref = fn(x)
@@ -16150,8 +16176,10 @@ fn
         class A:
             method = make_method(MyCM())
 
+        get_A = self._make_sourceless_cls_getter(A)
+
         def fn(x):
-            return A().method(x)
+            return get_A()().method(x)
 
         x = torch.tensor(1.0)
         ref = fn(x)
@@ -16197,8 +16225,10 @@ fn
         class A:
             method = make_method(Counter())
 
+        get_A = self._make_sourceless_cls_getter(A)
+
         def fn(x):
-            return A().method(x)
+            return get_A()().method(x)
 
         x = torch.tensor(1.0)
         ref = fn(x)
@@ -16243,8 +16273,10 @@ fn
         class A:
             method = make_method(MyCM().rec)
 
+        get_A = self._make_sourceless_cls_getter(A)
+
         def fn(x):
-            return A().method(x)
+            return get_A()().method(x)
 
         cm = A.method.__closure__[0].cell_contents.__self__
         x = torch.tensor(1.0)
@@ -16283,8 +16315,10 @@ fn
         class A:
             method = make_method(MyCM().clone)
 
+        get_A = self._make_sourceless_cls_getter(A)
+
         def fn(x):
-            return A().method(x)
+            return get_A()().method(x)
 
         x = torch.tensor(1.0)
         ref = fn(x)
@@ -16326,8 +16360,10 @@ fn
         class A:
             method = make_method(MyCM().bump)
 
+        get_A = self._make_sourceless_cls_getter(A)
+
         def fn(x):
-            return A().method(x)
+            return get_A()().method(x)
 
         cm = A.method.__closure__[0].cell_contents.__self__
         x = torch.tensor(1.0)
@@ -16365,8 +16401,10 @@ fn
         class A:
             method = make_method(ctx_manager.clone)
 
+        get_A = self._make_sourceless_cls_getter(A)
+
         def fn(x):
-            return A().method(x)
+            return get_A()().method(x)
 
         x = torch.tensor(1.0)
         ref = fn(x)

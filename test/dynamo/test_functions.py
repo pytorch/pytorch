@@ -7516,6 +7516,41 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             g_inner(torch.ones(1))
         self.assertEqual(inner_log, ["touched", "touched"])
 
+        # Locally defined class @property mutating a captured dict
+        prop_state = {"n": 0}
+
+        class PropHelper:
+            @property
+            def val(self):
+                prop_state["n"] += 1
+                return 2
+
+        def f_prop(x):
+            return x + PropHelper().val
+
+        g_prop = torch.compile(f_prop, backend="eager", fullgraph=True)
+        self.assertEqual(g_prop(torch.ones(1)), torch.tensor([3.0]))
+        self.assertEqual(g_prop(torch.ones(1)), torch.tensor([3.0]))
+        self.assertEqual(prop_state, {"n": 2})
+
+        # Class defined inside the compiled function mutating a nonlocal variable
+        n = 0
+
+        def f_nonlocal(x):
+            class InnerNonlocal:
+                def touch(self):
+                    nonlocal n
+                    n += 1
+
+            InnerNonlocal().touch()
+            return x + 1
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            g_nonlocal = torch.compile(f_nonlocal, backend="eager")
+            self.assertEqual(g_nonlocal(torch.ones(1)), torch.tensor([2.0]))
+            self.assertEqual(g_nonlocal(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(n, 2)
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
