@@ -235,7 +235,7 @@ TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
        << ", grad_only_one_elem: " << grad_only_one_elem
        << ", prefix_finite_grad_param: " << prefix_finite_grad_param
        << ", is_norm_nonfinite: " << is_norm_nonfinite;
-    std::string msg = ss.str();
+    std::string msg = std::move(ss).str();
 
     auto parameters = gen_parameters(
         scalar, grad_only_one_elem, prefix_finite_grad_param, device_type);

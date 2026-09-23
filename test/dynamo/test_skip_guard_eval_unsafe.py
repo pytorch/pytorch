@@ -140,6 +140,34 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref2, res2)
         self.assertEqual(ref3, res3)
 
+    def test_skip_all_guards_single_cache_entry(self):
+        def fn(x):
+            return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(
+            fn,
+            backend=cnts,
+            options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
+        )
+
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        entries = torch._dynamo.eval_frame._debug_get_cache_entry_list(fn)
+        self.assertEqual(len(entries), 1)
+        root = entries[0].guard_manager.root
+        self.assertEqual(len(root.get_leaf_guards()), 0)
+        self.assertEqual(len(root.get_accessors()), 0)
+        self.assertEqual(len(root.get_epilogue_lambda_guards()), 0)
+
+        with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
+            y = torch.randn(4, 4)
+            self.assertEqual(opt_fn(y), fn(y))
+
+        self.assertEqual(cnts.frame_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
