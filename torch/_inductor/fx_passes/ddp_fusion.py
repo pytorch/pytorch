@@ -85,7 +85,7 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
     input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
-    # If the users of the wait node are following items, we consinder them
+    # If the users of the wait node are following items, we consider them
     # to be a part of the output.
     intermediate_outputs = ("split", "reshape", "getitem", "detach", "alias")
 

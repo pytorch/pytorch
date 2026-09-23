@@ -22,7 +22,7 @@ permissions:
 jobs:
   tag-trunk-commit:
     name: Tag trunk commit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.repository_owner == 'pytorch'
 
     steps:

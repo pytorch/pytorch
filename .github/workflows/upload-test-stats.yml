@@ -8,11 +8,13 @@ on:
       - trunk
       - trunk-rocm-sandbox
       - periodic
+      - periodic-strict
       - periodic-rocm-mi200
       - periodic-rocm-mi300
       - periodic-rocm-mi350
       - inductor
       - unstable
+      - td-holdout-unstable
       - slow
       - slow-rocm-mi200
       - unstable-periodic
@@ -20,8 +22,8 @@ on:
       - rocm-mi200
       - rocm-mi300
       - rocm-mi350
-      - rocm-navi31
-      - rocm-nightly
+      - rocm-rx7900
+      - rocm-preview
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124
@@ -39,7 +41,7 @@ jobs:
   # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
   get_workflow_conclusion:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
     steps:
@@ -135,7 +137,7 @@ jobs:
 
   check-api-rate:
     if: ${{ always() && github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - name: Get our GITHUB_TOKEN API limit usage

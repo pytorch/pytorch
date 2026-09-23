@@ -165,7 +165,7 @@ void DebugUtil::SaveTensorsGraphInfo(
 
 bool DebugUtil::ExperimentEnabled(const std::string& name) {
   static const std::unordered_set<std::string>* xset = LoadExperiments();
-  return xset->find(name) != xset->end();
+  return xset->contains(name);
 }
 
 } // namespace torch::lazy
