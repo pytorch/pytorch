@@ -3790,6 +3790,8 @@ class GuardBuilder(GuardBuilderBase):
                     pytype = value.pytype
                 if value.dispatch_keys is not None:
                     dispatch_keys = value.dispatch_keys
+            elif torch._subclasses.fake_tensor.is_fake_tensor(value):
+                pytype = type(self.get(guard))
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -4340,6 +4342,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
+        if pytype is torch.nn.Parameter:
+            ret._is_param = True
         # A .grad the guards never read is pruned to the _Missing sentinel on
         # the way in (only a training capture has one to prune at all); it was
         # not guarded on, so the rebuilt tensor does not need it, but assigning
@@ -4738,11 +4742,17 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # always does, from_real_tensor only for an mkldnn source).
                 if obj.dispatch_keys is not None:
                     dispatch_keys = obj.dispatch_keys
+            elif torch._subclasses.fake_tensor.is_fake_tensor(obj):
+                pytype = torch.Tensor
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
             # pickle; no_dispatch makes the template a plain meta tensor.
-            with no_dispatch() if is_fake else contextlib.nullcontext():
+            with (
+                no_dispatch()
+                if torch._subclasses.fake_tensor.is_fake_tensor(obj)
+                else contextlib.nullcontext()
+            ):
                 meta = torch.empty_like(
                     obj, device="meta", requires_grad=obj.requires_grad
                 )
