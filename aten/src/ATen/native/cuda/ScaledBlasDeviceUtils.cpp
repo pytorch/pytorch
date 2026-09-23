@@ -15,11 +15,9 @@ bool scaled_mm_arch_allowed(
     c10::DeviceIndex device_index) {
   static const std::vector<std::string> archs = {
       "gfx942",
-#if ROCM_VERSION >= 60300
-      "gfx1200", "gfx1201",
-#endif
 #if ROCM_VERSION >= 60500
-      "gfx950",
+      // gfx950 and gfx120x only support OCP fp8, which requires ROCm 6.5.
+      "gfx950", "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 71400
       "gfx1250",

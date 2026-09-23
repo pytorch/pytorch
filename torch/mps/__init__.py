@@ -204,6 +204,10 @@ def is_available() -> bool:
     return device_count() > 0
 
 
+def _is_scaled_mm_supported(device: torch.types.Device = None) -> bool:
+    return is_available()
+
+
 def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorage":
     r"""Returns a CPU :class:`torch.UntypedStorage` that aliases the
     host-visible contents of the MTLBuffer backing ``storage``.

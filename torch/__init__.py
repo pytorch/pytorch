@@ -3493,9 +3493,10 @@ def is_scaled_mm_supported(device: "Device" = None) -> builtins.bool:
     r"""Return device- and build-level support for :func:`torch.nn.functional.scaled_mm`.
 
     Returns ``False`` if the backend is unavailable or does not support
-    scaled_mm. A ``True`` result does not validate a particular invocation:
-    dtypes, scaling recipes, layouts, swizzles, and output configurations have
-    additional restrictions.
+    scaled_mm. Backends that do not implement the support query, including
+    out-of-tree backends, report ``False``. A ``True`` result does not validate
+    a particular invocation: dtypes, scaling recipes, layouts, swizzles, and
+    output configurations have additional restrictions.
 
     Args:
         device (:class:`torch.device`, str, int, optional): Device for which to
@@ -3508,8 +3509,6 @@ def is_scaled_mm_supported(device: "Device" = None) -> builtins.bool:
 
         >>> torch.is_scaled_mm_supported("cpu")
         True
-        >>> torch.is_scaled_mm_supported("meta")
-        False
     """
     if isinstance(device, builtins.int):
         accelerator = torch.accelerator.current_accelerator() or torch.device("cpu")
