@@ -9,10 +9,17 @@ from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
-from torch._inductor.analysis.device_info import _device_mapping, lookup_device_info
+from torch._inductor.analysis.device_info import (
+    _device_mapping,
+    datasheet_tops,
+    DeviceInfo,
+    lookup_device_info,
+    register_device_info,
+)
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
     _create_extern_mapping,
+    JsonProfile,
     main,
 )
 from torch._inductor.utils import fresh_inductor_cache, tabulate_2d, zip_dicts
@@ -281,6 +288,111 @@ class TestUtils(TestCase):
         self.assertIsNotNone(upper)
         self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
         self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
+
+    def test_register_device_info_normalizes_name(self):
+        info = DeviceInfo(tops={}, dram_bw_gbs=123.0, dram_gb=1.0)
+        with patch.dict(_device_mapping):
+            register_device_info("test device", info)
+            self.assertIs(lookup_device_info("TEST DEVICE"), info)
+            self.assertIs(lookup_device_info("test device"), info)
+
+    def test_lookup_device_info_reported_rocm_names(self):
+        # Names as reported by torch.cuda.get_device_name() on ROCm hosts.
+        cases = {
+            "AMD Instinct MI350X VF": "AMD MI350X",
+            "AMD Instinct MI355X": "AMD MI355X",
+            "AMD Instinct MI300X": "AMD MI300X",
+            "AMD Instinct MI300X HF": "AMD MI300X",
+            "AMD Instinct MI210": "AMD MI210X",
+            "AMD Instinct MI250X / MI250": "AMD MI250X",
+            "AMD Radeon RX 7900 XT": "AMD RADEON RX 7900 XT",
+            "Radeon RX 7900 XT": "AMD RADEON RX 7900 XT",
+            "AMD Radeon Pro W7800 48GB": "AMD RADEON PRO W7800 48GB",
+        }
+        for reported, entry in cases.items():
+            expected = _device_mapping[entry.upper()]
+            with self.subTest(reported=reported):
+                self.assertIs(lookup_device_info(reported), expected)
+        # An unrecognized trailing word is not a variant suffix, and a name that is
+        # nothing but a suffix must not resolve to the empty key.
+        self.assertIsNone(lookup_device_info("AMD Instinct MI325X"))
+        self.assertIsNone(lookup_device_info("AMD Instinct MI350X XT"))
+        self.assertIsNone(lookup_device_info("VF"))
+
+    def test_rocm_entry_datasheet_values(self):
+        # Guards the numbers themselves, not just that the name resolves.
+        expected = {
+            "AMD MI250X": (47.85, 191.5, 1600.0, 64.0),
+            "AMD RADEON PRO W7800 48GB": (45.2, 90.4, 864.0, 48.0),
+            "AMD RADEON RX 7900 XT": (51.6, 103.0, 800.0, 20.0),
+        }
+        for name, (fp32, fp16, dram_bw_gbs, dram_gb) in expected.items():
+            with self.subTest(name=name):
+                info = lookup_device_info(name)
+                self.assertIsNotNone(info)
+                self.assertEqual(info.tops[torch.float32], fp32)
+                self.assertEqual(info.tops[torch.float16], fp16)
+                self.assertEqual(info.tops[torch.bfloat16], fp16)
+                self.assertEqual(info.dram_bw_gbs, dram_bw_gbs)
+                self.assertEqual(info.dram_gb, dram_gb)
+
+    def test_rocm_entries_omit_unsupported_fp8(self):
+        # CDNA2 and RDNA3 have no fp8 matrix instructions, so these entries must not
+        # claim an fp8 peak; datasheet_tops reports a missing dtype as unknown.
+        for name in (
+            "AMD MI250X",
+            "AMD RADEON PRO W7800 48GB",
+            "AMD RADEON RX 7900 XT",
+        ):
+            info = lookup_device_info(name)
+            self.assertIsNotNone(info)
+            for dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                with self.subTest(name=name, dtype=dtype):
+                    self.assertNotIn(dtype, info.tops)
+                    self.assertIsNone(datasheet_tops(dtype, device_name=name))
+
+    def test_compute_stats_dtype_without_datasheet_peak(self):
+        # No entry lists a peak for integer dtypes, so the flops ratio has no
+        # denominator. That has to report 0, not raise; the branch is only
+        # reachable on ROCm now that the reported names resolve.
+        trace = {
+            "deviceProperties": [{"id": 0, "name": "AMD Instinct MI300X HF"}],
+            "traceEvents": [
+                {
+                    "ph": "X",
+                    "cat": "kernel",
+                    "name": "void int_kernel",
+                    "ts": 0,
+                    "dur": 100,
+                    "args": {
+                        "device": 0,
+                        "name": "int_kernel",
+                        "kernel_flop": 1024,
+                        "kernel_num_gb": 0.5,
+                    },
+                }
+            ],
+        }
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False
+        ) as trace_file:
+            json.dump(trace, trace_file)
+        profile = JsonProfile(trace_file.name, dtype=torch.int64)
+        self.assertIsNotNone(profile._devices[0].info)
+        profile._compute_stats()
+        (stats,) = profile._devices[0].stats["void int_kernel"]
+        self.assertEqual(stats.achieved_flops, 0)
+        self.assertGreater(stats.achieved_bandwidth, 0)
+
+    def test_rdna3_fp64_is_not_half_of_fp32(self):
+        # RDNA3 runs fp64 at 1/32 of the fp32 rate these entries quote. A "half of
+        # fp32" estimate would overstate it by 16x and mislead the roofline.
+        for name in ("AMD RADEON PRO W7800 48GB", "AMD RADEON RX 7900 XT"):
+            info = lookup_device_info(name)
+            self.assertIsNotNone(info)
+            with self.subTest(name=name):
+                ratio = info.tops[torch.float32] / info.tops[torch.float64]
+                self.assertAlmostEqual(ratio, 32.0, delta=0.5)
 
 
 def has_supported_gpu():

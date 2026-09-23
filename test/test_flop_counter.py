@@ -19,13 +19,20 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    parametrize,
     run_tests,
+    subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
-from torch.utils.flop_counter import sdpa_backward_flop_count, sdpa_flop_count
+from torch.utils.flop_counter import (
+    _efficient_attention_backward_flop,
+    _varlen_attn_backward_flop,
+    sdpa_backward_flop_count,
+    sdpa_flop_count,
+)
 
 
 try:
@@ -329,6 +336,24 @@ class TestFlopCounter(TestCase):
     def test_noop(self):
         with FlopCounterMode() as mode:
             T(4, 5).cos()
+
+    def test_sdpa_cpu(self):
+        query = T(1, 2, 16, 16, requires_grad=True)
+        key = T(1, 2, 16, 16, requires_grad=True)
+        value = T(1, 2, 16, 16, requires_grad=True)
+
+        expected_forward = sdpa_flop_count(query.shape, key.shape, value.shape)
+        with FlopCounterMode() as mode:
+            out = F.scaled_dot_product_attention(query, key, value)
+            self.assertEqual(int(get_total_flops(mode)), expected_forward)
+            out.sum().backward()
+
+        expected_backward = sdpa_backward_flop_count(
+            out.shape, query.shape, key.shape, value.shape
+        )
+        self.assertEqual(
+            int(get_total_flops(mode)), expected_forward + expected_backward
+        )
 
     def test_flash_attention_forward_flop_layout(self):
         B, S, H, D = 2, 128, 8, 64
@@ -1354,6 +1379,70 @@ class TestFlopCounterCUDA(TestCase):
         # fw=2 bmms, bw=5 bmms (flash recomputes scores), fw+bw = fw * 7/2
         self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
+
+    @parametrize(
+        "backward_flop,q_shape,k_shape,v_shape,grad_shape",
+        [
+            subtest(
+                (
+                    _varlen_attn_backward_flop,
+                    (16, 4, 192),
+                    (16, 2, 192),
+                    (16, 2, 128),
+                    (16, 4, 128),
+                ),
+                name="flash",
+            ),
+            subtest(
+                (
+                    _efficient_attention_backward_flop,
+                    (1, 16, 4, 192),
+                    (1, 16, 2, 192),
+                    (1, 16, 2, 128),
+                    (1, 16, 4, 128),
+                ),
+                name="efficient",
+            ),
+        ],
+    )
+    def test_nested_attn_backward_flops_with_unequal_qk_value_dims(
+        self, backward_flop, q_shape, k_shape, v_shape, grad_shape
+    ):
+        # Meta offsets represent two sequences of maximum length eight.
+        offsets = torch.empty(3, dtype=torch.int32, device="meta")
+        query = torch.empty(q_shape, device="meta")
+        key = torch.empty(k_shape, device="meta")
+        value = torch.empty(v_shape, device="meta")
+        grad_out = torch.empty(grad_shape, device="meta")
+        # These positions are out/lse for flash and bias/out for efficient attention.
+        actual = backward_flop(
+            grad_out,
+            query,
+            key,
+            value,
+            None,
+            None,
+            offsets,
+            offsets,
+            8,
+            8,
+        )
+        self.assertEqual(actual, 851968)
+
+        bad_grad_out = torch.empty((*grad_shape[:-1], 64), device="meta")
+        with self.assertRaisesRegex(AssertionError, "grad_out has shape.*expected"):
+            backward_flop(
+                bad_grad_out,
+                query,
+                key,
+                value,
+                None,
+                None,
+                offsets,
+                offsets,
+                8,
+                8,
+            )
 
 
 instantiate_device_type_tests(TestFlopCounterCUDA, globals(), only_for="cuda")
