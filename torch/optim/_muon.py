@@ -209,7 +209,6 @@ class Muon(Optimizer):
                 params_with_grad,
                 grads,
                 muon_momentum_bufs,
-                foreach=torch.compiler.is_compiling(),
                 lr=lr,
                 weight_decay=weight_decay,
                 momentum=momentum,
