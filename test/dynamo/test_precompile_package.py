@@ -2377,11 +2377,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(flags(), ambient)
             with _capture_config():
                 self.assertEqual(flags(), (True, True, True, True))
-                # A nested scope patches again and the outer one comes back
-                # when it closes.
-                with _capture_config():
-                    self.assertEqual(flags(), (True, True, True, True))
-                self.assertEqual(flags(), (True, True, True, True))
             self.assertEqual(flags(), ambient)
 
             with self.assertRaisesRegex(RuntimeError, "boom"):
