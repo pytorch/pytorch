@@ -1444,8 +1444,9 @@ def current_blas_handle():
     separate handles, and this function returns a different handle for each
     stream, because a rocBLAS workspace must not be shared by two streams at
     once. Each keeps the workspace rocBLAS allocated when it was created,
-    outside the caching allocator, and a workspace bound with
-    ``rocblas_set_workspace`` stays bound.
+    outside the caching allocator. A workspace bound with
+    ``rocblas_set_workspace`` stays bound, even after the thread exits and the
+    handle passes to another thread, so unbind it before freeing the buffer.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()

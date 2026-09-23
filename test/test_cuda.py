@@ -4427,6 +4427,10 @@ exit(2)
     def test_graph_capture_cublas_workspace_cross_thread(self):
         if torch.cuda.get_device_capability()[0] != 9:
             self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
+        # On ROCm this has not been shown to catch the cached-workspace hazard:
+        # it passes with TORCH_CUBLAS_WORKSPACE_CACHE=1 on gfx950. There it checks
+        # that a worker whose handles were created before the capture can run a
+        # GEMM on the capture stream while another thread captures.
 
         torch._C._cuda_clearCublasWorkspaces()
         x = torch.randn(32, 10944, device="cuda", dtype=torch.bfloat16)
@@ -4475,6 +4479,7 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(not TEST_WITH_ROCM, "Only ROCm keeps a BLAS handle per stream")
     def test_blas_handle_new_stream_under_capture(self):
         # ROCm keeps a BLAS handle per stream, so the capture stream's first
         # request creates one unless capture_begin stocked a spare. A fresh
@@ -4555,6 +4560,11 @@ assert x.item() == 2
                 expected = a @ b
                 torch.cuda.synchronize()
                 self.assertTrue(torch.cuda.tunable.get_results())
+                if not any(
+                    kernel.startswith("Gemm_Rocblas")
+                    for _, _, kernel, _ in torch.cuda.tunable.get_results()
+                ):
+                    self.skipTest("TunableOp picked no rocBLAS solution to replay")
 
                 torch.cuda.tunable.tuning_enable(False)
                 stream = torch.cuda.Stream()
