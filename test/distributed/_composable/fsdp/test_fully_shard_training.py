@@ -763,9 +763,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             fsdp_module: FSDPModule, opt: torch.optim.Optimizer, args, kwargs
         ) -> None:
             post_optim_event = (
-                torch.get_device_module(
-                    self.device_type
-                ).current_stream().record_event()
+                torch.get_device_module(self.device_type)
+                .current_stream()
+                .record_event()
             )
             fsdp_module.set_post_optim_event(post_optim_event)
 
@@ -968,10 +968,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def test_partial_group_releases_deferred_all_gather_after_backward(self):
         """Root backward releases state retained by a partial forward."""
         dim, vocab_size = 32, 128
-        model = ChunkedHeadModel(dim, vocab_size, tie=False).to(device_type)
+        model = ChunkedHeadModel(dim, vocab_size, tie=False).to(self.device_type)
         fully_shard([model.norm, model.head])
         fully_shard(model)
-        tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+        tokens = torch.randint(0, vocab_size, (2, 16), device=self.device_type)
 
         hidden = model(tokens, skip_head=True)
         chunk = hidden.detach().requires_grad_()
@@ -2689,15 +2689,19 @@ class TestFullyShardShareCommContext(FSDPTest):
 
 
 class TestFullyShardInference(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     def test_inference(self):
-        model = nn.Linear(8, 4, bias=False, device=device_type)
+        # This class is not instantiated, so use the module-level helper.
+        device = get_devtype()
+        model = nn.Linear(8, 4, bias=False, device=device)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
         with torch.inference_mode():
-            model(torch.ones((2, 8), device=device_type))
+            model(torch.ones((2, 8), device=device))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
