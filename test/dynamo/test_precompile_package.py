@@ -2443,11 +2443,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 for n, act in enumerate(acts):
                     with mock.patch.object(sys.modules[__name__], "_act", act):
                         call(torch.ones(2 + n))
-            return session.summary().risky_dropped_guards
+            return session.summary()
 
         slot = ("CLOSURE_MATCH", "G['_act']")
-        self.assertNotIn(slot, risky([_relu, _relu]))
-        self.assertIn(slot, risky([_relu, _sigmoid]))
+        same = risky([_relu, _relu])
+        self.assertIn(slot, same.dropped_guards)
+        self.assertGreaterEqual(same.guarded_codes, 2)
+        self.assertNotIn(slot, same.risky_dropped_guards)
+        self.assertIn(slot, risky([_relu, _sigmoid]).risky_dropped_guards)
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
