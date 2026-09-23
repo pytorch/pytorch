@@ -25,6 +25,7 @@ import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -36,6 +37,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 class _MisreportedDevice(torch.Tensor):
@@ -5860,6 +5862,32 @@ class TestExportPython(TestCase):
         )
         self.assertEqual(run(mod, ids), mod(ids))
 
+    def test_overlap_handles_awkward_subclass_shapes(self, device):
+        # __tensor_flatten__ names the attributes to transform, and they are not all
+        # tensors -- DTensor's list carries its DeviceMesh. getattr on one used to
+        # escape as a bare AttributeError, which only RuntimeError was catching.
+        from torch.compiler._export_python import _dense_leaves, _shares_memory
+
+        class HasMetadata(TwoTensor):
+            def __tensor_flatten__(self):
+                attrs, ctx = super().__tensor_flatten__()
+                return [*attrs, "label"], ctx
+
+        base = make_tensor((8,), device=device, dtype=torch.float32)
+        side = make_tensor((8,), device=device, dtype=torch.float32)
+        wrapper = HasMetadata(base[:4], side[:4])  # TwoTensor wants matching offsets
+        wrapper.label = "not a tensor"
+        self.assertTrue(_shares_memory(base, wrapper))
+        self.assertTrue(_shares_memory(side, wrapper))
+        self.assertFalse(_shares_memory(torch.zeros(4, device=device), wrapper))
+
+        # A subclass that flattens to exactly ONE tensor is the arity that made the
+        # plain-tensor test an elementwise Tensor ==, which raises above numel 1.
+        single = AsyncCollectiveTensor(base[:4])
+        self.assertEqual(len(_dense_leaves(single)), 1)
+        self.assertTrue(_shares_memory(base[:4], single))
+        self.assertFalse(_shares_memory(base[4:], single))
+
     def test_duplicate_input_objects_are_guarded(self, device):
         # Byte overlap cannot tell "two views that intersect" from "one tensor passed
         # twice", and AOTAutograd folds the second into a single graph slot. Both report
@@ -5944,6 +5972,31 @@ class TestExportPython(TestCase):
         baked = re.findall(r"_arr\[(\d+)\]", source)
         self.assertEqual(baked, [], f"artifact bakes a fixed per-thread array: {baked}")
 
+    def test_subclass_input_dtype_and_device_are_still_guarded(self, device):
+        # A wrapper subclass's outer SHAPE is not the dense shape the artifact bakes, so
+        # it is deliberately not stamped -- but the driver skipped dtype and device on
+        # the same condition, and those are well defined. A float64 subclass then reached
+        # a graph built for float32 and came back as reinterpreted bytes with no error.
+        def fn(x):
+            return x * 2 + 1
+
+        run = torch.compiler.export_python(path=self._tmp_path("sub_guard.py"))(fn)
+        base = make_tensor((4,), device=device, dtype=torch.float32)
+        run(TwoTensor(base, base.clone()))
+
+        same = make_tensor((4,), device=device, dtype=torch.float32)
+        self.assertEqual(run(TwoTensor(same, same.clone())).a, fn(same))
+
+        wide = make_tensor((4,), device=device, dtype=torch.float64)
+        with self.assertRaisesRegex(PrecompileError, "dtype"):
+            run(TwoTensor(wide, wide.clone()))
+
+        if TEST_CUDA:
+            elsewhere = "cpu" if torch.device(device).type == "cuda" else "cuda"
+            moved = make_tensor((4,), device=elsewhere, dtype=torch.float32)
+            with self.assertRaisesRegex(PrecompileError, "device"):
+                run(TwoTensor(moved, moved.clone()))
+
     def test_indented_comment_does_not_stop_the_stamp_reader(self, device):
         # The documented rule is that the reader stops at the first NON-COMMENT line. An
         # indented comment is still a comment, but it ended the scan -- silently turning
@@ -6016,6 +6069,24 @@ class TestExportPython(TestCase):
         # A strided tensor's extent is not its numel; using numel under-reports it.
         self.assertTrue(_shares_memory(base.as_strided((4,), (2,)), base[5:]))
 
+        # A wrapper subclass reports data_ptr() == 0 with a real device, so comparing
+        # its span directly would call every pair disjoint.
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        payload = torch.from_numpy(np.zeros(8, dtype=np.float32))
+        self.assertTrue(
+            _shares_memory(
+                payload,
+                TwoTensor(payload, payload.clone()),
+            )
+        )
+        self.assertFalse(
+            _shares_memory(
+                TwoTensor(torch.zeros(4), torch.zeros(4)),
+                TwoTensor(torch.zeros(4), torch.zeros(4)),
+            )
+        )
+
         # A 0-numel tensor whose bounding span is NOT empty: the numel guard is what
         # rejects this, not the span arithmetic.
         empty_wide = torch.empty(8, device=device).as_strided((3, 0), (1, 1))
@@ -6023,6 +6094,129 @@ class TestExportPython(TestCase):
         self.assertFalse(
             _shares_memory(torch.empty(4, device="meta"), torch.empty(4, device="meta"))
         )
+
+    def test_overlap_sees_through_a_wrapper_that_misreports_its_device(self, device):
+        # A subclass can report a device differing from its payload's in INDEX
+        # (map_location="cuda" over a "cuda:0" payload) or in TYPE
+        # (map_location={"cuda:0": "cpu"}). Deciding on the wrapper rather than the leaf
+        # reported such a tensor as sharing memory with nothing -- including its own
+        # payload -- so the aliasing guard would go blind on it.
+        from torch.compiler._export_python import _shares_memory
+
+        base = make_tensor((8,), device=device, dtype=torch.float32)
+        # No hardware needed for any of these: _make_wrapper_subclass takes a device
+        # LABEL, so they run identically on a CPU-only runner. Gating them on TEST_CUDA
+        # meant the type axis pinned nothing there, and the index axis alone cannot tell
+        # a leaf-keyed predicate from a wrapper-device-type-keyed one.
+        lies = [
+            _lying_device(device),  # index axis
+            _type_lying_device(device),  # type axis
+            torch.device("meta"),  # is_meta is a device report too
+        ]
+        for reported in lies:
+            wrapper = _MisreportedDevice(base[:4], reported)
+            self.assertNotEqual(wrapper.device, wrapper.payload.device)
+            self.assertTrue(_shares_memory(base[:4], wrapper), reported)
+            self.assertTrue(_shares_memory(base[2:6], wrapper), reported)
+            self.assertFalse(_shares_memory(base[4:], wrapper), reported)
+            self.assertFalse(
+                _shares_memory(
+                    make_tensor((4,), device=device, dtype=torch.float32), wrapper
+                ),
+                reported,
+            )
+
+        # One empty component must not make the whole wrapper unlocatable. It used to,
+        # because every empty tensor reports data_ptr 0, which makes the predicate claim
+        # an overlap that does not exist for every caller of it.
+        from torch.compiler._export_python import _dense_leaves
+
+        side = make_tensor((8,), device=device, dtype=torch.float32)
+        unrelated = make_tensor((4,), device=device, dtype=torch.float32)
+        for spare in (
+            torch.empty(2, device=device),
+            torch.empty(0, device=device),  # owns no bytes
+            torch.empty(4, device="meta"),  # a leaf that genuinely IS meta
+        ):
+            partly_empty = TwoTensor(base[:4], side[:4])  # matching storage offsets
+            partly_empty.b = spare
+            self.assertIsNotNone(_dense_leaves(partly_empty), spare.device)
+            self.assertTrue(_shares_memory(base[:4], partly_empty), spare.device)
+            self.assertFalse(_shares_memory(unrelated, partly_empty), spare.device)
+
+        # Every component byte-less is a real answer -- "owns nothing" -- not "bytes we
+        # cannot find". Collapsing it back to unresolvable made such a wrapper alias
+        # every tensor of its device type.
+        all_empty = TwoTensor(
+            torch.empty(0, device=device), torch.empty(0, device=device)
+        )
+        self.assertEqual(_dense_leaves(all_empty), [])
+        self.assertFalse(_shares_memory(unrelated, all_empty))
+        # But a wrapper with no tensor components at all stays conservative: there is
+        # nothing to have looked at, so it must not read as disjoint from everything.
+        no_tensors = TwoTensor(base[:4], side[:4])
+        no_tensors.__tensor_flatten__ = lambda: ([], None)  # type: ignore[method-assign]
+        self.assertIsNone(_dense_leaves(no_tensors))
+        self.assertTrue(_shares_memory(unrelated, no_tensors))
+
+        # A tensor whose bytes cannot be located at all is assumed to alias -- but only
+        # within its own device type, which is the only evidence left once there are no
+        # leaves to inspect. The sweep routes these to the same predicate, so its
+        # cross-check cannot pin this; it needs asserting directly.
+        opaque = make_tensor((4, 4), device=device, dtype=torch.float32).to_sparse()
+        self.assertTrue(_shares_memory(opaque, base[:4]))
+        if TEST_CUDA:
+            elsewhere = "cpu" if torch.device(device).type == "cuda" else "cuda"
+            self.assertFalse(_shares_memory(opaque, torch.randn(4, device=elsewhere)))
+
+    def test_overlap_sweep_matches_the_pairwise_predicate(self, device):
+        # _input_overlaps sweeps sorted byte spans instead of running _shares_memory
+        # over every pair; the two must agree exactly, including the shapes that leave
+        # the sweep and fall back to the pairwise path.
+        from torch.compiler._export_python import _input_overlaps, _shares_memory
+
+        arena = make_tensor((32,), device=device, dtype=torch.float32)
+        other = make_tensor((32,), device=device, dtype=torch.float32)
+        cases = [
+            [arena[0:20], arena[10:30], arena[20:32], arena[24:32]],  # a chain
+            [arena[i:] for i in range(5)],  # a clique
+            [arena[:8], other[:8], arena[8:16], other[8:16]],  # two disjoint groups
+            [arena[:4], torch.empty(0, device=device), arena[2:6]],
+            [arena[:4], torch.randn(4, device="meta"), arena[2:6]],
+            [arena[:4], arena.to_sparse(), other[:4]],  # unresolvable: pairwise path
+            [TwoTensor(arena[:4], other[:4]), arena[2:6], other[6:10]],
+            # One wrapper whose two leaves overlap EACH OTHER: the only shape that
+            # can produce a bogus self-pair out of the sweep.
+            [TwoTensor(arena[:4], arena[:4]), other[:4]],
+            # Wrappers misreporting their device. The INDEX lie alone does not pin the
+            # sweep's keying -- the key it replaced was (wrapper device TYPE, leaf
+            # device), which already handled that axis -- so the TYPE lie has to be here
+            # too, or reverting the key passes while the sweep and the predicate
+            # demonstrably disagree.
+            [
+                _MisreportedDevice(arena[:4], _lying_device(device)),
+                arena[2:6],
+                other[:4],
+            ],
+            [arena[:4], _MisreportedDevice(arena[2:6], _lying_device(device))],
+            [
+                _MisreportedDevice(arena[:4], _type_lying_device(device)),
+                arena[2:6],
+                other[:4],
+            ],
+            [arena[:4], _MisreportedDevice(arena[2:6], torch.device("meta"))],
+            [arena.as_strided((4,), (7,)), arena[20:24], arena[28:32]],
+            [],
+            [arena],
+        ]
+        for tensors in cases:
+            pairwise = [
+                [i, j]
+                for i in range(len(tensors))
+                for j in range(i + 1, len(tensors))
+                if _shares_memory(tensors[i], tensors[j])
+            ]
+            self.assertEqual(_input_overlaps(None, tensors), pairwise)
 
     def test_version_stamp_written_before_the_repr_change_still_warns(self, device):
         # Artifacts already committed carry a bare, unquoted version. literal_eval
