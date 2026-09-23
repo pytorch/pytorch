@@ -38,8 +38,19 @@ might be used interchangeably in this documentation.
 It captures a whole computation -- `fn(model, x)`, with the model(s) passed as arguments --
 from the caller's own calls and lowers it to a self-contained, runnable Python source
 artifact plus an acceleration cache that a fresh process reloads. No weights are baked in,
-so you pass the model again at runtime. See the {ref}`API reference <torch.compiler_api>`
-for details.
+so you pass the model again at runtime:
+
+```python
+with torch.compiler.precompile.capture(
+    lambda model, x: model(x), artifact_path="m.py", cache_path="m.cache"
+) as cap:
+    y = cap(model, x)
+
+f = torch.compiler.precompile.load("m.py", "m.cache")
+y = f(model, x)
+```
+
+See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.
