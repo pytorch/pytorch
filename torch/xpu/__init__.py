@@ -199,10 +199,6 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     expose_subdevices = os.getenv("ZE_FLAT_DEVICE_HIERARCHY") != "COMPOSITE"
 
     _cached_zes_device_infos.clear()
-    visible = set(visible_mask)
-    logical_index = 0
-    num_igpu = 0
-    num_dgpu = 0
 
     for device in devices:
         props = pyzes.zes_device_properties_t()
@@ -224,19 +220,25 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         num_slots = props.numSubdevices if tiled else 1
 
         for slot in range(num_slots):
-            if logical_index in visible:
-                _cached_zes_device_infos.append(
-                    _ZesDeviceInfo(
-                        device_handle=device,
-                        subdevice_id=slot if tiled else None,
-                        is_integrated=is_integrated,
-                    )
+            _cached_zes_device_infos.append(
+                _ZesDeviceInfo(
+                    device_handle=device,
+                    subdevice_id=slot if tiled else None,
+                    is_integrated=is_integrated,
                 )
-                if is_integrated:
-                    num_igpu += 1
-                else:
-                    num_dgpu += 1
-            logical_index += 1
+            )
+
+    # Sort iGPUs to the end, keep only the visible ordinals
+    _cached_zes_device_infos.sort(key=lambda info: info.is_integrated)
+    visible = set(visible_mask)
+    _cached_zes_device_infos = [
+        info
+        for logical_index, info in enumerate(_cached_zes_device_infos)
+        if logical_index in visible
+    ]
+
+    num_igpu = sum(1 for info in _cached_zes_device_infos if info.is_integrated)
+    num_dgpu = len(_cached_zes_device_infos) - num_igpu
 
     # dGPUs take priority; strip iGPUs when at least one dGPU is visible.
     if num_dgpu and num_igpu:
