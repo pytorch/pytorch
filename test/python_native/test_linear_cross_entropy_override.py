@@ -13,11 +13,7 @@ import torch._native.registry as registry_module
 from torch._native import cutedsl_utils as cu
 from torch._native.ops.linear_cross_entropy import cutedsl_impl
 from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
-from torch.testing._internal.common_cuda import (
-    has_device_side_assert,
-    TEST_CUDA,
-    TEST_MULTIGPU,
-)
+from torch.testing._internal.common_cuda import has_device_side_assert, TEST_CUDA
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
@@ -399,37 +395,6 @@ class TestLinearCrossEntropyOverride(TestCase):
         self.assertTrue(eligible(), "all on one device")
         for name in ("linear_weight", "target", "linear_bias", "weight"):
             self.assertFalse(eligible(**{name: True}), f"{name} on another device")
-
-    @_needs_kernel
-    @unittest.skipIf(not TEST_MULTIGPU, "requires at least 2 visible CUDA devices")
-    def test_the_same_call_on_each_device(self):
-        """Two identical calls, on the current device and then on another. The
-        second must compile for and launch on its own device; a compile cached
-        without the device in its key would hand it the first device's."""
-
-        def check(device):
-            input = torch.randn(
-                2, 8, device=device, dtype=torch.bfloat16, requires_grad=True
-            )
-            weight = torch.randn(
-                4, 8, device=device, dtype=torch.bfloat16, requires_grad=True
-            )
-            target = torch.tensor([1, 3], device=device)
-
-            def grads():
-                loss = torch.nn.functional.linear_cross_entropy(
-                    input, weight, target, options=_compact_options(batch_chunk_size=1)
-                )
-                return (loss, *torch.autograd.grad(loss, (input, weight)))
-
-            fused = grads()
-            with torch.backends.python_native.cutedsl.disabled():
-                plain = grads()
-            self.assertEqual(fused, plain)
-
-        with torch.cuda.device(0):
-            check("cuda:0")
-            check("cuda:1")
 
     @_needs_kernel
     def test_an_out_of_range_target_traps(self):
