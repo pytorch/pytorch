@@ -88,8 +88,8 @@ it.
 #    "real" mode, so each size is baked as a constant).
 #    Capture also constrains the example INPUTS: a NESTED tensor (either layout) is
 #    refused on BOTH capture paths, as a restriction rather than a claim that it cannot be
-#    fakeified -- nothing downstream of the trace has a nested representation (the recorded
-#    dense shape/dtype/device the driver checks against is None for one). That refusal
+#    fakeified -- nothing downstream of the trace has a nested representation (there is
+#    no dense shape for the driver to check one against). That refusal
 #    applies to a traceable wrapper subclass's INNER tensors too, since a wrapper reports
 #    non-nested whatever it wraps.
 #    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
@@ -152,12 +152,18 @@ it.
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
-#    on input layout. Each dense user-input leaf's dtype and device are recorded at
-#    capture and checked at runtime (both backends): a dtype- or device-mismatched input
-#    is rejected with a PrecompileError rather than crashing deep in a kernel or reading
-#    a wrong value. The graph is specialized to the example input shapes (invariant 3);
+#    on input layout. Every tensor user-input leaf's dtype and device, tensor subclasses
+#    (e.g. DTensor) included, are recorded at capture and checked at runtime (both
+#    backends): a dtype- or device-mismatched input is rejected with a PrecompileError
+#    rather than crashing deep in a kernel or reading a wrong value. The recorded device
+#    includes its index, so a capture whose only tensor inputs are subclass leaves (e.g.
+#    a DTensor shard on cuda:0) is tied to that device index, as parameters already
+#    are. The graph is specialized to the example input shapes (invariant 3);
 #    tensor-subclass outputs in particular are rebuilt with constant outer sizes/strides,
-#    so a different runtime shape is undefined. The inductor backend ADDITIONALLY bakes
+#    so a different runtime shape is undefined. A subclass INPUT's shape is not recorded:
+#    the inductor backend's assert_size_stride still rejects a differently-sharded input
+#    on each inner leaf the graph reads, but under backend='eager' a subclass input of a
+#    different outer shape is not checked. The inductor backend ADDITIONALLY bakes
 #    each read input's stride / memory format (it emits assert_size_stride) -- and this
 #    applies to model PARAMETERS/BUFFERS too, not only user inputs, since they are graph
 #    inputs the kernels read. So a same-shape runtime input OR a same-shape/same-dtype
@@ -384,7 +390,8 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
     Tensor subclasses (e.g. DTensor) go through AOTAutograd's flatten path, so their
     outer shape is not the dense shape the inductor artifact bakes; record ``None`` and
-    skip them in the shape check.
+    skip them in the shape check only; dtype and device are still recorded and checked.
+    What that leaves unchecked is stated at invariant 6.
     """
     if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
         return tuple(t.shape)
@@ -392,26 +399,32 @@ def _dense_shape(t: object) -> tuple[int, ...] | None:
 
 
 def _dense_dtype(t: object) -> str | None:
-    """Return the dtype of a plain dense tensor as a string, else ``None``.
+    """Return a tensor's dtype as a string, else ``None`` for a non-tensor.
 
     Recorded as a string (e.g. ``"torch.float32"``) so it serializes into the artifact
-    metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime;
-    mirrors the _dense_shape convention (None for non-tensor / subclass leaves). The
+    metadata as a literal and compares cleanly against ``str(t.dtype)`` at runtime. The
     graph is specialized to the example dtype (invariant 6).
+
+    Unlike _dense_shape this applies to a wrapper subclass too. The kernels are built
+    against the subclass's inner leaves, so the outer dtype is only a proxy for them; it
+    is a faithful one for the supported subclasses (DTensor copies its local shard's).
     """
-    if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
+    if isinstance(t, torch.Tensor):
         return str(t.dtype)
     return None
 
 
 def _dense_device(t: object) -> str | None:
-    """Return the device (as a string) of a plain dense tensor, else ``None``.
+    """Return a tensor's device as a string, else ``None`` for a non-tensor.
 
     Recorded as a string so it serializes into the artifact metadata as a literal and
-    compares cleanly at runtime; mirrors _dense_shape (None for non-tensor / subclass
-    leaves). The graph is specialized to the example device (invariant 6).
+    compares cleanly at runtime. The graph is specialized to the example device
+    (invariant 6).
+
+    Applies to a wrapper subclass too, as _dense_dtype does: a graph built for one
+    device must not be handed a subclass on another.
     """
-    if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
+    if isinstance(t, torch.Tensor):
         return str(t.device)
     return None
 
@@ -693,8 +706,8 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     either fake mode: the unbacked path's ShapeEnv could mint the symbolic nested int a
     jagged tensor's ragged dim needs (a static capture has none, so fakeifying one there
     dies on a raw internal assertion), but nothing downstream of the trace has a nested
-    representation either way -- the recorded dense shape/dtype/device the driver checks
-    against is None for one. Running ahead of every shape read also gets the STRIDED
+    representation either way -- there is no dense shape for the driver to check one
+    against. Running ahead of every shape read also gets the STRIDED
     layout, whose ``t.shape`` read raises inside NestedTensorImpl, this same named refusal.
     """
     if a.is_nested:
@@ -910,7 +923,7 @@ def _capture(
     # reject a shape (invariant 3) or dtype/device (invariant 6) mismatch up front; see
     # the inlined driver checks (torch._precompile_driver). Stride is NOT recorded --
     # memory-format mismatches are enforced by inductor's own (pinned-on)
-    # assert_size_stride. Subclasses -> None.
+    # assert_size_stride. Subclass shapes -> None.
     # Widened element type (a marked-dynamic dim becomes None within the tuple in the
     # unbacked path below); _dense_shape's static tuples conform to it.
     user_input_shapes: list[tuple[int | None, ...] | None] = [
@@ -1246,8 +1259,9 @@ def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -
     # driver validates against it when present, else skips the structure check).
     buf.writeline(f"IN_SPEC = {in_spec_str!r}")
     buf.writeline(f"OUT_SPEC = {out_spec_str!r}")
-    # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
-    # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
+    # Per user-input-leaf example shape / dtype / device (None for a non-tensor leaf,
+    # and shape None for a subclass leaf); the drivers reject a runtime mismatch
+    # (invariants 3 and 6).
     # Memory-format mismatches are caught by the inductor artifact's own
     # assert_size_stride (pinned on at capture).
     buf.writeline(f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}")
@@ -1804,11 +1818,11 @@ class PrecompiledModule(PrecompiledRunnable):
         # exactly the params that received one, leaving frozen / non-contributing
         # params' .grad as None.
         self._grad_param_indices: list[int] = []
-        # Per user-input-leaf example shape, dtype, and device (None for a subclass /
-        # non-tensor leaf; a marked-dynamic dim is None within the shape tuple); the drivers
-        # reject a runtime mismatch (invariants 3 and 6). Stride / memory format is enforced
-        # by the inductor artifact's own assert_size_stride, not recorded here. Populated by
-        # _compile().
+        # Per user-input-leaf example shape, dtype, and device (None for a non-tensor
+        # leaf, shape None for a subclass leaf; a marked-dynamic dim is None within the
+        # shape tuple); the drivers reject a runtime mismatch (invariants 3 and 6).
+        # Stride / memory format is enforced by the inductor artifact's own
+        # assert_size_stride, not recorded here. Populated by _compile().
         self._user_input_shapes: list[tuple[int | None, ...] | None] = []
         self._user_input_dtypes: list[str | None] = []
         self._user_input_devices: list[str | None] = []
