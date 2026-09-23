@@ -605,6 +605,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
 
         with mock.patch.multiple(
             c10d,
+            _TORCHCOMM_AVAILABLE=True,
             _use_torchcomms_enabled=lambda: True,
             _torchcomms_handles_backend=lambda b: True,
             new_comm=fake_new_comm,
