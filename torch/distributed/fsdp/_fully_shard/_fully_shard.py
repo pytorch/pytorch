@@ -429,7 +429,8 @@ class FSDPModule:
         Without synchronization, gradients accumulate on the native unsharded
         parameters using ``MixedPrecisionPolicy.reduce_dtype`` when set,
         otherwise their pre-FSDP ``grad_dtype`` policy. Parameters without an
-        explicit gradient policy accumulate in the compute dtype.
+        explicit gradient policy accumulate in the original parameter dtype,
+        independently of ``MixedPrecisionPolicy.param_dtype``.
         Previously reduced gradients remain on the sharded parameters in their
         configured ``grad_dtype``. HSDP may also retain reduce-scattered gradients
         that still require all-reduce. These contributions remain separate.

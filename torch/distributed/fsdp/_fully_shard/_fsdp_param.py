@@ -830,11 +830,8 @@ class FSDPParam:
         self.reduce_dtype = reduce_dtype
         if reduce_dtype is not None:
             self.unsharded_grad_dtype = reduce_dtype
-        elif self._has_sharded_grad_dtype_override:
-            self.unsharded_grad_dtype = self.sharded_grad_dtype
         else:
-            self.unsharded_grad_dtype = param_dtype or self.orig_dtype
-        # None indicates that the mixed precision is not enabled
+            self.unsharded_grad_dtype = self.sharded_grad_dtype
 
     def _init_extensions(self) -> None:
         inner_tensor = self._sharded_local_tensor

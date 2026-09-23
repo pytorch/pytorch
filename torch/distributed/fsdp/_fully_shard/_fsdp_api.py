@@ -38,7 +38,8 @@ class MixedPrecisionPolicy:
             gradients without casting before reduction. If ``None``, FSDP
             preserves each parameter's explicitly configured ``grad_dtype``,
             including ``None`` to allow any incoming gradient dtype. Parameters
-            without an explicit gradient policy use the compute dtype.
+            without an explicit gradient policy use the original parameter
+            dtype, independently of ``param_dtype``.
             Gradients with different dtypes are reduced separately. Reduced
             sharded gradients use each parameter's ``grad_dtype`` as specified before calling
             :func:`fully_shard`. Changing this policy afterward is unsupported,

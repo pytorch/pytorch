@@ -77,7 +77,9 @@ class TestFullyShardPendingGrad(FSDPTest):
         fully_shard(
             model,
             mesh=init_device_mesh(device, (self.world_size,)),
-            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+            ),
             offload_policy=CPUOffloadPolicy(pin_memory=False)
             if cpu_offload
             else OffloadPolicy(),
@@ -120,7 +122,9 @@ class TestFullyShardPendingGrad(FSDPTest):
             model,
             mesh=init_device_mesh(device, (self.world_size,)),
             reshard_after_forward=False,
-            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+            ),
             offload_policy=CPUOffloadPolicy(pin_memory=False)
             if cpu_offload
             else OffloadPolicy(),
@@ -452,7 +456,9 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
             mesh=mesh,
             shard_placement_fn=lambda _: Shard(shard_dim),
             reshard_after_forward=False,
-            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+            ),
             offload_policy=CPUOffloadPolicy(pin_memory=False)
             if cpu_offload
             else OffloadPolicy(),

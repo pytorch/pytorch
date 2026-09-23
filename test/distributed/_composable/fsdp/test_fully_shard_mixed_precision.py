@@ -133,16 +133,19 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             use_shard_placement_fn=use_shard_placement_fn,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
+        orig_dtype = next(ref_model.parameters()).dtype
+        for param in ref_model_bf16.parameters():
+            param.grad_dtype = orig_dtype
         orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
-            self.assertEqual(output.dtype, param_dtype)
+            self.assertEqual(output.dtype, orig_dtype)
 
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
+            self.process_group, all_reduce_group=None, reduce_dtype=orig_dtype
         )
 
         torch.manual_seed(42 + self.rank + 1)
@@ -370,16 +373,21 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         """
         Tests that gradient accumulation without reduce-scatter when using
         bf16 compute and fp32 reduction accumulates the unsharded gradients in
-        fp32.
+        fp32, with either the default or an explicit reduction dtype.
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False]},
+            {
+                "reshard_after_forward": [True, False],
+                "reduce_dtype": [None, torch.float32],
+            },
             self._test_grad_acc_with_reduce_dtype,
         )
 
-    def _test_grad_acc_with_reduce_dtype(self, reshard_after_forward: bool):
+    def _test_grad_acc_with_reduce_dtype(
+        self, reshard_after_forward: bool, reduce_dtype: torch.dtype | None
+    ):
         torch.manual_seed(42)
-        param_dtype, reduce_dtype = (torch.bfloat16, torch.float32)
+        param_dtype = torch.bfloat16
         mp_policy = MixedPrecisionPolicy(
             param_dtype=param_dtype, reduce_dtype=reduce_dtype
         )
@@ -401,7 +409,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
-            self.assertEqual(output.dtype, reduce_dtype)
+            self.assertEqual(output.dtype, torch.float32)
 
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn

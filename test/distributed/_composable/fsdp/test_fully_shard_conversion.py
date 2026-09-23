@@ -320,6 +320,48 @@ class TestFullyShardConversion(TestCase):
             else:
                 model(inp)
 
+    @parametrize(
+        "orig_dtype,param_dtype",
+        [(torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32)],
+    )
+    @parametrize("override_reduce_dtype", [False, True])
+    def test_default_reduction_uses_original_param_dtype(
+        self, device, orig_dtype, param_dtype, override_reduce_dtype
+    ):
+        model = nn.Linear(1, 2, bias=False, device=device, dtype=orig_dtype)
+        reference = copy.deepcopy(model).to(param_dtype)
+        reduce_dtype = param_dtype if override_reduce_dtype else None
+        unsharded_grad_dtype = reduce_dtype or orig_dtype
+        reference.weight.grad_dtype = unsharded_grad_dtype
+        fully_shard(
+            model,
+            mesh=self.mesh,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=param_dtype, reduce_dtype=reduce_dtype
+            ),
+        )
+        model.set_requires_gradient_sync(False)
+        model.set_reshard_after_backward(False)
+        for value in (256, 1, -256):
+            inp = torch.full((1, 1), value, device=device, dtype=param_dtype)
+            model(inp).sum().backward()
+            reference(inp).sum().backward()
+        expected = 0 if unsharded_grad_dtype == torch.bfloat16 else 1
+        self.assertEqual(
+            reference.weight.grad, torch.full_like(reference.weight.grad, expected)
+        )
+        self.assertEqual(model.weight.dtype, param_dtype)
+        self.assertEqual(model.weight.grad_dtype, unsharded_grad_dtype)
+        self.assertEqual(model.weight.grad.dtype, unsharded_grad_dtype)
+        self.assertEqual(model.weight.grad, reference.weight.grad)
+        model.synchronize_gradients()
+        model.reshard()
+        self.assertEqual(model.weight.grad_dtype, orig_dtype)
+        self.assertEqual(model.weight.grad.dtype, orig_dtype)
+        self.assertEqual(
+            model.weight.grad.full_tensor(), reference.weight.grad.to(orig_dtype)
+        )
+
     @parametrize("param_dtype", [None, torch.bfloat16])
     def test_grad_dtype_default_reduction_preserves_accumulation(
         self, device, param_dtype
