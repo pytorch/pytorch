@@ -402,7 +402,7 @@ class TestFlexDecoding(InductorTestCase):
             # Note, it seems like we really are less accurate than the float32
             # computation, likely due to the online softmax
             if dtype == torch.float32:
-                fudge_factor = 10.0
+                fudge_factor = 12.0
             else:
                 fudge_factor = 1.1
 

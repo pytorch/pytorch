@@ -165,7 +165,7 @@ def _update_registry_with_changes(
     # Collect new entries separately to insert them all at once
     new_entries: list[tuple[str, list[dict[str, Any]]]] = []
 
-    for gb_type, (call, file_path) in calls.items():
+    for gb_type, (call, _file_path) in calls.items():
         if gb_type in latest_entry:
             existing_entry = latest_entry[gb_type]
 
@@ -244,7 +244,7 @@ def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessa
     for gb_type, call_list in all_calls.items():
         if len(call_list) > 1:
             first_call = call_list[0][0]
-            for call, file_path in call_list[1:]:
+            for call, _file_path in call_list[1:]:
                 if (
                     call["context"] != first_call["context"]
                     or call["explanation"] != first_call["explanation"]
@@ -321,7 +321,7 @@ def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessa
     renames: dict[str, str] = {}
     remaining_calls = dict(calls)
 
-    for gb_type, (call, file_path) in calls.items():
+    for gb_type, (call, _file_path) in calls.items():
         if gb_type not in latest_entry:
             for existing_gb_type, existing_entry in latest_entry.items():
                 if (
@@ -335,7 +335,7 @@ def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessa
 
     needs_update = bool(renames)
 
-    for gb_type, (call, file_path) in remaining_calls.items():
+    for gb_type, (call, _file_path) in remaining_calls.items():
         if gb_type in latest_entry:
             existing_entry = latest_entry[gb_type]
 
