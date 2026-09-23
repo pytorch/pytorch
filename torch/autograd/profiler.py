@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, Optional
+from typing_extensions import deprecated
 from warnings import warn
 
 
@@ -1223,13 +1224,21 @@ class emit_nvtx:
         return False
 
 
+@deprecated(
+    "`torch.autograd.profiler.load_nvprof` is deprecated and will be removed "
+    "in a future release.",
+    category=FutureWarning,
+)
 def load_nvprof(path):
     """Open an nvprof trace file and parse autograd annotations.
+
+    .. deprecated::
+        This function is deprecated and will be removed in a future release.
 
     Args:
         path (str): path to nvprof trace
     """
-    return EventList(parse_nvprof_trace(path))
+    return EventList(_parse_nvprof_trace(path))
 
 
 class EnforceUnique:
@@ -1247,7 +1256,21 @@ class EnforceUnique:
         self.seen.add(key)
 
 
+@deprecated(
+    "`torch.autograd.profiler.parse_nvprof_trace` is deprecated and will be "
+    "removed in a future release.",
+    category=FutureWarning,
+)
 def parse_nvprof_trace(path):
+    """Parse autograd annotations from an nvprof trace file.
+
+    .. deprecated::
+        This function is deprecated and will be removed in a future release.
+    """
+    return _parse_nvprof_trace(path)
+
+
+def _parse_nvprof_trace(path):
     import sqlite3
 
     conn = sqlite3.connect(path)

@@ -1066,6 +1066,13 @@ class TestProfiler(TestCase):
             with profile(activities=[ProfilerActivity.CPU], with_modules=True):
                 torch.ones(1)
 
+    @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
+    def test_nvprof_import_deprecated(self, api):
+        with patch("torch.autograd.profiler._parse_nvprof_trace", return_value=[]):
+            with self.assertWarnsRegex(FutureWarning, f"{api}.*deprecated"):
+                events = getattr(torch.autograd.profiler, api)("trace.prof")
+        self.assertEqual(events, [])
+
     def test_profiler_metadata(self):
         t1, t2 = torch.ones(1), torch.ones(1)
         with profile() as prof:
