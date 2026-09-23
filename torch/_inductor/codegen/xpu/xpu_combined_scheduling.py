@@ -47,10 +47,7 @@ class XPUCombinedScheduling(BaseScheduling):
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
 
-    def has_sub_parent_epilogue(
-        self,
-        nodes: Sequence[BaseSchedulerNode],
-    ) -> bool:
+    def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
         return self._triton_scheduling.has_sub_parent_epilogue(nodes)
 
     def validate_staged_reduction(self, node: FusedStagedReduction) -> None:
