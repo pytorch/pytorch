@@ -143,7 +143,7 @@ class ComptimeVar:
         if isinstance(self.__variable, SymNodeVariable):
             self.__variable.evaluate_expr()
         elif self.__variable.is_python_constant():
-            # TODO: Maybe complain if this isn't a int/bool/float variable
+            # TODO: Maybe complain if this isn't an int/bool/float variable
             pass
         else:
             raise AssertionError(

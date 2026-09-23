@@ -39,6 +39,7 @@ permissions:
 jobs:
   # See job-filter.yml for rules on adding job filter conditions
   job-filter:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: job-filter
     uses: ./.github/workflows/job-filter.yml
@@ -460,31 +461,6 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-cuda13.0-cudnn9-py3.10-clang20 (build only)              ║
-  # ╠══════════════════════════════════════════════════════════════════════╣
-
-  linux-jammy-cuda13_0-cudnn9-py3_10-clang20-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-cudnn9-py3.10-clang20 ') }}
-    name: linux-jammy-cuda13.0-cudnn9-py3.10-clang20
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-cudnn9-py3.10-clang20
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang20
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
-      python-version: "3.10"
-      compiler: clang20
-      cuda-version: "13.0"
-    secrets: inherit
-
-  # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-cuda13.2-cudnn9-py3.10-clang20 (build only)              ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
@@ -500,6 +476,7 @@ jobs:
       build-environment: linux-jammy-cuda13.2-cudnn9-py3.10-clang20
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-clang20
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '7.5 8.0'
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
