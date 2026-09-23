@@ -45,6 +45,7 @@ class InterconnectType(IntEnum):
     IB_HDR = 4  # 200 Gbps InfiniBand
     IB_NDR = 5  # 400 Gbps InfiniBand / RoCE
     PCIE = 6  # PCIe (no NVLink)
+    UNKNOWN = 7
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,10 @@ def _has_nvlink() -> bool:
 
 
 @functools.lru_cache
-def get_gpu_type() -> NVIDIA_GPU_TYPE:
+def get_gpu_type() -> NVIDIA_GPU_TYPE | None:
+    # HIP capability numbers are GFX versions, not NVIDIA compute capabilities.
+    if torch.version.hip is not None:
+        return None
     # Prefer compute capability (works for all NVIDIA GPUs, including H200, L40, etc.)
     if torch.cuda.is_available() and torch.cuda.device_count() > 0:
         major = torch.cuda.get_device_properties(0).major
@@ -152,6 +156,8 @@ def detect_interconnect(group_size: int) -> InterconnectType:
     """Auto-detect interconnect type from GPU generation and group topology."""
     gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 8
     gpu_gen = get_gpu_type()
+    if gpu_gen is None:
+        return InterconnectType.UNKNOWN
     if math.ceil(group_size / gpus_per_node) == 1:
         if not _has_nvlink():
             return InterconnectType.PCIE
@@ -427,21 +433,27 @@ _GPU_INTER_NODE_BW: dict[NVIDIA_GPU_TYPE, float] = {
 
 
 def get_intra_node_bw() -> float:
-    """Return intra-node bandwidth in GB/s. Config overrides auto-detection."""
+    """Return modeled intra-node bandwidth in GB/s, or 0 if unavailable."""
     override = torch._inductor.config.intra_node_bw
     if override is not None:
         return float(override)
+    gpu_type = get_gpu_type()
+    if gpu_type is None:
+        return 0.0
     if not _has_nvlink():
         return _PCIE_INTRA_NODE_BW
-    return _GPU_NVLINK_BW.get(get_gpu_type(), 240.0)
+    return _GPU_NVLINK_BW.get(gpu_type, 240.0)
 
 
 def get_inter_node_bw() -> float:
-    """Return inter-node (IB/RoCE) bandwidth in GB/s. Config overrides auto-detection."""
+    """Return modeled inter-node bandwidth in GB/s, or 0 if unavailable."""
     override = torch._inductor.config.inter_node_bw
     if override is not None:
         return float(override)
-    return _GPU_INTER_NODE_BW.get(get_gpu_type(), 25.0)
+    gpu_type = get_gpu_type()
+    if gpu_type is None:
+        return 0.0
+    return _GPU_INTER_NODE_BW.get(gpu_type, 25.0)
 
 
 def _log2i(n: int) -> int:
@@ -555,27 +567,29 @@ def _nccl_algo_time(
 
     busBw = bw
 
-    index1 = compCapIndex if nNodes == 1 else 0
-    llMaxBw = llMaxBws[index1][index2]
+    if compCapIndex is None:
+        # The per-generation caps are NVIDIA tuning constants; without a GPU
+        # generation only the configured bandwidth limits the estimate.
+        llMaxBw = ringLL128MaxBw = treeLL128MaxBw = treeMaxBw = math.inf
+    else:
+        index1 = compCapIndex if nNodes == 1 else 0
+        llMaxBw = llMaxBws[index1][index2]
+        ringLL128MaxBw = nChannels * perChMaxRingLL128Bws[compCapIndex][index2]
+        treeLL128MaxBw = nChannels * perChMaxTreeLL128Bws[compCapIndex][index2]
+        treeMaxBw = nChannels * perChMaxTreeBws[compCapIndex][index2]
 
     if algo == NCCL_ALGO.RING and proto == NCCL_PROTO.LL:
         busBw = min(llMaxBw, busBw * 0.5)
     elif algo == NCCL_ALGO.RING and proto == NCCL_PROTO.LL128:
-        busBw = min(
-            busBw * (120.0 / 128.0),
-            nChannels * perChMaxRingLL128Bws[compCapIndex][index2],
-        )
+        busBw = min(busBw * (120.0 / 128.0), ringLL128MaxBw)
     elif algo == NCCL_ALGO.TREE and proto == NCCL_PROTO.LL:
         busBw = min(busBw * (1.0 / 3.8), llMaxBw)
     elif algo == NCCL_ALGO.TREE and proto == NCCL_PROTO.LL128:
         factor = 7.0 / 9.0 if nNodes == 1 else 120.0 / 128.0
-        busBw = min(
-            busBw * factor,
-            nChannels * perChMaxTreeLL128Bws[compCapIndex][index2],
-        )
+        busBw = min(busBw * factor, treeLL128MaxBw)
     elif algo == NCCL_ALGO.TREE and proto == NCCL_PROTO.SIMPLE:
         if coll == NCCL_COLL.ALL_REDUCE:
-            busBw = min(busBw * 0.92, nChannels * perChMaxTreeBws[compCapIndex][index2])
+            busBw = min(busBw * 0.92, treeMaxBw)
     # Ring+SIMPLE: no extra cap beyond busBw
 
     if busBw <= 0:
@@ -606,7 +620,11 @@ def _nccl_algo_time(
         return -1.0
 
     # --- Latency computation (mirrors ncclTopoTuneModel) ---
-    intraHw = NCCL_HW.PCI if interconnect == InterconnectType.PCIE else NCCL_HW.NVLINK
+    intraHw = (
+        NCCL_HW.PCI
+        if interconnect in (InterconnectType.PCIE, InterconnectType.UNKNOWN)
+        else NCCL_HW.NVLINK
+    )
     lat = baseLat[algo][proto]
     intraLat = hwLat[intraHw][algo][proto]
     interLat = hwLat[NCCL_HW.NET][algo][proto]
@@ -709,7 +727,10 @@ def compute_min_saturation_bytes(
     if group_size <= 1:
         return 0
 
-    profile = INTERCONNECT_PROFILES[detect_interconnect(group_size)]
+    interconnect = detect_interconnect(group_size)
+    if interconnect == InterconnectType.UNKNOWN:
+        return 0
+    profile = INTERCONNECT_PROFILES[interconnect]
 
     if coll in (NCCL_COLL.ALL_GATHER, NCCL_COLL.REDUCE_SCATTER):
         nsteps = group_size - 1
