@@ -807,8 +807,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         def get_conv_input_weight_vals(n: Node) -> tuple[Any, Any]:
             if is_conv_bwd(n):
-                return n.args[1].meta["val"], n.args[2].meta["val"]
-            return n.args[0].meta["val"], n.args[1].meta["val"]
+                return n.args[1].meta["val"], n.args[2].meta["val"]  # type: ignore[union-attr, operator]
+            return n.args[0].meta["val"], n.args[1].meta["val"]  # type: ignore[union-attr, operator]
 
         conv_nodes = [
             n
