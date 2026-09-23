@@ -938,7 +938,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         f(torch.tensor([3], device=device))
 
-    def test_meta_dynamic_shapes(self):
+    def test_meta_dynamic_shapes(self, device):
         def foobar(x, y):
             return x * 2, y * 3
 
@@ -948,7 +948,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         self.assertEqual(foo_c(t, y), foobar(t, y))
 
-    def test_floor(self):
+    def test_floor(self, device):
         def fn(x):
             n = x.size(-1)
             y = x + int(n * 0.2) + 1
@@ -1239,7 +1239,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(output, expected)
 
     @serialTest()
-    def test_wrapper_codegen_statically_known_int_or_none(self):
+    def test_wrapper_codegen_statically_known_int_or_none(self, device):
         torch._dynamo.reset()
 
         _x = torch.randn([5, 3, 3])
@@ -1343,7 +1343,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         f(x)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
-    def test_unspecialized_float_operations(self):
+    def test_unspecialized_float_operations(self, device):
         operations = {
             "multiply": operator.mul,
             "add": operator.add,
@@ -1373,7 +1373,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
                     self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False)
-    def test_unspecialized_float_fallback_specialization(self):
+    def test_unspecialized_float_fallback_specialization(self, device):
         def fn(x, y, z):
             return (
                 torch.tensor(z),
@@ -1398,7 +1398,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(specialize_float=False)
-    def test_unspecialized_float_softshrink(self):
+    def test_unspecialized_float_softshrink(self, device):
         # This test is particularly interesting since it exercises
         # both standard operator replacements ie. torch.ops.aten.mul.Tensor
         # as well as comparison replacements ie. torch.ops.aten.ge.Scalar
@@ -1478,7 +1478,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         if not torch.allclose(result, expected, atol=1e-3, rtol=1e-3):
             raise AssertionError
 
-    def test_unspecialized_float_dynamic(self):
+    def test_unspecialized_float_dynamic(self, device):
         def fn(x, y):
             return x * y
 
@@ -1492,7 +1492,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False)
-    def test_unspecialized_float_fallback_symint_specialization(self):
+    def test_unspecialized_float_fallback_symint_specialization(self, device):
         def fn(x, y):
             return math.floor(x**2) * y
 
@@ -1625,7 +1625,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         out_compiled.sum().backward()
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_combinations_dynamic(self):
+    def test_combinations_dynamic(self, device):
         def f(x):
             return torch.combinations(x, r=2)
 
