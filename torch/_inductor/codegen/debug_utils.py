@@ -55,7 +55,7 @@ class IntermediateValueDebuggingLevel(Enum):
     # LEVEL 2: Print all intermediate tensor values by default to the console. No debug saving will be performed.
     PRINT_ONLY = "2"
     # LEVEL 3: Print all kernel names to the console only. No debug saving/printing for input tensor value info will be performed.
-    # This mode can be helpful in cases when you just want to pinpointing what kernel is running into a CUDA IMA issue, etc.
+    # This mode can be helpful in cases when you just want to pinpoint what kernel is running into a CUDA IMA issue, etc.
     PRINT_KERNEL_NAMES_ONLY = "3"
 
 

@@ -44,4 +44,13 @@ std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
   return result;
 }
 
+void free_unstolen_handles(std::vector<AtenTensorHandle>& handles) {
+  for (auto& handle : handles) {
+    if (handle != nullptr) {
+      aoti_torch_delete_tensor_object(handle);
+      handle = nullptr;
+    }
+  }
+}
+
 } // namespace torch::aot_inductor

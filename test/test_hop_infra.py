@@ -4,7 +4,12 @@ import importlib
 import pkgutil
 
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
@@ -24,6 +29,8 @@ do_imports()
 
 @skipIfTorchDynamo("not applicable")
 class TestHOPInfra(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_all_hops_have_opinfo(self):
         """All HOPs should have an OpInfo in torch/testing/_internal/hop_db.py"""
         from torch._ops import _higher_order_ops
@@ -42,7 +49,22 @@ class TestHOPInfra(TestCase):
 
         self.assertTrue(
             len(missing_ops) == 0,
-            f"Missing hop_db OpInfo entries for {missing_ops}, please add them to torch/testing/_internal/hop_db.py",
+            lambda msg: f"{msg}\nMissing hop_db OpInfo entries for {missing_ops}, please add them to torch/testing/_internal/hop_db.py",
+        )
+
+    def test_hop_db_has_no_decorators_or_skips(self):
+        """hop_db entries should not decide how tests are skipped or decorated."""
+        offending_op_infos = [
+            op.full_name for op in hop_db if op.decorators or op.skips
+        ]
+
+        self.assertEqual(
+            offending_op_infos,
+            [],
+            msg=(
+                "Move hop_db decorators/skips to the tests that need them "
+                "instead of storing them on the OpInfo."
+            ),
         )
 
     def test_all_hops_are_imported(self):
@@ -74,6 +96,7 @@ class TestHOPInfra(TestCase):
             "triton_kernel_wrapper_functional",
             "triton_kernel_wrapper_mutation",
             "wrap",  # Really weird failure -- importing this causes Dynamo to choke on checkpoint
+            "control_deps",  # Inductor-internal ordering HOP, not a public torch.ops.higher_order API
         }
         not_imported_hops = registered_hops - imported_hops
         not_imported_hops = not_imported_hops - FIXME_ALLOWLIST
@@ -98,9 +121,58 @@ class TestHOPInfra(TestCase):
             self.assertIs(
                 hop,
                 copied_hop,
-                f"deepcopy of HigherOrderOperator '{name}' should return the same object (singleton pattern)",
+                lambda msg: f"{msg}\ndeepcopy of HigherOrderOperator '{name}' should return the same object (singleton pattern)",
             )
             self.assertEqual(id(hop), id(copied_hop))
+
+    def test_triton_kernel_wrapper_functional_fake_tensor_nested_kwargs(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional,
+        )
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        mode = FakeTensorMode()
+        with mode:
+            fake_output = torch.empty_strided((2, 3), (3, 1))
+
+        self.assertIsInstance(fake_output, FakeTensor)
+
+        out = triton_kernel_wrapper_functional(
+            kernel_idx=0,
+            constant_args_idx=0,
+            grid=[(1,)],
+            tma_descriptor_metadata={},
+            kwargs={"out_ptr": fake_output},
+            tensors_to_clone=["out_ptr"],
+        )
+
+        self.assertEqual(set(out.keys()), {"out_ptr"})
+        self.assertIsInstance(out["out_ptr"], FakeTensor)
+        self.assertIs(out["out_ptr"].fake_mode, mode)
+        self.assertEqual(out["out_ptr"].size(), fake_output.size())
+        self.assertEqual(out["out_ptr"].stride(), fake_output.stride())
+
+    def test_triton_kernel_wrapper_mutation_fake_tensor_nested_kwargs(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_mutation,
+        )
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        mode = FakeTensorMode()
+        with mode:
+            fake_output = torch.empty_strided((2, 3), (3, 1))
+
+        self.assertIsInstance(fake_output, FakeTensor)
+
+        out = triton_kernel_wrapper_mutation(
+            kernel_idx=0,
+            constant_args_idx=0,
+            grid=[(1,)],
+            tma_descriptor_metadata={},
+            kwargs={"out_ptr": fake_output},
+        )
+
+        self.assertIsNone(out)
 
 
 if __name__ == "__main__":

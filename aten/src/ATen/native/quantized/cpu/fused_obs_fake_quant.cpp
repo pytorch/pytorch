@@ -215,7 +215,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
         ch_axis);
   }
   auto mask = at::ones_like(self, at::kBool, MemoryFormat::Preserve);
-  return std::make_tuple(self.clone(), mask);
+  return std::make_tuple(self.clone(), std::move(mask));
 }
 
 at::Tensor fused_moving_avg_obs_fake_quant(
