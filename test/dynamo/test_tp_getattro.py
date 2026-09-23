@@ -4,6 +4,7 @@
 import collections
 import inspect
 import sys
+import traceback
 import types
 import unittest
 
@@ -498,6 +499,36 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             result = torch.compile(fn, backend="eager", fullgraph=True)(cls, x)
             self.assertEqual(result, expected)
             self.assertEqual(calls, expected_calls)
+
+    def test_user_descriptor_untraceable_get_on_class(self):
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(objtype)
+                traceback.extract_stack()
+                return len(calls) * 10
+
+        class Base:
+            d = Desc()
+
+        def fn(x):
+            return x + 1, Base.d, Base.d
+
+        x = torch.ones(3)
+        expected = fn(x)
+        expected_calls = list(calls)
+        for nested in (False, True):
+            with torch._dynamo.config.patch(nested_graph_breaks=nested):
+                torch._dynamo.reset()
+                calls.clear()
+                result = torch.compile(fn, backend="eager")(x)
+                self.assertEqual(result, expected)
+                self.assertEqual(calls, expected_calls)
+
+                torch._dynamo.reset()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_staticmethod_descriptor(self):
         class MyObj:
