@@ -44,6 +44,7 @@ import fcntl
 import importlib
 import os
 import pickle
+import threading
 from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import get_context
 from typing import NamedTuple, Optional
@@ -61,7 +62,7 @@ class PoolPayload(NamedTuple):
     installer_module: str
     installer_qualname: str
     identity: str
-    data: bytes
+    data: object
 
 
 def _collect_pool_payloads(obj, out: list[PoolPayload]) -> None:
@@ -226,14 +227,11 @@ def _pin_dsl_arch(cute_dsl_arch: Optional[str]) -> None:
         pass
 
 
-def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
-    # GPU-blind compilation: hide devices and pin the target arch via the
-    # same overrides the CPU-only compile workflow uses. Forked workers must
-    # never initialize CUDA (fork-safety), and spawned workers save the
-    # ~1-2 s + ~300 MB of a per-worker CUDA context.
+def pin_worker_arch(quack_arch: Optional[str], cute_dsl_arch: Optional[str]) -> None:
+    """Pin this process's dispatch and ptxas arch for GPU-blind compilation
+    (the :func:`_pool_initializer` body, for hosts that own their workers)."""
     if quack_arch is not None:
         os.environ["QUACK_ARCH"] = quack_arch
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
     if cute_dsl_arch is not None:
         os.environ["CUTE_DSL_ARCH"] = cute_dsl_arch
     # Pay the heavy torch/cutlass import at worker start (no-op under
@@ -249,6 +247,16 @@ def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
         # GPU-blind: the driver can never answer, so the one trace-time
         # device query must come from the static arch table.
         _install_gpu_blind_device_attrs()
+
+
+def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
+    # GPU-blind compilation: hide devices and pin the target arch via the
+    # same overrides the CPU-only compile workflow uses. Forked workers must
+    # never initialize CUDA (fork-safety), and spawned workers save the
+    # ~1-2 s + ~300 MB of a per-worker CUDA context.
+    if quack_arch is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    pin_worker_arch(quack_arch, cute_dsl_arch)
 
 
 def _pool_worker(
@@ -496,6 +504,7 @@ class CompilePool:
 
 _active_pool: Optional[CompilePool] = None
 _suppress_depth = 0
+_thread_pool = threading.local()
 
 
 class suppress_pool:
@@ -533,7 +542,25 @@ def deactivate() -> None:
 
 
 def get_active_pool() -> Optional[CompilePool]:
-    return None if _suppress_depth > 0 else _active_pool
+    if _suppress_depth > 0:
+        return None
+    return getattr(_thread_pool, "pool", None) or _active_pool
+
+
+@contextlib.contextmanager
+def pool_active(pool: CompilePool):
+    """Make ``pool`` the active pool for the calling thread only.
+
+    For hosts that drive compilation from several threads (Inductor's
+    autotune precompile): ``CompilePending`` can only escape into this
+    thread's block, never into other threads' cold misses.
+    """
+    previous = getattr(_thread_pool, "pool", None)
+    _thread_pool.pool = pool
+    try:
+        yield pool
+    finally:
+        _thread_pool.pool = previous
 
 
 @contextlib.contextmanager
