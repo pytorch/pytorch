@@ -130,9 +130,9 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
-    Configure parameter dtypes before ``fully_shard``; later dtype changes are
-    unsupported. Device conversions preserve sharded gradient dtypes. Pending
-    unsharded gradients and buffers awaiting all-reduce are not moved.
+    Configure parameter dtypes and ``grad_dtype`` before ``fully_shard``;
+    later edits are unsupported and unchecked. Device moves preserve sharded
+    gradient dtypes and leave pending gradients on their original device.
 
     Since grouping multiple tensors together for one collective is critical for
     communication efficiency, this implementation makes this grouping first
@@ -423,33 +423,17 @@ class FSDPModule:
         both reduce-scatter and all-reduce together. This is the equivalence of
         `no_sync` in FSDP1.
 
-        Without synchronization, gradients accumulate on the native unsharded
-        parameters using ``MixedPrecisionPolicy.reduce_dtype`` when set,
-        otherwise their pre-FSDP ``grad_dtype`` policy. Parameters without an
-        explicit gradient policy accumulate in the original parameter dtype,
-        independently of ``MixedPrecisionPolicy.param_dtype``.
-        Previously reduced gradients remain on the sharded parameters in their
-        configured ``grad_dtype``. HSDP may also retain reduce-scattered gradients
-        that still require all-reduce. These contributions remain separate.
+        Unsynchronized gradients accumulate on unsharded parameters according
+        to ``MixedPrecisionPolicy.reduce_dtype``. Sharded gradients and HSDP
+        buffers awaiting all-reduce remain separate. CPU offload moves only
+        fully reduced sharded gradients to CPU.
 
-        In the sharded state, ``model.parameters()`` exposes the sharded
-        parameters and their reduced ``grad``. In the unsharded state, it exposes
-        the unsharded parameters and their accumulated ``grad``. HSDP partial
-        reduction buffers remain internal. With CPU offload, unreduced gradients
-        stay on the compute device; fully reduced sharded gradients are offloaded.
-        When ``reshard_after_forward`` is an integer, the temporary post-forward
-        shards have no gradient; unsharding or fully resharding restores the
-        corresponding parameter owners.
+        ``zero_grad()`` clears only the currently registered parameters' gradients,
+        leaving other parameter copies and pending all-reduce buffers intact.
 
-        Ordinary ``nn.Module.zero_grad()`` clears only the currently registered
-        parameters: sharded gradients while sharded, or unsharded gradients while
-        unsharded. Gradients on other parameter owners and HSDP partial buffers
-        are unchanged.
-        Reduction consumes the unsharded ``grad`` and sets it to ``None``; HSDP
-        partial buffers are consumed when all-reduce completes. Before global
-        gradient clipping or an optimizer step, enable the required reductions
-        and call ``set_is_last_backward(True)`` for the final backward. Reshard
-        parameters before updating them.
+        Before gradient clipping or an optimizer step, enable the required
+        reductions and call ``set_is_last_backward(True)`` for the final backward.
+        Reshard before updating parameters.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
@@ -528,8 +512,8 @@ class FSDPModule:
         reduced communication since the unsharded parameters do not need to be
         re-all-gathered before the next forward.
 
-        When retaining unsharded parameters, call :meth:`reshard` on each FSDP
-        module on every rank before updating its sharded parameters.
+        Call :meth:`reshard` on each FSDP module on every rank before updating
+        its sharded parameters.
 
         Args:
             reshard_after_backward (bool): Whether to reshard parameters after
@@ -723,9 +707,8 @@ class FSDPModule:
         reduce-scatter collectives. Similar to DDP's
         ``find_unused_parameters``.
 
-        Zero gradients must have the same dtype on every rank. If a parameter
-        has an explicit ``grad_dtype=None`` policy, set ``reduce_dtype`` in the
-        mixed precision policy before enabling this option.
+        Explicit ``grad_dtype=None`` requires a non-``None`` ``reduce_dtype``
+        so zero gradients have the same dtype on every rank.
 
         Args:
             reduce_scatter_unused_params (bool): Whether to include zero

@@ -744,17 +744,15 @@ class FSDPParamGroup:
                     if isinstance(self.mesh_info, DDPMeshInfo)
                     else []
                 )
-                partial_input = (
-                    self._prepare_partial_reduce_output(
-                        fsdp_params_with_grad,
-                        partial_sizes,
-                        self._reduce_dtype or unsharded_grads[0].dtype,
-                    )
-                    if partial_sizes
-                    else None
-                )
-                if partial_input is not None and self.device.type != "cpu":
-                    partial_input.record_stream(self.comm_ctx.reduce_scatter_stream)
+                partial_input = None
+                if partial_sizes:
+                    # Allocate on the RS stream so reuse is ordered after consumption.
+                    with self.device_handle.stream(self.comm_ctx.reduce_scatter_stream):
+                        partial_input = self._prepare_partial_reduce_output(
+                            fsdp_params_with_grad,
+                            partial_sizes,
+                            self._reduce_dtype or unsharded_grads[0].dtype,
+                        )
                 (
                     reduce_scatter_input,
                     reduce_scatter_event,

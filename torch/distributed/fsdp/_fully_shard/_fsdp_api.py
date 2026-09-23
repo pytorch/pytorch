@@ -30,23 +30,15 @@ class MixedPrecisionPolicy:
             the unsharded parameter uses the original dtype. The optimizer step
             uses the sharded parameter in the original dtype. (Default:
             ``None``)
-        reduce_dtype (Optional[torch.dtype]): The dtype for unsharded gradients
-            and gradient reduction (reduce-scatter or all-reduce). FSDP sets
-            the unsharded parameter's ``grad_dtype`` to this dtype, so autograd
-            produces and accumulates gradients in this dtype regardless of
-            whether gradient synchronization is enabled. FSDP packs these
-            gradients without casting before reduction. If ``None``, FSDP
-            preserves each parameter's explicitly configured ``grad_dtype``,
-            including ``None`` to allow any incoming gradient dtype. Parameters
-            without an explicit gradient policy use the original parameter
-            dtype, independently of ``param_dtype``.
-            Each communication group must have a uniform unsharded gradient
-            dtype. FSDP raises an error for nonuniform policies or actual
-            gradient dtypes instead of issuing additional collectives. Set an
-            explicit ``reduce_dtype`` to give the group a common dtype. Reduced
-            sharded gradients use each parameter's ``grad_dtype`` as specified before calling
-            :func:`fully_shard`. Changing this policy afterward is unsupported
-            and is not checked, including before the first forward. (Default: ``None``)
+        reduce_dtype (Optional[torch.dtype]): The dtype for autograd accumulation
+            and gradient reduction (reduce-scatter or all-reduce). If ``None``,
+            follows the parameter's ``grad_dtype`` configured before
+            :func:`fully_shard`: unset uses the original parameter dtype;
+            explicit ``None`` accepts any incoming gradient dtype. This fallback
+            is independent of ``param_dtype``. Actual gradients in a communication
+            group must share a dtype or reduction raises an error; setting
+            ``reduce_dtype`` ensures this. Reduced shards retain the input
+            ``grad_dtype`` policy. (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed
