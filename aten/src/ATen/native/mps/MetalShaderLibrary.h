@@ -166,7 +166,7 @@ class MetalShaderLibrary {
   // (copy_identity, copy_conj, copy_neg, copy_conj_neg). offsets are in bytes;
   // numel is the element count to process.
   void exec_unary_kernel_raw(
-      const std::string& name,
+      std::string_view name,
       MTLBuffer_t src_buf,
       uint32_t src_offs_bytes,
       c10::ScalarType src_dtype,
@@ -212,6 +212,8 @@ class MetalShaderLibrary {
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
+  // `library` and the caches below are guarded by a mutex private to
+  // OperationUtils.mm, where every accessor that touches them is defined.
   MTLLibrary_t library = nullptr;
 
  private:

@@ -55,7 +55,7 @@ def build_reshard_metadata(
         world_size (int): number of ranks.
 
     Returns:
-        A Tuple of the followings:
+        A Tuple of the following:
             A List[`ShardMetadata`] which contains the metadata for the shard, including
                 offsets, lengths and device placement.
             A List[int] which contains the ranks in the order of placement.
@@ -105,7 +105,7 @@ def reshuffle_local_shard(
         pg (ProcessGroup): The process group to aggregate on.
 
     Returns:
-        A Tuple of the followings:
+        A Tuple of the following:
             A List[`Shard`] which contains the local tensor and its metadata.
             A List[`ShardMetadata`] which contains the metadata for the shard, including
                 offsets, lengths and device placement.
@@ -174,7 +174,7 @@ def reshard_local_shard(
         pg (ProcessGroup): The process group to aggregate on.
 
     Returns:
-        A Tuple of the followings:
+        A Tuple of the following:
             A List[`Shard`] which contains the local tensor and its metadata.
             A List[`ShardMetadata`] which contains the metadata for the shard, including
                 offsets, lengths and device placement.

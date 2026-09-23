@@ -32,12 +32,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
   # Builds every Python version sequentially on a single runner. libtorch_cpu
   # is Python-ABI-free and shared across iterations via `build/` — only
   # libtorch_python + _C are recompiled per interpreter (~5 min each after the
   # first ~80 min full build), thanks to the Python-cache invalidation in
   # tools/setup_helpers/cmake.py.
   wheel-build:
+    needs: check-ci
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-26-xlarge
     timeout-minutes: 280
@@ -49,8 +53,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
+      DESIRED_PYTHONS: "3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'
     steps:
       # BINARY_ENV_FILE needs ${RUNNER_TEMP} so it has to be populated in-step
       # rather than at the workflow env level.
@@ -59,7 +63,7 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5.1.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # Full fetch on tag pushes so the release tag is visible to
@@ -74,7 +78,7 @@ jobs:
           git clean -fxd
       - name: Install libomp
         run: |
-          "${PYTORCH_ROOT}/.ci/macwheel/install_libomp.sh"
+          "${PYTORCH_ROOT}/.ci/wheel/mac/install_libomp.sh"
       - name: Install uv
         uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -86,23 +90,17 @@ jobs:
         # One command, parallel downloads of everything in DESIRED_PYTHONS.
         # Cached under ~/.local/share/uv/python/; the build script's per-
         # iteration `uv python install <ver>` becomes a cache hit.
-        run: uv python install $DESIRED_PYTHONS
+        run: |
+          read -ra python_versions <<< "${DESIRED_PYTHONS}"
+          uv python install "${python_versions[@]}"
       - name: Build all wheels
         run: |
           # Per-Python build now delocates inline (repair_wheel.py); no
           # separate delocation step.
-          "${PYTORCH_ROOT}/.ci/macwheel/build_all_macos_wheels.sh"
+          "${PYTORCH_ROOT}/.ci/wheel/mac/build_all_macos_wheels.sh"
       # Upload phase: each wheel becomes its own artifact (one call per name).
-      - name: Upload wheel-py3_10-cpu
-        uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_10-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/wheel-py3_10-cpu
       - name: Upload wheel-py3_11-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@v6.0.0
         if: always()
         with:
           name: wheel-py3_11-cpu
@@ -110,7 +108,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_11-cpu
       - name: Upload wheel-py3_12-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@v6.0.0
         if: always()
         with:
           name: wheel-py3_12-cpu
@@ -118,7 +116,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_12-cpu
       - name: Upload wheel-py3_13-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@v6.0.0
         if: always()
         with:
           name: wheel-py3_13-cpu
@@ -126,7 +124,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_13-cpu
       - name: Upload wheel-py3_14-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@v6.0.0
         if: always()
         with:
           name: wheel-py3_14-cpu
@@ -134,13 +132,29 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_14-cpu
       - name: Upload wheel-py3_14t-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@v6.0.0
         if: always()
         with:
           name: wheel-py3_14t-cpu
           retention-days: 14
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_14t-cpu
+      - name: Upload wheel-py3_15-cpu
+        uses: actions/upload-artifact@v6.0.0
+        if: always()
+        with:
+          name: wheel-py3_15-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_15-cpu
+      - name: Upload wheel-py3_15t-cpu
+        uses: actions/upload-artifact@v6.0.0
+        if: always()
+        with:
+          name: wheel-py3_15t-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_15t-cpu
   # Each matrix entry invokes _binary-test-macos.yml independently, so the
   # test (on macos-26) -> upload (on ubuntu, via _binary-upload.yml) chain
   # runs per-Python-version: test-X failing blocks only upload-X.
@@ -157,10 +171,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            setup_python_version: "3.10.4"
-            freethreaded: false
-            build_name: wheel-py3_10-cpu
           - desired_python: "3.11"
             setup_python_version: "3.11.4"
             freethreaded: false
@@ -181,6 +191,14 @@ jobs:
             setup_python_version: "3.14.0"
             freethreaded: true
             build_name: wheel-py3_14t-cpu
+          - desired_python: "3.15"
+            setup_python_version: "3.15"
+            freethreaded: false
+            build_name: wheel-py3_15-cpu
+          - desired_python: "3.15t"
+            setup_python_version: "3.15"
+            freethreaded: true
+            build_name: wheel-py3_15t-cpu
     uses: ./.github/workflows/_binary-test-macos.yml
     with:
       build_name: ${{ matrix.build_name }}
@@ -207,7 +225,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5.1.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
@@ -217,10 +235,10 @@ jobs:
         with:
           python-version: "3.10.4"
           freethreaded: false
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7.0.0
         name: Download Wheel Artifact
         with:
-          name: wheel-py3_10-cpu
+          name: wheel-py3_11-cpu
           path: "${{ runner.temp }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         run: |
@@ -232,7 +250,7 @@ jobs:
             --platform macos \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6.0.0
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-release

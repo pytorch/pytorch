@@ -169,12 +169,12 @@ def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     return m * n * 2 * k
 
 @register_flop_formula(aten.addmm)
-def addmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def addmm_flop(self_shape, a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for addmm."""
     return mm_flop(a_shape, b_shape)
 
 @register_flop_formula(aten.bmm)
-def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def bmm_flop(a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for the bmm operation."""
     # Inputs should be a list of length 2.
     # Inputs contains the shapes of two tensor.
@@ -189,7 +189,7 @@ def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     return flop
 
 @register_flop_formula(aten.baddbmm)
-def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def baddbmm_flop(self_shape, a_shape, b_shape, *args, **kwargs) -> int:
     """Count flops for the baddbmm operation."""
     # Inputs should be a list of length 3.
     # Inputs contains the shapes of three tensors.
@@ -396,6 +396,7 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
 
 @register_flop_formula([aten._scaled_dot_product_efficient_attention,
                         aten._scaled_dot_product_flash_attention,
+                        aten._scaled_dot_product_flash_attention_for_cpu,
                         aten._scaled_dot_product_cudnn_attention])
 def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention."""
@@ -443,11 +444,15 @@ def _unpack_flash_attention_nested_shapes(
             raise AssertionError("sdpa_flop_count: expected key.shape to be 3-dimensional")
         if len(value.shape) != 3:
             raise AssertionError("sdpa_flop_count: expected value.shape to be 3-dimensional")
-        if grad_out is not None and grad_out.shape != query.shape:
-            raise AssertionError("sdpa_flop_count: grad_out.shape must match query.shape when provided")
-        _, h_q, d_q = query.shape
+        t_q, h_q, d_q = query.shape
         _, h_k, d_k = key.shape
         _, h_v, d_v = value.shape
+        expected_grad_out_shape = (t_q, h_q, d_v)
+        if grad_out is not None and tuple(grad_out.shape) != expected_grad_out_shape:
+            raise AssertionError(
+                "sdpa_flop_count: grad_out has shape "
+                f"{tuple(grad_out.shape)}, expected {expected_grad_out_shape}"
+            )
         if cum_seq_q is None:
             raise AssertionError("sdpa_flop_count: cum_seq_q must not be None")
         if cum_seq_k is None:
@@ -460,7 +465,7 @@ def _unpack_flash_attention_nested_shapes(
             new_query_shape = (1, h_q, seq_q_len, d_q)
             new_key_shape = (1, h_k, seq_k_len, d_k)
             new_value_shape = (1, h_v, seq_k_len, d_v)
-            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            new_grad_out_shape = (1, h_q, seq_q_len, d_v) if grad_out is not None else None
             yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
         return
 
@@ -479,7 +484,7 @@ def _unpack_efficient_attention_nested_shapes(
     max_seqlen_k,
 ) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
-    Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
+    Given inputs to an efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
     each batch element.
 
@@ -497,11 +502,15 @@ def _unpack_efficient_attention_nested_shapes(
             raise AssertionError("_unpack_efficient_attention_nested_shapes: expected key.shape to be 4-dimensional")
         if len(value.shape) != 4:
             raise AssertionError("_unpack_efficient_attention_nested_shapes: expected value.shape to be 4-dimensional")
-        if grad_out is not None and grad_out.shape != query.shape:
-            raise AssertionError("_unpack_efficient_attention_nested_shapes: grad_out.shape must match query.shape when provided")
-        _, _, h_q, d_q = query.shape
+        b, m, h_q, d_q = query.shape
         _, _, h_k, d_k = key.shape
         _, _, h_v, d_v = value.shape
+        expected_grad_out_shape = (b, m, h_q, d_v)
+        if grad_out is not None and tuple(grad_out.shape) != expected_grad_out_shape:
+            raise AssertionError(
+                "_unpack_efficient_attention_nested_shapes: grad_out has shape "
+                f"{tuple(grad_out.shape)}, expected {expected_grad_out_shape}"
+            )
         if cu_seqlens_q is None:
             raise AssertionError("_unpack_efficient_attention_nested_shapes: cu_seqlens_q must not be None")
         if cu_seqlens_k is None:
@@ -515,7 +524,7 @@ def _unpack_efficient_attention_nested_shapes(
             new_query_shape = (1, h_q, len_q, d_q)
             new_key_shape = (1, h_k, len_k, d_k)
             new_value_shape = (1, h_v, len_k, d_v)
-            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            new_grad_out_shape = (1, h_q, len_q, d_v) if grad_out is not None else None
             yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
         return
 
@@ -629,6 +638,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
 
 @register_flop_formula([aten._scaled_dot_product_efficient_attention_backward,
                         aten._scaled_dot_product_flash_attention_backward,
+                        aten._scaled_dot_product_flash_attention_for_cpu_backward,
                         aten._scaled_dot_product_cudnn_attention_backward])
 def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention backward."""
@@ -833,9 +843,11 @@ flop_registry = {
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
     aten._scaled_dot_product_flash_attention: sdpa_flop,
+    aten._scaled_dot_product_flash_attention_for_cpu: sdpa_flop,
     aten._scaled_dot_product_cudnn_attention: sdpa_flop,
     aten._scaled_dot_product_efficient_attention_backward: sdpa_backward_flop,
     aten._scaled_dot_product_flash_attention_backward: sdpa_backward_flop,
+    aten._scaled_dot_product_flash_attention_for_cpu_backward: sdpa_backward_flop,
     aten._scaled_dot_product_cudnn_attention_backward: sdpa_backward_flop,
     aten._flash_attention_forward: _flash_attention_forward_flop,
     aten._efficient_attention_forward: _efficient_attention_forward_flop,

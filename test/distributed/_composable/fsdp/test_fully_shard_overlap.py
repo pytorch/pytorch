@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
     run_tests,
-    TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -74,9 +73,11 @@ class TestFullyShardOverlap(FSDPTest):
     def world_size(self) -> int:
         return min(2, torch.get_device_module(device_type).device_count())
 
-    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_fully_shard_training_overlap(self):
         torch.manual_seed(42)
 
@@ -190,7 +191,6 @@ class TestFullyShardOverlap(FSDPTest):
         # )
         self.assertLessEqual(fwd_bwd_time, ref_fwd_bwd_time)
 
-    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_backward_comm_overlap(self):
         """Exercise backward with reduce-scatter sharing the shard process
@@ -320,7 +320,10 @@ class TestFullyShardOverlap(FSDPTest):
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/131081")
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_fully_shard_post_optim_event_overlap(self):
         torch.manual_seed(42)
 
@@ -480,15 +483,25 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             dist.barrier()
             _pg_mod.foreach_reduce = orig
 
+    # Hangs on MI200: RCCL deadlocks when three communicators make
+    # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
     @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_fully_shard_per_param_mesh_training_overlap(self):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=False)
 
+    # Hangs on MI200: RCCL deadlocks when three communicators make
+    # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
     @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_fully_shard_per_param_mesh_no_grad_input_overlap(self):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=True)
 

@@ -29,6 +29,7 @@ from torch.distributed.fsdp import (
     share_comm_ctx,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_reduce_scatter_input_fn,
     foreach_all_gather,
     foreach_reduce,
 )
@@ -47,6 +48,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
@@ -63,7 +65,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchInductor,
     TEST_CUDA_GRAPH,
-    TEST_HPU,
     TEST_XPU,
     wrapSwapTensorsTest,
     xfailIf,
@@ -410,7 +411,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep kernel not supported for HPU/XPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
         """
@@ -434,7 +438,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/148901")
     @skip_if_lt_x_gpu(2, allow_cpu=True)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -458,7 +465,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group_unshard_async_op(self):
         """
@@ -592,7 +602,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
-    @unittest.skipIf(TEST_XPU, "Sleep is not supported on XPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -723,7 +736,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep is not supported on HPU/XPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_post_optim_event(self):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
@@ -932,6 +948,29 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             mp_policy_mode="none",
             ac=False,
         )
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_partial_group_releases_deferred_all_gather_after_backward(self):
+        """Root backward releases state retained by a partial forward."""
+        dim, vocab_size = 32, 128
+        model = ChunkedHeadModel(dim, vocab_size, tie=False).to(device_type)
+        fully_shard([model.norm, model.head])
+        fully_shard(model)
+        tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+
+        hidden = model(tokens, skip_head=True)
+        chunk = hidden.detach().requires_grad_()
+        model.head(chunk).sum().backward()
+        comm_ctx = model.head._get_fsdp_state()._comm_ctx
+        # The standalone head forward leaves this deferred state for the root
+        # backward boundary to release.
+        self.assertIsNotNone(comm_ctx.all_gather_state)
+
+        # Pipeline schedules use non-final backwards while accumulating grads.
+        model.set_is_last_backward(False)
+        hidden.backward(chunk.grad)
+
+        self.assertIsNone(comm_ctx.all_gather_state)
 
     def _test_partial_group_forward_then_standalone(
         self,
@@ -1292,7 +1331,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model(tokens, skip_head=True)
         model.body.armed = False
 
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        self.assertIsNotNone(comm_ctx.all_gather_state)
         model.reset_iter_state()
+        self.assertIsNone(comm_ctx.all_gather_state)
 
         # Proves the reset is real: the next iteration completes cleanly.
         model(tokens).sum().backward()
@@ -1499,13 +1541,12 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
             self.assertTrue(param.grad.to_local().is_contiguous())
 
 
-class TestFullyShardSharedParams(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        min_world_size = 4
-        if device_type.type == "cpu":
-            return min_world_size
-        return min(min_world_size, torch.get_device_module(device_type).device_count())
+class TestFullyShardSharedParams(FSDPTestContinuous):
+    world_size = (
+        4
+        if device_type.type == "cpu"
+        else min(4, torch.get_device_module(device_type).device_count())
+    )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_train_parity_with_shared_params(self):
@@ -1687,13 +1728,12 @@ class TestFullyShardSharedParams(FSDPTest):
         out.sum().backward()
 
 
-class TestFullyShardGradientAccumulation(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        min_world_size = 4
-        if device_type.type == "cpu":
-            return min_world_size
-        return min(min_world_size, torch.get_device_module(device_type).device_count())
+class TestFullyShardGradientAccumulation(FSDPTestContinuous):
+    world_size = (
+        4
+        if device_type.type == "cpu"
+        else min(4, torch.get_device_module(device_type).device_count())
+    )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_gradient_accumulation(self):
@@ -2561,6 +2601,8 @@ class TestFullyShardShareCommContext(FSDPTest):
             partial_reduce_output: torch.Tensor | None,  # only used for HSDP
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
+            *,
+            prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -2580,6 +2622,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
+                prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
             )
 
         with (
@@ -2596,6 +2639,18 @@ class TestFullyShardShareCommContext(FSDPTest):
         self.assertEqual(len(reduce_scatter_streams), 1)
         self.assertEqual(len(shared_comm_ctx._last_post_reduce_events), 0)
         check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardInference(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_inference(self):
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        fully_shard(model, shard_placement_fn=lambda _: Shard(1))
+        with torch.inference_mode():
+            model(torch.ones((2, 8), device=device_type))
 
 
 class TestFullyShardWorldSize1(FSDPTest):

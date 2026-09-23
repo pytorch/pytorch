@@ -2,11 +2,11 @@
 #include <ATen/native/Activation.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/OpMathType.h>
-#include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
@@ -440,15 +440,13 @@ Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
 }
 
 Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() != at::kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool,
   "Bool inputs not supported for hardtanh");
   //preserve legacy behavior of boundaries not causing type promotion
   Scalar min_, max_;
   if (at::isIntegralType(self.scalar_type(), /*include_bool*/false)) {
     int64_t minval = min.toLong();
     int64_t maxval = max.toLong();
-    TORCH_CHECK(self.dtype() != at::kByte || (minval >= 0 &&
-       maxval >=0), "cannot do hardtanh on an unsigned type with negative limits");
     min_ = minval;
     max_ = maxval;
   } else {
@@ -513,12 +511,12 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min_(self, 0);
 }
 

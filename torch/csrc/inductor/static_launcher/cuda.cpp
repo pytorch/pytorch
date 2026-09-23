@@ -4,10 +4,12 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #include <cstdint>
 
 #include <torch/csrc/utils/python_numbers.h>
+#include <cstring>
 #include <filesystem>
 #include <optional>
 #include <utility>
@@ -103,6 +105,50 @@ CUdeviceptr getPointer(PyObject* obj) {
 
   return dev_ptr;
 }
+
+#if !defined(USE_ROCM)
+// CUtensorMap is a fixed 128-byte CUDA driver ABI type passed to the kernel by
+// value; catch a header change to its size at compile time.
+static_assert(
+    sizeof(CUtensorMap) == 128,
+    "CUtensorMap is expected to be 128 bytes (CUDA ABI change?)");
+
+// Pointer to the CUtensorMap in a host-side TMA descriptor arg (triton's
+// PyCUtensorMap, or a duck-typed tma_desc_cpu_ptr()). Owned by `obj`, which
+// must stay alive across the launch.
+void* getTmaDescPtr(PyObject* obj) {
+  if (std::strcmp(
+          Py_TYPE(obj)->tp_name, "triton.backends.nvidia.PyCUtensorMap") == 0) {
+    // triton stores the CUtensorMap as the trailing field of a PyObject_HEAD
+    // struct, so derive its offset from tp_basicsize instead of mirroring the
+    // struct: triton may be built against a different CUDA major than we are,
+    // and alignof(CUtensorMap) is 64 on 12.x vs 128 on 13.x. 64 is the weaker
+    // of the two, so checking against it accepts either build.
+    constexpr Py_ssize_t kMinTensorMapAlign = 64;
+    const Py_ssize_t basicsize = Py_TYPE(obj)->tp_basicsize;
+    const Py_ssize_t offset =
+        basicsize - static_cast<Py_ssize_t>(sizeof(CUtensorMap));
+    TORCH_CHECK(
+        offset >= static_cast<Py_ssize_t>(sizeof(PyObject)) &&
+            offset % kMinTensorMapAlign == 0,
+        "triton PyCUtensorMap layout changed (tp_basicsize=",
+        basicsize,
+        "); the static launcher cannot locate its CUtensorMap");
+    return reinterpret_cast<char*>(obj) + offset;
+  }
+  // Duck-typed fallback: tma_desc_cpu_ptr() -> host pointer to a CUtensorMap.
+  THPObjectPtr method{PyObject_GetAttrString(obj, "tma_desc_cpu_ptr")};
+  TORCH_CHECK(
+      method,
+      "tensordesc argument must be a triton PyCUtensorMap or expose "
+      "tma_desc_cpu_ptr()");
+  THPObjectPtr ret{PyObject_CallNoArgs(method)};
+  TORCH_CHECK(ret, "tma_desc_cpu_ptr() call failed");
+  auto host_ptr = static_cast<uintptr_t>(THPUtils_unpackUInt64(ret));
+  TORCH_CHECK(host_ptr != 0, "tma_desc_cpu_ptr() returned NULL");
+  return reinterpret_cast<void*>(host_ptr); // NOLINT(performance-no-int-to-ptr)
+}
+#endif
 
 #define SHARED_MEM_STATIC_MAX 49152 // 48 KB
 
@@ -332,6 +378,20 @@ void parseKernelArgs(
       case 'K':
         convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
         break;
+      case 'e':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonFp16,
+            "float16",
+            slot,
+            item);
+        break;
+      case 'y':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonBf16,
+            "bfloat16",
+            slot,
+            item);
+        break;
       case 'f':
         convertType<float>(THPUtils_unpackDouble, "float", slot, item);
         break;
@@ -343,6 +403,16 @@ void parseKernelArgs(
         CUdeviceptr ptr = getPointer(item);
         *reinterpret_cast<CUdeviceptr*>(slot) = ptr;
         break;
+      }
+      case 'M': { // host-side TMA descriptor (CUtensorMap, 128-byte by-value)
+#if defined(USE_ROCM)
+        TORCH_CHECK(false, "tensordesc kernel args are not supported on ROCm");
+#else
+        // Point the kernel arg at the descriptor's 128 bytes; no 8-byte slot,
+        // so skip the slot write.
+        kernelArgs[i] = getTmaDescPtr(item);
+        continue;
+#endif
       }
       default:
         TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
@@ -588,7 +658,8 @@ PyObject* unload_kernel(PyObject* self, PyObject* args) {
   if (!PyArg_ParseTuple(args, "K", &mod_ptr)) {
     return nullptr;
   }
-  CUmodule mod = reinterpret_cast<CUmodule>(mod_ptr);
+  CUmodule mod =
+      reinterpret_cast<CUmodule>(mod_ptr); // NOLINT(performance-no-int-to-ptr)
   if (mod) {
 #if defined(USE_ROCM)
     AT_CUDA_DRIVER_CHECK(hipModuleUnload(mod));
@@ -721,6 +792,7 @@ struct FastCudaLauncherObject {
   uint32_t sharedMemBytes;
   int numKernelArgs; // args passed from Python
   int numTotalArgs; // numKernelArgs + nScratch
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char argTypes[MAX_ARGS + 1]; // null-terminated
   // Thread safety: argStorage/kernelArgs are shared across calls but safe
   // because the GIL is held throughout fast_launcher_vectorcall (no
@@ -730,7 +802,9 @@ struct FastCudaLauncherObject {
   // TODO(T000000): Not safe under free-threaded Python (PEP 703, nogil).
   // If two threads call the same instance concurrently without the GIL,
   // they will corrupt argStorage/kernelArgs.  Revisit when nogil is stable.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint64_t argStorage[MAX_ARGS];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   void* kernelArgs[MAX_ARGS];
 };
 
@@ -852,6 +926,15 @@ static PyObject* fast_launcher_vectorcall(
         *reinterpret_cast<CUdeviceptr*>(slot) = getPointerFast(item);
         break;
       }
+      case 'M': {
+#if defined(USE_ROCM)
+        TORCH_CHECK(false, "tensordesc kernel args are not supported on ROCm");
+#else
+        // Override the pre-bound slot to point at the descriptor's 128 bytes.
+        self->kernelArgs[i] = getTmaDescPtr(item);
+        continue;
+#endif
+      }
       case 'b':
         convertType<int8_t>(THPUtils_unpackInt, "int8", slot, item);
         break;
@@ -875,6 +958,20 @@ static PyObject* fast_launcher_vectorcall(
         break;
       case 'K':
         convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
+        break;
+      case 'e':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonFp16,
+            "float16",
+            slot,
+            item);
+        break;
+      case 'y':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonBf16,
+            "bfloat16",
+            slot,
+            item);
         break;
       case 'f':
         convertType<float>(THPUtils_unpackDouble, "float", slot, item);

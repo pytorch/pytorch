@@ -38,7 +38,7 @@ class OutDtypeOperator(HigherOrderOperator):
     The general implementation for all operators will be the following:
         1. Promote inputs dtypes based on default PyTorch dtype promotion rules,
             using the dtypes of all input Tensors/Scalars and the `out_dtype`
-            arugument.
+            argument.
         2. Execute the operator
         3. Cast the output to `out_dtype`
     """

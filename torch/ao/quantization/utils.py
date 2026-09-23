@@ -621,7 +621,7 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
     in a tuple of initial qmin and qmax values. One use case is these customized qmin and qmax
     values are used to calculate static estimates of the scale and zero point for aggressive lower-bit
     fake quantization. These estimates are compared against parameters learned through backpropagation.
-    The related literatures for scale and zero point via backpropagation are as follows:
+    The related literature for scale and zero point via backpropagation are as follows:
 
     Learned Step Size Quantization: https://openreview.net/pdf?id=rkgO66VKDS
     Trained Quantization Thresholds: https://arxiv.org/pdf/1903.08066.pdf

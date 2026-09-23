@@ -18,21 +18,6 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
  # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
-macro(disable_ubsan)
-  if(CMAKE_C_FLAGS MATCHES ${UBSAN_FLAG} OR CMAKE_CXX_FLAGS MATCHES ${UBSAN_FLAG})
-    set(CAFFE2_UBSAN_ENABLED ON)
-    string(REPLACE ${UBSAN_FLAG} "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
-    string(REPLACE ${UBSAN_FLAG} "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-  endif()
-endmacro()
-
-macro(enable_ubsan)
-  if(CAFFE2_UBSAN_ENABLED)
-    set(CMAKE_C_FLAGS "${UBSAN_FLAG} ${CMAKE_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${UBSAN_FLAG} ${CMAKE_CXX_FLAGS}")
-  endif()
-endmacro()
-
 # ---[ CUDA
 if(USE_CUDA)
   # public/*.cmake uses CAFFE2_USE_*
@@ -47,7 +32,7 @@ if(USE_CUDA)
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
       if(NOT CAFFE2_USE_NVRTC)
         message(FATAL_ERROR
@@ -109,9 +94,7 @@ endif()
 
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
-  disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
-  enable_ubsan()
 endif()
 
 if(USE_ASAN OR USE_LSAN OR USE_TSAN)
@@ -128,7 +111,7 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
         # through hiprtc and we haven't set up an ASAN-aware hiprtc
         # runtime. Read by the AT_USE_JITERATOR() gate in
         # aten/src/ATen/jit_macros.h.
-        add_definitions(-DAT_DISABLE_JITERATOR)
+        add_compile_definitions(AT_DISABLE_JITERATOR)
       endif()
     else()
       message(WARNING "ASAN not found. Suppress this warning with -DUSE_ASAN=OFF.")
@@ -204,12 +187,11 @@ if(BLAS STREQUAL "Eigen")
   set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
-  include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
-  list(APPEND Caffe2_DEPENDENCY_LIBS cblas)
+  include_directories(SYSTEM ${Atlas_INCLUDE_DIR})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${Atlas_LIBRARIES})
   set(BLAS_INFO "atlas")
   set(BLAS_FOUND 1)
-  set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
+  set(BLAS_LIBRARIES ${Atlas_LIBRARIES})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
@@ -223,6 +205,9 @@ elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${BLIS_LIB})
+  set(BLAS_INFO "blis")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${BLIS_LIB})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
@@ -265,6 +250,9 @@ elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+  set(BLAS_INFO "flexi")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${FlexiBLAS_LIB})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "APL")
   find_package(APL REQUIRED)
@@ -275,7 +263,7 @@ elseif(BLAS STREQUAL "APL")
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
-  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+  if("$ENV{GENERIC_BLAS_LIBRARIES}" STREQUAL "")
     set(GENERIC_BLAS "blas")
   else()
     set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
@@ -332,7 +320,7 @@ endif()
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
 if(NOT AT_MKL_ENABLED)
-  set(POCKETFFT_INCLUDE_DIR "${Torch_SOURCE_DIR}/third_party/pocketfft/")
+  set(POCKETFFT_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/third_party/pocketfft/")
   if(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}")
     message(FATAL_ERROR "pocketfft directory not found, expected ${POCKETFFT_INCLUDE_DIR}")
   elseif(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}/pocketfft_hdronly.h")
@@ -683,6 +671,17 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Disable benchmark install to avoid overwriting vendor install.")
   if(NOT USE_SYSTEM_BENCHMARK)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
+    # Clang 23+ classifies __COUNTER__ in preprocessor conditions as a C2y
+    # extension. benchmark enables -Werror so this becomes fatal. Suppress
+    # only that warning on affected compilers without touching the submodule.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23.0")
+      if(TARGET benchmark)
+        target_compile_options(benchmark PRIVATE -Wno-c2y-extensions)
+      endif()
+      if(TARGET benchmark_main)
+        target_compile_options(benchmark_main PRIVATE -Wno-c2y-extensions)
+      endif()
+    endif()
   else()
     add_library(benchmark SHARED IMPORTED)
     find_library(BENCHMARK_LIBRARY benchmark)
@@ -715,6 +714,20 @@ if(USE_FBGEMM)
     endif()
     target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     target_compile_options_if_supported(asmjit -Wno-unused-variable)
+
+    # fbgemm's cpp_library() gives source-less aggregate targets (like fbgemm
+    # itself) a placeholder .cc named via STRING(RANDOM) and rewritten with
+    # file(WRITE) on every configure. Since we reconfigure on every build, that
+    # placeholder is a perpetually-dirty torch_cpu dependency and forces a full
+    # relink of libtorch_cpu.so and everything downstream. Swap in a stable one.
+    get_target_property(FBGEMM_SRCS fbgemm SOURCES)
+    if(FBGEMM_SRCS MATCHES "gen_placeholder_")
+      set(FBGEMM_STABLE_PLACEHOLDER "${CMAKE_BINARY_DIR}/fbgemm_placeholder.cc")
+      file(GENERATE OUTPUT "${FBGEMM_STABLE_PLACEHOLDER}" CONTENT "")
+      list(FILTER FBGEMM_SRCS EXCLUDE REGEX "gen_placeholder_")
+      list(APPEND FBGEMM_SRCS "${FBGEMM_STABLE_PLACEHOLDER}")
+      set_property(TARGET fbgemm PROPERTY SOURCES ${FBGEMM_SRCS})
+    endif()
   endif()
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
@@ -725,13 +738,6 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
-endif()
-
-if(USE_OPENCL)
-  message(INFO "USING OPENCL")
-  find_package(OpenCL REQUIRED)
-  include_directories(SYSTEM ${OpenCL_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
 endif()
 
 # ---[ NUMA
@@ -874,8 +880,34 @@ if(BUILD_PYTHON)
         caffe2_update_option(USE_NUMPY ON)
       endif()
     endif()
-    # Observers are required in the python build
-    caffe2_update_option(USE_OBSERVERS ON)
+    # When cross-compiling, FindPython does not run the interpreter to determine
+    # Python_SOABI unless CMAKE_CROSSCOMPILING_EMULATOR is set (policy CMP0190),
+    # so it is left empty. Python_add_library with WITH_SOABI would then emit
+    # extension modules without a platform suffix -- an untagged _C.so that the
+    # target interpreter will not import. A cross-python setup provides a
+    # directly runnable interpreter that reports the target's config, so when
+    # SOABI is empty, query it from the interpreter and set Python_SOABI once,
+    # for every downstream WITH_SOABI consumer.
+    #
+    # Only fill an *empty* value: a non-empty Python_SOABI is authoritative. With
+    # an emulator FindPython ran the target interpreter to compute it, and this
+    # bare invocation would run the wrong interpreter (or fail to exec the target
+    # binary), so we must not second-guess it.
+    if(CMAKE_CROSSCOMPILING AND NOT Python_SOABI)
+      execute_process(
+        COMMAND "${Python_EXECUTABLE}" -c
+                "import sysconfig; print(sysconfig.get_config_var('SOABI') or '')"
+        OUTPUT_VARIABLE _python_target_soabi
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(_python_target_soabi)
+        message(WARNING
+          "FindPython left Python_SOABI empty while cross-compiling (it does not run "
+          "the interpreter without CMAKE_CROSSCOMPILING_EMULATOR); setting it from the "
+          "target interpreter's SOABI '${_python_target_soabi}' so Python extension "
+          "modules get a valid suffix.")
+        set(Python_SOABI "${_python_target_soabi}")
+      endif()
+    endif()
   else()
     message(WARNING "Python dependencies not met. Not compiling with python. Suppress this warning with -DBUILD_PYTHON=OFF")
     caffe2_update_option(BUILD_PYTHON OFF)
@@ -972,7 +1004,7 @@ if(USE_LLVM)
     message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
     include_directories(${LLVM_INCLUDE_DIRS})
-    add_definitions(-DTORCH_ENABLE_LLVM)
+    add_compile_definitions(TORCH_ENABLE_LLVM)
   endif(LLVM_FOUND)
 endif(USE_LLVM)
 
@@ -1040,10 +1072,28 @@ if(USE_ROCM)
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
+    # composable_kernel has no gfx1250 support, so aten/src/ATen/CMakeLists.txt
+    # filters gfx1250 out of the ck_gemm target's HIP_ARCHITECTURES. When gfx1250
+    # is the only requested arch that list is empty and CMake fails at generate
+    # time with 'HIP_ARCHITECTURES is empty for target "ck_gemm"', so turn CK GEMM
+    # off entirely here -- before -DUSE_ROCM_CK_GEMM is added below, since the
+    # non-CK TUs guarded by that define (HIPBlas.cpp, HIPHooks.cpp, GroupedBlas.cpp)
+    # would otherwise reference symbols the unbuilt ck_gemm target never provides.
+    # Mirrors the USE_ROCM_CK_SDPA / USE_MSLK auto-disable pattern in
+    # aten/src/ATen/CMakeLists.txt. Remove once the CK submodule supports gfx1250.
+    if(USE_ROCM_CK_GEMM)
+      set(_ck_gemm_supported_arches ${PYTORCH_ROCM_ARCH})
+      list(REMOVE_ITEM _ck_gemm_supported_arches "gfx1250")
+      if(_ck_gemm_supported_arches STREQUAL "")
+        message(STATUS "USE_ROCM_CK_GEMM disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch supported by composable_kernel")
+        caffe2_update_option(USE_ROCM_CK_GEMM OFF)
+      endif()
+      unset(_ck_gemm_supported_arches)
+    endif()
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
-    # add_definitions(-DAT_DISABLE_JITERATOR) above doesn't reliably
+    # add_compile_definitions(AT_DISABLE_JITERATOR) above doesn't reliably
     # propagate to HIP TUs; mirror the pattern used for USE_ROCM and
     # add it explicitly so the AT_USE_JITERATOR() gate in
     # aten/src/ATen/jit_macros.h fires under hipified .cu/.cuh TUs.
@@ -1062,13 +1112,13 @@ if(USE_ROCM)
       string(APPEND CMAKE_HIP_FLAGS " --rocm-device-lib-path=${_rocm_device_lib_path}")
     endif()
     if(WIN32)
-      add_definitions(-DROCM_ON_WINDOWS)
+      add_compile_definitions(ROCM_ON_WINDOWS)
       list(APPEND HIP_CXX_FLAGS -fms-extensions)
       # Suppress warnings about dllexport.
       list(APPEND HIP_CXX_FLAGS -Wno-ignored-attributes)
     endif()
-    add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
-    add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
+    add_compile_definitions(ROCM_VERSION=${ROCM_VERSION_DEV_INT})
+    add_compile_definitions(TORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
@@ -1085,7 +1135,7 @@ if(USE_ROCM)
     endif()
 
     if(USE_LAYERNORM_FAST_RECIPROCAL)
-      add_definitions(-DUSE_LAYERNORM_FAST_RECIPROCAL)
+      add_compile_definitions(USE_LAYERNORM_FAST_RECIPROCAL)
     endif()
 
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
@@ -1099,6 +1149,12 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::host MIOpen hiprtc::hiprtc)
 
+    # intra_node_comm.cpp is the only consumer, and -Wl,--no-as-needed would
+    # stamp the DT_NEEDED on even when it is not built.
+    if(USE_DISTRIBUTED AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0" AND amd_smi_FOUND)
+      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS amd_smi)
+    endif()
+
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
@@ -1107,16 +1163,17 @@ if(USE_ROCM)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
       )
-      if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
-          set(CAFFE2_USE_HIPSPARSELT ON)
-      endif()
+    endif()
+    set(CAFFE2_USE_HIPSPARSELT OFF)
+    if(hipsparselt_FOUND AND USE_HIPSPARSELT AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
+      set(CAFFE2_USE_HIPSPARSELT ON)
+    elseif(USE_HIPSPARSELT)
+      caffe2_update_option(USE_HIPSPARSELT OFF)
     endif()
 
-    # ROCM-SMI needed to support symmetric memory
-    if(USE_DISTRIBUTED AND UNIX)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        rocm_smi64
-      )
+    # hipfile only ships with ROCm 7.14 and above, disable the option if not found
+    if(USE_CUFILE AND NOT hipfile_FOUND)
+      caffe2_update_option(USE_CUFILE OFF)
     endif()
 
     # ---[ Kernel asserts
@@ -1130,6 +1187,8 @@ if(USE_ROCM)
 
   else()
     caffe2_update_option(USE_ROCM OFF)
+    caffe2_update_option(USE_HIPSPARSELT OFF)
+    set(CAFFE2_USE_HIPSPARSELT OFF)
   endif()
 
   # Add ROCm includes as SYSTEM includes (lower priority than regular includes).
@@ -1195,6 +1254,11 @@ if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
+if(USE_CUDA AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # NVCC inserts whitespace into literal operators, triggering a spurious Clang warning.
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-deprecated-literal-operator")
+endif()
+
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
@@ -1204,7 +1268,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    add_compile_options(-DTORCH_USE_LIBUV)
+    add_compile_definitions(TORCH_USE_LIBUV)
     include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/tensorpipe/third_party/libuv/include)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
@@ -1214,6 +1278,11 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
+    # tensorpipe_cuda pulls in the same libnop headers via the host compiler and
+    # is only built under USE_CUDA, so it needs the same suppression.
+    if(USE_CUDA)
+      target_compile_options_if_supported(tensorpipe_cuda -Wno-missing-template-arg-list-after-template-kw)
+    endif()
     # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
     # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
     # But are used only once during shutdown
@@ -1260,10 +1329,6 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
-      if(USE_DISTRIBUED AND USE_TENSORPIPE)
-        get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
-        set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
-      endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
 
       # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to re-enable it!
@@ -1349,36 +1414,8 @@ if(USE_GLOO)
     elseif(USE_ROCM)
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS gloo_hip)
     endif()
-    add_compile_options(-DCAFFE2_USE_GLOO)
+    add_compile_definitions(CAFFE2_USE_GLOO)
   endif()
-endif()
-
-# ---[ profiling
-if(USE_PROF)
-  find_package(htrace)
-  if(htrace_FOUND)
-    set(USE_PROF_HTRACE ON)
-  else()
-    message(WARNING "htrace not found. Caffe2 will build without htrace prof")
-  endif()
-endif()
-
-if(USE_SNPE AND ANDROID)
-  if(SNPE_LOCATION AND SNPE_HEADERS)
-    message(STATUS "Using SNPE location specified by -DSNPE_LOCATION: " ${SNPE_LOCATION})
-    message(STATUS "Using SNPE headers specified by -DSNPE_HEADERS: " ${SNPE_HEADERS})
-    include_directories(SYSTEM ${SNPE_HEADERS})
-    add_library(snpe SHARED IMPORTED)
-    set_property(TARGET snpe PROPERTY IMPORTED_LOCATION ${SNPE_LOCATION})
-    list(APPEND Caffe2_DEPENDENCY_LIBS snpe)
-  else()
-    caffe2_update_option(USE_SNPE OFF)
-  endif()
-endif()
-
-if(USE_NNAPI AND NOT ANDROID)
-  message(WARNING "NNApi is only used in android builds.")
-  caffe2_update_option(USE_NNAPI OFF)
 endif()
 
 # ---[ Onnx
@@ -1397,15 +1434,15 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
   if(ONNX_ML)
-    add_definitions(-DONNX_ML=1)
+    add_compile_definitions(ONNX_ML=1)
   endif()
-  add_definitions(-DONNXIFI_ENABLE_EXT=1)
+  add_compile_definitions(ONNXIFI_ENABLE_EXT=1)
   set(Python3_EXECUTABLE "${Python_EXECUTABLE}")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
   endif()
 
-  add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
+  add_compile_definitions(ONNX_NAMESPACE=${ONNX_NAMESPACE})
   if(NOT USE_SYSTEM_ONNX)
     # In mobile build we care about code size, and so we need drop
     # everything (e.g. checker) in onnx but the pb definition.
@@ -1463,7 +1500,7 @@ if(NOT INTERN_BUILD_MOBILE)
 
   if(MSVC)
     # we want to respect the standard, and we are bored of those **** .
-    add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
+    add_compile_definitions(_CRT_SECURE_NO_DEPRECATE=1)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   else()
     if(WERROR)
@@ -1472,6 +1509,13 @@ if(NOT INTERN_BUILD_MOBILE)
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
+        # third_party/cutlass is included as a plain (non-SYSTEM) include dir
+        # for torch_cuda (caffe2/CMakeLists.txt), so -Wunused-function fires on
+        # cutlass header-only helpers (e.g. cutlassGetStatusString, cute's
+        # prefetch) that a given translation unit's CUDA-version-gated
+        # instantiation path happens not to reference.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=unused-function ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
@@ -1539,13 +1583,6 @@ if(NOT INTERN_BUILD_MOBILE)
     list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
   endif()
 
-  if(NOT USE_CUDA)
-    message("disabling CUDA because NOT USE_CUDA is set")
-    set(AT_CUDA_ENABLED 0)
-  else()
-    set(AT_CUDA_ENABLED 1)
-  endif()
-
   if(NOT USE_ROCM)
     message("disabling ROCM because NOT USE_ROCM is set")
     message(STATUS "MIOpen not found. Compiling without MIOpen support")
@@ -1606,31 +1643,31 @@ if(NOT INTERN_BUILD_MOBILE)
     set(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
     CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
     if(HAVE_MMAP)
-      add_definitions(-DHAVE_MMAP=1)
+      add_compile_definitions(HAVE_MMAP=1)
     endif(HAVE_MMAP)
     # done for lseek: https://www.gnu.org/software/libc/manual/html_node/File-Position-Primitive.html
-    add_definitions(-D_FILE_OFFSET_BITS=64)
+    add_compile_definitions(_FILE_OFFSET_BITS=64)
     CHECK_FUNCTION_EXISTS(shm_open HAVE_SHM_OPEN)
     if(HAVE_SHM_OPEN)
-      add_definitions(-DHAVE_SHM_OPEN=1)
+      add_compile_definitions(HAVE_SHM_OPEN=1)
     endif(HAVE_SHM_OPEN)
     CHECK_FUNCTION_EXISTS(shm_unlink HAVE_SHM_UNLINK)
     if(HAVE_SHM_UNLINK)
-      add_definitions(-DHAVE_SHM_UNLINK=1)
+      add_compile_definitions(HAVE_SHM_UNLINK=1)
     endif(HAVE_SHM_UNLINK)
     CHECK_FUNCTION_EXISTS(malloc_usable_size HAVE_MALLOC_USABLE_SIZE)
     if(HAVE_MALLOC_USABLE_SIZE)
-      add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
+      add_compile_definitions(HAVE_MALLOC_USABLE_SIZE=1)
     endif(HAVE_MALLOC_USABLE_SIZE)
     set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
     CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
     if(HAVE_POSIX_FALLOCATE)
-      add_definitions(-DHAVE_POSIX_FALLOCATE=1)
+      add_compile_definitions(HAVE_POSIX_FALLOCATE=1)
     endif(HAVE_POSIX_FALLOCATE)
   endif(UNIX)
 
-  add_definitions(-DUSE_EXTERNAL_MZCRC)
-  add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
+  add_compile_definitions(USE_EXTERNAL_MZCRC)
+  add_compile_definitions(MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
 
   find_package(ZVECTOR) # s390x simd support
 endif()
@@ -1700,12 +1737,35 @@ if(USE_KINETO)
 
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
   set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
-  set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+
+  # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.
+  # The xpu backend is excluded because its tests compile SYCL device code
+  # through an ExternalProject, which does not fit inside this build.
+  if(BUILD_TEST AND NOT KINETO_BACKEND STREQUAL "xpu")
+    set(KINETO_BUILD_TESTS ON CACHE BOOL "" FORCE)
+  else()
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  endif()
+  # Install alongside PyTorch's own test binaries, where the Windows CI
+  # runner looks for C++ tests.
+  set(KINETO_INSTALL_TESTS ${INSTALL_TEST} CACHE BOOL "" FORCE)
+  set(KINETO_TEST_INSTALL_DIR "test" CACHE STRING "" FORCE)
+
+  # Kineto's tests link nlohmann_json. Create the target from PyTorch's copy
+  # so Kineto skips adding its own; both pin the same version. This mirrors
+  # how fmt is already shared with Kineto above.
+  if(KINETO_BUILD_TESTS AND NOT TARGET nlohmann_json)
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    set(JSON_Install OFF CACHE INTERNAL "")
+    add_subdirectory("${CAFFE2_THIRD_PARTY_ROOT}/nlohmann"
+                     "${CMAKE_BINARY_DIR}/third_party/nlohmann")
+  endif()
 
   message(STATUS "Configuring Kineto dependency:")
   message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+  message(STATUS "  KINETO_INSTALL_TESTS = ${KINETO_INSTALL_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
   message(STATUS "  KINETO_BACKEND = ${KINETO_BACKEND}")
 
@@ -1716,7 +1776,23 @@ if(USE_KINETO)
   endif()
 
   if(NOT TARGET kineto)
+    # Send Kineto's test binaries to their own subdirectory of build/bin so
+    # the CI runner can glob them without sweeping up PyTorch's tests too.
+    set(_kineto_saved_runtime_output_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/kineto")
+    # Kineto registers its tests with gtest_discover_tests, which defaults to
+    # running every test binary during the build to enumerate its cases. Those
+    # binaries link CUPTI, whose DLL is not on PATH while a Windows build runs,
+    # so each one fails to start and takes the build down with it. Defer
+    # discovery to test time instead. Nothing is lost: PyTorch finds these
+    # tests by listing the built binaries rather than through CTest.
+    set(_kineto_saved_discovery_mode "${CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
     add_subdirectory("${KINETO_SOURCE_DIR}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE "${_kineto_saved_discovery_mode}")
+    unset(_kineto_saved_discovery_mode)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${_kineto_saved_runtime_output_dir}")
+    unset(_kineto_saved_runtime_output_dir)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)

@@ -1,9 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/CPUAllocator.h>
 #include <c10/core/ConstantSymNodeImpl.h>
+#include <c10/core/Storage.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
+
+#include <vector>
 
 using namespace c10;
 #ifndef C10_MOBILE
@@ -61,6 +66,10 @@ class ConstantIntPretendingToBeSymbolicSymNodeImpl
 
   c10::SymNode wrap_bool(bool b) override {
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(b));
+  }
+
+  c10::SymNode clone() override {
+    return wrap_int(int_());
   }
 
   SymNode add(const SymNode& other) override {
@@ -200,5 +209,33 @@ struct MaxWrapper<SymInt> {
 TEST(SymIntTest, MinMax) {
   test_operator<MinWrapper>();
   test_operator<MaxWrapper>();
+}
+
+// Test copying sizes/strides after materialization.
+TEST(SymIntTest, MaterializedShapeSurvivesTensorImplCopy) {
+  Storage storage(
+      Storage::use_byte_size_t(), /*size_bytes=*/0, GetCPUAllocator());
+  auto impl = c10::make_intrusive<TensorImpl>(
+      std::move(storage),
+      DispatchKeySet(DispatchKey::CPU),
+      caffe2::TypeMeta::Make<float>());
+  std::vector<SymInt> sizes{
+      create_symbolic_symint(2), create_symbolic_symint(3)};
+  std::vector<SymInt> strides{
+      create_symbolic_symint(3), create_symbolic_symint(1)};
+  impl->set_sizes_and_strides(sizes, strides);
+
+  const std::vector<int64_t> expected_sizes{2, 3};
+  const std::vector<int64_t> expected_strides{3, 1};
+
+  // Materialize the caches on the original before copying.
+  ASSERT_EQ(impl->sizes(), IntArrayRef(expected_sizes));
+  ASSERT_EQ(impl->strides(), IntArrayRef(expected_strides));
+
+  auto copy = impl->shallow_copy_and_detach(
+      /*version_counter=*/c10::VariableVersion(/*version=*/0),
+      /*allow_tensor_metadata_change=*/true);
+  EXPECT_EQ(copy->sizes(), IntArrayRef(expected_sizes));
+  EXPECT_EQ(copy->strides(), IntArrayRef(expected_strides));
 }
 #endif

@@ -109,13 +109,11 @@ inline void assert_inf_and_nan(
     const std::string& tensor_name,
     at::Tensor& check_tensor) {
   auto isnan_tensor = check_tensor.isnan();
-  if (isnan_tensor.any().item<bool>()) {
-    throw std::runtime_error("At least one NaN in " + tensor_name);
-  }
+  TORCH_CHECK(
+      !isnan_tensor.any().item<bool>(), "At least one NaN in ", tensor_name);
   auto isinf_tensor = check_tensor.isinf();
-  if (isinf_tensor.any().item<bool>()) {
-    throw std::runtime_error("At least one INF in " + tensor_name);
-  }
+  TORCH_CHECK(
+      !isinf_tensor.any().item<bool>(), "At least one INF in ", tensor_name);
 }
 
 // utility functions to convert a pointer to an optional value
@@ -269,7 +267,13 @@ struct OwnedOptionalArrayRef {
   std::optional<std::vector<T>> storage;
 
   /* implicit */ operator c10::OptionalArrayRef<T>() const {
-    return storage ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*storage))
+    // Build the OptionalArrayRef from a std::optional<ArrayRef<T>> (whose
+    // constructor is not lifetimebound) rather than from a temporary ArrayRef:
+    // the view points into the owned `storage` vector, which outlives the
+    // wrapper's enclosing call, so binding it to the temporary ArrayRef would
+    // be a spurious -Wreturn-stack-address error under C10_LIFETIMEBOUND.
+    return storage ? c10::OptionalArrayRef<T>(
+                         std::make_optional(c10::ArrayRef<T>(*storage)))
                    : c10::OptionalArrayRef<T>(std::nullopt);
   }
   /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {

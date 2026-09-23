@@ -1000,12 +1000,12 @@ def trace(
         warnings.warn(
             "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return func
@@ -1139,12 +1139,12 @@ def trace_module(
         warnings.warn(
             "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return mod

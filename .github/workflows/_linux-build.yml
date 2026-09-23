@@ -46,6 +46,13 @@ on:
         default: "linux.c7i.2xlarge"
         description: |
           Label of the runner this job should run on.
+      flash-attention-large-memory-build:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          Allow a larger FlashAttention compile pool. Only enable this for a
+          reviewed high-memory build runner.
       test-matrix:
         required: false
         type: string
@@ -60,6 +67,11 @@ on:
         required: false
         type: string
         default: ""
+      ignore-test-config-labels:
+        description: Ignore test-config/* PR labels when filtering the test matrix.
+        required: false
+        type: boolean
+        default: false
       s3-bucket:
         description: S3 bucket to download artifact
         required: false
@@ -188,6 +200,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
           selected-test-configs: ${{ inputs.selected-test-configs }}
+          ignore-test-config-labels: ${{ inputs.ignore-test-config-labels }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
 
       - name: Map EC2 runners to ARC runners
@@ -229,11 +242,11 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
+          FLASH_ATTENTION_LARGE_MEMORY_BUILD: ${{ inputs.flash-attention-large-memory-build }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
-          RUNNER: ${{ inputs.runner }}
           SKIP_SCCACHE_INITIALIZATION: 1
         shell: bash
         run: |

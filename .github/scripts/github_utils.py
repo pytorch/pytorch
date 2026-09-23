@@ -133,6 +133,16 @@ def gh_fetch_json_dict(
     return cast(dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
+class GHGraphQLError(RuntimeError):
+    """GraphQL response contained errors; the raw response is kept so callers
+    can tolerate partial failures (GraphQL still returns data for the paths
+    that resolved)."""
+
+    def __init__(self, message: str, response: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.response = response
+
+
 def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
     rc = gh_fetch_url(
         "https://api.github.com/graphql",  # @lint-ignore
@@ -140,8 +150,8 @@ def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
         reader=json.load,
     )
     if "errors" in rc:
-        raise RuntimeError(
-            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
+        raise GHGraphQLError(
+            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}", rc
         )
     return cast(dict[str, Any], rc)
 
@@ -181,6 +191,34 @@ def gh_close_pr(org: str, repo: str, pr_num: int, dry_run: bool = False) -> None
         print(f"Dry run closing PR {pr_num}")
     else:
         gh_fetch_url(url, method="PATCH", data={"state": "closed"})
+
+
+def gh_merge_pr(
+    org: str,
+    repo: str,
+    pr_num: int,
+    *,
+    merge_method: str = "squash",
+    commit_title: str | None = None,
+    commit_message: str | None = None,
+    sha: str | None = None,
+    dry_run: bool = False,
+) -> str:
+    """Merge a PR via GitHub's merge API and return the resulting merge commit sha."""
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}/merge"
+    data: dict[str, Any] = {"merge_method": merge_method}
+    if commit_title is not None:
+        data["commit_title"] = commit_title
+    if commit_message is not None:
+        data["commit_message"] = commit_message
+    if sha is not None:
+        data["sha"] = sha
+    if dry_run:
+        print(f"[dry_run] Merging PR {pr_num} via GitHub API with {data}")
+        return ""
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    resp = gh_fetch_url(url, headers=headers, data=data, method="PUT", reader=json.load)
+    return cast(str, resp["sha"])
 
 
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:

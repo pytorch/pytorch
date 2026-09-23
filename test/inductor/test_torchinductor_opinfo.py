@@ -251,7 +251,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "nonzero_static": {b8, f16, f32, f64, i32, i64},
+    # Same reason as "complex"/"view_as_complex" above: check_model runs the
+    # reference with reference_in_float=True, and reference_to_expect only
+    # casts the reference back when y.dtype.is_floating_point -- which is
+    # False for complex, so the f16 reference stays complex64 while the actual
+    # is complex32 and the dtype comparison fails.
+    "polar": {f16},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -430,6 +435,8 @@ inductor_override_kwargs["cpu"] = {
         "atol": 1e-3,
         "rtol": 1e-4,
     },
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("addbmm", f16): {"reference_in_float": False},
     # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
@@ -466,6 +473,10 @@ inductor_override_kwargs["cuda"] = {
     ("linalg.cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("atanh", f16): {"reference_in_float": True},
@@ -566,9 +577,12 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 7e-1,
     },
-    # The eager gradient for native_group_norm appears to be numerically unstable at low
-    # precisions; more investigation is needed.
-    ("native_group_norm", f16): {"check_gradient": False},
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
+    },
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -582,9 +596,17 @@ inductor_override_kwargs["xpu"] = {
     "randn": {"assert_equal": False},
     "nn.functional.rrelu": {"check_gradient": False},
     # XPU
+    # Mirrors the CUDA override from #189872; the fp16 backward gap is the
+    # same eager-vs-inductor intermediate-precision difference on XPU.
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
     ("cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
@@ -736,13 +758,35 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
     },
-    # The eager gradient for native_group_norm appears to be numerically unstable at low
-    # precisions; more investigation is needed.
-    ("native_group_norm", f16): {"check_gradient": False},
+    # fp16 backward accumulates ~1e-3 rounding across the aten kernel and
+    # inductor decomposition; loosen tolerances to match the CUDA override
+    # added in pytorch/pytorch#190245.
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
+    },
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
-        {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
+        {
+            ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5},
+            # See https://github.com/pytorch/pytorch/pull/186595#issuecomment-4849920339
+            ("combinations", f16): {"grad_atol": 5e-4, "grad_rtol": 2e-3},
+            # Sample 6 broadcasts the exponent (10, 1, 5) against the base
+            # (10, 5), so the base gradient contains the reduction
+            #   sum(grad * exponent * base ** (exponent - 1), dim=0).
+            # On ROCm, eager and Triton take separate powf paths (system ROCm
+            # OCML versus Triton's bundled OCML), introducing a small difference
+            # before this reduction. The terms at the failing element strongly
+            # cancel, which makes the result sensitive to the FP32 reduction
+            # tree. Persistent-reduction autotuning can legally select different
+            # XBLOCK layouts, and thus different trees, based on timing. Observed
+            # layouts produce relative errors up to 1.396e-5, just above the
+            # generic 1.3e-5 tolerance, across gfx90a, gfx942, and gfx950.
+            # Keep the forward tolerance unchanged and allow modest headroom only
+            # for gradients. See https://github.com/pytorch/pytorch/issues/165296.
+            ("__rpow__", f32): {"grad_atol": 1.5e-5, "grad_rtol": 2e-5},
+        }
     )
 
 
@@ -1293,6 +1337,7 @@ class TestInductorOpInfo(TestCase):
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
     )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCPUIf(IS_MACOS, "Skipped under macOS")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
@@ -1415,7 +1460,7 @@ class TestInductorOpInfo(TestCase):
                 self.has_rng_op = False
 
             def __torch_dispatch__(self, func, types, args, kwargs=None):
-                kwargs = kwargs if kwargs else {}
+                kwargs = kwargs or {}
                 if torch.Tag.nondeterministic_seeded in func.tags:
                     self.has_rng_op = True
 

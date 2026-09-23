@@ -13,6 +13,8 @@ programming_model.dynamo_core_concepts
 programming_model.graph_breaks_index
 programming_model.non_strict_tracing_model
 programming_model.recompilation
+programming_model.reducing_compile_time
+programming_model.reducing_guard_overhead
 programming_model.observability
 programming_model.reporting_issues
 ```

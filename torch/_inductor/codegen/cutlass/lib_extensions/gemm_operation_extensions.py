@@ -312,7 +312,7 @@ cute::Stride<cute::_2,cute::_1>>"
                             f"cutlass::detail::TagToStrideB_t<{layout_b_str}>"
                         )
                         layout_b_str = f"{operation_name_str}_LayoutNarrowReordered"
-                    # The {operation_name_str}_ prefixs in mixed_dtype_prepare_code and
+                    # The {operation_name_str}_ prefixes in mixed_dtype_prepare_code and
                     # layout_{a, b}_str are to prevent errors in Windows platform unity build
                     mixed_dtype_prepare_code = f"""
             using {operation_name_str}_StrideNarrow = {stride_narrow_str};

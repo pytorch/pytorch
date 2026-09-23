@@ -1,0 +1,114 @@
+diff --git a/test/cpython/v3_13/test_bisect.py b/test/cpython/v3_13/test_bisect.py
+index 97204d4cad3871690c0a1d254c562d90c7d46c89..a919223862148549711aaf2a821a46400bddb2fc 100644
+--- a/test/cpython/v3_13/test_bisect.py
++++ b/test/cpython/v3_13/test_bisect.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_bisect.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import sys
+ import unittest
+ from test.support import import_helper
+@@ -29,8 +47,9 @@ class Range(object):
+         self.last_insert = idx, item
+ 
+ 
+-class TestBisect:
++class _TestBisect:
+     def setUp(self):
++        super().setUp()
+         self.precomputedCases = [
+             (self.module.bisect_right, [], 1, 0),
+             (self.module.bisect_right, [1], 0, 0),
+@@ -291,15 +310,15 @@ class TestBisect:
+         self.assertEqual(i1, 40)
+         self.assertEqual(i2, 41)
+ 
+-class TestBisectPython(TestBisect, unittest.TestCase):
++class TestBisectPython(_TestBisect, CPythonTestCase):
+     module = py_bisect
+ 
+-class TestBisectC(TestBisect, unittest.TestCase):
++class TestBisectC(_TestBisect, CPythonTestCase):
+     module = c_bisect
+ 
+ #==============================================================================
+ 
+-class TestInsort:
++class _TestInsort:
+     def test_vsBuiltinSort(self, n=500):
+         from random import choice
+         for insorted in (list(), UserList()):
+@@ -326,10 +345,10 @@ class TestInsort:
+         self.module.insort_right(lst, 5)
+         self.assertEqual([5, 10], lst.data)
+ 
+-class TestInsortPython(TestInsort, unittest.TestCase):
++class TestInsortPython(_TestInsort, CPythonTestCase):
+     module = py_bisect
+ 
+-class TestInsortC(TestInsort, unittest.TestCase):
++class TestInsortC(_TestInsort, CPythonTestCase):
+     module = c_bisect
+ 
+ #==============================================================================
+@@ -354,7 +373,7 @@ class CmpErr:
+     __eq__ = __lt__
+     __ne__ = __lt__
+ 
+-class TestErrorHandling:
++class _TestErrorHandling:
+     def test_non_sequence(self):
+         for f in (self.module.bisect_left, self.module.bisect_right,
+                   self.module.insort_left, self.module.insort_right):
+@@ -381,15 +400,15 @@ class TestErrorHandling:
+                   self.module.insort_left, self.module.insort_right):
+             self.assertRaises(TypeError, f, 10)
+ 
+-class TestErrorHandlingPython(TestErrorHandling, unittest.TestCase):
++class TestErrorHandlingPython(_TestErrorHandling, CPythonTestCase):
+     module = py_bisect
+ 
+-class TestErrorHandlingC(TestErrorHandling, unittest.TestCase):
++class TestErrorHandlingC(_TestErrorHandling, CPythonTestCase):
+     module = c_bisect
+ 
+ #==============================================================================
+ 
+-class TestDocExample:
++class _TestDocExample:
+     def test_grades(self):
+         def grade(score, breakpoints=[60, 70, 80, 90], grades='FDCBA'):
+             i = self.module.bisect(breakpoints, score)
+@@ -408,13 +427,13 @@ class TestDocExample:
+         self.assertEqual(data[bisect_left(keys, 5)], ('red', 5))
+         self.assertEqual(data[bisect_left(keys, 8)], ('yellow', 8))
+ 
+-class TestDocExamplePython(TestDocExample, unittest.TestCase):
++class TestDocExamplePython(_TestDocExample, CPythonTestCase):
+     module = py_bisect
+ 
+-class TestDocExampleC(TestDocExample, unittest.TestCase):
++class TestDocExampleC(_TestDocExample, CPythonTestCase):
+     module = c_bisect
+ 
+ #------------------------------------------------------------------------------
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

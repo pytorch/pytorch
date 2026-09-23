@@ -641,7 +641,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           // simplicity. For now, we collect producer and the immediate parent
           // loop of the consumer. We could collect all the consumer enclosing
           // loops, but then we will have to clean up the ones that are shared
-          // with the producer encloser loop. Currently, we only test on the
+          // with the producer enclosing loop. Currently, we only test on the
           // immediate parent loop.
           auto buffers = BufFinder::find(l.root_stmt());
           std::vector<std::pair<StmtPtr, ForPtr>> producer_consumer_pairs;

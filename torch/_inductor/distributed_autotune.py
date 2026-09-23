@@ -61,9 +61,12 @@ def get_autotune_pg() -> dist.ProcessGroup | None:
     if dist.is_available() and dist.is_initialized():
         global _AUTOTUNE_PG
         if _AUTOTUNE_PG is None:
-            _AUTOTUNE_PG = dist.distributed_c10d._new_group_with_tag(
+            autotune_pg = dist.distributed_c10d._new_group_with_tag(
                 pg_tag="pt2_distributed_autotune_pg"
             )
+            if autotune_pg == dist.GroupMember.NON_GROUP_MEMBER:
+                raise AssertionError("Autotune process group must include all ranks")
+            _AUTOTUNE_PG = autotune_pg
         return _AUTOTUNE_PG
 
     return None

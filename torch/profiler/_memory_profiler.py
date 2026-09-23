@@ -597,7 +597,7 @@ class DataFlowGraph:
         To address this issue we walk over the graph and select the topmost
         torch ops ** which match at least one operator schema **. These form
         the leaves of the first pass through the op tree. (As well as any
-        allocations or frees which do are not part of a kernel.) These events
+        allocations or frees which are not part of a kernel.) These events
         form the logical nodes in our data flow graph.
         """
 

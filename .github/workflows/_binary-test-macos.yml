@@ -57,7 +57,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout smoke-test script
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5.1.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/pytorch/smoke_test/
@@ -67,7 +67,11 @@ jobs:
         with:
           python-version: ${{ inputs.setup_python_version }}
           freethreaded: ${{ inputs.freethreaded }}
-      - uses: actions/download-artifact@v4.1.7
+          # 3.15 has no stable release yet; setup_python_version is "3.15" and
+          # setup-python needs this to resolve the latest 3.15 beta. No-op for
+          # the exact stable versions the other Pythons pass.
+          allow-prereleases: true
+      - uses: actions/download-artifact@v7.0.0
         with:
           name: ${{ inputs.build_name }}
           path: ${{ runner.temp }}/artifacts

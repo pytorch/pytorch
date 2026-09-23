@@ -6,6 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
+
+#include <limits>
 #if defined(CPU_CAPABILITY_AVX512)
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
@@ -219,7 +221,8 @@ class Vectorized<float> {
   }
   Vectorized<float> angle() const {
     __m512 zero_vec = _mm512_set1_ps(0.f);
-    const auto nan_vec = _mm512_set1_ps(NAN);
+    const auto nan_vec =
+        _mm512_set1_ps(std::numeric_limits<float>::quiet_NaN());
     const auto not_nan_mask = _mm512_cmp_ps_mask(values, values, _CMP_EQ_OQ);
     const auto not_nan_vec = _mm512_mask_set1_epi32(
         _mm512_castps_si512(zero_vec), not_nan_mask, 0xFFFFFFFF);
@@ -241,6 +244,16 @@ class Vectorized<float> {
   Vectorized<float> conj() const {
     return *this;
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> acos() const;
+  Vectorized<float> acosh() const;
+  Vectorized<float> asin() const;
+  Vectorized<float> asinh() const;
+  Vectorized<float> atan() const;
+  Vectorized<float> atanh() const;
+  Vectorized<float> atan2(const Vectorized<float>& b) const;
+  Vectorized<float> copysign(const Vectorized<float>& sign) const;
+#else
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf16_u10(values));
   }
@@ -268,6 +281,10 @@ class Vectorized<float> {
   Vectorized<float> copysign(const Vectorized<float>& sign) const {
     return Vectorized<float>(Sleef_copysignf16(values, sign));
   }
+#endif
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> erf() const;
+#else
   Vectorized<float> erf() const {
     // constants
     const auto neg_zero_vec = _mm512_set1_ps(-0.f);
@@ -300,6 +317,14 @@ class Vectorized<float> {
     auto tmp7 = _mm512_fmadd_ps(tmp6, r, one_vec);
     return _mm512_xor_ps(sign_mask, tmp7);
   }
+#endif
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> erfc() const;
+  Vectorized<float> erfinv() const;
+  Vectorized<float> exp() const;
+  Vectorized<float> exp2() const;
+  Vectorized<float> expm1() const;
+#else
   Vectorized<float> erfc() const {
     return Vectorized<float>(Sleef_erfcf16_u15(values));
   }
@@ -315,6 +340,7 @@ class Vectorized<float> {
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f16_u10(values));
   }
+#endif
   Vectorized<float> fexp_u20() const {
     const __m512 vec_c0 = _mm512_set1_ps(0.00010703434948458272f);
     const __m512 vec_c1 = _mm512_set1_ps(0.30354260500649682f);
@@ -436,6 +462,13 @@ class Vectorized<float> {
     vec_res = _mm512_mul_ps(vec_res, vec_two);
     return vec_res;
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> fmod(const Vectorized<float>& q) const;
+  Vectorized<float> log() const;
+  Vectorized<float> log2() const;
+  Vectorized<float> log10() const;
+  Vectorized<float> log1p() const;
+#else
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     return Vectorized<float>(Sleef_fmodf16(values, q));
   }
@@ -451,7 +484,22 @@ class Vectorized<float> {
   Vectorized<float> log1p() const {
     return Vectorized<float>(Sleef_log1pf16_u10(values));
   }
+#endif
   Vectorized<float> frac() const;
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> sin() const;
+  Vectorized<float> sinh() const;
+  Vectorized<float> cos() const;
+  Vectorized<float> cosh() const;
+  Vectorized<float> ceil() const;
+  Vectorized<float> floor() const;
+  Vectorized<float> hypot(const Vectorized<float>& b) const;
+  Vectorized<float> i0() const;
+  Vectorized<float> i0e() const;
+  Vectorized<float> digamma() const;
+  Vectorized<float> igamma(const Vectorized<float>& x) const;
+  Vectorized<float> igammac(const Vectorized<float>& x) const;
+#else
   Vectorized<float> sin() const {
     return Vectorized<float>(Sleef_sinf16_u35(values));
   }
@@ -505,9 +553,16 @@ class Vectorized<float> {
     }
     return loadu(tmp);
   }
+#endif
   Vectorized<float> neg() const {
     return _mm512_xor_ps(_mm512_set1_ps(-0.f), values);
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> nextafter(const Vectorized<float>& b) const;
+  Vectorized<float> round() const;
+  Vectorized<float> tan() const;
+  Vectorized<float> tanh() const;
+#else
   Vectorized<float> nextafter(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_nextafterf16(values, b));
   }
@@ -521,13 +576,18 @@ class Vectorized<float> {
   Vectorized<float> tanh() const {
     return Vectorized<float>(Sleef_tanhf16_u10(values));
   }
+#endif
   Vectorized<float> trunc() const {
     return _mm512_roundscale_ps(
         values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> lgamma() const;
+#else
   Vectorized<float> lgamma() const {
     return Vectorized<float>(Sleef_lgammaf16_u10(values));
   }
+#endif
   Vectorized<float> sqrt() const {
     return _mm512_sqrt_ps(values);
   }
@@ -537,9 +597,13 @@ class Vectorized<float> {
   Vectorized<float> rsqrt() const {
     return _mm512_div_ps(_mm512_set1_ps(1), _mm512_sqrt_ps(values));
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> pow(const Vectorized<float>& b) const;
+#else
   Vectorized<float> pow(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_powf16_u10(values, b));
   }
+#endif
   float reduce_add() const {
     return _mm512_reduce_add_ps(values);
   }

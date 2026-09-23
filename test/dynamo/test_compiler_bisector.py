@@ -339,6 +339,7 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
 
+    # XPU doesn't support cudagrah
     @requires_cuda
     def test_cudagraph_bisect_max(self):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""

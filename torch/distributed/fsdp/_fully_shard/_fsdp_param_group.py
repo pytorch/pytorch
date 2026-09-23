@@ -21,6 +21,8 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -73,6 +75,8 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
+    all_gather_state: AllGatherState | None = None
+
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
         # Setting the all-gather/reduce-scatter streams to be higher priority
@@ -104,7 +108,6 @@ class FSDPCommContext:
         # All-gather/reduce-scatter states keep references to collective
         # tensors produced in one stream and used in another and accompanying
         # CUDA events for synchronization
-        self.all_gather_state: AllGatherState | None = None
         self.reduce_scatter_states: list[ReduceScatterState] = []
         # Effective cap on retained reduce_scatter_states, resolved from the
         # per-group reduce_scatter_max_input_buffers in
@@ -125,6 +128,42 @@ class FSDPCommContext:
             return self.all_gather_copy_in_stream, self.all_gather_stream
         current_stream = self.device_handle.current_stream()
         return current_stream, current_stream
+
+    def wait_all_gather_streams_on_event(self, event: torch.Event | None) -> None:
+        """Order both all-gather streams after the given event."""
+        if event is None:
+            return
+        # Calling ``unshard`` before lazy init means streams are not initialized.
+        if not hasattr(self, "all_gather_copy_in_stream"):
+            return
+        self.all_gather_copy_in_stream.wait_event(event)
+        self.all_gather_stream.wait_event(event)
+
+    def release_all_gather_state_for_comm_reuse(self) -> None:
+        """Release deferred state before reuse by all-gather streams.
+
+        Forward prefetch may immediately reuse the retained buffers on either
+        all-gather stream, so both streams must follow the saved copy-out event
+        before ownership is released.
+        """
+        if (all_gather_state := self.all_gather_state) is None:
+            return
+        self.wait_all_gather_streams_on_event(all_gather_state.event)
+        self.all_gather_state = None
+
+    def release_all_gather_state_on_current_stream(self) -> None:
+        """Release deferred state at a current-stream lifecycle boundary.
+
+        Post-backward and reset execute on the current stream. Ordering that
+        stream after copy-out avoids introducing reverse dependencies onto the
+        communication streams. Root pre-forward orders those streams after the
+        current stream before the next implicit all-gather.
+        """
+        if (all_gather_state := self.all_gather_state) is None:
+            return
+        if all_gather_state.event is not None and hasattr(self, "device_handle"):
+            self.device_handle.current_stream().wait_event(all_gather_state.event)
+        self.all_gather_state = None
 
 
 # See [Note: Overlapping all-gather copy-in and all-gather]
@@ -205,10 +244,12 @@ class FSDPParamGroup:
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
         # specify it, possibly at construction time before lazy init
-        self._all_reduce_hook_stream: torch.cuda.Stream | None = None
+        self._all_reduce_hook_stream: torch.Stream | None = None
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
+        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
+        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -392,7 +433,9 @@ class FSDPParamGroup:
         if self._reshard_after_forward_event is not None:
             # Resharded parameter data is allocated in the default stream and
             # used in the all-gather streams
-            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(
+                self._reshard_after_forward_event
+            )
             self._reshard_after_forward_event = None
 
         if isinstance(self.mesh_info, FSDPMeshInfo):
@@ -437,9 +480,7 @@ class FSDPParamGroup:
             return  # no preceding unshard
         async_op = self._all_gather_result.all_gather_work is not None
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
-            if prev_all_gather_state := self.comm_ctx.all_gather_state:
-                self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
-                self.comm_ctx.all_gather_state = None  # free the all-gather result
+            self.comm_ctx.release_all_gather_state_for_comm_reuse()
         if isinstance(self.mesh_info, FSDPMeshInfo):
             world_size = self._all_gather_process_group.size()
         else:
@@ -464,8 +505,11 @@ class FSDPParamGroup:
                 tensor = fsdp_param.all_gather_outputs[0]
                 alloc_storage(tensor)
 
-                # find alternative way to check if tensor.is_inference
-                with torch.autograd._unsafe_preserve_version_counter(tensor):
+                with (
+                    torch.autograd._unsafe_preserve_version_counter(tensor)
+                    if not tensor.is_inference()
+                    else contextlib.nullcontext()
+                ):
                     tensor.copy_(all_gather_input)
 
         else:
@@ -474,6 +518,7 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
+                    all_gather_output_fn=self._all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -494,16 +539,9 @@ class FSDPParamGroup:
                 self._all_gather_result, all_gather_copy_out_event
             )
         else:
-            self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(all_gather_copy_out_event)
 
         self._all_gather_result = None  # free unless saved in `all_gather_state`
-
-    def _wait_all_gather_streams_on_event(self, event: torch.Event | None):
-        # Calling `unshard` before lazy init means streams are not initialized
-        if hasattr(self.comm_ctx, "all_gather_copy_in_stream") and event is not None:
-            self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
-            self.comm_ctx.all_gather_stream.wait_event(event)
 
     @_disable_functorch_if_active
     def reshard(self):
@@ -540,7 +578,9 @@ class FSDPParamGroup:
             current_stream.wait_event(self._all_reduce_state.event)
         self._all_reduce_state = None
         if self._reshard_after_forward_event is not None:
-            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(
+                self._reshard_after_forward_event
+            )
             self._reshard_after_forward_event = None
         self._partial_reduce_output = None
         self._post_forward_indices.clear()
@@ -688,7 +728,7 @@ class FSDPParamGroup:
                     if isinstance(self.mesh_info, DDPMeshInfo)
                     else None
                 )
-                all_reduce_stream: torch.cuda.Stream
+                all_reduce_stream: torch.Stream
                 if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                     # this means the native HSDP is not enabled,
                     # but user may want to have a custom HSDP setup
@@ -734,6 +774,7 @@ class FSDPParamGroup:
                     self._partial_reduce_output,
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
+                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
@@ -1025,11 +1066,16 @@ class FSDPParamGroup:
             if existing is not None:
                 new_groups[ranks] = existing
             else:
-                new_groups[ranks] = dist.new_group(
+                new_group = dist.new_group(
                     list(ranks),
                     use_local_synchronization=True,
                     group_desc="fsdp_reduce_scatter",
                 )
+                if new_group == dist.GroupMember.NON_GROUP_MEMBER:
+                    raise AssertionError(
+                        f"Current rank was not included in process group {ranks}"
+                    )
+                new_groups[ranks] = new_group
         mesh_info.reduce_scatter_process_group = new_groups[ranks]
 
     @property

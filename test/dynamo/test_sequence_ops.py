@@ -3,6 +3,8 @@
 """Tests for sequence protocol operations (sq_*) in PyTorch Dynamo."""
 
 import collections
+import sys
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -54,6 +56,16 @@ class UserDefinedSequence:
 
     def __repr__(self):
         return f"UserDefinedSequence({self.items})"
+
+
+class IndexLike:
+    """Object usable wherever an integer index is expected (defines __index__)."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __index__(self):
+        return self.value
 
 
 class TestSqConcat(torch._dynamo.test_case.TestCase):
@@ -182,6 +194,24 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         b = [3, 4]
         result = a + b
         self.assertEqual(list(result), [1, 2, 3, 4])
+
+    @make_dynamo_test
+    def test_user_defined_list_concat_returns_plain_list(self):
+        # out-of-place C sq_concat constructs a fresh base-type object
+        result = UserDefinedList([1]) + UserDefinedList([2])
+        self.assertIs(type(result), list)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_user_defined_list_inplace_concat(self):
+        # in-place C sq_inplace_concat mutates and returns self: subclass
+        # type and identity preserved
+        a = UserDefinedList([1])
+        b = a
+        a += [2]
+        self.assertEqual(list(a), [1, 2])
+        self.assertIs(type(a), UserDefinedList)
+        self.assertIs(a, b)
 
     # --- User-defined tuple subclass concatenation ---
 
@@ -326,6 +356,79 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d = collections.deque([1, 2, 3])
         d *= -1
         self.assertEqual(list(d), [])
+
+    # --- deque.rotate ---
+
+    @make_dynamo_test
+    def test_deque_rotate_default(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate()
+        self.assertEqual(list(d), [5, 1, 2, 3, 4])
+
+    @make_dynamo_test
+    def test_deque_rotate_positive(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(2)
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_negative(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(-2)
+        self.assertEqual(list(d), [3, 4, 5, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_rotate_wraps(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(7)
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_index_arg(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(IndexLike(2))
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_short(self):
+        d = collections.deque([1])
+        d.rotate(3)
+        self.assertEqual(list(d), [1])
+        d = collections.deque([])
+        d.rotate(2)
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_rotate_with_maxlen(self):
+        d = collections.deque([1, 2, 3], maxlen=3)
+        d.rotate(1)
+        d.append(9)
+        self.assertEqual(list(d), [1, 2, 9])
+
+    @make_dynamo_test
+    def test_deque_rotate_noop_bumps_state(self):
+        # rotate() bumps the iteration-state counter whenever len > 1, even when
+        # n is a multiple of len (no element actually moves), so mutation during
+        # iteration is still detected.
+        for n in (0, 4):
+            d = collections.deque([1, 2, 3, 4])
+            with self.assertRaises(RuntimeError):
+                for _ in d:
+                    d.rotate(n)
+
+    # --- deque setattr (deque has no __dict__) ---
+
+    @make_dynamo_test
+    def test_deque_setattr_maxlen_readonly(self):
+        d = collections.deque([1, 2, 3])
+        with self.assertRaises(AttributeError):
+            d.maxlen = 10
+
+    @make_dynamo_test
+    def test_deque_setattr_unknown_attr(self):
+        d = collections.deque([1, 2, 3])
+        with self.assertRaises(AttributeError):
+            d.foo = 1
 
     # --- list re-init (list.__init__) ---
 
@@ -640,6 +743,51 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
 instantiate_parametrized_tests(TestSqConcat)
 
 
+class TestSqRepeat(torch._dynamo.test_case.TestCase):
+    """Tests for sq_repeat (*) and sq_inplace_repeat (*=) on sequences."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # --- User-defined subclasses: the inherited C sq_repeat slot ---
+
+    @make_dynamo_test
+    def test_user_defined_list_repeat(self):
+        # CPython runs list's inherited C sq_repeat: result is a plain list,
+        # not the subclass
+        result = UserDefinedList([1, 2]) * 2
+        self.assertEqual(result, [1, 2, 1, 2])
+        self.assertIs(type(result), list)
+
+    @make_dynamo_test
+    def test_user_defined_list_repeat_reflected(self):
+        result = 2 * UserDefinedList([5])
+        self.assertEqual(result, [5, 5])
+        self.assertIs(type(result), list)
+
+    @make_dynamo_test
+    def test_user_defined_tuple_repeat(self):
+        result = UserDefinedTuple([1, 2]) * 2
+        self.assertEqual(result, (1, 2, 1, 2))
+        self.assertIs(type(result), tuple)
+
+    @make_dynamo_test
+    def test_user_defined_list_inplace_repeat(self):
+        # in-place repeat mutates the object: type and identity preserved
+        a = UserDefinedList([1])
+        b = a
+        a *= 3
+        self.assertEqual(list(a), [1, 1, 1])
+        self.assertIs(type(a), UserDefinedList)
+        self.assertIs(a, b)
+
+
 # ---------------------------------------------------------------------------
 # sq_ass_item / mp_ass_subscript on sequences (__setitem__)
 # ---------------------------------------------------------------------------
@@ -903,6 +1051,53 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
         lst = L([0, 0, 0])
         lst[0] = 5
         self.assertEqual(lst[0], 1005)
+
+    @make_dynamo_test
+    def test_subclass_list_override_new(self):
+        # list.__new__ ignores the initializer arg (PyType_GenericNew) and, when
+        # __new__ is overridden, list.__init__ ignores excess keyword args.
+        class L(list):
+            def __new__(cls, seq, newarg=None):
+                self = super().__new__(cls, seq)
+                self.newarg = newarg
+                return self
+
+        lst = L([1, 2], newarg=3)
+        self.assertIs(type(lst), L)
+        self.assertEqual(list(lst), [1, 2])
+        self.assertEqual(lst.newarg, 3)
+
+    @make_dynamo_test
+    def test_subclass_list_inherited_new(self):
+        # __new__ override is inherited through an intermediate base; the kwarg
+        # tolerance still applies since B's tp_new is not list's.
+        class A(list):
+            def __new__(cls, seq, newarg=None):
+                self = super().__new__(cls, seq)
+                self.newarg = newarg
+                return self
+
+        class B(A):
+            pass
+
+        lst = B([1, 2], newarg=3)
+        self.assertIs(type(lst), B)
+        self.assertEqual(list(lst), [1, 2])
+        self.assertEqual(lst.newarg, 3)
+
+    @make_dynamo_test
+    def test_subclass_list_no_new_rejects_init_kwargs(self):
+        # Without a __new__ override, list.__init__ rejects keyword args on
+        # 3.11+ (the tp_new check was added when it moved to argument clinic);
+        # 3.10 tolerates them.
+        class L(list):
+            pass
+
+        if sys.version_info >= (3, 11):
+            with self.assertRaises(TypeError):
+                L([1, 2], newarg=3)
+        else:
+            L([1, 2], newarg=3)
 
     # -- mutation visibility --
 
@@ -1268,6 +1463,139 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), "type_error")
 
 
+@instantiate_parametrized_tests
+class TestRangeIndex(torch._dynamo.test_case.TestCase):
+    @parametrize("value", [True, 1.0, 1 + 0j])
+    def test_numeric_equality_returns_int(self, value):
+        def fn():
+            return range(3).index(value)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 1)
+        self.assertIs(type(result), int)
+
+    @parametrize(
+        "bounds,expected",
+        [((1, 8, 2), (1, [1, 3])), ((7, 0, -2), (2, [7, 5, 3]))],
+    )
+    def test_custom_equality_stops_at_first_match(self, bounds, expected):
+        seen = []
+
+        class Match:
+            def __eq__(self, other):
+                seen.append(other)
+                return other % 3 == 0
+
+            def __index__(self):
+                raise AssertionError("index() must use equality, not __index__")
+
+        def fn():
+            return range(*bounds).index(Match()), seen
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
+
+    def test_int_subclass_uses_overridden_equality(self):
+        class Match(int):
+            def __eq__(self, other):
+                return other == 2
+
+        def fn():
+            return range(5).index(Match(99))
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 2)
+
+    def test_int_subclass_uses_inherited_equality(self):
+        class IntSubclass(int):
+            pass
+
+        def fn():
+            return range(3).index(IntSubclass(1))
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 1)
+
+    def test_symbolic_integer_needle(self):
+        def fn(x):
+            return x + range(10).index(x.shape[0])
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for size in (3, 4):
+            x = torch.zeros(size)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_comparison_exception_propagates(self):
+        seen = []
+
+        class Match:
+            def __eq__(self, other):
+                seen.append(other)
+                if other == 2:
+                    raise RuntimeError("comparison failed")
+                return False
+
+        def fn():
+            try:
+                range(5).index(Match())
+            except RuntimeError:
+                return seen
+            return None
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), [0, 1, 2]
+        )
+
+    @parametrize("stop", [0, 3])
+    def test_missing_value_does_not_format_needle(self, stop):
+        seen = []
+
+        class Missing:
+            def __eq__(self, other):
+                seen.append(other)
+                return False
+
+            def __repr__(self):
+                raise RuntimeError("index() must not format the missing value")
+
+        def fn():
+            try:
+                range(stop).index(Missing())
+            except ValueError:
+                return seen
+            return None
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), list(range(stop))
+        )
+
+    def test_large_range_non_integer_match(self):
+        def fn():
+            return range(2**100).index(1 + 0j)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), 1)
+
+    def test_recompiles_for_changed_bounds_and_search_value(self):
+        class EqualTo:
+            def __init__(self, target):
+                self.target = target
+
+            def __eq__(self, other):
+                return other == self.target
+
+        def fn(x, values, needle):
+            return x + values.index(needle)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        x = torch.zeros(3)
+        needle = EqualTo(3)
+        self.assertEqual(compiled(x, range(-1, 8, 2), needle), x + 2)
+        self.assertEqual(counter.frame_count, 1)
+        needle.target = 5
+        self.assertEqual(compiled(x, range(-1, 8, 2), needle), x + 3)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(compiled(x, range(9, -2, -2), needle), x + 2)
+        self.assertEqual(counter.frame_count, 3)
+
+
 class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):
     # range_iterator.__setstate__(k) sets the iterator index, clamped to
     # [0, len], mirroring CPython rangeiter_setstate.
@@ -1368,6 +1696,113 @@ class TestRangeDynamicBounds(torch._dynamo.test_case.TestCase):
             return list(keys)
 
         self.assertEqual(fn(), [0, 1, 2, 3, 4])
+
+
+class TestRangeContains(torch._dynamo.test_case.TestCase):
+    # range.__contains__ uses the arithmetic fast path only for exact int/bool
+    # operands; everything else falls back to an __eq__ linear scan, matching
+    # CPython range_contains / _PySequence_IterSearch.
+    def test_non_int_members(self):
+        class AlwaysEq:
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return 0
+
+        class IntSubclassEq(int):
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return 0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                1.0 in range(3),
+                True in range(3),
+                (1 + 0j) in range(3),
+                AlwaysEq() in range(3),
+                IntSubclassEq(11) in range(10),
+                5 in range(3),
+                2.5 in range(3),
+            )
+
+        self.assertEqual(fn(), (True, True, True, True, True, False, False))
+
+    def test_negative_step_and_strided(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                -1 in range(0, -20, -1),
+                1.0 in range(0, -20, -1),
+                2 in range(0, 101, 2),
+                1 in range(0, 101, 2),
+                2.0 in range(0, 101, 2),
+                100.0 in range(0, 101, 2),
+            )
+
+        self.assertEqual(fn(), (True, False, True, False, True, True))
+
+
+class TestDequeConstruct(torch._dynamo.test_case.TestCase):
+    """Tests for collections.deque() construction under Dynamo."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    @make_dynamo_test
+    def test_deque_bad_kwarg_raises_typeerror(self):
+        with self.assertRaises(TypeError):
+            collections.deque(unsupported_arg=[])
+
+    @make_dynamo_test
+    def test_deque_too_many_positional_raises_typeerror(self):
+        with self.assertRaises(TypeError):
+            collections.deque([1], [2], [3])
+
+    @make_dynamo_test
+    def test_deque_valid_construction(self):
+        d = collections.deque([1, 2, 3], maxlen=5)
+        self.assertEqual(list(d), [1, 2, 3])
+        self.assertEqual(d.maxlen, 5)
+
+    @make_dynamo_test
+    def test_deque_maxlen_conversion(self):
+        # maxlen is a Py_ssize_t, so a bool arrives as a plain int.
+        d = collections.deque([1], maxlen=True)
+        self.assertEqual(d.maxlen, 1)
+        self.assertIs(type(d.maxlen), int)
+        self.assertEqual(collections.deque([1], maxlen=None).maxlen, None)
+        with self.assertRaises(ValueError):
+            collections.deque([1], maxlen=-1)
+        with self.assertRaises(TypeError):
+            collections.deque([1], maxlen=1.0)
+
+    @make_dynamo_test
+    def test_deque_iterable_by_name_and_position_raises_typeerror(self):
+        # Must be a catchable TypeError, not a leaked StopIteration.
+        with self.assertRaises(TypeError):
+            collections.deque([1], iterable=[2])
+
+    @make_dynamo_test
+    def test_deque_valid_kwargs_over_positional_limit_raises_typeerror(self):
+        # total (positional + keyword) > 2 with only valid kwarg names.
+        with self.assertRaises(TypeError):
+            collections.deque([1], [2], maxlen=3)
+
+    @make_dynamo_test
+    def test_deque_bad_kwarg_over_limit_reports_count(self):
+        # CPython reports the arg-count TypeError (not the bad kwarg) here.
+        with self.assertRaises(TypeError):
+            collections.deque([], maxlen=1, bad=2)
 
 
 if __name__ == "__main__":

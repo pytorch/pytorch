@@ -13,6 +13,7 @@ Key components:
 - CompilerFn: Type for backend compiler functions that transform FX graphs
 - _BACKENDS: Registry mapping backend names to entry points
 - _COMPILER_FNS: Registry mapping backend names to loaded compiler functions
+- _BACKEND_TAGS: Registry mapping backend names to their tags
 
 Example usage:
     @register_backend
@@ -79,6 +80,7 @@ CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
 
 _BACKENDS: dict[str, EntryPoint | None] = {}
 _COMPILER_FNS: dict[str, CompilerFn] = {}
+_BACKEND_TAGS: dict[str, tuple[str, ...]] = {}
 _default_backend: str | CompilerFn = "inductor"
 
 
@@ -106,10 +108,10 @@ def register_backend(
     name = name or compiler_fn.__name__
     if name in _COMPILER_FNS:
         raise AssertionError(f"duplicate name: {name}")
-    if compiler_fn not in _BACKENDS:
+    if name not in _BACKENDS:
         _BACKENDS[name] = None
     _COMPILER_FNS[name] = compiler_fn
-    compiler_fn._tags = tuple(tags)  # type: ignore[attr-defined]
+    _BACKEND_TAGS[name] = tuple(tags)
     return compiler_fn
 
 
@@ -153,8 +155,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:  # type:
     backends = [
         name
         for name in _BACKENDS
-        if name not in _COMPILER_FNS
-        or not exclude_tags_set.intersection(_COMPILER_FNS[name]._tags)  # type: ignore[attr-defined]
+        if not exclude_tags_set.intersection(_BACKEND_TAGS.get(name, ()))
     ]
     return sorted(backends)
 
@@ -199,15 +200,11 @@ def _is_registered_backend(compiler_fn: CompilerFn) -> bool:
     if compiler_fn in _COMPILER_FNS.values():
         return True
 
-    # Check for _TorchCompileInductorWrapper or _TorchCompileWrapper
-    # These have a compiler_name attribute that identifies the backend
-    if hasattr(compiler_fn, "compiler_name"):
-        compiler_name = compiler_fn.compiler_name
-        if compiler_name in _BACKENDS or compiler_name in _COMPILER_FNS:
-            return True
+    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
+        return True
 
-    # Check if the wrapper has a compiler_fn attribute (e.g., _TorchCompileWrapper)
-    if hasattr(compiler_fn, "compiler_fn"):
+    # _TorchCompileWrapper wraps either a registered backend or a custom callable
+    if isinstance(compiler_fn, torch._TorchCompileWrapper):
         return compiler_fn.compiler_fn in _COMPILER_FNS.values()
 
     return False

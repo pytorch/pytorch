@@ -9,9 +9,11 @@ import shutil
 import string
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch.backends.cudnn
@@ -140,6 +142,39 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIsNone(doubler.get().grad)
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
+
+    def test_jit_stale_lock_file_does_not_deadlock(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189245:
+        # a leftover 'lock' file (e.g. from a builder killed by SIGKILL/OOM)
+        # must not deadlock later loads. Run in a subprocess so a regression
+        # (an infinite wait) surfaces as a timeout instead of hanging the job.
+        build_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, build_dir, ignore_errors=True)
+        # Simulate the stale lock left behind by a forcefully killed builder.
+        open(os.path.join(build_dir, "lock"), "w").close()
+        script = "\n".join(
+            [
+                "import torch.utils.cpp_extension as ext",
+                "m = ext.load_inline(",
+                "    name='stale_lock_ext',",
+                "    cpp_sources='int forty_two() { return 42; }',",
+                "    functions=['forty_two'],",
+                f"    build_directory={build_dir!r},",
+                "    verbose=True)",
+                "assert m.forty_two() == 42",
+                "print('STALE_LOCK_OK')",
+            ]
+        )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("cpp_extension.load() deadlocked on a stale lock file (#189245)")
+        self.assertIn("STALE_LOCK_OK", proc.stdout, msg=proc.stderr)
 
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
@@ -492,6 +527,84 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         self.assertEqual(module.tanh_add.__doc__.split("\n")[2], "Tanh and then sum :D")
+
+    def test_inline_jit_generated_bindings_gil_not_used(self):
+        variants = (
+            ("default", {}, False),
+            ("enabled", {"gil_not_used": True}, True),
+            ("disabled", {"gil_not_used": False}, False),
+        )
+
+        for name, options, expects_gil_not_used in variants:
+            with (
+                self.subTest(name=name),
+                tempfile.TemporaryDirectory() as build_directory,
+            ):
+                with (
+                    mock.patch.object(
+                        torch.utils.cpp_extension,
+                        "remove_extension_h_precompiler_headers",
+                    ),
+                    mock.patch.object(
+                        torch.utils.cpp_extension,
+                        "_jit_compile",
+                    ),
+                ):
+                    torch.utils.cpp_extension.load_inline(
+                        name=f"inline_jit_extension_gil_not_used_{name}",
+                        cpp_sources="int add_one(int value) { return value + 1; }",
+                        functions="add_one",
+                        build_directory=build_directory,
+                        **options,
+                    )
+
+                with open(os.path.join(build_directory, "main.cpp")) as source_file:
+                    generated_source = source_file.read()
+
+                gil_not_used_declaration = (
+                    "PYBIND11_MODULE(TORCH_EXTENSION_NAME, m, "
+                    "pybind11::mod_gil_not_used()) {"
+                )
+                gil_used_declaration = "PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {"
+                expected_declaration, unexpected_declaration = (
+                    (gil_not_used_declaration, gil_used_declaration)
+                    if expects_gil_not_used
+                    else (gil_used_declaration, gil_not_used_declaration)
+                )
+                self.assertIn(expected_declaration, generated_source)
+                self.assertNotIn(unexpected_declaration, generated_source)
+
+    @unittest.skipUnless(
+        sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+        "requires free-threaded Python",
+    )
+    def test_inline_jit_generated_bindings_keep_gil_disabled(self):
+        script = """
+import sys
+import tempfile
+
+import torch.utils.cpp_extension
+
+assert not sys._is_gil_enabled()
+with tempfile.TemporaryDirectory() as build_directory:
+    module = torch.utils.cpp_extension.load_inline(
+        name="inline_jit_extension_gil_not_used_runtime",
+        cpp_sources="int add_one(int value) { return value + 1; }",
+        functions="add_one",
+        build_directory=build_directory,
+        gil_not_used=True,
+        verbose=True,
+    )
+    assert module.add_one(1) == 2
+    assert not sys._is_gil_enabled()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_inline_jit_compile_extension_multiple_sources_and_no_functions(self):
         cpp_source1 = """
