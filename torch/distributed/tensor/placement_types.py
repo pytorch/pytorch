@@ -278,15 +278,12 @@ class Shard(torch._C._distributed.Shard):
                 f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
             )
 
-        # chunk tensor over dimension `dim` into n slices
+        # Matching what _custom_chunk does:- clamp so trailing ranks can be partial or empty.
         dim_size = tensor.size(self.dim)
         split_size = (dim_size + num_chunks - 1) // num_chunks
-        # each split is split_size except (maybe) the last one...
-        last_split = dim_size - split_size * (num_chunks - 1)
-
-        start = split_size * index
-        length = torch.sym_ite(index == num_chunks - 1, last_split, split_size)
-        result = torch.narrow(tensor, self.dim, start, length)
+        start = torch.sym_min(split_size * index, dim_size)
+        end = torch.sym_min(split_size * (index + 1), dim_size)
+        result = torch.narrow(tensor, self.dim, start, end - start)
         if clone:
             result = result.clone()
         elif contiguous:
