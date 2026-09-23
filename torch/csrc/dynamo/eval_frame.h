@@ -36,9 +36,13 @@ extern bool is_skip_guard_eval_unsafe;
 extern int fullgraph_compiled_frame_count;
 extern bool fullgraph_error_on_nested_compile;
 
+#if IS_PYTHON_3_13_PLUS
+#define clear_old_frame_if_python_312_plus _PyEval_FrameClearAndPop
+#else
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame);
+#endif
 
 void eval_frame_callback_set(PyObject* obj);
 

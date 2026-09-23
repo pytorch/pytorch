@@ -1,5 +1,6 @@
 from inspect import getattr_static
-from typing import Any, TYPE_CHECKING, TypeGuard
+from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 from torch._guards import Source
 from torch.backends.cuda import SDPAParams
@@ -68,7 +69,7 @@ class SDPAParamsVariable(VariableTracker):
     def as_proxy(self) -> Proxy:
         return self.proxy
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         import torch._C
@@ -99,5 +100,5 @@ class SDPAParamsVariable(VariableTracker):
             return wrap_fx_proxy(tx=tx, proxy=proxy)
 
     @staticmethod
-    def is_sdpa_params(value: Any) -> TypeGuard["SDPAParams"]:
+    def is_sdpa_params(value: object) -> TypeIs[type[SDPAParams]]:
         return value is SDPAParams
