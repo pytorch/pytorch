@@ -1854,7 +1854,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # original dict changes, the changes are reflected in proxy as well.
             dict_arg = args[0]
             if isinstance(dict_arg, ConstDictVariable):
-                return variables.MappingProxyVariable(dict_arg)
+                return variables.MappingProxyVariable(dict_arg, args[0].python_type())
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (
             self.source or torch._dynamo.config.enable_trace_load_build_class
         ):
