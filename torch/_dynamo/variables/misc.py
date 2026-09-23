@@ -698,6 +698,25 @@ class ExceptionVariable(VariableTracker):
     def python_type(self) -> type:
         return self.exc_type
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # ref: BaseException_init in CPython Objects/exceptions.c. Builtin
+        # subclasses with their own tp_init (OSError, StopIteration, ...) are
+        # not modelled. A Python-level __init__ means this VT is the base of a
+        # user-defined exception, reached via BaseException.__init__.
+        init = self.exc_type.__init__
+        if init is not BaseException.__init__ and inspect.ismethoddescriptor(init):
+            return super().tp_init_impl(tx, args, kwargs)
+        if kwargs:
+            name = self.python_type_name()
+            raise_type_error(tx, f"{name}() takes no keyword arguments")
+        self.args = list(args)
+        return ConstantVariable.create(None)
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":

@@ -1270,6 +1270,19 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
+                # Only ImportError, AttributeError and NameError (and their
+                # subclasses) accept keywords; exception groups check their
+                # positional args first.
+                if (
+                    kwargs
+                    and fn.__module__ == "builtins"
+                    and not issubclass(fn, (ImportError, AttributeError, NameError))
+                    and not (
+                        sys.version_info >= (3, 11)
+                        and issubclass(fn, builtins.BaseExceptionGroup)
+                    )
+                ):
+                    raise_type_error(tx, f"{fn.__name__}() takes no keyword arguments")
                 if fn is StopIteration:
                     return variables.StopIterationVariable(fn, args, kwargs)
                 elif fn is AttributeError:
@@ -1895,6 +1908,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
+
+        if (
+            self.fn is BaseException
+            and name == "__init__"
+            and args
+            and isinstance(args[0], variables.UserDefinedExceptionObjectVariable)
+        ):
+            return args[0].exc_vt.call_method(tx, name, args[1:], kwargs)
 
         if self.fn in (set, frozenset, list, tuple):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
