@@ -142,69 +142,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void reset_backward_hooks(const TensorImpl* self) const override {
     PANIC(reset_backward_hooks);
   }
-
-  bool fake_try_decomp(
-      const c10::OperatorHandle& /*op*/,
-      torch::jit::Stack* /*stack*/,
-      bool /*has_symbolic_sizes*/,
-      bool* /*has_python_cia*/) const override {
-    PANIC(fake_try_decomp);
-  }
-  bool fake_try_meta(
-      const c10::OperatorHandle& /*op*/,
-      torch::jit::Stack* /*stack*/) const override {
-    PANIC(fake_try_meta);
-  }
-  bool fake_try_custom_op_impl(
-      const c10::OperatorHandle& /*op*/,
-      torch::jit::Stack* /*stack*/,
-      PyObject* /*real*/) const override {
-    PANIC(fake_try_custom_op_impl);
-  }
-  bool fake_try_op_impl(
-      const c10::OperatorHandle& /*op*/,
-      torch::jit::Stack* /*stack*/,
-      c10::Device /*common_device*/) const override {
-    PANIC(fake_try_op_impl);
-  }
-  bool fake_try_fast_op_impls(
-      const c10::OperatorHandle& /*op*/,
-      torch::jit::Stack* /*stack*/,
-      c10::Device /*common_device*/) const override {
-    PANIC(fake_try_fast_op_impls);
-  }
-  bool fake_try_prim_meta(
-      const c10::OperatorHandle& /*op*/,
-      torch::jit::Stack* /*stack*/) const override {
-    PANIC(fake_try_prim_meta);
-  }
-  bool is_symbolic_wrapped_number(const TensorImpl* /*self*/) const override {
-    PANIC(is_symbolic_wrapped_number);
-  }
-  bool fake_infer_from_real_out(
-      const c10::OperatorHandle& /*op*/,
-      torch::jit::Stack* /*stack*/,
-      PyObject* /*real*/) const override {
-    PANIC(fake_infer_from_real_out);
-  }
-  c10::intrusive_ptr<TensorImpl> to_meta_tensor(
-      const c10::intrusive_ptr<TensorImpl>& /*real*/) const override {
-    PANIC(to_meta_tensor);
-  }
-  bool allow_non_fake_inputs() const override {
-    PANIC(allow_non_fake_inputs);
-  }
-  PyObject* fake_run_real_op(
-      const c10::OperatorHandle& /*op*/,
-      const torch::jit::Stack& /*fake_args*/) const override {
-    PANIC(fake_run_real_op);
-  }
-  void propagate_real_tensors(
-      const c10::OperatorHandle& /*op*/,
-      PyObject* /*real*/,
-      torch::jit::Stack* /*stack*/) const override {
-    PANIC(propagate_real_tensors);
-  }
 };
 
 // Construct this in Global scope instead of within `disarm`

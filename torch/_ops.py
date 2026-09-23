@@ -153,13 +153,6 @@ class OperatorBase:
                 )
             self.py_kernels[k] = fn
             self._dispatch_cache.clear()
-            if (
-                isinstance(self, OpOverload)
-                and k == DispatchKey.CompositeImplicitAutograd
-            ):
-                torch._C._fake_dispatch_register_python_cia(
-                    self._schema.name, self._schema.overload_name
-                )
             return fn
 
         return inner
