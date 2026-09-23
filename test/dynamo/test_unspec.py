@@ -491,6 +491,31 @@ else:
             self.assertEqual(res_state, ref_state)
             self.assertLess(cnt.frame_count, len(shapes))
 
+    @parametrize("reset_method", ["seed", "setstate"])
+    def test_random_object_draws_before_and_after_reset(self, reset_method):
+        def fn(x, rng):
+            before = rng.random()
+            if reset_method == "seed":
+                rng.seed(42)
+            else:
+                rng.setstate(random.Random(42).getstate())
+            return x + before + rng.random() + rng.random()
+
+        def run(f):
+            rng = random.Random(123)
+            outs = []
+            states = []
+            for _ in range(3):
+                outs.append(f(torch.zeros(3), rng))
+                states.append(rng.getstate())
+            return outs, states
+
+        ref = run(fn)
+        cnt = CompileCounter()
+        res = run(torch.compile(fn, backend=cnt, fullgraph=True))
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_random_object_alternating_instances(self):
         def fn(x, rng):
             return x.sum() + rng.random()
