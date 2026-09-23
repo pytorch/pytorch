@@ -378,6 +378,19 @@ class SuperVariable(VariableTracker):
         ):
             # type: ignore[arg-type]
             return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedClassVariable)
+            and inner_fn == type.__setattr__.__get__(self.objvar.value)
+            and len(args) == 2
+            and not kwargs
+        ):
+            # super().__setattr__ inside a metaclass __setattr__ resolves to
+            # type.__setattr__ bound to the class: a plain class attribute store.
+            result = variables.SetAttrBuiltinVariable()._call_setattr(
+                tx, self.objvar, *args
+            )
+            if result is not None:
+                return result
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:
