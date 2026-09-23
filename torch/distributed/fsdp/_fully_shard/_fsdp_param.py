@@ -210,6 +210,7 @@ class FSDPParam:
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
+    keep_unsharded_storage: bool
 
     def __init__(
         self,
@@ -237,6 +238,7 @@ class FSDPParam:
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
+        self.keep_unsharded_storage = False
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -961,7 +963,8 @@ class FSDPParam:
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
-        self.free_unsharded_param()
+        if not self.keep_unsharded_storage:
+            self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
 
     def to_sharded_post_forward(self) -> None:
@@ -1000,7 +1003,8 @@ class FSDPParam:
             requires_grad=self.sharded_param.requires_grad,
         )
         self._setattr_on_modules(self._sharded_post_forward_param)
-        self.free_unsharded_param()
+        if not self.keep_unsharded_storage:
+            self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:
