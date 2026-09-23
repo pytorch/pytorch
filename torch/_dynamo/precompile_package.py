@@ -1825,19 +1825,9 @@ class PrecompileSession:
         *,
         require_complete: bool,
         require_no_risky_drops: bool,
-        require_no_dropped_guards: bool,
     ) -> PrecompileSummary:
         """Run the coverage and guard gates, or raise saying which one failed."""
         summary = self.summary()
-        if require_no_dropped_guards and summary.dropped_guards:
-            raise PackageError(
-                f"Precompilation dropped {len(summary.dropped_guards)} guard(s) that "
-                f"were not serialized: {list(summary.dropped_guards)}. Rebinding any "
-                f"of those sources between capture and load can silently serve a "
-                f"graph traced against the old value. Pass "
-                f"require_no_dropped_guards=False to accept the default policy, which "
-                f"refuses only the risky drops."
-            )
         if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
                 f"Precompilation dropped guard(s) that can affect dispatch on "
@@ -1900,7 +1890,6 @@ class PrecompileSession:
         *,
         require_complete: bool = True,
         require_no_risky_drops: bool = True,
-        require_no_dropped_guards: bool = False,
     ) -> tuple[str, bytes]:
         """Render everything captured SO FAR as ``(python_code, cache)``.
 
@@ -1915,7 +1904,6 @@ class PrecompileSession:
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
-            require_no_dropped_guards=require_no_dropped_guards,
         )
         backends = self._collect_backends()
         return _build_multigraph_artifact(
