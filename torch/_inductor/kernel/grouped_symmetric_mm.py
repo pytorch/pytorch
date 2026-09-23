@@ -10,6 +10,8 @@ import triton
 import triton.language as tl
 
 import torch
+
+# pyrefly: ignore [missing-import]
 from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm import (
     create_tensor_and_stride,
     GroupedGemmKernel,
@@ -76,6 +78,8 @@ class GroupedSymmetricPlan:
     ) -> None:
         if not inputs:
             raise ValueError("grouped symmetric GEMM requires at least one input")
+        if torch.version.hip is not None:
+            raise ValueError("grouped symmetric GEMM requires an NVIDIA GPU")
         if c is not None and len(c) != len(inputs):
             raise ValueError("grouped symmetric GEMM C list has the wrong length")
         if any(
@@ -83,11 +87,15 @@ class GroupedSymmetricPlan:
             or x.dtype != torch.bfloat16
             or not x.is_cuda
             or not x.is_contiguous()
+            or x.data_ptr() % 16
+            or any(dim <= 0 or dim % 8 for dim in x.shape)
             for x in inputs
         ):
             raise ValueError(
-                "grouped symmetric GEMM requires contiguous CUDA BF16 matrices"
+                "grouped symmetric GEMM requires aligned contiguous CUDA BF16 matrices"
             )
+        if row_block <= 0 or row_block % 8:
+            raise ValueError("grouped symmetric GEMM row block must be 8-aligned")
         if any(x.device != inputs[0].device for x in inputs):
             raise ValueError("grouped symmetric GEMM inputs must use one device")
         if c is not None and any(
@@ -95,6 +103,7 @@ class GroupedSymmetricPlan:
             or tensor.dtype != x.dtype
             or tensor.device != x.device
             or not tensor.is_contiguous()
+            or tensor.data_ptr() % 16
             for x, tensor in zip(inputs, c)
         ):
             raise ValueError("grouped symmetric GEMM C tensors have invalid metadata")
@@ -112,6 +121,7 @@ class GroupedSymmetricPlan:
             or out.dtype != x.dtype
             or out.device != x.device
             or not out.is_contiguous()
+            or out.data_ptr() % 16
             for x, out in zip(inputs, self.outputs)
         ):
             raise ValueError("grouped symmetric GEMM outputs have invalid metadata")
@@ -296,7 +306,7 @@ class SymmetricMuonPlan:
         self.outputs = self.inputs if steps % 2 == 0 else self.alternate
 
     def __call__(self, updates: list[torch.Tensor], eps: float) -> list[torch.Tensor]:
-        from torch._vendor.quack.gemm_symmetric import gemm_symmetric
+        from torch._vendor.quack.gemm_interface import gemm_symmetric
 
         if len(updates) != 1:
             raise ValueError("symmetric Muon plan requires exactly one update")
@@ -308,11 +318,12 @@ class SymmetricMuonPlan:
         for step in range(self.num_steps):
             x = buffers[step % 2]
             out = buffers[(step + 1) % 2]
-            gemm_symmetric(x, self.gram)
+            gemm_symmetric(x, x.mT, out=self.gram)
             gemm_symmetric(
                 self.gram,
-                self.update,
+                self.gram,
                 C=self.gram,
+                out=self.update,
                 alpha=self.c,
                 beta=self.b,
             )
@@ -373,7 +384,7 @@ class PackedSymmetricMuonPlan:
         self.outputs = list(outputs.unbind())
 
     def __call__(self, updates: list[torch.Tensor], eps: float) -> list[torch.Tensor]:
-        from torch._vendor.quack.gemm_symmetric import gemm_symmetric
+        from torch._vendor.quack.gemm_interface import gemm_symmetric
 
         if len(updates) != len(self.input_views):
             raise ValueError("packed symmetric Muon plan has the wrong update count")
@@ -390,11 +401,12 @@ class PackedSymmetricMuonPlan:
         for step in range(self.num_steps):
             x = buffers[step % 2]
             out = buffers[(step + 1) % 2]
-            gemm_symmetric(x, self.gram)
+            gemm_symmetric(x, x.mT, out=self.gram)
             gemm_symmetric(
                 self.gram,
-                self.update,
+                self.gram,
                 C=self.gram,
+                out=self.update,
                 alpha=self.c,
                 beta=self.b,
             )

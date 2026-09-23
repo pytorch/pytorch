@@ -825,7 +825,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
             result must be sent over RPC and get unpickled on the receiving side
             to restore the module. Otherwise, there will be RRef leaks, which
             can potentially lead to program hang. When using this API, it is
-            applications responsibility to make sure that the above assumption
+            the application's responsibility to make sure that the above assumption
             always holds.
       )");
   module.def("_disable_jit_rref_pickle", &disableJitRRefPickle);
