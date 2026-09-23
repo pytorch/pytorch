@@ -1937,6 +1937,52 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(got.__cause__)
         self.assertIsNone(got.__context__)
 
+    @parametrize("explicit_del", [False, True])
+    def test_except_as_name_cleared(self, explicit_del):
+        def fn(x):
+            try:
+                raise ValueError("x")
+            except ValueError as e:
+                if explicit_del:
+                    del e
+            try:
+                return e  # noqa: F821
+            except UnboundLocalError as err:
+                return x + 1, err.args
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("op", ["load", "delete"])
+    def test_unbound_local_after_del(self, op):
+        def fn(x):
+            y = x + 1
+            del y
+            try:
+                if op == "load":
+                    return y  # noqa: F821
+                del y  # noqa: F821
+            except UnboundLocalError as err:
+                return x + 2, err.args
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("op", ["load", "delete"])
+    def test_unbound_local_after_comprehension(self, op):
+        def fn(x):
+            [y + 1 for y in range(2)]
+            try:
+                if op == "load":
+                    return y  # noqa: F821
+                del y  # noqa: F821
+            except UnboundLocalError as err:
+                return x + 1, err.args
+            y = 0  # noqa: F841
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
 
 instantiate_parametrized_tests(ExceptionTests)
 

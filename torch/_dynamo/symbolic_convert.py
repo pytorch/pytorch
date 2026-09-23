@@ -2202,6 +2202,13 @@ class InstructionTranslatorBase(
     def popn(self, n: int) -> list[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
+    def _raise_unbound_local_error(self, name: str) -> NoReturn:
+        if sys.version_info >= (3, 11):
+            msg = f"cannot access local variable '{name}' where it is not associated with a value"
+        else:
+            msg = f"local variable '{name}' referenced before assignment"
+        raise_observed_exception(UnboundLocalError, self, args=[msg])
+
     def LOAD_FAST(self, inst: Instruction) -> None:
         name = inst.argval
         if self.exec_recorder and name in self.f_locals:
@@ -2226,12 +2233,7 @@ class InstructionTranslatorBase(
                         ],
                     )
             else:
-                unimplemented(
-                    gb_type="Attempted to read undefined local variable",
-                    context=f"LOAD_FAST {name}",
-                    explanation=f"Could not find a local variable with name `{name}`",
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
+                self._raise_unbound_local_error(name)
 
         # for continuation functions
         if name.startswith("__stack"):
@@ -2275,6 +2277,8 @@ class InstructionTranslatorBase(
 
     def DELETE_FAST(self, inst: Instruction) -> None:
         var = self.symbolic_locals.get(inst.argval)
+        if var is None or istype(var, NullVariable):
+            self._raise_unbound_local_error(inst.argval)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
         del self.symbolic_locals[inst.argval]
@@ -4951,12 +4955,7 @@ class InstructionTranslatorBase(
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
         if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
-            unimplemented(
-                gb_type="LOAD_FAST_CHECK on uninitialized variable",
-                context=inst.argval,
-                explanation=f"Attempted to load uninitialized local variable {inst.argval}",
-                hints=[*graph_break_hints.USER_ERROR],
-            )
+            self._raise_unbound_local_error(inst.argval)
         self.LOAD_FAST(inst)
 
     def LOAD_FAST_AND_CLEAR(self, inst: Instruction) -> None:
