@@ -348,7 +348,7 @@ def _get_mxfp_candidates(
         try:
             _make_gemm_param(asdict(candidate), dtype_id=dtype_id)
             valid_configs.append(candidate)
-        except ValueError as error:
+        except (AssertionError, ValueError) as error:
             log.debug(
                 "Skipping invalid %s config %s: %s", mxfp_format, candidate, error
             )
