@@ -598,7 +598,7 @@ class TestFlattenParams(FSDPTestContinuous):
         self.assertEqual(
             shard_metadata,
             expected,
-            msg=f"{handle.shard_metadata()}, {expected}",
+            msg=lambda msg: f"{msg}\n{handle.shard_metadata()}, {expected}",
         )
 
     @parametrize("memory_format", [torch.contiguous_format, torch.channels_last])

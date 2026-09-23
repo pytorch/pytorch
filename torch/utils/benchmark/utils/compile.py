@@ -12,7 +12,7 @@ __all__ = ["bench_all", "benchmark_compile"]
 
 
 _warned_tensor_cores = False
-_default_float_32_precision = torch.get_float32_matmul_precision()
+_default_float_32_precision: str | None = None
 
 try:
 
@@ -26,10 +26,13 @@ except ModuleNotFoundError:
 
 if HAS_TABULATE:
     def _enable_tensor_cores() -> None:
-        global _warned_tensor_cores
+        global _warned_tensor_cores, _default_float_32_precision
 
         if torch.cuda.is_available():
-            if torch.backends.cuda.matmul.allow_tf32 is False and torch.cuda.get_device_capability() >= (8, 0):
+            tf32_off = torch._C._get_fp32_precision_getter("cuda", "matmul") != "tf32"
+            if tf32_off and torch.cuda.get_device_capability() >= (8, 0):
+                # tf32 being off implies the legacy precision was "highest"
+                _default_float_32_precision = "highest"
                 torch.set_float32_matmul_precision("high")
                 if not _warned_tensor_cores:
                     print("Your GPU supports tensor cores")
@@ -37,7 +40,10 @@ if HAS_TABULATE:
                     _warned_tensor_cores = True
 
     def _disable_tensor_cores() -> None:
-        torch.set_float32_matmul_precision(_default_float_32_precision)
+        global _default_float_32_precision
+        if _default_float_32_precision is not None:
+            torch.set_float32_matmul_precision(_default_float_32_precision)
+            _default_float_32_precision = None
 
     def bench_loop(
         model: torch.nn.Module | Callable,
@@ -129,7 +135,7 @@ if HAS_TABULATE:
         This is a simple utility that can be used to benchmark torch.compile
         In particular it ensures that your GPU is setup to use tensor cores if it supports its
         It also tries out all the main backends and prints a table of results so you can easily compare them all
-        Many of the backendds have their own optional dependencies so please pip install them separately
+        Many of the backends have their own optional dependencies so please pip install them separately
 
         You will get one table for inference and another for training
         If you'd like to leverage this utility for training make sure to pass in a torch.optim.Optimizer
@@ -168,14 +174,13 @@ if HAS_TABULATE:
                     finally:
                         if torch.cuda.is_available():
                             _disable_tensor_cores()
-                            table.append([
-                                ("Training" if optimizer else "Inference"),
-                                # pyrefly: ignore [redundant-condition]
-                                backend if backend else "-",
-                                mode if mode is not None else "-",
-                                f"{compilation_time} ms " if compilation_time else "-",
-                                f"{running_time} ms " if running_time else "-",
-                            ])
+                    table.append([
+                        ("Training" if optimizer else "Inference"),
+                        backend if backend else "-",
+                        mode if mode is not None else "-",
+                        f"{compilation_time} ms " if compilation_time else "-",
+                        f"{running_time} ms " if running_time else "-",
+                    ])
 
             else:
                 torch._dynamo.reset()

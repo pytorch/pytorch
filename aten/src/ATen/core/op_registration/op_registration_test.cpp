@@ -16,7 +16,6 @@
 #include <ATen/core/Tensor.h>
 #include <functional>
 
-#include <ATen/core/LegacyTypeDispatch.h>
 
 #include <algorithm>
 
@@ -2030,7 +2029,7 @@ TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
       if (op_name.overload_name != "") {
           error_str += "." + op_name.overload_name;
       }
-      error_str += "\n";
+      error_str += '\n';
   }
   ASSERT_EQ(danglingImpls.size(), 0) << error_str;
 }

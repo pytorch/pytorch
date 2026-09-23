@@ -389,7 +389,7 @@ class Timer:
             max_run_time: float = 10.0,
             callback: Callable[[int, float], NoReturn] | None = None,
     ) -> common.Measurement:
-        """Similar to `blocked_autorange` but also checks for variablility in measurements
+        """Similar to `blocked_autorange` but also checks for variability in measurements
         and repeats until iqr/median is smaller than `threshold` or `max_run_time` is reached.
 
 

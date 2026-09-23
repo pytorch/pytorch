@@ -1021,6 +1021,27 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
             self.assertEqual(param.grad, ref_param.grad)
 
+        # Also cover the opt-in reduce-scatter PG setup on HSDP meshes. Each
+        # rank creates the communicator for its shard group, so the
+        # implementation must use local synchronization internally to avoid
+        # waiting for nonmember ranks in new_group's post-init barrier.
+        model.set_separate_reduce_scatter_group()
+        rs_process_groups = set()
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                for param_group in module._get_fsdp_state()._fsdp_param_groups:
+                    self.assertIsNotNone(
+                        param_group.mesh_info.reduce_scatter_process_group
+                    )
+                    self.assertIsNot(
+                        param_group._reduce_scatter_process_group,
+                        param_group.mesh_info.shard_process_group,
+                    )
+                    rs_process_groups.add(
+                        id(param_group.mesh_info.reduce_scatter_process_group)
+                    )
+        self.assertEqual(len(rs_process_groups), 1)
+
 
 class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
     @property
@@ -1471,7 +1492,7 @@ class TestFullyShardNonFloatParam(FSDPTest):
         expected_ag_dtype = (
             next(iter(ag_input_dtypes)) if len(ag_input_dtypes) == 1 else torch.uint8
         )
-        orig_ag = dist.all_gather_into_tensor
+        orig_ag = dist.all_gather_single
 
         def assert_all_gather(*args, **kw):
             output = kw.get("output", args[0] if len(args) > 0 else None)
@@ -1483,7 +1504,7 @@ class TestFullyShardNonFloatParam(FSDPTest):
         expected_rs_input_numel = sum(
             p.numel() for p in model.parameters() if p.requires_grad
         )
-        orig_rs = dist.reduce_scatter_tensor
+        orig_rs = dist.reduce_scatter_single
 
         def assert_reduce_scatter(*args, **kw):
             input = kw.get("input", args[1] if len(args) > 1 else None)
