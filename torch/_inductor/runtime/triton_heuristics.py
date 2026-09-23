@@ -1192,10 +1192,8 @@ class CachingAutotuner(KernelInterface):
         that we don't need to store in the cache(since TritonBundler handles the collection for us),
         this behavior is gated by keep_static_cubin_raw config.
         """
-        # Only cubin_raw must be retained: __getstate__ already nulls cubin_path
-        # on every serialize, so a cold-container load rehydrates the cubin from
-        # cubin_raw (reload_cubin_path calls reload_cubin_from_raw) instead of
-        # pointing at a missing file.
+        # Only cubin_raw must be retained: __getstate__ nulls cubin_path on every
+        # serialize, and cached launchers load retained bytes directly in memory.
         if torch._inductor.config.keep_static_cubin_raw:
             return
         for result in self.compile_results:
@@ -3148,10 +3146,6 @@ class StaticTritonCompileResult(CompileResult[_T]):
         """Point the launcher at its canonical path without materializing it."""
         self.kernel.cubin_path = self.cubin_path()
 
-    def reload_cubin_path(self) -> None:
-        """Reload this result's GPU binary at its canonical cache path."""
-        self.kernel.reload_cubin_from_raw(self.cubin_path())
-
     def make_launcher(self) -> LauncherType:
         # If at least one static make_launcher call occurs,
         # we're sure static cuda launcher was used for this compile
@@ -3160,8 +3154,10 @@ class StaticTritonCompileResult(CompileResult[_T]):
         if self.kernel.cubin_raw is None:
             if not self.kernel.cubin_path:
                 self.set_cubin_path()
-            if not os.path.exists(self.kernel.cubin_path):
-                self.reload_cubin_path()
+        retained_cubin = None
+        if torch._inductor.config.keep_static_cubin_raw:
+            self.kernel.retain_cubin_from_path()
+            retained_cubin = self.kernel.cubin_raw
         # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
         # kernel, so the launcher must keep its loaded handles per device.
         self.kernel.device_agnostic = self.compile_meta.get("device") is None
@@ -3169,7 +3165,11 @@ class StaticTritonCompileResult(CompileResult[_T]):
             self.compile_meta.get("device"),
             self.compile_meta.get("device_type", "cuda"),
         )
-        self.kernel.load_kernel(device)
+        try:
+            self.kernel.load_kernel(device)
+        finally:
+            if retained_cubin is not None:
+                self.kernel.cubin_raw = retained_cubin
         scope = {
             "runner": self.kernel.run,
         }

@@ -218,19 +218,6 @@ class TestStaticTritonLauncherUnit(TestCase):
         autotuner.prepare_for_caching()
         self.assertEqual(result.kernel.cubin_raw, b"cubin")
 
-    def test_retained_cubin_preserves_existing_cache_file(self):
-        kernel = object.__new__(StaticallyLaunchedCudaKernel)
-        kernel.cubin_raw = b"valid bundled cubin"
-        kernel.cubin_path = None
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            cubin_path = os.path.join(tmp_dir, "kernel.cubin")
-            with open(cubin_path, "wb") as file:
-                file.write(b"existing cubin")
-
-            self.assertEqual(kernel.reload_cubin_from_raw(cubin_path), cubin_path)
-            with open(cubin_path, "rb") as file:
-                self.assertEqual(file.read(), b"existing cubin")
-
     def test_backend_errors_classify_invalid_kernel_images(self):
         for message in (
             "CUDA driver error: 98",
@@ -302,12 +289,6 @@ class TestStaticTritonLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
-        # Test reload cubin from raw here
-        old_cubin_path = result.cubin_path
-        if old_cubin_path is None:
-            raise AssertionError
-        result.cubin_path = None
-        result.reload_cubin_from_raw(old_cubin_path)
         device_interface = get_interface_for_device(GPU_TYPE)
         result.load_kernel(device_interface.current_device())
         return result
@@ -976,11 +957,6 @@ class TestFastCudaLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
-        old_cubin_path = result.cubin_path
-        if old_cubin_path is None:
-            raise AssertionError
-        result.cubin_path = None
-        result.reload_cubin_from_raw(old_cubin_path)
         device_interface = get_interface_for_device(GPU_TYPE)
         result.load_kernel(device_interface.current_device())
         return result
