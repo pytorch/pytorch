@@ -3,6 +3,7 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/metal/common.h>
 #include <functional>
+#include <mutex>
 #include <stdexcept>
 #include <string_view>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -767,6 +768,15 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
 
 // MetalShaderLibrary implementation
+
+namespace {
+// Guards `library` and the lazily populated caches of every MetalShaderLibrary.
+// A file-static rather than a member keeps sizeof(MetalShaderLibrary) stable for
+// out-of-tree extensions; every accessor that touches those members is defined
+// in this file. Contention is irrelevant: these are one-time lazy-init paths.
+std::mutex cache_mutex;
+} // namespace
+
 MetalShaderLibrary::~MetalShaderLibrary() {
   for (const auto& it : cplMap) {
     auto [cpl, func] = it.second;
@@ -874,12 +884,19 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 }
 
 bool MetalShaderLibrary::hasFunction(const std::string& fname) {
-  std::lock_guard guard(cache_mutex);
   // Lazily build a set of all kernel names exposed by the library. The library is immutable post-load, so the set is
   // computed once per library instance. Used by exec_unary_kernel to decide whether to take the direct per-(in,out)
   // kernel or fall back to the `_dense_cast_` cast variant.
-  if (C10_UNLIKELY(!functionNamesPopulated)) {
-    auto names = getFunctionNames();
+  {
+    std::lock_guard guard(cache_mutex);
+    if (C10_LIKELY(functionNamesPopulated)) {
+      return functionNames.contains(fname);
+    }
+  }
+  // getFunctionNames() takes the lock itself, so it has to run unlocked here.
+  auto names = getFunctionNames();
+  std::lock_guard guard(cache_mutex);
+  if (!functionNamesPopulated) {
     functionNames.insert(names.begin(), names.end());
     functionNamesPopulated = true;
   }
@@ -887,9 +904,11 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
-  std::lock_guard guard(cache_mutex);
-  if (C10_UNLIKELY(!library && nparams > 0)) {
-    throw std::runtime_error("Library must be initialized first");
+  {
+    std::lock_guard guard(cache_mutex);
+    if (C10_UNLIKELY(!library && nparams > 0)) {
+      throw std::runtime_error("Library must be initialized first");
+    }
   }
   std::vector<std::string> rc;
   @autoreleasepool {
@@ -908,16 +927,20 @@ std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const
 }
 
 MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::string& name) {
-  std::lock_guard guard(cache_mutex);
-  // Check if kernel is already cached
-  auto it = kernelCache.find(name);
-  if (it != kernelCache.end()) {
-    return it->second.get();
+  {
+    std::lock_guard guard(cache_mutex);
+    auto it = kernelCache.find(name);
+    if (it != kernelCache.end()) {
+      return it->second.get();
+    }
   }
 
-  // Create new kernel function and cache it
+  // Both of these take the lock, so build the kernel before reacquiring it. A
+  // racing thread may have cached `name` first, in which case try_emplace keeps
+  // the winner and this one is dropped.
   auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
   auto kernel = std::make_unique<MetalKernelFunction>(cpl, func);
+  std::lock_guard guard(cache_mutex);
   return kernelCache.try_emplace(name, std::move(kernel)).first->second.get();
 }
 

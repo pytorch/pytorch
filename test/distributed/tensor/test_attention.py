@@ -56,7 +56,12 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocm,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -109,7 +114,6 @@ class RingAttentionTest(DTensorTestBase):
         return False
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
@@ -307,18 +311,20 @@ class RingAttentionTest(DTensorTestBase):
         )
 
         # Due to numerical error, we need to choose different atol for different
-        # attention kernels
+        # attention kernels, and the ROCm backends need more room than the CUDA ones.
         (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [seq_dim])
-        atol = (
-            2e-06
-            if backend == SDPBackend.EFFICIENT_ATTENTION
-            else 8e-3 * self.world_size
-        )
-        rtol = (
-            1e-05
-            if backend == SDPBackend.EFFICIENT_ATTENTION
-            else 1e-3 * self.world_size
-        )
+        if backend == SDPBackend.EFFICIENT_ATTENTION:
+            # AOTriton's merge drifts by one rescaling step per rank, so on ROCm the
+            # atol has to scale with world_size where a flat value does for CUDA.
+            atol = 1e-06 * self.world_size if TEST_WITH_ROCM else 2e-06
+            rtol = 1e-05
+        else:
+            atol = 8e-3 * self.world_size
+            # bf16's own quantization floor: dv sums the whole sequence, so with
+            # grad_out=ones it reaches ~10 under a causal mask, where one bf16 ulp is
+            # already 0.0625. That floor does not shrink with world_size the way a
+            # scaled rtol does, so ROCm needs an rtol above bf16 eps (2**-8).
+            rtol = 2e-2 if TEST_WITH_ROCM else 1e-3 * self.world_size
         torch.testing.assert_close(out, cp_out, atol=atol, rtol=rtol)
 
         if test_forward_only:

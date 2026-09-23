@@ -47,6 +47,7 @@ from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, 
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
+from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
@@ -65,6 +66,9 @@ if torch.get_default_dtype() is not torch.float32:
 
 if TEST_SCIPY:
     import scipy
+
+def setUpModule():
+    initialize_kineto_with_cuda()
 
 def blaslt_supported_device():
     if torch.cuda.is_available():
