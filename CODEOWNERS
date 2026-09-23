@@ -1045,6 +1045,7 @@
 #
 # [infra_test]
 # /test/benchmark_utils/
+# /test/junit_xml_testdata/
 # /test/scripts/
 # /test/spincli/
 # /test/strobelight/
