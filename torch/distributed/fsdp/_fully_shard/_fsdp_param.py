@@ -198,6 +198,7 @@ class FSDPParam:
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: torch.Tensor | None  # 1D
     _sharded_post_forward_param: nn.Parameter | None  # ND
+    _unsharded_param: nn.Parameter  # ND
     _sharding_spec: DTensorSpec
     _unsharded_dtensor_spec: (
         DTensorSpec | None
@@ -234,7 +235,6 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        self._unsharded_param: nn.Parameter | None = None  # ND
         self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
@@ -886,7 +886,7 @@ class FSDPParam:
         ]
 
     def init_unsharded_param(self):
-        if self._unsharded_param is not None:  # after the 1st all-gather
+        if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
@@ -1002,8 +1002,8 @@ class FSDPParam:
 
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
-        set_requires_grad_if_needed(self.sharded_param, self.unsharded_param)
-        self._setattr_on_modules(self.unsharded_param)
+        set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
+        self._setattr_on_modules(self._unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
             # reshard and must be kept alive for the next all-gather copy-in.
@@ -1146,8 +1146,7 @@ class FSDPParam:
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
-        # Callers must initialize the parameter with init_unsharded_param() first.
-        return cast(nn.Parameter, self._unsharded_param)
+        return self._unsharded_param
 
     @property
     def unsharded_grad_dtype(self) -> torch.dtype | None:
@@ -1169,7 +1168,7 @@ class FSDPParam:
     def unsharded_accumulated_grad(self) -> torch.Tensor | None:
         # The autograd leaf owns accumulation even while its parameter data is
         # resharded. Never fold reduced history into this native-dtype buffer.
-        param = self._unsharded_param
+        param = getattr(self, "_unsharded_param", None)
         return param.grad if param is not None else None
 
     def get_unsharded_zero_grad_data(self, dtype: torch.dtype) -> torch.Tensor:

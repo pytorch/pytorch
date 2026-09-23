@@ -563,7 +563,7 @@ class FSDPParamGroup:
             self._reshard_after_forward_event = None
         for fsdp_param in self.fsdp_params:
             fsdp_param.sharded_param.grad = None
-            leaf = fsdp_param._unsharded_param
+            leaf = getattr(fsdp_param, "_unsharded_param", None)
             if leaf is not None:
                 leaf.grad = None
         self._partial_reduce_output = None
@@ -656,23 +656,25 @@ class FSDPParamGroup:
                 unsharded_grads: list[torch.Tensor] = []
                 for index in self._reduce_scatter_param_indices:
                     fsdp_param = self.fsdp_params[index]
-                    if fsdp_param._unsharded_param is None:
+                    if not hasattr(fsdp_param, "_unsharded_param"):
                         continue
                     grad_pending_all_reduce = self._get_partial_reduce_grad(fsdp_param)
                     # A group unused in this microbatch may still own gradients
                     # from an earlier backward without synchronization.
                     if fsdp_param.unsharded_param.grad is not None:
                         grad = fsdp_param.unsharded_grad_data
-                    elif grad_pending_all_reduce is not None or (
+                    elif grad_pending_all_reduce is not None:
+                        grad = fsdp_param.get_unsharded_zero_grad_data(
+                            dtype=grad_pending_all_reduce.dtype
+                        )
+                    elif (
                         self.reduce_scatter_unused_params
                         and fsdp_param.unsharded_param.requires_grad
                     ):
-                        if grad_pending_all_reduce is not None:
-                            zero_grad_dtype = grad_pending_all_reduce.dtype
-                        else:
-                            zero_grad_dtype = fsdp_param.unsharded_grad_dtype
-                            if zero_grad_dtype is None:
-                                zero_grad_dtype = fsdp_param.unsharded_param.dtype
+                        zero_grad_dtype = (
+                            fsdp_param.unsharded_grad_dtype
+                            or fsdp_param.unsharded_param.dtype
+                        )
                         grad = fsdp_param.get_unsharded_zero_grad_data(
                             dtype=zero_grad_dtype
                         )
