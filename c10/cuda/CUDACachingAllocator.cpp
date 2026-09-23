@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -1012,10 +1013,10 @@ struct ExpandableSegment {
     // cannot call c10::cuda::stream_synchronize because
     // it might grab the GIL which can lead to a deadlock
     // Locking order must be GIL -> Allocator Lock
+    cuda::CUDAGuard device_guard(device_);
     if (stream_) {
       C10_CUDA_CHECK(cudaStreamSynchronize(*stream_));
     } else {
-      cuda::CUDAGuard device_guard(device_);
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
     for (auto i : c10::irange(begin, end)) {
@@ -1206,7 +1207,7 @@ bool BlockComparatorSizeCounterAddress::operator()(
     const Block* a,
     const Block* b) const {
   if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
+    return std::less<>{}(a->stream, b->stream);
   }
   if (a->size != b->size) {
     return a->size < b->size;
@@ -1214,14 +1215,14 @@ bool BlockComparatorSizeCounterAddress::operator()(
   if (a->registration_counter != b->registration_counter) {
     return a->registration_counter < b->registration_counter;
   }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
+    return std::less<>{}(a->stream, b->stream);
   }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 // Info about OOM rejection, used to defer observer callbacks outside of lock
@@ -4053,15 +4054,19 @@ class DeviceCachingAllocator {
 
       if (p.err != cudaSuccess) {
         if (p.err == cudaErrorMemoryAllocation) {
+          // Logged on every failed attempt, including ones recovered by the
+          // release-and-retry path, since each retry is a costly perf signal.
+          // INFO (opt-in via TORCH_CPP_LOG_LEVEL=INFO) so workloads that
+          // intentionally run near-full are not spammed by default (#193195).
           {
             size_t device_free = 0;
             size_t device_total = 0;
             (void)cudaMemGetInfo(&device_free, &device_total);
-            LOG(WARNING) << "memory allocation failed with OOM on device "
-                         << static_cast<int>(device_id)
-                         << " while trying to allocate " << size
-                         << " bytes (free: " << device_free
-                         << ", total: " << device_total << ").";
+            LOG(INFO) << "memory allocation failed with OOM on device "
+                      << static_cast<int>(device_id)
+                      << " while trying to allocate " << size
+                      << " bytes (free: " << device_free
+                      << ", total: " << device_total << ").";
           }
           // If this is the first attempt (!isRetry), we can forgive and clear
           // CUDA's internal error state.

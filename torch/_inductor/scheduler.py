@@ -403,19 +403,12 @@ class MixOrderReduction:
             ):
                 return False
 
-            # We require more more row than columns since
-            # 1, we prefer doing persistent reduction for each row
-            # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, ncol * 2),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
-                return False
+            # Don't gate on the nrow/ncol ratio: mix-order reduction can also
+            # be helpful on relatively flat inputs, and a `nrow >= ncol * 2`
+            # gate would reject profitable shapes.
 
-            # When nrow is small, ncol should also be small (due to the check
-            # above). Thus the entire tensor should be well cached in L2.
-            # Mix order reduction is less beneficial.
+            # Need enough rows to split the other reduction across; too few
+            # gives insufficient parallelism to justify the fusion overhead.
             if not V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow, 4096),
                 size_oblivious=True,
@@ -655,6 +648,51 @@ class NestedReduction:
         )
 
     @classmethod
+    def _mutations_survive_hoisting(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        group: Sequence[BaseSchedulerNode] | None = None,
+    ) -> bool:
+        """Whether ``nodes``' aliasing and mutation survive sub-parent hoisting.
+
+        Hoisting an epilogue into the parent kernel moves its stores relative to
+        the rest of the group, so a mutation is only safe when no other node
+        there touches that storage. ``group`` defaults to ``nodes`` and must
+        cover everything sharing the fused kernel, since a node outside the
+        hoisted set observes the reordering just the same; ordering against
+        nodes outside the kernel is already carried by dependency edges.
+
+        Both names for the storage are claimed. The mutator keeps the
+        pre-mutation one -- its own StarDep self-edge and any read-modify-write
+        hoist along with it, so only another node reading that name is a
+        hazard -- while later nodes see the post-mutation name via
+        Scheduler.mutation_renames. In practice functionalization leaves one
+        mutator per buffer and no post-mutation reader, so only the
+        pre-mutation read rejects today; the rest keep this conservative rather
+        than wrong if that ever changes. Aliasing stays rejected outright: the
+        lane index math assumes each store owns its destination.
+        """
+        owners: dict[str, BaseSchedulerNode] = {}
+        for node in nodes:
+            for buf in node.get_outputs():
+                if buf.get_aliases():
+                    return False
+                if not buf.get_mutations():
+                    continue
+                for name in (*buf.get_mutations(), buf.get_name()):
+                    # A second node on the same storage makes their relative
+                    # order load-bearing, which hoisting does not preserve.
+                    if owners.setdefault(name, node) is not node:
+                        return False
+        if not owners:
+            return True
+        return all(
+            owners.get(dep.name, node) is node
+            for node in (nodes if group is None else group)
+            for dep in node.read_writes.reads_and_writes()
+        )
+
+    @classmethod
     def sub_parent_epilogue_plan(
         cls,
         nodes: Sequence[BaseSchedulerNode],
@@ -668,8 +706,7 @@ class NestedReduction:
         [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
-        # TODO: No fundamental limitation; track aliases and mutation versions here.
-        if any(node.has_aliasing_or_mutation() for node in nodes):
+        if not cls._mutations_survive_hoisting(nodes):
             return None
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return None
@@ -1804,8 +1841,8 @@ class NestedReduction:
         )
         if not sub_parent_nodes:
             return None
-        # TODO: No fundamental limitation; track aliases and mutation versions here.
-        if any(node.has_aliasing_or_mutation() for node in sub_parent_nodes):
+        kernel_nodes = (outer_node, *grouped_nodes)
+        if not cls._mutations_survive_hoisting(sub_parent_nodes, kernel_nodes):
             return None
 
         candidates: list[SubParentEpilogueCandidate] = []
@@ -3365,6 +3402,8 @@ class BaseSchedulerNode:
             return ret
 
         dtype = buf.node.maybe_get_dtype()
+        if dtype is None:
+            return 0
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
@@ -5491,7 +5530,31 @@ def get_scheduler_node_symbol_uses(
     free_symbol_uses.update(
         *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
     )
-    return free_symbol_uses
+    expanded_symbol_uses = OrderedSet[sympy.Symbol]()
+    for symbol in free_symbol_uses:
+        expanded_symbol_uses.update(
+            V.graph.sizevars.remove_precomputed_replacements(symbol).free_symbols
+        )
+    return expanded_symbol_uses
+
+
+def filter_graph_level_symbols(
+    symbols: OrderedSet[sympy.Symbol],
+) -> OrderedSet[sympy.Symbol]:
+    """Remove symbols that are always internal to generated kernels."""
+    return OrderedSet(
+        s
+        for s in symbols
+        if symbol_is_type(
+            s,
+            (
+                SymT.SIZE,
+                SymT.FLOAT,
+                SymT.UNBACKED_INT,
+                SymT.UNBACKED_FLOAT,
+            ),
+        )
+    )
 
 
 def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
@@ -11186,7 +11249,7 @@ class Scheduler:
 
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
-            if get_scheduler_node_symbol_uses(node):
+            if filter_graph_level_symbols(get_scheduler_node_symbol_uses(node)):
                 return "dynamic shape ops"
 
         return None
@@ -11332,28 +11395,6 @@ class Scheduler:
                 # read_writes does not contain sympy.Expr
                 raise NotImplementedError(f"Unsupported input node type: {type(node)}")
 
-        def filter_symbols(
-            symbols: OrderedSet[sympy.Symbol],
-        ) -> OrderedSet[sympy.Symbol]:
-            """
-            Filters a set of symbols that are required for codegen. Skip symbols
-            that are always internal to kernels, such as SymT.TMP, SymT.INDEX,
-            and SymT.R0_INDEX.
-            """
-            return OrderedSet(
-                s
-                for s in symbols
-                if symbol_is_type(
-                    s,
-                    (
-                        SymT.SIZE,
-                        SymT.FLOAT,
-                        SymT.UNBACKED_INT,
-                        SymT.UNBACKED_FLOAT,
-                    ),
-                )
-            )
-
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
@@ -11361,7 +11402,7 @@ class Scheduler:
             *(get_input_node_symbols(node) for node in input_nodes.values())
         )
 
-        candidate_symbols = filter_symbols(candidate_symbols)
+        candidate_symbols = filter_graph_level_symbols(candidate_symbols)
 
         res: OrderedSet[sympy.Symbol] = OrderedSet()
         for s in candidate_symbols:
