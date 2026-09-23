@@ -208,6 +208,7 @@ def reset_code_caches() -> None:
     log.info("torch._dynamo.reset_code_caches")
     """Clear compile caches that are keyed by code objects"""
     with convert_frame.compile_lock:
+        convert_frame.reset_frame_exec_strategy_cache()
         reset_code_state()
         for weak_code in (
             convert_frame.input_codes.seen + convert_frame.output_codes.seen

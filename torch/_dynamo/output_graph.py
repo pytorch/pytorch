@@ -124,6 +124,7 @@ from .graph_id_filter import (
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
+from .nn_module_container_index import NNModuleContainerIndexTracker
 from .side_effects import AttributeMutationExisting, SideEffects, ValueMutationExisting
 from .source import (
     _get_source_debug_name,
@@ -837,6 +838,7 @@ class OutputGraph(OutputGraphCommon):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: dict[str, Source] | None = {}
         self.side_effects = SideEffects(self)
+        self.nn_module_container_index_tracker = NNModuleContainerIndexTracker()
         # Generators created while tracing this frame. Tracked here (not on
         # SideEffects) because SideEffects is cloned/swapped during HOP
         # speculation and graph-break restore; the OutputGraph is the single
