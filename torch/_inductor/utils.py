@@ -506,7 +506,13 @@ TMA_DESCRIPTOR_SIZE = 128
 #
 # 1. Legality. `make_tensor_descriptor` enforces rank 1-5, a unit innermost
 #    stride, and an innermost *block* extent of at least 16 bytes. This is the
-#    only alignment-shaped rule Triton actually checks.
+#    only alignment-shaped rule Triton actually checks. Note what it does NOT
+#    constrain: the logical innermost *extent*. `can_use_tma` requires that to
+#    be a 16-byte multiple; TDM has no such rule, because a descriptor load
+#    bounds-checks against the logical shape and zero-fills beyond it, so a
+#    block may legally overhang the extent. That is what admits FP16 head_dim
+#    65 (a 130-byte extent under a 128-element block). Do not copy TMA's rule
+#    here: it would reject padded head dimensions that are correct on TDM.
 # 2. Operand policy. Inductor additionally requires 16-byte storage offset and
 #    outer strides. Conservative, not required: it constrains where an operand
 #    may start, and does not establish base-pointer alignment.
@@ -2205,13 +2211,15 @@ def is_nvidia_sm100_or_later() -> bool:
     )
 
 
-def get_num_sms() -> int:
+def get_num_sms(two_ctas: bool = False) -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
     if torch.xpu.is_available():
-        return get_max_num_sms()
-    carveout = torch._C._get_sm_carveout_experimental()
-    return get_max_num_sms() - (carveout if carveout is not None else 0)
+        num_sms = get_max_num_sms()
+    else:
+        carveout = torch._C._get_sm_carveout_experimental()
+        num_sms = get_max_num_sms() - (carveout if carveout is not None else 0)
+    return num_sms // 2 * 2 if two_ctas else num_sms
 
 
 def get_tma_workspace_arg(
@@ -2593,6 +2601,54 @@ def tdm_descriptor_row_major(mat: IRNode) -> bool | None:
     return _tdm_row_major_from_strides(strides_i)
 
 
+def _tdm_operand_policy_violation(
+    mat: IRNode,
+    accepted_dtypes: OrderedSet[torch.dtype],
+    offset: _IntLike,
+    outer_strides: Sequence[_IntLike],
+) -> str | None:
+    """Apply the shared TDM operand policy, or return why it does not hold.
+
+    Rank, orientation and symbol resolution differ between the dense MM and Flex
+    paths, so each caller prepares those itself and passes the results in. Every
+    check here is guard-free, which lets the callers keep their different guard
+    policies while agreeing on the rules.
+    """
+    from .virtualized import V
+
+    dtype = mat.get_dtype()
+    if dtype not in accepted_dtypes:
+        return f"unsupported dtype {dtype}"
+    if mat.get_name() in V.graph.unaligned_buffers:
+        return "buffer is marked unaligned"
+
+    itemsize = dtype.itemsize
+    aligned = _bytes_aligned
+
+    # Operand policy (rule 2). The innermost request extent (rule 1) depends on
+    # what the caller actually asks for, so it stays with the caller.
+    if not aligned(offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
+        return f"offset is not {_TDM_OPERAND_ALIGNMENT_BYTES}-byte aligned"
+    # Redundant under the 128-byte check below, kept because that one is
+    # provisional while this is an independent policy on outer strides.
+    if not all(
+        aligned(s * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES) for s in outer_strides
+    ):
+        return f"outer strides are not {_TDM_OPERAND_ALIGNMENT_BYTES}-byte aligned"
+
+    # Direct-path policy (rule 3): relative only, proves nothing about the
+    # absolute address.
+    if not all(
+        aligned(s * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES)
+        for s in outer_strides
+    ):
+        return (
+            "outer strides are not "
+            f"{_TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES}-byte aligned"
+        )
+    return None
+
+
 def _tdm_operand_compatible(
     mat: IRNode,
     accepted_dtypes: OrderedSet[torch.dtype],
@@ -2600,12 +2656,9 @@ def _tdm_operand_compatible(
     """Check descriptor semantics and the current direct-path selection policy."""
     from .virtualized import V
 
-    dtype = mat.get_dtype()
     sizes = mat.get_size()
     strides = mat.get_stride()
-    if dtype not in accepted_dtypes or len(sizes) != 2 or len(strides) != 2:
-        return False
-    if mat.get_name() in V.graph.unaligned_buffers:
+    if len(sizes) != 2 or len(strides) != 2:
         return False
 
     strides_i = [
@@ -2618,24 +2671,16 @@ def _tdm_operand_compatible(
     if row_major is None:
         return False
     outer_idx = 0 if row_major else 1
-    itemsize = dtype.itemsize
 
-    aligned = _bytes_aligned
-
-    # Operand policy (rule 2). The innermost block extent (rule 1) is checked by
-    # the template config filter, not by constraining the tensor extent here.
-    if not aligned(offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
-        return False
-    # Redundant under the 128-byte check below, kept because that one is
-    # provisional while this is an independent policy on outer strides.
-    if not aligned(strides_i[outer_idx] * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
-        return False
-
-    # Direct-path policy (rule 3): relative only, proves nothing about the
-    # absolute address.
-    return aligned(
-        strides_i[outer_idx] * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES
+    violation = _tdm_operand_policy_violation(
+        mat, accepted_dtypes, offset, [strides_i[outer_idx]]
     )
+    if violation is not None:
+        # Covers the shared dtype/alignment policy only; the rank and
+        # orientation exits above return before a reason exists.
+        log.debug("Dense TDM operand rejected for %s: %s", mat.get_name(), violation)
+        return False
+    return True
 
 
 def _guard_tdm_operand_layout(mat: IRNode) -> None:
@@ -2729,6 +2774,95 @@ def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
         and config.assume_aligned_inputs
         and _gfx1250_device_prereqs(device)
     )
+
+
+def use_flex_tdm_descriptor(
+    *matrices: IRNode,
+    block_shapes: Sequence[Sequence[sympy.Expr | int]],
+) -> bool:
+    """Return whether flex operands satisfy TDM descriptor and request constraints."""
+    from .virtualized import V
+
+    if not config.triton.enable_flex_tdm:
+        return False
+    if not matrices or not _gfx1250_device_prereqs(matrices[0].get_device()):
+        return False
+
+    # Checked rather than zipped loosely: zip() truncates, so a short list would
+    # silently leave later operands unvalidated.
+    if len(block_shapes) != len(matrices):
+        raise AssertionError("Expected one block shape per flex descriptor operand")
+
+    def _reject(mat: IRNode, reason: str) -> bool:
+        log.debug("Flex TDM descriptor rejected for %s: %s", mat.get_name(), reason)
+        return False
+
+    def operand_admissible(
+        mat: IRNode, block_shape: Sequence[sympy.Expr | int]
+    ) -> bool:
+        reject = functools.partial(_reject, mat)
+
+        sizes = mat.get_size()
+        strides = mat.get_stride()
+        if len(sizes) != 4 or len(strides) != 4:
+            return reject("expected four-dimensional sizes and strides")
+
+        itemsize = mat.get_dtype().itemsize
+        aligned = _bytes_aligned
+
+        if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
+            return reject("innermost stride is not statically known to be one")
+
+        # Offsets and strides stay symbolic so alignment can be proven without
+        # specializing dynamic sequence lengths; unprovable alignment disables
+        # TDM. The shared policy never resolves a hint, so passing the
+        # unresolved expressions keeps that property.
+        violation = _tdm_operand_policy_violation(
+            mat, _TDM_SUPPORTED_DTYPES, mat.get_layout().offset, strides[:-1]
+        )
+        if violation is not None:
+            return reject(violation)
+
+        if len(block_shape) != 2:
+            return reject("expected a two-dimensional block shape")
+
+        # Rule 1, against the extent actually requested, which is the block
+        # width rather than the logical dim. This is the frontend's minimum,
+        # not an alignment policy.
+        if not V.graph.sizevars.statically_known_geq(
+            block_shape[-1] * itemsize, _TDM_MIN_INNERMOST_REQUEST_BYTES
+        ):
+            return reject(
+                "innermost request extent is not statically known to hold at "
+                f"least {_TDM_MIN_INNERMOST_REQUEST_BYTES} bytes"
+            )
+
+        if not aligned(
+            block_shape[-1] * itemsize,
+            _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
+        ):
+            return reject("block width is not 128-byte aligned")
+
+        return True
+
+    # List-wide and guard-free, as in ``_tdm_operands_compatible``: rejecting a
+    # later operand must not leave guards behind for an earlier one.
+    if not all(
+        operand_admissible(mat, block_shape)
+        for mat, block_shape in zip(matrices, block_shapes)
+    ):
+        return False
+
+    # Bounds only: this does not pin a dynamic sequence length.
+    if not _descriptor_shapes_fit_in_int32(
+        [mat.get_size() for mat in matrices], add_guards=True
+    ):
+        log.debug(
+            "Flex TDM descriptor rejected for %s: shapes do not fit in int32",
+            [mat.get_name() for mat in matrices],
+        )
+        return False
+    return True
 
 
 def _tma_descriptor_max_offset_fits_in_int32(
@@ -3752,7 +3886,8 @@ def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
-        sm_clock = max_clock_rate(device_idx)
+        # Triton's tflops helpers are dimensioned in kHz; max_clock_rate is MHz.
+        sm_clock = max_clock_rate(device_idx) * 1e3
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype, sm_clock, device_idx)
 

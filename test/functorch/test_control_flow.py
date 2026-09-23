@@ -49,7 +49,6 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_CROSSREF,
@@ -12777,7 +12776,6 @@ class <lambda>(torch.nn.Module):
             )
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/181947")
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):

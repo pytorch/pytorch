@@ -117,6 +117,9 @@ provider = { path = "tools/metadata", module = "dependencies" }
 include = [
     "third_party/**",
     "aten/src/ATen/native/quantized/cpu/qnnpack/deps/**",
+    # NCCL is not shipped (see !third_party/nccl/** below); the configure step
+    # clones it from this pin instead, so the pin must survive the .ci/** exclude.
+    ".ci/docker/ci_commit_pins/nccl*.txt",
     "!**/.git",
     "!**/__pycache__/**",
     "!**/*.pyc",

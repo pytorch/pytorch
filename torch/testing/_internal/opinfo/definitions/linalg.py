@@ -1016,6 +1016,8 @@ def sample_inputs_linalg_solve_triangular(
     op_info, device, dtype, requires_grad=False, **kwargs
 ):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
+    # NB: read before the loop below rebinds the name `kwargs` per sample.
+    small_inputs_only = kwargs.get("small_inputs_only", False)
     bs = (1, 2, 0)
     ns = (3, 0)
     ks = (1, 3, 0)
@@ -1052,6 +1054,18 @@ def sample_inputs_linalg_solve_triangular(
                 )
         else:
             yield SampleInput(A, args=(B,), kwargs=kwargs)
+
+    # Batched shapes that exercise the small-matrix triangular-solve kernels
+    # (n of 16/32/64, and RHS column counts either side of the divisible-by-8
+    # fast path). These are correctness coverage for those specializations, not
+    # gradient coverage: the loop above already covers every
+    # (left, upper, unitriangular) combination for autograd.
+    #
+    # Slow gradcheck runs with fast_mode=False, which materializes the full
+    # float64/complex128 Jacobian. At (2, 64, 128) that is gigabytes per sample
+    # and OOMs a 22 GiB GPU, so skip them when the caller asks for small inputs.
+    if small_inputs_only:
+        return
 
     shapes = (
         (16, 16),

@@ -65,7 +65,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, TensorProperty, TensorPropertySource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -1134,6 +1134,24 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
     ) -> VariableTracker | None:
         return self._method_size_stride("stride", *args, **kwargs)
+
+    def method_storage_offset(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        if self.source is None or not self.source.subguards_allowed():
+            return None
+
+        fake = self.proxy.node.meta.get("example_value")
+        if fake is None:
+            return None
+
+        storage_offset = fake.storage_offset()
+        if not isinstance(storage_offset, int):
+            return None
+
+        source = TensorPropertySource(self.source, TensorProperty.STORAGE_OFFSET)
+        install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        return ConstantVariable.create(storage_offset, source=source)
 
     def _method_size_stride(
         self, name: str, dim: Any | None = None
@@ -2461,6 +2479,7 @@ class TensorVariable(VariableTracker):
     tp_methods = {
         "size": Method(method_size),
         "stride": Method(method_stride),
+        "storage_offset": Method(method_storage_offset),
         "numel": Method(method_numel),
         "nelement": Method(method_nelement),
         "dim": Method(method_dim),

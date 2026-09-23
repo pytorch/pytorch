@@ -1439,6 +1439,20 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_merge_group_clones_store_for_uninitialized_child(self):
+        parent_store = c10d.FileStore(self.file_name, self.world_size)
+        parent = self._create_process_group_nccl(parent_store, self.opts())
+        merge_store = test_c10d_common._CloneTrackingStore()
+
+        child = parent.merge_remote_group(merge_store, 1)
+
+        self.assertEqual(merge_store.clone_count, 1)
+        self.assertEqual(child.size(), 1)
+        child.shutdown()
+        dist.destroy_process_group()
+
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group_backend_validation(self):
@@ -4477,11 +4491,16 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
                 # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
                 # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
-                "NCCL_ALGO": "NVLS",
                 "NCCL_DEBUG": "INFO",
                 "NCCL_DEBUG_SUBSYS": "NVLS",
                 "NCCL_DEBUG_FILE": nccl_debug_file.name,
             }
+            # NCCL 2.31 uses NCCL_ALGO to exclude symmetric kernels.
+            if (
+                torch.cuda.nccl.version() < (2, 31)
+                or self._testMethodName == "test_nccl_user_buffer_registration"
+            ):
+                nccl_env["NCCL_ALGO"] = "NVLS"
             if torch.cuda.nccl.version() >= (2, 24, 3):
                 nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
             self.env_patcher = mock.patch.dict(os.environ, nccl_env)

@@ -376,11 +376,15 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move)
+      list(APPEND private_compile_options -Wredundant-move -Wpessimizing-move)
       # -Wno-interference-size only exists in GCC 12+
       if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
         list(APPEND private_compile_options -Wno-interference-size)
       endif()
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+      # icpx uses the clang frontend but reports its own compiler ID
+      list(APPEND private_compile_options -Wmove)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       if(NOT USE_CUDA)

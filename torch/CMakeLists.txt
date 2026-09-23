@@ -41,7 +41,7 @@ append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
-    add_definitions(-DBUILDING_TESTS)
+    add_compile_definitions(BUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
       )
@@ -270,9 +270,11 @@ if(USE_DISTRIBUTED)
     endif()
     # Disable certain warnings for GCC-9.X
     if(CMAKE_COMPILER_IS_GNUCXX)
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
+        PROPERTIES COMPILE_OPTIONS -Wno-cast-function-type)
     endif()
     # NCCL is a private dependency of libtorch, but libtorch_python includes
     # some private headers of libtorch, which in turn include NCCL. As a hacky
@@ -371,7 +373,7 @@ if(BUILD_LIBTORCHLESS)
   set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
   if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
-    target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+    target_compile_definitions(torch_python PRIVATE AT_EXPERIMENTAL_SINGLE_THREAD_POOL=1)
   endif()
 
 endif()
@@ -395,8 +397,10 @@ set_source_files_properties(
 
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX)
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(
+    ${TORCH_SRC_DIR}/csrc/Module.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
+    PROPERTIES COMPILE_OPTIONS -Wno-cast-function-type)
 endif()
 
 # Preserve CUDA_GENCODE flags
@@ -417,7 +421,7 @@ if(USE_XPU)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
 endif()
 
-target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
+target_compile_definitions(torch_python PRIVATE THP_BUILD_MAIN_LIB)
 
 target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
 
@@ -433,16 +437,16 @@ if(USE_UCC)
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
-  target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_compile_definitions(torch_python PRIVATE BUILD_ONEDNN_GRAPH)
   if(NOT BUILD_LIBTORCHLESS)
-    target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+    target_compile_definitions(torch_cpu PRIVATE BUILD_ONEDNN_GRAPH)
   endif()
 endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
    # Workaround numerous decref-without-a-gil warnings from JIT
    # see https://github.com/pytorch/pytorch/issues/130073
-   target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
+   target_compile_definitions(torch_python PRIVATE PYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF)
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")

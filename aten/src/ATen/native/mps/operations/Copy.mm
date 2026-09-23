@@ -246,6 +246,11 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     NSUInteger blitSourceOffset = storage_byte_offset;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
+      // The castout kernel picks the store type from a runtime switch over the
+      // dtypes Metal can represent. A CPU destination can have any other dtype
+      // (Double, ComplexDouble, ...), for which the store would be silently
+      // skipped, so raise for those here.
+      scalarToMetalTypeString(dst.scalar_type());
       // Unified memory: cast straight from the MPS source into the CPU-wrapped
       // destination buffer at the requested offsets. This avoids the temporary
       // that used to alias the live source buffer and blitting from it (see
