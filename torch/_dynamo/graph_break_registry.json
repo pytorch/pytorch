@@ -2348,6 +2348,18 @@
       "Hints": []
     }
   ],
+  "GB5210": [
+    {
+      "Gb_type": "Constant fold with a rank-relative device",
+      "Context": "fqn(self.value)",
+      "Explanation": "`{fqn(self.value)}` was called with the current device, whose index is only known at runtime under compile_on_one_rank, so the result cannot be folded into the graph.",
+      "Hints": [
+        "This graph break is expected under compile_on_one_rank.",
+        "The resumed eager call observes the running rank's device.",
+        "Pass an explicit device if the value is the same on every rank."
+      ]
+    }
+  ],
   "GB9672": [
     {
       "Gb_type": "unsupported type.__dict__['{attr_name}'].__get__ call",
