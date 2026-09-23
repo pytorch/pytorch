@@ -5919,12 +5919,12 @@ class TestSidecarFieldValidation(unittest.TestCase):
                 "--allow-stale must still generate",
             )
 
-    def test_stale_error_names_the_arches_and_a_command_that_fixes_them(self):
-        # A bare `export.py` re-run maintains only the arch it resolves for, so the
-        # message has to name the arches and the --arch invocation.
+    def test_stale_error_names_the_target_trees_to_replace(self):
+        # Target selection comes from each declaration, so recovery names the stale
+        # target trees rather than prescribing a device architecture.
         with tempfile.TemporaryDirectory() as tmpdir:
             sc = self._sc(sources={"tools/native_aot/decl.py": "0" * 16})
-            with self.assertRaisesRegex(RuntimeError, r"--arch sm_100a"):
+            with self.assertRaisesRegex(RuntimeError, "Delete the stale target trees"):
                 self._run(tmpdir, sc)
 
 
