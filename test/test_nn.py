@@ -17517,6 +17517,50 @@ instantiate_parametrized_tests(TestFusedRMSNormOverrideRouting)
 instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 
+class TestPoly1CrossEntropy(TestCase):
+    # at.Reduction: None=0, Mean=1, Sum=2
+    def _poly1(self, logits, target, epsilon=1.0, reduction=1):
+        log_pt = torch.log_softmax(logits, 1).gather(1, target.unsqueeze(1)).squeeze(1)
+        pt = log_pt.exp()
+        out = -log_pt + epsilon * (1 - pt)
+        if reduction == 1:
+            return out.mean()
+        if reduction == 2:
+            return out.sum()
+        return out
+
+    def test_poly1_matches_definition(self):
+        logits = torch.tensor([[2.0, 0.5, -1.0], [0.2, 0.1, 0.3]])
+        target = torch.tensor([0, 2])
+        got = torch.ops.aten.poly1_cross_entropy_loss(logits, target)
+        self.assertEqual(got, self._poly1(logits, target))
+        self.assertEqual(got, torch.tensor(1.04524589), atol=1e-6, rtol=0)
+        none = torch.ops.aten.poly1_cross_entropy_loss(logits, target, 1.0, 0)
+        self.assertEqual(none, torch.tensor([0.45571429, 1.63477755]), atol=1e-6, rtol=0)
+        total = torch.ops.aten.poly1_cross_entropy_loss(logits, target, 1.0, 2)
+        self.assertEqual(total, torch.tensor(2.09049177), atol=1e-6, rtol=0)
+
+    def test_poly1_epsilon_zero_is_cross_entropy(self):
+        logits = torch.tensor([[2.0, 0.5, -1.0], [0.2, 0.1, 0.3]])
+        target = torch.tensor([0, 2])
+        got = torch.ops.aten.poly1_cross_entropy_loss(logits, target, 0.0, 0)
+        ce = torch.nn.functional.cross_entropy(logits, target, reduction="none")
+        self.assertEqual(got, ce)
+
+    def test_poly1_rejects_bad_dtypes_and_shapes(self):
+        logits = torch.tensor([[2, 0], [1, 3]])
+        target = torch.tensor([0, 1])
+        with self.assertRaisesRegex(RuntimeError, "floating point"):
+            torch.ops.aten.poly1_cross_entropy_loss(logits, target)
+        float_logits = torch.tensor([[2.0, 0.0], [1.0, 3.0]])
+        with self.assertRaisesRegex(RuntimeError, "int64"):
+            torch.ops.aten.poly1_cross_entropy_loss(
+                float_logits, torch.tensor([0, 1], dtype=torch.int32)
+            )
+        with self.assertRaisesRegex(RuntimeError, r"\[N, C\]"):
+            torch.ops.aten.poly1_cross_entropy_loss(float_logits, torch.tensor([0, 1, 2]))
+
+
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
