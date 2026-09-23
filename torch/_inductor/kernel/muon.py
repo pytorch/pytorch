@@ -331,7 +331,7 @@ class _MuonForeachPlan:
             shapes = [original_shapes[index] for index in chunk]
             plan = None
             if supported:
-                from .grouped_symmetric_mm import (
+                from ._grouped_symmetric_mm import (
                     GroupedMuonPlan,
                     PackedSymmetricMuonPlan,
                     SequentialSymmetricMuonPlan,

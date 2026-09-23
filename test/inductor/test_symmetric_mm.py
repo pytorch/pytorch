@@ -273,7 +273,7 @@ class SymmetricMMTest(TestCase):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
 
-        from torch._inductor.kernel.grouped_symmetric_mm import GroupedSymmetricPlan
+        from torch._inductor.kernel._grouped_symmetric_mm import GroupedSymmetricPlan
 
         inputs = [
             torch.randn(512, 1024, device=device, dtype=torch.bfloat16),
@@ -320,7 +320,7 @@ class SymmetricMMTest(TestCase):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
 
-        from torch._inductor.kernel.grouped_symmetric_mm import GroupedSymmetricPlan
+        from torch._inductor.kernel._grouped_symmetric_mm import GroupedSymmetricPlan
 
         inputs = [
             torch.randn(127, 1024, device=device, dtype=torch.bfloat16),
