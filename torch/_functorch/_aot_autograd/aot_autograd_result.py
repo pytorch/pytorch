@@ -37,6 +37,7 @@ from torch._inductor.output_code import (
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import getArtifactLogger
 
+from .codegen import aggregate_runtime_wrapper_sources
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
@@ -610,7 +611,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         that AOTAutograd returned the first time it was run. It does this by running the various
         post compile steps that AOTAutograd runs on its compiled artifact after running the fw/bw compilers.
 
-        In the inference path, this consists of the Subclass, FunctionalzedRngRuntime, and RuntimeWrappers.
+        In the inference path, this consists of the Subclass, FunctionalizedRngRuntime, and RuntimeWrappers.
         In the autograd path, this consists of AOTAutogradDispatch.post_compile.
 
         The steps here should match exactly the steps that are run in aot_dispatch_base and aot_dispatch_autograd.
@@ -633,12 +634,13 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 self._load_and_post_compile(args, fx_config)
             )
 
-        compiled_function = self._apply_runtime_wrappers(
-            compiled_fw_func,
-            compiled_bw_func,
-            needs_autograd,
-            runtime_aot_config,
-        )
+        with aggregate_runtime_wrapper_sources():
+            compiled_function = self._apply_runtime_wrappers(
+                compiled_fw_func,
+                compiled_bw_func,
+                needs_autograd,
+                runtime_aot_config,
+            )
         # Now that we're pretty sure it's a successful load, add guards
         # to the existing shape environment from the cache.
         self._check_guards(args)
