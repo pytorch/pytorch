@@ -465,6 +465,8 @@ class TestProfilerITT(TestCase):
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
@@ -1065,107 +1067,6 @@ class TestProfiler(TestCase):
             with profile(activities=[ProfilerActivity.CPU], with_modules=True):
                 torch.ones(1)
 
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @parametrize("use_cuda", [False, True])
-    def test_trace_only_export_matches_default(self, use_cuda):
-        """trace_only=True must produce the same chrome trace metadata as the default path."""
-        if use_cuda and ProfilerActivity.CUDA not in supported_activities():
-            self.skipTest("CUDA is required")
-
-        device = "cuda" if use_cuda else "cpu"
-        activities = [ProfilerActivity.CPU]
-        if use_cuda:
-            activities.append(ProfilerActivity.CUDA)
-
-        def profile_and_export(trace_only):
-            with profile(
-                activities=activities,
-                record_shapes=True,
-                experimental_config=_ExperimentalConfig(trace_only=trace_only),
-            ) as prof:
-                self.payload(device=device)
-            with TemporaryFileName(mode="w+") as fname:
-                prof.export_chrome_trace(fname)
-                with open(fname) as f:
-                    return json.load(f)
-
-        # Warmup: ensures dynamo compilation and CUDA init don't skew comparison
-        profile_and_export(trace_only=False)
-
-        default_trace = profile_and_export(trace_only=False)
-        trace_only_trace = profile_and_export(trace_only=True)
-
-        def get_cpu_op_metadata(trace_data):
-            result = {}
-            for ev in trace_data.get("traceEvents", []):
-                if ev.get("cat") == "cpu_op":
-                    name = ev.get("name", "")
-                    args = ev.get("args", {})
-                    if name not in result:
-                        result[name] = set(args.keys())
-                    else:
-                        result[name] |= set(args.keys())
-            return result
-
-        default_meta = get_cpu_op_metadata(default_trace)
-        trace_only_meta = get_cpu_op_metadata(trace_only_trace)
-
-        self.assertEqual(
-            sorted(default_meta.keys()),
-            sorted(trace_only_meta.keys()),
-            "cpu_op event names should match",
-        )
-        for op in default_meta:
-            missing = default_meta[op] - trace_only_meta.get(op, set()) - {"Call stack"}
-            self.assertEqual(
-                missing,
-                set(),
-                lambda msg: f"{msg}\n{op}: metadata keys missing in trace_only: {missing}",
-            )
-
-        if use_cuda:
-
-            def count_by_cat(trace_data):
-                return collections.Counter(
-                    ev.get("cat", "") for ev in trace_data.get("traceEvents", [])
-                )
-
-            default_counts = count_by_cat(default_trace)
-            trace_only_counts = count_by_cat(trace_only_trace)
-            for cat in ("kernel", "ac2g"):
-                self.assertGreater(
-                    default_counts[cat],
-                    0,
-                    lambda msg: f"{msg}\nexpected {cat} events in default trace",
-                )
-                self.assertEqual(
-                    default_counts[cat],
-                    trace_only_counts[cat],
-                    lambda msg: f"{msg}\n{cat} event count mismatch",
-                )
-
-        # events() must raise in trace_only mode
-        with profile(
-            activities=[ProfilerActivity.CPU],
-            experimental_config=_ExperimentalConfig(trace_only=True),
-        ) as prof:
-            self.payload()
-        with self.assertRaises(RuntimeError):
-            prof.events()
-
-        # trace_only + with_stack should warn and disable trace_only
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            with profile(
-                activities=[ProfilerActivity.CPU],
-                with_stack=True,
-                experimental_config=_ExperimentalConfig(trace_only=True),
-            ) as prof:
-                self.payload()
-            self.assertTrue(any("trace_only" in str(x.message) for x in w))
-            # Should fall back to normal path
-            prof.events()
-
     def test_profiler_metadata(self):
         t1, t2 = torch.ones(1), torch.ones(1)
         with profile() as prof:
@@ -1189,52 +1090,6 @@ class TestProfiler(TestCase):
                     raise AssertionError(
                         f"Expected trace['test_key2'] == [1, 2, 3], got {trace['test_key2']}"
                     )
-
-    def _test_profiler_tracing(self, use_kineto):
-        with _profile(use_kineto=use_kineto) as prof:
-            t1, t2 = torch.ones(1), torch.ones(1)
-            torch.add(t1, t2)
-
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            # read the trace and expect valid json
-            # if the JSON generated by export_chrome_trace is not valid, this will throw and fail the test.
-            with open(fname) as f:
-                json.load(f)
-
-        # test empty trace
-        with _profile(use_kineto=use_kineto) as prof:
-            pass
-        # saving an empty trace
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            if use_kineto:
-                with open(fname) as f:
-                    contents = json.load(f)
-                    # Some builds may not have logger observer
-                    # so skip if not
-                    if "WARNING" in contents:
-                        found_empty_warning = False
-                        for warning in contents["WARNING"]:
-                            if "No Valid Trace Events" in warning:
-                                found_empty_warning = True
-                        self.assertTrue(found_empty_warning)
-
-        # Same test but for cuda.
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        if not use_cuda:
-            return
-
-        device = torch.device("cuda:0")
-        with _profile(use_device="cuda", use_kineto=use_kineto) as prof:
-            t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
-            torch.add(t1, t2)
-
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            # Now validate the json
-            with open(fname) as f:
-                json.load(f)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_profiler_trace_sanitizes_python_function_names(self):
@@ -1270,11 +1125,6 @@ class TestProfiler(TestCase):
                 for name in python_function_names
             )
         )
-
-    def test_profiler_tracing(self):
-        self._test_profiler_tracing(False)
-        if kineto_available():
-            self._test_profiler_tracing(True)
 
     def test_profiler_op_event_args(self):
         torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
@@ -2484,6 +2334,136 @@ class TestProfilerDevice(TestCase):
         else:
             self.assertTrue(found_mm)
         self._check_stats(p._stats)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_trace_only_export_matches_default(self, device):
+        """trace_only=True must produce the same chrome trace metadata as the default path."""
+        device_type = device.split(":")[0]
+        activities = get_profiler_activities(device_type)
+
+        def profile_and_export(trace_only):
+            with profile(
+                activities=activities,
+                record_shapes=True,
+                experimental_config=_ExperimentalConfig(trace_only=trace_only),
+            ) as prof:
+                self.payload(device=device)
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    return json.load(f)
+
+        # Warmup: ensures dynamo compilation and device init don't skew comparison
+        profile_and_export(trace_only=False)
+
+        default_trace = profile_and_export(trace_only=False)
+        trace_only_trace = profile_and_export(trace_only=True)
+
+        def get_cpu_op_metadata(trace_data):
+            result = {}
+            for ev in trace_data.get("traceEvents", []):
+                if ev.get("cat") == "cpu_op":
+                    name = ev.get("name", "")
+                    args = ev.get("args", {})
+                    if name not in result:
+                        result[name] = set(args.keys())
+                    else:
+                        result[name] |= set(args.keys())
+            return result
+
+        default_meta = get_cpu_op_metadata(default_trace)
+        trace_only_meta = get_cpu_op_metadata(trace_only_trace)
+
+        self.assertEqual(
+            sorted(default_meta.keys()),
+            sorted(trace_only_meta.keys()),
+            "cpu_op event names should match",
+        )
+        for op in default_meta:
+            missing = default_meta[op] - trace_only_meta.get(op, set()) - {"Call stack"}
+            self.assertEqual(
+                missing,
+                set(),
+                lambda msg: f"{msg}\n{op}: metadata keys missing in trace_only: {missing}",
+            )
+
+        if device_type != "cpu":
+
+            def count_by_cat(trace_data):
+                return collections.Counter(
+                    ev.get("cat", "") for ev in trace_data.get("traceEvents", [])
+                )
+
+            default_counts = count_by_cat(default_trace)
+            trace_only_counts = count_by_cat(trace_only_trace)
+            for cat in ("kernel", "ac2g"):
+                self.assertGreater(
+                    default_counts[cat],
+                    0,
+                    lambda msg: f"{msg}\nexpected {cat} events in default trace",
+                )
+                self.assertEqual(
+                    default_counts[cat],
+                    trace_only_counts[cat],
+                    lambda msg: f"{msg}\n{cat} event count mismatch",
+                )
+
+        # events() must raise in trace_only mode
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            experimental_config=_ExperimentalConfig(trace_only=True),
+        ) as prof:
+            self.payload()
+        with self.assertRaises(RuntimeError):
+            prof.events()
+
+        # trace_only + with_stack should warn and disable trace_only
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            with profile(
+                activities=[ProfilerActivity.CPU],
+                with_stack=True,
+                experimental_config=_ExperimentalConfig(trace_only=True),
+            ) as prof:
+                self.payload()
+            self.assertTrue(any("trace_only" in str(x.message) for x in w))
+            # Should fall back to normal path
+            prof.events()
+
+    @parametrize("use_kineto", [False, True])
+    def test_profiler_tracing(self, device, use_kineto):
+        if use_kineto and not kineto_available():
+            self.skipTest("Kineto is required")
+        device_type = device.split(":")[0]
+
+        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
+            t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
+            torch.add(t1, t2)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            # read the trace and expect valid json
+            # if the JSON generated by export_chrome_trace is not valid, this will throw and fail the test.
+            with open(fname) as f:
+                json.load(f)
+
+        # test empty trace
+        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
+            pass
+        # saving an empty trace
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            if use_kineto:
+                with open(fname) as f:
+                    contents = json.load(f)
+                    # Some builds may not have logger observer
+                    # so skip if not
+                    if "WARNING" in contents:
+                        found_empty_warning = False
+                        for warning in contents["WARNING"]:
+                            if "No Valid Trace Events" in warning:
+                                found_empty_warning = True
+                        self.assertTrue(found_empty_warning)
 
     def test_memory_profiler(self, device):
         device_type = device.split(":")[0]
