@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import torch
@@ -197,22 +197,3 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
-
-
-@dataclass
-class ReduceScatterInput:
-    r"""Describe a parameter group's reduce-scatter input layout and copy.
-
-    Attributes:
-        padded_unsharded_sizes (Sequence[torch.Size]): Padded sizes in parameter
-            order, used to allocate the collective buffer and unpack its result.
-        copy_in (Callable): Function taking ``(unsharded_grads, output, world_size)``
-            that fills FSDP's flat, contiguous ``output`` in rank-major order.
-            It must convert inputs to the output dtype and enqueue copies on the
-            current stream. Strategy-specific metadata may be bound to this
-            callable. FSDP releases this result and clears ``unsharded_grads``
-            after the copy is submitted.
-    """
-
-    padded_unsharded_sizes: Sequence[torch.Size]
-    copy_in: Callable[[list[torch.Tensor], torch.Tensor, int], None]
