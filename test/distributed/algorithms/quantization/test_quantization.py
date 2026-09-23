@@ -91,8 +91,8 @@ if BACKEND in ("gloo", "nccl", "xccl"):
     @unittest.skipIf(
         not dist.is_backend_available(BACKEND)
         or (
-            BACKEND == "nccl"
-            and torch.cuda.device_count() < int(os.environ["WORLD_SIZE"])
+            (BACKEND == "nccl" or BACKEND == "xccl")
+            and torch.accelerator.device_count() < int(os.environ["WORLD_SIZE"])
         ),
         "Requested distributed backend or devices unavailable",
     )
