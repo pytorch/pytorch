@@ -2966,10 +2966,11 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_declarations.getvaluewithlinemap(),
         )
 
-    def generate_and_run_autotune_block(self):
+    def generate_and_run_autotune_block(self) -> dict[str, Any] | None:
         """
         Compose self.kernel_autotune_defs and self.kernel_autotune_calls into a single block of
-        code and execute it to trigger Triton kernel compilation and auto-tuning
+        code and execute it to trigger Triton kernel compilation and auto-tuning.
+        Returns the namespace it ran in, which binds each kernel's tuned autotuner.
         """
         self.kernel_autotune_defs.splice(
             """
@@ -3013,6 +3014,7 @@ class PythonWrapperCodegen(CodeGen):
             exec(tuning_code, scope)
         except Exception as e:
             raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
+        return scope
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
@@ -5646,6 +5648,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
         return root
 
-    def generate_and_run_autotune_block(self):
+    def generate_and_run_autotune_block(self) -> dict[str, Any] | None:
         # Only execute auto-tuning block in the main graph
-        pass
+        return None
