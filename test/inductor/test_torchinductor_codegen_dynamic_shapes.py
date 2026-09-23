@@ -661,34 +661,34 @@ if HAS_CPU:
     )
 
 
-class DynamicShapesCodegenGPUTests(
-    DynamicShapesCodegenCommonTemplate, DynamicShapesCodegenTestCase
-):
-    hw_classification = HardwareClassification.ACCELERATOR
-    maxDiff = None
-
-    def common(
-        self,
-        model,
-        example_inputs,
-        kwargs=None,
-        copy_to_gpu=True,
-        assert_dynamic_dims=None,
-        **_rest,
-    ):
-        return check_codegen(
-            self=self,
-            model=model,
-            example_inputs=example_inputs,
-            device=self.device,
-            kwargs=kwargs,
-            is_cpp_code=False,
-            copy_to_gpu=copy_to_gpu,
-            assert_dynamic_dims=assert_dynamic_dims,
-        )
-
-
 if not TEST_WITH_ASAN:
+
+    class DynamicShapesCodegenGPUTests(
+        DynamicShapesCodegenCommonTemplate, DynamicShapesCodegenTestCase
+    ):
+        hw_classification = HardwareClassification.ACCELERATOR
+        maxDiff = None
+
+        def common(
+            self,
+            model,
+            example_inputs,
+            kwargs=None,
+            copy_to_gpu=True,
+            assert_dynamic_dims=None,
+            **_rest,
+        ):
+            return check_codegen(
+                self=self,
+                model=model,
+                example_inputs=example_inputs,
+                device=self.device,
+                kwargs=kwargs,
+                is_cpp_code=False,
+                copy_to_gpu=copy_to_gpu,
+                assert_dynamic_dims=assert_dynamic_dims,
+            )
+
     instantiate_device_type_tests(
         DynamicShapesCodegenGPUTests,
         globals(),
