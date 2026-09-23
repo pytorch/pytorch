@@ -17517,6 +17517,63 @@ instantiate_parametrized_tests(TestFusedRMSNormOverrideRouting)
 instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 
+class TestFocalLoss(TestCase):
+    # at.Reduction: None=0, Mean=1, Sum=2
+    def _focal(self, logits, target, alpha=0.25, gamma=2.0, reduction=1):
+        nll = -torch.log_softmax(logits, 1).gather(1, target.unsqueeze(1)).squeeze(1)
+        pt = (-nll).exp()
+        out = alpha * (1 - pt).pow(gamma) * nll
+        if reduction == 1:
+            return out.mean()
+        if reduction == 2:
+            return out.sum()
+        return out
+
+    def test_focal_loss_matches_definition(self):
+        logits = torch.tensor([[2.0, 0.5, -1.0], [0.2, 0.1, 0.3]])
+        target = torch.tensor([0, 2])
+        got = torch.ops.aten.focal_loss(logits, target)
+        self.assertEqual(got, self._focal(logits, target))
+        self.assertEqual(got, torch.tensor(0.05154381), atol=1e-6, rtol=0)
+        none = torch.ops.aten.focal_loss(logits, target, 0.25, 2.0, 0)
+        self.assertEqual(none, torch.tensor([0.00277319, 0.10031443]), atol=1e-6, rtol=0)
+        total = torch.ops.aten.focal_loss(logits, target, 0.25, 2.0, 2)
+        self.assertEqual(total, torch.tensor(0.10308762), atol=1e-6, rtol=0)
+
+    def test_focal_loss_gamma_zero_is_cross_entropy(self):
+        logits = torch.tensor([[2.0, 0.5, -1.0], [0.2, 0.1, 0.3]])
+        target = torch.tensor([0, 2])
+        got = torch.ops.aten.focal_loss(logits, target, 1.0, 0.0, 0)
+        ce = torch.nn.functional.cross_entropy(logits, target, reduction="none")
+        self.assertEqual(got, ce)
+
+    def test_focal_loss_rejects_bad_dtypes_and_shapes(self):
+        logits = torch.tensor([[2, 0], [1, 3]])
+        target = torch.tensor([0, 1])
+        with self.assertRaisesRegex(RuntimeError, "floating point"):
+            torch.ops.aten.focal_loss(logits, target)
+        float_logits = torch.tensor([[2.0, 0.0], [1.0, 3.0]])
+        int_target = torch.tensor([0, 1], dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "int64"):
+            torch.ops.aten.focal_loss(float_logits, int_target)
+        long_target = torch.tensor([0, 1, 2])
+        with self.assertRaisesRegex(RuntimeError, r"\[N, C\]"):
+            torch.ops.aten.focal_loss(float_logits, long_target)
+
+    def test_focal_loss_gradcheck(self):
+        logits = torch.tensor(
+            [[2.0, 0.5, -1.0], [0.2, 0.1, 0.3]],
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        target = torch.tensor([0, 2])
+        self.assertTrue(
+            torch.autograd.gradcheck(
+                lambda x: torch.ops.aten.focal_loss(x, target), (logits,)
+            )
+        )
+
+
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
