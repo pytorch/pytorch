@@ -22,7 +22,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCPU,
     OpDTypes,
     ops,
     precisionOverride,
@@ -1051,9 +1050,8 @@ class TestSparseCompressedDevice(TestCase):
                 return False
             # Note: only validates storage on native device types
             # because some accelerators, like XLA, do not expose storage
-            if base.device.type in ('cpu', 'cuda', 'xpu', torch._C._get_privateuse1_backend_name()):
-                if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
-                    return False
+            if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
+                return False
             return True
 
         kwargs = dict(device=device, dtype=dtype, index_dtype=index_dtype)
@@ -1811,6 +1809,18 @@ class TestSparseCSR(TestCase):
             c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
             self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device, ref=ref_block_addmv)
 
+    @parametrize("matrix_shape", [(3, 3), (5, 7), (11, 9)], name_fn=lambda x: "shape_{}x{}".format(*x))
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @skipCUDAIfNoSparseGeneric
+    def test_addmv(self, dtype, device, matrix_shape):
+        mat = torch.randn(matrix_shape, dtype=dtype, device=device)
+        mat[mat.real < 0] = 0
+        sparse_mat = mat.to_sparse_csr()
+        mvec = torch.randn((mat.size(1),), dtype=dtype, device=device)
+        avec = torch.randn((mat.size(0),), dtype=dtype, device=device)
+        ref_output = torch.addmv(avec, mat, mvec)
+        output = torch.addmv(avec, sparse_mat, mvec)
+        self.assertEqual(ref_output, output)
 
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
@@ -2075,6 +2085,40 @@ class TestSparseCSR(TestCase):
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="all_sparse")
+
+    @skipCPUIfNoMklSparse
+    @dtypes(*floating_and_complex_types())
+    @sparse_compressed_nonblock_layouts()
+    @skipCUDAIfNoSparseGeneric
+    def test_addmm_dense_result(self, device, dtype, layout):
+        M = torch.randn(10, 25, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
+
+        # Test 0-strided
+        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
+        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
+
+        # Test beta=0, M=nan
+        M = torch.full((10, 25), float('nan'), device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="dense_result")
+
+        # Test transpose
+        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
+            def maybe_transpose(cond, m):
+                if not cond:
+                    return m
+                return m.t().clone(memory_format=torch.contiguous_format).t()
+
+            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
+            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="dense_result")
 
 
     @parametrize("k", [0, 1, 8])
@@ -2621,6 +2665,104 @@ class TestSparseCSR(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to have strided layout"):
             torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
+
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    @precisionOverride({torch.bfloat16: 0.01})
+    @skipCUDAIfNoSparseGeneric
+    def test_sparse_mm_reduce_sum(self, device, dtype):
+        def run_test(m, n, k, nnz, train):
+            sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+            dense = sparse.to_dense()
+
+            mat = torch.randn(k, n, dtype=dtype, device=device)
+            ref_mat = mat.clone()
+
+            if train:
+                sparse.requires_grad_()
+                mat.requires_grad_()
+                dense.requires_grad_()
+                ref_mat.requires_grad_()
+
+            ref_out = torch.mm(dense, ref_mat)
+            out = torch.sparse.mm(sparse, mat, 'sum')
+
+            self.assertEqual(out, ref_out)
+
+            if train:
+                ref_out.sum().backward()
+                out.sum().backward()
+
+                grad_input = sparse.grad
+                ref_grad_input = dense.grad
+                grad_mat = mat.grad
+                ref_grad_mat = ref_mat.grad
+
+                self.assertEqual(grad_input.to_dense(), ref_grad_input)
+                self.assertEqual(grad_mat, ref_grad_mat)
+
+        run_test(4, 5, 4, 10, False)
+        run_test(4, 4, 4, 16, True)
+
+    @skipIfTorchDynamo()
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
+    @skipCUDAIfNoSparseGeneric
+    def test_sparse_mm_reduce(self, device, dtype):
+        def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
+            csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            mat = torch.randn(n, k, dtype=dtype, device=device)
+            ref_mat = mat.clone()
+            ref_values = csr.values().clone()
+
+            out_int32 = index_dtype == torch.int32
+            coo_indices = torch._convert_indices_from_csr_to_coo(
+                csr.crow_indices(),
+                csr.col_indices(),
+                out_int32=out_int32)
+            row, col = coo_indices[0], coo_indices[1]
+
+            def ref(row, col, val, mat):
+                out = torch.zeros([m, k], dtype=dtype, device=device)
+                weight = mat.index_select(0, col)
+                src = weight.mul(val.view(-1, 1))
+                index = row.view(-1, 1).expand_as(weight)
+                index = index.to(dtype=torch.int64)
+                # scatter_reduce expect index to be int64
+                out.scatter_reduce_(0, index, src, reduce=reduce_type, include_self=False)
+                return out
+
+            if train:
+                csr.requires_grad_()
+                mat.requires_grad_()
+                ref_values.requires_grad_()
+                ref_mat.requires_grad_()
+
+            ref_out = ref(row, col, ref_values, ref_mat)
+            out = torch.sparse.mm(csr, mat, reduce_type)
+            self.assertEqual(out, ref_out)
+
+            if train and dtype not in (torch.bfloat16, torch.float16):
+                ref_out.sum().backward()
+                out.sum().backward()
+
+                grad_values = csr.grad.values()
+                grad_weight = mat.grad
+                ref_grad_values = ref_values.grad
+                ref_grad_weight = ref_mat.grad
+                self.assertEqual(grad_values, ref_grad_values)
+                self.assertEqual(grad_weight, ref_grad_weight)
+
+        for train in [False, True]:
+            for index_dtype in [torch.int32, torch.int64]:
+                for reduce_type in ["sum", "mean", "amax", "amin"]:
+                    # by setting nnz < M, create empty rows
+                    run_test(3, 4, 11, 1, reduce_type, index_dtype, train)
+                    run_test(3, 4, 11, 6, reduce_type, index_dtype, train)
+                    run_test(3, 4, 11, 12, reduce_type, index_dtype, train)
+                    # we are doing blocking with 4x vector length in the kernel,
+                    # so need to test when K > 4x vector length
+                    run_test(4, 7, 33, 13, reduce_type, index_dtype, train)
+
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -4279,6 +4421,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         self.assertEqual(get_meta_with_checks(32, 32, 64, warn_count=1),
                          dict(GROUP_SIZE_ROW=4, SPLIT_N=4, num_stages=1, num_warps=4))
 
+@instantiate_parametrized_tests
 class TestSparseCSRGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -4293,154 +4436,12 @@ class TestSparseCSRGeneric(TestCase):
             a = torch.sparse_csr_tensor(crow_indices, col_indices, values, (rows, cols))
             self.assertEqual(a._nnz(), nnz)
 
-    @parametrize("matrix_shape", [(3, 3), (5, 7), (11, 9)], name_fn=lambda x: "shape_{}x{}".format(*x))
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_addmv(self, dtype, device, matrix_shape):
-        mat = torch.randn(matrix_shape, dtype=dtype, device=device)
-        mat[mat.real < 0] = 0
-        sparse_mat = mat.to_sparse_csr()
-        mvec = torch.randn((mat.size(1),), dtype=dtype, device=device)
-        avec = torch.randn((mat.size(0),), dtype=dtype, device=device)
-        ref_output = torch.addmv(avec, mat, mvec)
-        output = torch.addmv(avec, sparse_mat, mvec)
-        self.assertEqual(ref_output, output)
-
-    @skipCPUIfNoMklSparse
-    @dtypes(*floating_and_complex_types())
-    @sparse_compressed_nonblock_layouts()
-    def test_addmm_dense_result(self, device, dtype, layout):
-        M = torch.randn(10, 25, device=device).to(dtype)
-        m1 = torch.randn(10, 50, device=device).to(dtype)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
-
-        # Test 0-strided
-        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
-        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
-
-        # Test beta=0, M=nan
-        M = torch.full((10, 25), float('nan'), device=device).to(dtype)
-        m1 = torch.randn(10, 50, device=device).to(dtype)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="dense_result")
-
-        # Test transpose
-        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
-            def maybe_transpose(cond, m):
-                if not cond:
-                    return m
-                return m.t().clone(memory_format=torch.contiguous_format).t()
-
-            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
-            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
-            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="dense_result")
-
-    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
-    @precisionOverride({torch.bfloat16: 0.01})
-    def test_sparse_mm_reduce_sum(self, device, dtype):
-        def run_test(m, n, k, nnz, train):
-            sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
-            dense = sparse.to_dense()
-
-            mat = torch.randn(k, n, dtype=dtype)
-            ref_mat = mat.clone()
-
-            if train:
-                sparse.requires_grad_()
-                mat.requires_grad_()
-                dense.requires_grad_()
-                ref_mat.requires_grad_()
-
-            ref_out = torch.mm(dense, ref_mat)
-            out = torch.sparse.mm(sparse, mat, 'sum')
-
-            self.assertEqual(out, ref_out)
-
-            if train:
-                ref_out.sum().backward()
-                out.sum().backward()
-
-                grad_input = sparse.grad
-                ref_grad_input = dense.grad
-                grad_mat = mat.grad
-                ref_grad_mat = ref_mat.grad
-
-                self.assertEqual(grad_input.to_dense(), ref_grad_input)
-                self.assertEqual(grad_mat, ref_grad_mat)
-
-        run_test(4, 5, 4, 10, False)
-        run_test(4, 4, 4, 16, True)
-
-    @onlyCPU
-    @skipIfTorchDynamo()
-    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
-    @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
-    def test_sparse_mm_reduce(self, device, dtype):
-        def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
-            csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-            mat = torch.randn(n, k, dtype=dtype)
-            ref_mat = mat.clone()
-            ref_values = csr.values().clone()
-
-            out_int32 = index_dtype == torch.int32
-            coo_indices = torch._convert_indices_from_csr_to_coo(
-                csr.crow_indices(),
-                csr.col_indices(),
-                out_int32=out_int32)
-            row, col = coo_indices[0], coo_indices[1]
-
-            def ref(row, col, val, mat):
-                out = torch.zeros([m, k], dtype=dtype)
-                weight = mat.index_select(0, col)
-                src = weight.mul(val.view(-1, 1))
-                index = row.view(-1, 1).expand_as(weight)
-                index = index.to(dtype=torch.int64)
-                # scatter_reduce expect index to be int64
-                out.scatter_reduce_(0, index, src, reduce=reduce_type, include_self=False)
-                return out
-
-            if train:
-                csr.requires_grad_()
-                mat.requires_grad_()
-                ref_values.requires_grad_()
-                ref_mat.requires_grad_()
-
-            ref_out = ref(row, col, ref_values, ref_mat)
-            out = torch.sparse.mm(csr, mat, reduce_type)
-            self.assertEqual(out, ref_out)
-
-            if train and dtype not in (torch.bfloat16, torch.float16):
-                ref_out.sum().backward()
-                out.sum().backward()
-
-                grad_values = csr.grad.values()
-                grad_weight = mat.grad
-                ref_grad_values = ref_values.grad
-                ref_grad_weight = ref_mat.grad
-                self.assertEqual(grad_values, ref_grad_values)
-                self.assertEqual(grad_weight, ref_grad_weight)
-
-        for train in [False, True]:
-            for index_dtype in [torch.int32, torch.int64]:
-                for reduce_type in ["sum", "mean", "amax", "amin"]:
-                    # by setting nnz < M, create empty rows
-                    run_test(3, 4, 11, 1, reduce_type, index_dtype, train)
-                    run_test(3, 4, 11, 6, reduce_type, index_dtype, train)
-                    run_test(3, 4, 11, 12, reduce_type, index_dtype, train)
-                    # we are doing blocking with 4x vector length in the kernel,
-                    # so need to test when K > 4x vector length
-                    run_test(4, 7, 33, 13, reduce_type, index_dtype, train)
-
 
 instantiate_parametrized_tests(TestSparseCompressed)
 instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
 
 instantiate_device_type_tests(TestSparseCSR, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestSparseCSRGeneric, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSparseCSRCudaOnly, globals(), only_for="cuda")
 
 if __name__ == '__main__':

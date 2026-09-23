@@ -5087,11 +5087,7 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Layout for a named buffer that aliases another tensor or view.
-
-    This layout does not add a view transformation. ``view`` is the logical
-    tensor being aliased and carries any view-specific layout metadata.
-    """
+    """Is a view into the storage of another tensor"""
 
     def __init__(self, view: BaseView | TensorBox) -> None:
         layout = view.get_layout()
@@ -5192,14 +5188,6 @@ class NoneLayout(OutputSpec):
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
-    """Layout for an operation that writes into an existing tensor or view.
-
-    A buffer with this layout does not own a new allocation or add a view
-    transformation. ``target`` is the logical mutation destination and carries
-    any view-specific layout metadata. ``get_buffer()`` unwraps it to the buffer
-    whose storage is mutated.
-    """
-
     def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device_or_error(),
@@ -9765,6 +9753,10 @@ class FallbackKernel(ExternKernelAlloc):
             example_output, (torch._C.ScriptObject, FakeScriptObject)
         ) or is_custom_class_obj(example_output):
             return torch.device("cpu")
+        if isinstance(example_output, dict):
+            # generate_output builds a MultiOutput per value, so the values carry
+            # the devices; the keys never do.
+            example_output = list(example_output.values())
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
                 # pyrefly: ignore [bad-argument-type]
@@ -10368,8 +10360,6 @@ class FallbackKernel(ExternKernelAlloc):
             device = torch.device("cpu")
 
         def create_direct_output(output: torch.Tensor) -> FallbackKernel:
-            if not device:
-                raise AssertionError("Not sure where to find device info")
             packed = cls(
                 cls.tensor_to_layout(output),
                 kernel,
@@ -10423,8 +10413,12 @@ class FallbackKernel(ExternKernelAlloc):
             return create_direct_output(example_output)
 
         else:
+            # No tensor in or out, so there is no device to inherit and nothing to
+            # run on but the host. An op that produces no output keeps None above --
+            # its placement is decided by the scheduler, and forcing a device there
+            # moves stream and event HOPs out of the stream block they belong to.
             if not device:
-                raise AssertionError("Not sure where to find device info")
+                device = torch.device("cpu")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
@@ -10483,7 +10477,7 @@ class FallbackKernel(ExternKernelAlloc):
         if isinstance(outputs, (list, tuple)):
             packed.outputs = outputs
         elif isinstance(outputs, dict):
-            packed.outputs = tuple(outputs)
+            packed.outputs = tuple(outputs.values())
         else:
             packed.outputs = [outputs]
 
