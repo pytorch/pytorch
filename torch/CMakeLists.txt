@@ -373,7 +373,7 @@ if(BUILD_LIBTORCHLESS)
   set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
   if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
-    target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+    target_compile_definitions(torch_python PRIVATE AT_EXPERIMENTAL_SINGLE_THREAD_POOL=1)
   endif()
 
 endif()
@@ -421,7 +421,7 @@ if(USE_XPU)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
 endif()
 
-target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
+target_compile_definitions(torch_python PRIVATE THP_BUILD_MAIN_LIB)
 
 target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
 
@@ -437,16 +437,16 @@ if(USE_UCC)
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
-  target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_compile_definitions(torch_python PRIVATE BUILD_ONEDNN_GRAPH)
   if(NOT BUILD_LIBTORCHLESS)
-    target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+    target_compile_definitions(torch_cpu PRIVATE BUILD_ONEDNN_GRAPH)
   endif()
 endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
    # Workaround numerous decref-without-a-gil warnings from JIT
    # see https://github.com/pytorch/pytorch/issues/130073
-   target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
+   target_compile_definitions(torch_python PRIVATE PYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF)
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
