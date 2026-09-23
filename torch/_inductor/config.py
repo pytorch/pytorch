@@ -227,8 +227,9 @@ fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 # hoisted kernels compile serially, in process, on first launch instead of fanning out
 # to the worker pool -- so it is for artifacts a person tunes
 # (torch.compiler.export_python), not for a normal compile. Nothing autotunes at
-# runtime: it requires triton.autotune_at_compile_time and pins each hoisted kernel to
-# the config chosen then (KERNEL_CONFIGS in the module), and refuses multi_kernel.
+# runtime: it requires triton.autotune_at_compile_time (turned on when unset) and
+# pins each hoisted kernel to the config chosen then (KERNEL_CONFIGS in the module),
+# and refuses multi_kernel.
 # User-defined @triton.jit kernels stay source strings.
 readable_wrapper: bool = os.environ.get("TORCHINDUCTOR_READABLE_WRAPPER", "0") == "1"
 
