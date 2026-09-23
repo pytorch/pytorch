@@ -33,7 +33,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 2.5: PT2 Issues — Special Handling
   - Step 3: Redirect to Secondary Oncall
   - Step 4: Label the Issue
-  - Step 5: High Priority — REQUIRES HUMAN REVIEW
+  - Step 5: Escalate — High Priority (human review), then release triage
   - Step 6: bot-triaged (automatic)
   - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
@@ -52,8 +52,9 @@ Use these GitHub MCP tools for triage:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__github__issue_read` | Get issue details, comments, and existing labels |
-| `mcp__github__issue_write` | Apply labels or close issues |
+| `mcp__github__get_issue` | Get issue details and existing labels |
+| `mcp__github__get_issue_comments` | Get existing issue comments |
+| `mcp__github__update_issue` | Apply labels or close issues |
 | `mcp__github__add_issue_comment` | Add comment (only for redirecting questions) |
 | `mcp__github__search_issues` | Find similar issues for context |
 
@@ -218,7 +219,13 @@ Only if the issue stays in the general queue:
 
 **Label based on the actual bug, not keywords.** Read the issue to understand what is actually broken. A bug about broadcasting that happens to mention "nan" in a parameter name is a frontend bug, not a NaN/Inf bug.
 
-### 5) High Priority — REQUIRES HUMAN REVIEW
+### 5) Escalate — High Priority (human review), then release triage
+
+Two independent decisions, in this order. Work through 5a first, then 5b for **every**
+issue — 5b is not limited to issues you escalated in 5a, and an issue can end up with
+both labels, one, or neither.
+
+#### 5a) High Priority — REQUIRES HUMAN REVIEW
 
 **CRITICAL:** If you believe an issue is high priority, you MUST:
 1. Add `triage review` label and do not add `triaged`
@@ -232,6 +239,48 @@ High priority criteria:
 - Internal assert failure
 - Many users affected
 - Core component or popular model impact
+
+#### 5b) release triage — Confirmed on the Latest Release
+
+`release triage` is a narrow flag, not a catch-all. It surfaces the issue for whoever
+owns the release; it is not a cherry-pick request and does not decide anything.
+
+**You are told which version is current — never guess it.** Your prompt carries a
+`RELEASE CONTEXT` block giving the most recent released minor version. **If the block
+says `unknown`, do not add `release triage` at all.**
+
+Add it only when **one of these two gates** is satisfied:
+
+**Gate 1 — confirmed on the most recent released minor.** The issue states a PyTorch
+version, and that version is the minor named in `RELEASE CONTEXT`, or one of its patch
+releases. "States a version" means the version is written in the issue: the
+`torch.__version__` line of the environment dump, a `pip install` line, or the reporter
+saying so in prose. Read it out of the issue; never infer it from the traceback, the
+issue date, or what you assume is current.
+
+**Gate 2 — already labelled `high priority`.** The label is on the issue when you read
+it, applied by a human in an earlier pass. This is the existing label only — it is not
+your own 5a judgement. If *you* think an issue is high priority, 5a has you add
+`triage review` and stop; that alone does not earn `release triage`.
+
+Do **not** add it for any of the following on its own:
+
+| Situation | Why not |
+|---|---|
+| Reproduces only on main, a nightly, or an RC | Not confirmed on a release. If it is serious, `triage review` in 5a is the path. |
+| No version stated anywhere in the issue | Unconfirmed. Do not guess. |
+| Stated version is older than the minor in `RELEASE CONTEXT` | Already shipped; not this train. |
+| Crash, silent correctness, BC break, packaging or install bug | Severity is not a gate. It qualifies only if it also clears gate 1 or gate 2. |
+| It looks like it *would* ship broken | Speculative. |
+| Feature request, enhancement, or documentation-only | Never `release triage`, under either gate. |
+
+**When unsure, leave it off.** This label is read as a short list that the release
+manager works through by hand, so a false positive costs more than a miss: a list that
+fills with maybes stops being read, and then it catches nothing. Anything genuinely
+urgent still reaches a human through `triage review` in 5a.
+
+`release triage` is independent of the 5a decision — an issue can carry both — and it
+remains a flag, not a verdict: whether to cherry-pick is never the bot's call.
 
 ### 6) bot-triaged (automatic)
 
@@ -256,6 +305,7 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
+- Add `release triage` only when the issue is confirmed on the most recent released minor, or already carries `high priority` (step 5b); when unsure, leave it off
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete
 
