@@ -13,7 +13,11 @@ import torch._native.registry as registry_module
 from torch._native import cutedsl_utils as cu, variants
 from torch._native.ops.linear_cross_entropy import cutedsl_impl
 from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
-from torch.testing._internal.common_cuda import has_device_side_assert, TEST_CUDA
+from torch.testing._internal.common_cuda import (
+    has_device_side_assert,
+    TEST_CUDA,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
@@ -404,6 +408,60 @@ class TestLinearCrossEntropyOverride(TestCase):
         self.assertTrue(eligible(), "all on one device")
         for name in ("linear_weight", "target", "linear_bias", "weight"):
             self.assertFalse(eligible(**{name: True}), f"{name} on another device")
+
+    @_needs_kernel
+    @unittest.skipIf(not TEST_MULTIGPU, "requires at least 2 visible CUDA devices")
+    def test_kernel_launches_on_the_input_device(self):
+        """With the input on a device that is not the current one, the kernel
+        must still launch on the input's device."""
+        import torch.nn.modules.linear_cross_entropy as lce_module
+
+        old_device = torch.cuda.current_device()
+        try:
+            torch.cuda.set_device(0)
+            gen = torch.Generator(device="cuda:1").manual_seed(0)
+            input = torch.randn(
+                64, 32, device="cuda:1", dtype=torch.bfloat16, generator=gen
+            )
+            linear_weight = torch.randn(
+                256, 32, device="cuda:1", dtype=torch.bfloat16, generator=gen
+            )
+            target = torch.randint(0, 256, (64,), device="cuda:1", generator=gen)
+            options = _compact_options(batch_chunk_size=16)
+
+            def once():
+                leaves = [
+                    t.detach().clone().requires_grad_() for t in (input, linear_weight)
+                ]
+                loss = torch.nn.functional.linear_cross_entropy(
+                    leaves[0], leaves[1], target, options=options
+                )
+                loss.backward()
+                return (loss.detach(), *(t.grad for t in leaves))
+
+            with unittest.mock.patch.object(
+                lce_module,
+                "_linear_cross_entropy_batch_chunked_accumulator",
+                wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
+            ) as accumulator:
+                fused = once()
+                self.assertEqual(
+                    accumulator.call_count, 0, "the call fell back to the accumulator"
+                )
+            with torch.backends.python_native.cutedsl.disabled():
+                plain = once()
+
+            self.assertEqual(torch.cuda.current_device(), 0)
+            for name, a, b in zip(
+                ("grad_input", "grad_linear_weight"), fused[1:], plain[1:]
+            ):
+                self.assertEqual(a.device, torch.device("cuda:1"))
+                self.assertEqual(a, b, atol=1e-3, rtol=0, msg=f"{name} disagrees")
+            self.assertEqual(
+                fused[0], plain[0], rtol=4 * torch.finfo(torch.bfloat16).eps, atol=0
+            )
+        finally:
+            torch.cuda.set_device(old_device)
 
     @_needs_kernel
     def test_an_out_of_range_target_traps(self):
