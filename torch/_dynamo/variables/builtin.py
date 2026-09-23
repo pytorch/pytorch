@@ -507,6 +507,22 @@ class BaseBuiltinVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name in ("__str__", "__repr__") and len(args) == 1 and not kwargs:
+            fn = self.as_python_constant()
+            # e.g. BaseException.__str__(KeyError("a")) must not dispatch to KeyError.__str__
+            if (
+                isinstance(fn, type)
+                and issubclass(fn, BaseException)
+                and getattr(fn, name)
+                is not getattr(maybe_get_python_type(args[0]), name)
+            ):
+                unimplemented(
+                    gb_type="Unbound exception __str__/__repr__ on a different type",
+                    context=f"{fn.__name__}.{name}({args[0].python_type_name()})",
+                    explanation=f"Dynamo only supports {fn.__name__}.{name}(obj) when it "
+                    f"resolves to the same method as type(obj).{name}.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         if name == "__str__" and len(args) == 1 and not kwargs:
             arg = args[0]
             if self.as_python_constant() is object:

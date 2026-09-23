@@ -896,12 +896,29 @@ class ExceptionVariable(VariableTracker):
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
+        exc_str = self.exc_type.__str__
+        if exc_str is KeyError.__str__ and len(self.args) == 1:
+            # KeyError_str reprs a single arg, otherwise falls back to BaseException_str
+            return generic_repr(tx, self.args[0])
+        # AttributeError and NameError set tp_str to BaseException_str explicitly.
+        # A Python-level __str__ means a user subclass reached here through
+        # super().__str__(), which already resolved to BaseException.__str__.
+        if isinstance(exc_str, types.WrapperDescriptorType) and exc_str not in (
+            BaseException.__str__,
+            AttributeError.__str__,
+            NameError.__str__,
+            KeyError.__str__,
+        ):
+            unimplemented(
+                gb_type="Unsupported exception __str__",
+                context=f"str() of {self.python_type_name()}",
+                explanation=f"Dynamo does not model {self.python_type_name()}.__str__, "
+                "which formats differently from BaseException.__str__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
         elif len(self.args) == 1:
-            # KeyError.__str__ uses repr for a single key, unlike BaseException.
-            if self.exc_type is KeyError:
-                return generic_repr(tx, self.args[0])
             return generic_str(tx, self.args[0])
         else:
             from . import TupleVariable
@@ -927,7 +944,23 @@ class ExceptionVariable(VariableTracker):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
-        return VariableTracker.build(tx, self.debug_repr())
+        exc_repr = self.exc_type.__repr__
+        if isinstance(exc_repr, types.WrapperDescriptorType) and (
+            exc_repr is not BaseException.__repr__
+        ):
+            unimplemented(
+                gb_type="Unsupported exception __repr__",
+                context=f"repr() of {self.python_type_name()}",
+                explanation=f"Dynamo does not model {self.python_type_name()}.__repr__, "
+                "which formats differently from BaseException.__repr__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        single = len(self.args) == 1
+        args = self.args[0] if single else TupleVariable(list(self.args))
+        args_repr = generic_repr(tx, args).as_python_constant()
+        if single:
+            args_repr = f"({args_repr})"
+        return VariableTracker.build(tx, f"{self.python_type_name()}{args_repr}")
 
 
 class StopIterationVariable(ExceptionVariable):
