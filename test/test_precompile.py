@@ -2675,7 +2675,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(_load_pair(ecode, ecache)(run, x), run(x))
 
     def test_unbacked_equality_shared_vs_independent_shape_id(self):
-        # MAJOR1 (invariant 3 DANGER note): two mark_unbacked dims that the graph requires
+        # MAJOR1 (invariant 3, shared shape_id): two mark_unbacked dims that the graph requires
         # to be EQUAL behave differently depending on shape_id. (a) A SHARED shape_id binds
         # them to ONE symbol, so they are equal by construction AND a runtime size mismatch
         # is LOUDLY rejected. (b) Two INDEPENDENTLY marked dims (no shared shape_id)

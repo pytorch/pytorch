@@ -112,7 +112,14 @@ it.
 #    captured as UNBACKED symints (symbolic capture), which CANNOT be guarded on -- so
 #    the artifact is valid for any runtime size of those dims, and a graph that needs to
 #    guard on / specialize a marked dim fails LOUDLY at capture (PrecompileError) instead
-#    of baking a silently-wrong result.
+#    of baking a silently-wrong result. Dims that MUST be equal at runtime (e.g. two
+#    inputs combined by a broadcast that requires equal sizes, ``model(a) + model(b)``)
+#    MUST share a ``shape_id``: marking them INDEPENDENTLY bakes a SILENT equal-size
+#    assumption, and a runtime mismatch does not raise the loud failure eager gives. The
+#    capture ShapeEnv records the equality as a deferred runtime assert (e.g.
+#    ``Eq(u0, u1)``), but precompile does not yet harvest those relational asserts --
+#    only mark_unbacked's min/max feed the runtime bound checks -- so a shared
+#    ``shape_id`` is the way to get the check today.
 #
 # 4. Boundary effects. Input mutation (including module buffers -- e.g. BatchNorm
 #    running stats in training mode), tensor-subclass wrap/unwrap (e.g. DTensor),
@@ -216,6 +223,11 @@ it.
 # and because there are no kernels, the eager cache carries no compiled artifact
 # (artifact=None) but is still a full integrity-tagged envelope (python_code is the
 # whole runnable artifact).
+#
+# THREADING: the inductor lowering drives process-global compiler state and is
+# serialized by _COMPILE_LOCK (torch/_functorch/_aot_autograd/to_standalone_python.py),
+# so concurrent backend="inductor" captures lower one at a time. The make_fx trace
+# and the backend="eager" path are NOT serialized.
 #
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
 # non-strict trace and is the only tracer implemented today -- everything above (the
@@ -2472,11 +2484,6 @@ class _PrecompileApi:
         contract; read Note [precompile programming model] before using it. The artifact
         faithfully reproduces ``fn`` only for callers that uphold that contract.
 
-        THREADING: the inductor lowering step drives process-global compiler state
-        and is serialized by an internal lock, so concurrent ``backend="inductor"``
-        calls lower one at a time. The make_fx capture phase and the ``backend="eager"``
-        path are NOT serialized.
-
         ``backend`` selects how the captured graph is realized:
 
         - ``"inductor"`` (default): lower the graph through
@@ -2492,6 +2499,9 @@ class _PrecompileApi:
           kernels there is nothing to accelerate, so ``load`` runs the inlined graph.
           Useful for
           inspecting/debugging exactly what was traced without an Inductor dependency.
+
+        Concurrent ``backend="inductor"`` calls lower one at a time (THREADING in the
+        Note).
 
         ``tracer`` selects the capture front-end:
 
@@ -2515,16 +2525,9 @@ class _PrecompileApi:
         on, so one artifact serves any runtime size of them (invariant 3); a graph that
         needs to guard on / specialize a marked dim fails at capture with a
         ``PrecompileError``. Dims sharing a ``shape_id`` reuse one symbol (equal by
-        construction); ``min``/``max`` become runtime asserts. Other dims stay static.
-        Dims that MUST be equal at runtime (e.g. two inputs combined by a broadcast that
-        requires equal sizes, ``model(a) + model(b)``) MUST be given a SHARED ``shape_id``
-        so a mismatch is rejected; marking two such dims INDEPENDENTLY currently bakes a
-        SILENT equal-size assumption and a runtime mismatch does NOT raise the loud failure
-        eager gives (invariant 3). This is a harvesting gap, not an inherent limit of the
-        standalone artifact: the capture ShapeEnv DOES record the equality (as a deferred
-        runtime assert, e.g. ``Eq(u0, u1)``), but precompile does not yet harvest/enforce
-        those relational asserts in the driver -- only the decorator's declared min/max feed
-        the runtime bound checks. A shared ``shape_id`` is the way to get the check today.
+        construction), so dims that must be equal at runtime need one: marking them
+        independently bakes a silent equal-size assumption. ``min``/``max`` become
+        runtime asserts. Other dims stay static.
 
         Returns ``(python_code, cache)`` -- a self-contained, executable Python
         source string (the single source of truth for the calling convention) and a
