@@ -209,3 +209,36 @@ The frontend API is `fully_shard` that can be called on a `module`:
 .. autoclass:: DataParallelMeshDims
     :members:
 ```
+
+## Experimental APIs
+
+```{eval-rst}
+.. automodule:: torch.distributed.fsdp.experimental
+```
+
+FSDP copies `Shard(1)` and higher-dimension shards through intermediate buffers
+by default. To opt in to direct native copies, register either or both callbacks
+after applying `fully_shard`. Each direction can be selected independently, and
+groups may also contain `Shard(0)` parameters:
+
+```python
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    reduce_scatter_input_fn_with_native_copy,
+)
+
+model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
+model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
+```
+
+The native CUDA copies can improve performance for wide contiguous tensors with
+small `outer_size`, such as `Shard(1)` over `[2, F, D]`. Here, `outer_size` is the
+product of dimensions before the shard dimension. Large outer sizes, skinny
+tensors, and strided collective buffers can increase CPU time, GPU time, and
+metadata memory. Benchmark the callbacks on the target workload before enabling
+them.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.fsdp.experimental.all_gather_output_fn_with_native_copy
+.. autofunction:: torch.distributed.fsdp.experimental.reduce_scatter_input_fn_with_native_copy
+```

@@ -993,6 +993,7 @@
 /torch/csrc/distributed/c10d/ @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
+/torch/csrc/distributed/fsdp/ @weifengpy
 /torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
 /torch/distributed/_composable/fsdp/ @weifengpy
 /torch/distributed/_composable/replicate.py @weifengpy
