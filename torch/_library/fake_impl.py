@@ -133,6 +133,28 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
     return meta_kernel
 
 
+def run_fake_impl(fake_mode, func, args, kwargs, real=None):
+    # real: the RealOpResult precomputed under propagate_real_tensors, used when
+    # a profile-generated fake kernel has no profile for these inputs.
+    from torch._library.fake_profile import MissingOpProfile
+
+    fake_impl = torch._library.simple_registry.singleton.find(
+        func.name()
+    ).fake_impl.kernel
+    if fake_impl is None:
+        raise AssertionError(f"expected a fake implementation for {func}")
+    ctx = FakeImplCtx(fake_mode, func)
+    with set_ctx_getter(lambda: ctx), fake_mode:
+        try:
+            return fake_impl(*args, **kwargs)
+        except MissingOpProfile:
+            if real is None or fake_mode.shape_env is None:
+                raise
+            from torch._subclasses.fake_tensor import infer_fake_from_real_out
+
+            return infer_fake_from_real_out(fake_mode, func, real)
+
+
 def get_none():
     return None
 
