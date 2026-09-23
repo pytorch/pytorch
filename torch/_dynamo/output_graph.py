@@ -466,6 +466,12 @@ class OutputGraphGuardsState:
     skip_guards_check: bool = False
     export_constraints: bool = False
     name_of_builtins_dict_key_in_fglobals: str | None = None
+    # [device-as-parameter] whether compile_on_one_rank was on while tracing.
+    # Recorded rather than re-read at guard-build time: a guard built under CooR
+    # checks the device index against the runtime current device, and one built
+    # without it pins the index. Deserializing has to rebuild whichever kind was
+    # saved, not whichever the loading process happens to be configured for.
+    compile_on_one_rank: bool = False
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -497,6 +503,7 @@ class OutputGraphGuardsState:
             _guards=self.guards,
             _aotautograd_guards=self.aotautograd_guards,
             skip_guards_check=self.skip_guards_check,
+            compile_on_one_rank=self.compile_on_one_rank,
         )
 
 
@@ -643,6 +650,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.skip_guards_check,
             output_graph_guards_state.export_constraints,
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
+            output_graph_guards_state.compile_on_one_rank,
         )
 
         self.import_sources = import_sources or {}
@@ -731,6 +739,7 @@ class OutputGraph(OutputGraphCommon):
             # These are set by @property instead, just initialize them as blank
             _guards=torch._guards.GuardsSet(),
             _aotautograd_guards=[],
+            compile_on_one_rank=torch.fx.experimental.proxy_tensor._coor_enabled(),
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
