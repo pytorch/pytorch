@@ -1822,6 +1822,8 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` with ``mode='trilinear'`` when attempting
+          to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
         * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
@@ -1851,7 +1853,6 @@ def use_deterministic_algorithms(
           - ``linear``
           - ``bilinear``
           - ``bicubic``
-          - ``trilinear``
 
         * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
