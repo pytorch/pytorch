@@ -29,6 +29,8 @@ import re
 from typing import Any
 from typing_extensions import override
 
+import sympy
+
 import torch._inductor.config as config
 from torch.utils._indented_buffer import DeferredLineBase, IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
@@ -143,7 +145,7 @@ def _pin_to_tuned_config(src_code: str, kernel_name: str) -> str | None:
     entries = [
         f"{ast.get_source_segment(src_code, k)}: {ast.get_source_segment(src_code, v)}"
         for k, v in zip(meta.keys, meta.values)
-        if not (isinstance(k, ast.Constant) and k.value in dropped)
+        if k is not None and not (isinstance(k, ast.Constant) and k.value in dropped)
     ]
     inductor_meta = "{" + ", ".join(entries) + "}"
     triton_meta = ast.get_source_segment(src_code, kwargs["triton_meta"])
@@ -284,9 +286,17 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         return scope
 
     @override
-    def define_user_defined_triton_kernel(  # type: ignore[override]
-        self, kernel: Any, configs: list[Any], *args: Any, **kwargs: Any
-    ) -> Any:
+    def define_user_defined_triton_kernel(
+        self,
+        kernel,
+        configs,
+        kwargs,
+        restore_value_args,
+        reset_to_zero_args,
+        grids: list[list[int | sympy.Expr]],
+        epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
+        launch_kwargs: tuple[str, ...],
+    ):
         if len(configs) > 1:
             # The kernel is still a source string for AsyncCompile, whose autotuner
             # would benchmark these configs on first launch.
@@ -295,9 +305,19 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
                 f"user-defined Triton kernel {kernel.__name__} is autotuned over "
                 f"{len(configs)} configs; give it a single config."
             )
-        return super().define_user_defined_triton_kernel(
-            kernel, configs, *args, **kwargs
-        )
+        # Its decorator keeps filename=, so coordinate_descent_tuning in its meta would
+        # have a cached best config replace its own, as for the pinned kernels.
+        with config.patch(coordinate_descent_tuning=False, incremental_autotune=False):
+            return super().define_user_defined_triton_kernel(
+                kernel,
+                configs,
+                kwargs,
+                restore_value_args,
+                reset_to_zero_args,
+                grids,
+                epilogue_fusion,
+                launch_kwargs,
+            )
 
     @override
     def emit_triton_kernel_definition(
