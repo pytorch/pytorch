@@ -7,6 +7,8 @@ from typing import Any
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FLEX_GEMM_LANE_DOMAIN_MIXED_ERROR,
+    FLEX_GEMM_LANE_DOMAIN_REDUCTION_SPAN_ERROR,
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
     FlexGemmOutputContraction,
     local_reduce_compressed_shape,
@@ -22,6 +24,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR,
     LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
+    NESTED_TENSORSSA_PHYSICAL_SPAN,
     ungrouped_reduction_error,
     unsupported_reduction_op_error,
     validate_local_reduce_tensorssa_group_size,
@@ -46,7 +49,12 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedUnsupportedReduction,
     NormalizedView,
 )
-from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
+from torch._inductor.kernel.gemm_epilogue_layout import (
+    FlexGemmLaneDomain,
+    grouped_tensor_layout,
+    match_output_contraction_use,
+    OutputContractionUse,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known_equal,
     statically_known_shape_equal,
@@ -78,10 +86,18 @@ class GemmLocalReduceMatch:
 
     value_node: torch.fx.Node
     geometry: GemmReductionGeometry
+    physical_span: int = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
             raise RuntimeError(LOCAL_REDUCE_MATCH_NODE_ERROR)
+
+    @property
+    def physical_geometry(self) -> GemmReductionGeometry:
+        """Geometry in physical accumulator columns: paired lanes folded into the group."""
+        return GemmReductionGeometry(
+            self.geometry.group * self.physical_span, self.geometry.axis
+        )
 
     def to_plan(
         self,
@@ -102,7 +118,10 @@ class GemmLocalReduceMatch:
         if not matches:
             return None
         match = matches[0]
-        if any(item.geometry != match.geometry for item in matches):
+        if any(
+            item.geometry != match.geometry or item.physical_span != match.physical_span
+            for item in matches
+        ):
             raise NotImplementedError(mixed_match_error)
         return match
 
@@ -294,6 +313,8 @@ class GemmLocalReduceAnalysis:
         graph: Dependency index used by recursive feed-main matching.
         grouped_tensors: FX nodes whose values carry a grouped TensorSSA layout.
         matches: FX values matched to a supported grouped local reduction.
+        lane_domains: FX values computed from selected lanes of the GEMM columns.
+        output_contraction_uses: Lane selects with their lowering metadata.
     """
 
     graph: GemmEpilogueGraph
@@ -305,6 +326,12 @@ class GemmLocalReduceAnalysis:
     ] = dataclasses.field(default_factory=dict)
     matches: dict[torch.fx.Node, GemmLocalReduceMatch] = dataclasses.field(
         default_factory=dict
+    )
+    lane_domains: dict[torch.fx.Node, "FlexGemmLaneDomain"] = dataclasses.field(
+        default_factory=dict
+    )
+    output_contraction_uses: dict[torch.fx.Node, "OutputContractionUse"] = (
+        dataclasses.field(default_factory=dict)
     )
     gemm: torch.fx.Node | None = None
     gemm_shape: tuple[Any, ...] | None = None
@@ -348,10 +375,11 @@ class GemmLocalReduceAnalysis:
         normalized = self.graph.normalized_nodes.get(node)
         if isinstance(normalized, NormalizedView):
             propagated = self.propagate_local_reduce_match(node, normalized.source)
+            domain = self.propagate_lane_domain_view(node, normalized.source)
             grouped = self.bind_grouped_layout(
                 node, normalized.shape, normalized.source
             )
-            if propagated or grouped:
+            if propagated or domain or grouped:
                 return
         if isinstance(normalized, NormalizedReduction):
             if self.bind_grouped_reduction(node, normalized):
@@ -365,12 +393,87 @@ class GemmLocalReduceAnalysis:
                 raise ungrouped_reduction_error(op_name)
         elif isinstance(normalized, NormalizedUnsupportedReduction):
             raise unsupported_reduction_op_error(normalized.target)
-        if isinstance(
-            normalized, (NormalizedSqueeze, NormalizedGetItem)
+        if self.bind_output_contraction_use(node):
+            return
+        if isinstance(normalized, NormalizedSqueeze):
+            propagated_match = self.propagate_local_reduce_match(
+                node, normalized.source
+            )
+            propagated_domain = self.propagate_lane_domain_view(node, normalized.source)
+            if propagated_match or propagated_domain:
+                return
+        elif isinstance(
+            normalized, NormalizedGetItem
         ) and self.propagate_local_reduce_match(node, normalized.source):
             return
         if is_shape_preserving_pointwise_node(node):
             self.propagate_pointwise_match(node, LOCAL_REDUCE_MIXED_MATCH_ERROR)
+            self.propagate_lane_domain_pointwise(node)
+
+    def propagate_lane_domain_view(self, node: torch.fx.Node, source: Any) -> bool:
+        """Copy a lane domain through a view or squeeze.
+
+        These ops preserve element count and order, so later grouping is
+        aligned to the same flat positions; QuACK's problem guards (N divisible
+        by the physical group and contraction) keep those groups inside one row.
+        """
+        if not isinstance(source, torch.fx.Node):
+            return False
+        domain = self.lane_domains.get(source)
+        if domain is None:
+            return False
+        self.lane_domains[node] = domain
+        return True
+
+    def bind_output_contraction_use(self, node: torch.fx.Node) -> bool:
+        """Record one selected lane and the lane domain of its value."""
+        if self.gemm is None:
+            return False
+        use = match_output_contraction_use(node, self.gemm, self)
+        if use is None:
+            return False
+        if self.gemm_shape is None:
+            raise AssertionError("matched lane selection requires GEMM shape metadata")
+        if use.domain.chunked and use.domain.physical_span == use.group:
+            # QuACK's concat layout interleaves two halves of each physical row.
+            source = self.graph.normalized_nodes[use.layout_node].source
+            source_shape = tensor_meta_shape(source)
+            if (
+                use.group != 2
+                or source_shape is None
+                or not statically_known_shape_equal(source_shape, self.gemm_shape)
+            ):
+                raise NotImplementedError(
+                    "FlexGEMM chunked lane selection requires two groups within "
+                    "each physical GEMM row"
+                )
+        self.output_contraction_uses[node] = use
+        self.lane_domains[node] = use.domain
+        return True
+
+    def propagate_lane_domain_pointwise(self, node: torch.fx.Node) -> bool:
+        """Carry one lane domain through a pointwise op, rejecting mixed domains."""
+        inputs = tuple(iter_fx_node_inputs((node.args, node.kwargs)))
+        domains = OrderedSet(
+            self.lane_domains[input_node]
+            for input_node in inputs
+            if input_node in self.lane_domains
+        )
+        gemm = self.gemm
+        if not domains or gemm is None:
+            return False
+        # Captures (GEMM-independent tensors) broadcast into the lane domain;
+        # lowering owns which capture kinds a grouped main output accepts.
+        mixed_inputs = any(
+            input_node not in self.lane_domains
+            and tensor_meta_shape(input_node) is not None
+            and self.graph.depends_on(input_node, gemm)
+            for input_node in inputs
+        )
+        if len(domains) > 1 or mixed_inputs:
+            raise NotImplementedError(FLEX_GEMM_LANE_DOMAIN_MIXED_ERROR)
+        self.lane_domains[node] = next(iter(domains))
+        return True
 
     def bind_grouped_layout(self, node: torch.fx.Node, shape: Any, source: Any) -> bool:
         """Attach a grouped TensorSSA layout introduced by a reshape."""
@@ -418,6 +521,19 @@ class GemmLocalReduceAnalysis:
         self.matches[node] = match
         return True
 
+    def reduction_physical_span(self, source: torch.fx.Node, axis: int) -> int:
+        """Return the physical columns folded into each element a reduction reads."""
+        domain = self.lane_domains.get(source)
+        if domain is None:
+            return 1
+        if domain.physical_span != NESTED_TENSORSSA_PHYSICAL_SPAN:
+            raise NotImplementedError(FLEX_GEMM_LANE_DOMAIN_REDUCTION_SPAN_ERROR)
+        if axis != 1:
+            raise NotImplementedError(
+                "nested TensorSSA physical spans support logical axis N only"
+            )
+        return domain.physical_span
+
     def bind_grouped_reduction(
         self,
         node: torch.fx.Node,
@@ -432,7 +548,12 @@ class GemmLocalReduceAnalysis:
         validate_local_reduce_tensorssa_group_size(layout.axis, layout.group)
         if not layout.matches_reduction_dim(reduction.dim):
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
-        self.matches[node] = GemmLocalReduceMatch(node, layout)
+        self.matches[node] = GemmLocalReduceMatch(
+            node, layout, self.reduction_physical_span(reduction.source, layout.axis)
+        )
+        domain = self.lane_domains.get(reduction.source)
+        if domain is not None:
+            self.lane_domains[node] = domain
         return True
 
     def has_physical_grouped_input(self, value: torch.fx.node.Argument) -> bool:
@@ -539,7 +660,14 @@ class GemmLocalReduceAnalysis:
                 or not layout.matches_reduction_dim(normalized.dim)
             ):
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
-            return GemmLocalReduceMatch(value, layout)
+            bound_match = self.matches.get(value)
+            if bound_match is not None:
+                return bound_match
+            return GemmLocalReduceMatch(
+                value,
+                layout,
+                self.reduction_physical_span(normalized.source, layout.axis),
+            )
         if not is_shape_preserving_pointwise_node(value):
             return None
         matches = [
@@ -681,11 +809,7 @@ class GemmLocalReduceAnalysis:
             value, torch.fx.Node
         ):
             return None
-        normalized = self.graph.normalized_nodes.get(grouped_source)
-        if not isinstance(normalized, NormalizedView):
-            return None
-        source_node = normalized.source
-        layout = grouped_tensor_layout(normalized.shape, tensor_meta_shape(source_node))
+        layout = self.grouped_tensors.get(grouped_source)
         if layout is None:
             return None
         if layout.axis != 0:
@@ -694,9 +818,12 @@ class GemmLocalReduceAnalysis:
             if layout.group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
                 return self.match_feed_value(value, grouped_source, layout)
             raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR)
+        normalized = self.graph.normalized_nodes.get(grouped_source)
+        if not isinstance(normalized, NormalizedView):
+            return None
         if layout.group > LOCAL_REDUCE_FRAGMENT_WIDTH:
             raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR)
-        source_meta = source_node.meta.get("val")
+        source_meta = normalized.source.meta.get("val")
         if (
             output_meta is not None
             and source_meta is not None
@@ -806,7 +933,7 @@ class GemmLocalReduceAnalysis:
             return None
         expected_aux_shape = local_reduce_compressed_shape(
             self.gemm_shape or output_meta.shape,
-            match.geometry.group,
+            match.physical_geometry.group,
             match.geometry.axis,
         )
         if not statically_known_shape_equal(expected_aux_shape, value_meta.shape):
