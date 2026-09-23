@@ -62,7 +62,7 @@ from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
-from torch._higher_order_ops.utils import _in_hop_compile
+from torch._higher_order_ops.utils import _hop_compile_tls
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
@@ -915,7 +915,7 @@ def trace_frame(
         and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
         and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
         and torch.cuda.is_current_stream_capturing()
-        and not _in_hop_compile()
+        and not _hop_compile_tls.in_hop_compile
     ):
         raise exc.TorchRuntimeError(
             "torch.compile cannot JIT compile during CUDA graph capture. "

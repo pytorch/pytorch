@@ -361,11 +361,12 @@ def check_meta_consistency(
 import threading
 
 
-_hop_compile_tls = threading.local()
+@dataclass(slots=True)
+class _HOPCompile(threading.local):
+    in_hop_compile: bool = False
 
 
-def _in_hop_compile() -> bool:
-    return getattr(_hop_compile_tls, "in_hop_compile", False)
+_hop_compile_tls = _HOPCompile()
 
 
 @contextmanager
@@ -382,7 +383,7 @@ def setup_compilation_env():
         _temp_remove_pre_dispatch_torch_function_mode,
     )
 
-    old_in_hop_compile = getattr(_hop_compile_tls, "in_hop_compile", False)
+    old_in_hop_compile = _hop_compile_tls.in_hop_compile
     _hop_compile_tls.in_hop_compile = True
     try:
         with (

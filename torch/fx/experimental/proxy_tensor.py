@@ -205,6 +205,7 @@ def is_sym_node(node: _HasMeta) -> bool:
     return "val" in node.meta and isinstance(node.meta["val"], py_sym_types)
 
 
+@dataclass(slots=True)
 class _DisableUpdateTensorTracker(threading.local):
     value: bool = False
 
