@@ -471,6 +471,34 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(obj)
         self.assertEqual(result, 1)
 
+    def test_user_descriptor_get_on_class(self):
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(objtype)
+                return len(calls) * 10
+
+        class Base:
+            d = Desc()
+
+        class Sub(Base):
+            pass
+
+        def fn(cls, x):
+            return x + cls.d, cls.d
+
+        x = torch.ones(3)
+        for cls in (Base, Sub):
+            torch._dynamo.reset()
+            calls.clear()
+            expected = fn(cls, x)
+            expected_calls = list(calls)
+            calls.clear()
+            result = torch.compile(fn, backend="eager", fullgraph=True)(cls, x)
+            self.assertEqual(result, expected)
+            self.assertEqual(calls, expected_calls)
+
     def test_staticmethod_descriptor(self):
         class MyObj:
             @staticmethod
