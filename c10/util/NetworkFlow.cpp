@@ -54,7 +54,7 @@ struct DinicFlowGraph {
     size_t vertex_count = 0;
 
     auto get_idx = [&vertex_count, this](const std::string& name) {
-      if (!mapping.count(name)) {
+      if (!mapping.contains(name)) {
         TORCH_CHECK(vertex_count == vertex_names.size());
         vertex_names.push_back(name);
         size_t idx = vertex_count;
@@ -236,7 +236,7 @@ struct DinicFlowGraph {
   }
 
   MinCutResult minimum_cut(const std::string& s, const std::string& t) {
-    if (mapping.find(s) == mapping.end() || mapping.find(t) == mapping.end()) {
+    if (!mapping.contains(s) || !mapping.contains(t)) {
       return {
           MinCutStatus::INVALID, // status
           0, // max_flow

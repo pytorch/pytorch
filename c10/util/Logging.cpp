@@ -1,4 +1,3 @@
-// @allow-raw-throw
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Lazy.h>
@@ -54,6 +53,9 @@ void ThrowEnforceNotMet(
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg();
   }
+  // TORCH_CHECK has no way to carry the `condition` string or the `caller`
+  // pointer that this Error was built with.
+  // @allow-raw-throw: CAFFE_ENFORCE's throw site
   throw std::move(e);
 }
 
@@ -72,6 +74,9 @@ void ThrowEnforceFiniteNotMet(
     const char* condition,
     const std::string& msg,
     const void* caller) {
+  // TORCH_CHECK has no way to carry the `condition` string or the `caller`
+  // pointer that this EnforceFiniteError was built with.
+  // @allow-raw-throw: CAFFE_ENFORCE_FINITE's throw site
   throw c10::EnforceFiniteError(
       file, line, condition, msg, GetFetchStackTrace()(), caller);
 }
@@ -209,7 +214,8 @@ DDPUsageLoggerType* GetDDPUsageLogger() {
 
 auto& EventSampledHandlerRegistry() {
   static auto& registry =
-      *new std::map<std::string, std::unique_ptr<EventSampledHandler>>();
+      *new std::
+          map<std::string, std::unique_ptr<EventSampledHandler>, std::less<>>();
   return registry;
 }
 
@@ -222,7 +228,7 @@ void InitEventSampledHandlers(
   static bool flag [[maybe_unused]] = [&]() {
     auto& registry = EventSampledHandlerRegistry();
     for (auto& [event, handler] : handlers) {
-      auto entry = registry.find(std::string{event});
+      auto entry = registry.find(event);
       if (entry == registry.end()) {
         entry = registry.emplace(event, nullptr).first;
       }
@@ -239,7 +245,7 @@ const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
 
   // The getter can be executed from different threads.
   std::lock_guard<std::mutex> lock(guard);
-  auto entry = registry.find(std::string{event});
+  auto entry = registry.find(event);
   if (entry == registry.end()) {
     entry = registry.emplace(event, nullptr).first;
   }
@@ -374,6 +380,9 @@ void MessageLogger::DealWithFatal() {
   if (exit_on_fatal_) {
     LOG(FATAL) << stream_.str();
   } else {
+    // source_location_ is the CHECK_* site, not this function, so TORCH_CHECK
+    // would report the wrong location.
+    // @allow-raw-throw: DealWithFatal's throw site, C10_USE_GLOG build
     throw c10::Error(source_location_, stream_.str());
   }
 }
@@ -593,6 +602,9 @@ void MessageLogger::DealWithFatal() {
   if (exit_on_fatal_) {
     abort();
   } else {
+    // source_location_ is the CHECK_* site, not this function, so TORCH_CHECK
+    // would report the wrong location.
+    // @allow-raw-throw: DealWithFatal's throw site, non-glog build
     throw c10::Error(source_location_, stream_.str());
   }
 }
