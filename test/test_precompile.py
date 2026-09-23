@@ -9,7 +9,9 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import torch
@@ -3044,6 +3046,146 @@ class TestPrecompile(TestCase):
             op = torch.ops.quantized.mlprecompile_unbacked_no_meta
             with self.assertRaises(UnsupportedOperatorException):
                 _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
+
+    def test_concurrent_captures_are_serialized(self):
+        # Capture clears the example tensors' .grad and reparametrizes the example
+        # module in place, so two captures of a shared model in flight at once would
+        # undo each other's mutations. One process-wide lock keeps a capture atomic
+        # with respect to another; assert no two are ever inside _capture.
+        real = torch._precompile._capture
+        state_lock = threading.Lock()
+        active = 0
+        max_active = 0
+        all_in = threading.Event()
+
+        def spy(*args, **kwargs):
+            nonlocal active, max_active
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+                if active == 4:
+                    all_in.set()
+            try:
+                # Without the lock all four workers meet here; with it this times out.
+                all_in.wait(timeout=0.5)
+                return real(*args, **kwargs)
+            finally:
+                with state_lock:
+                    active -= 1
+
+        def worker():
+            return torch.compiler.precompile(
+                lambda a: a + 1, torch.ones(2), backend="eager"
+            )
+
+        with (
+            mock.patch.object(torch._precompile, "_capture", spy),
+            ThreadPoolExecutor(4) as pool,
+        ):
+            futures = [pool.submit(worker) for _ in range(4)]
+            # result() re-raises a worker's exception with its traceback
+            results = [future.result() for future in futures]
+
+        self.assertEqual(max_active, 1)
+        for code, _cache in results:
+            self.assertIn("def forward", code)
+
+    def test_nested_capture_does_not_deadlock(self):
+        # Capture runs fn for real, so fn is free to ask for a capture of its own. The
+        # process-wide lock is therefore reentrant: a plain Lock would deadlock the
+        # thread against itself the moment a traced function precompiled anything.
+        def inner(a):
+            return a * 2
+
+        def outer(a):
+            torch.compiler.precompile(inner, torch.ones(2), backend="eager")
+            return a + 1
+
+        # Run on a thread so a regressed (non-reentrant) lock fails here instead of
+        # hanging the shard.
+        results = []
+        errors = []
+
+        def target():
+            try:
+                results.append(
+                    torch.compiler.precompile(outer, torch.ones(2), backend="eager")
+                )
+            except BaseException as e:
+                errors.append(e)
+
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        thread.join(120)
+        if thread.is_alive():
+            # The wedged thread holds the lock forever; free it for the later tests.
+            torch._precompile._CAPTURE_LOCK = threading.RLock()
+            self.fail("nested precompile deadlocked")
+        if errors:
+            raise errors[0]
+        code, _cache = results[0]
+        self.assertIn("def forward", code)
+
+    @unittest.skipIf(not hasattr(os, "fork"), "needs os.fork")
+    def test_capture_lock_survives_a_fork(self):
+        # The capture lock is process-global, and fork copies it in whatever state the
+        # parent left it: a child forked while another parent thread held it inherits a
+        # lock that is held by a thread that does not exist, and its first capture
+        # blocks forever. Run out of process -- forking a worker that may already have
+        # initialized CUDA is not safe -- and bound the child with an alarm so the
+        # regression is a failure rather than a hang.
+        code = textwrap.dedent(
+            """
+            import os, signal, sys, threading, time, traceback, torch
+            import torch._precompile as impl
+
+            held = threading.Event()
+            release = threading.Event()
+
+            def holder():
+                with impl._CAPTURE_LOCK:
+                    held.set()
+                    release.wait(300)
+
+            t = threading.Thread(target=holder)
+            t.start()
+            if not held.wait(60):
+                sys.stderr.write("holder never acquired the lock\\n")
+                sys.exit(3)
+            pid = os.fork()
+            if pid == 0:
+                t0 = time.monotonic()
+
+                def on_alarm(*_):
+                    waited = time.monotonic() - t0
+                    sys.stderr.write(f"no capture after {waited:.0f}s\\n")
+                    sys.stderr.flush()
+                    os._exit(4)
+
+                signal.signal(signal.SIGALRM, on_alarm)
+                signal.alarm(300)
+                try:
+                    torch.compiler.precompile(
+                        lambda a: a + 1, torch.ones(2), backend="eager"
+                    )
+                except BaseException:
+                    traceback.print_exc()
+                    sys.stderr.flush()
+                    os._exit(2)
+                os._exit(0)
+            _, status = os.waitpid(pid, 0)
+            release.set()
+            t.join()
+            sys.exit(os.waitstatus_to_exitcode(status))
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+        )
+        self.assertNotEqual(
+            proc.returncode, 4, f"child deadlocked on the inherited lock: {proc.stderr}"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
 
 
 class _FilesModel(torch.nn.Module):
