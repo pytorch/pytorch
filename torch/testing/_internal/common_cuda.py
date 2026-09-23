@@ -9,6 +9,7 @@ import torch.cuda
 from torch.testing._internal.common_utils import (
     _get_legacy_float32_matmul_precision, _set_legacy_float32_matmul_precision, LazyVal, TEST_NUMBA, TEST_WITH_ROCM,
     TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU)
+from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -197,7 +198,7 @@ def evaluate_platform_supports_flash_attention():
     if TEST_CUDA:
         return SM80OrLater
     if TEST_XPU:
-        return True
+        return PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
     return False
 
 def evaluate_platform_supports_ck_sdpa():

@@ -43,13 +43,13 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
     TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
-    SM80OrLater, SM90OrLater, _get_torch_rocm_version, has_device_side_assert
+    SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
-    skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
+    skipCUDAIf, skipCUDAIfNoCudnn, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -10112,7 +10112,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB')
     def test_upsampling_64bit_indexing_bilinear_channels_last(self, device, dtype):
@@ -10131,7 +10130,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('10GB')
     def test_upsampling_64bit_indexing_bilinear_channels_last_backward(self, device, dtype):
@@ -16289,24 +16287,13 @@ if __name__ == '__main__':
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
     def test_batchnorm(self, device, dims, mode, memory_format, ref_backend, mixed, dtype):
-        # skip conditions are expressed via the test parameters instead of
-        # self._testMethodName because instantiated names carry device/dtype suffixes
-        fmt_ref = (memory_format, ref_backend)
         if torch.version.cuda:
-            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref in (("NCHW", "cpu"), ("NHWC", "NCHW")):
+            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16"):
                 self.skipTest("Failed on CUDA")
-
-            if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
-                self.skipTest("Failed on CUDA")
-
-        if torch.version.hip:
-            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref == ("NCHW", "native") \
-                    and _get_torch_rocm_version() >= (6, 4):
-                # https://github.com/pytorch/pytorch/issues/156513
-                self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
-
-            if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
-                self.skipTest("3D float16 NCHW train failed on ROCm")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
@@ -16899,13 +16886,11 @@ class TestNNCUDA(NNTestCase):
                 hx_val, grad_hy, cx_val, grad_cy)
             compare_cpu_device(outputs_cpu, outputs_device)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/182790")
     @skipCUDAIfNoCudnn
     def test_RNN_cpu_vs_device_no_dropout(self, device):
         dtype = torch.double
         self._test_RNN_cpu_vs_device(device, 0, dtype)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/182666")
     @skipCUDAIfNoCudnn
     def test_RNN_cpu_vs_device_with_dropout(self, device):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
