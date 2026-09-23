@@ -34,7 +34,7 @@ bool supportedConvNode(Node* n) {
     case aten::_convolution: {
       auto transposed_conv =
           constant_as<bool>(n->namedInput("transposed")).value_or(true);
-      // dont handle transposed conv yet or not-constant transpose parameter
+      // don't handle transposed conv yet or not-constant transpose parameter
       return !transposed_conv;
     }
     default:
@@ -106,13 +106,13 @@ bool FoldFrozenConvBatchnorm(Block* b) {
       }
 
       ConvBNParameters params;
-      params.conv_w = conv_w;
-      params.conv_b = conv_b;
-      params.bn_rm = bn_rm;
-      params.bn_rv = bn_rv;
+      params.conv_w = std::move(conv_w);
+      params.conv_b = std::move(conv_b);
+      params.bn_rm = std::move(bn_rm);
+      params.bn_rv = std::move(bn_rv);
       params.bn_eps = bn_eps;
-      params.bn_w = bn_w;
-      params.bn_b = bn_b;
+      params.bn_w = std::move(bn_w);
+      params.bn_b = std::move(bn_b);
       std::tuple<Tensor, Tensor> out = computeUpdatedConvWeightAndBias(params);
       WithInsertPoint guard(conv);
       auto fused_conv_w = b->owningGraph()->insertConstant(std::get<0>(out));
@@ -323,7 +323,7 @@ bool FoldFrozenConvMulOrDiv(Block* b) {
 
       // We've already verified that the second input has numel == 1 or
       // channels-out resize it to the shape that will broadcast to
-      // weight_tensor when the op is run so we dont change weight size
+      // weight_tensor when the op is run so we don't change weight size
       std::vector<int64_t> weight_compatible_size = {out_channels};
       for ([[maybe_unused]] const auto i :
            c10::irange(1, weight_tensor.ndimension())) {

@@ -85,8 +85,7 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
     if reverse:
         out = out.flip(0)
 
-    # Use squeeze(1) to match original implementation
-    return out, (final_hx.squeeze(1), final_cx.squeeze(1))
+    return out, (final_hx.squeeze(0), final_cx.squeeze(0))
 
 
 def lstm_while_loop_impl(

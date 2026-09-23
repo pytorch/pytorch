@@ -47,7 +47,7 @@ class ShardedGradScaler(GradScaler):
     """
     ShardedGradScaler helps perform gradient scaling in a shard aware manner. It extends
     functionality from GradScaler:
-    * Supports Pytorch DDP and FSDP implementations
+    * Supports PyTorch DDP and FSDP implementations
     * Support CPU offloaded tensors (as used in fully sharded data parallel[FSDP])
     * Supports the custom Mixed Precision loss dtype (fp16, bf16) that FSDP returns
     * Sync inf/nan for scaled gradient tensors on any torch.device (where tensors are placed) across

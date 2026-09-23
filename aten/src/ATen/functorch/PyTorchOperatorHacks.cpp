@@ -1,13 +1,10 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <torch/library.h>
 #include <ATen/ATen.h>
-#include <ATen/WrapDimUtils.h>
-#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 
@@ -61,7 +58,7 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optiona
     // Also hit the fused path for contiguous 3D input.
     const auto input_sizes = input.sizes();
     const auto result = at::addmm(*bias, input.view({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
-    return result.view({input_sizes[0], input_sizes[1], result.size(1)});
+    return at::_unsafe_view(result, {input_sizes[0], input_sizes[1], result.size(1)});
   }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
@@ -220,13 +217,11 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
 Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
-    NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {
       return std::get<0>(at::native_dropout(input, p, train));
     }
     return _dropout<false>(input, p, train);
   }();
-  namedinference::propagate_names(result, input);
   return result;
 }
 

@@ -6,6 +6,8 @@ skip:
     - BlenderbotForConditionalGeneration
     - GPTNeoForCausalLM
     - GPTNeoForSequenceClassification
+    # Fails importing transformers.modeling_deberta_v2 with current TorchScript.
+    - DebertaV2ForMaskedLM
     # Fails with even batch size = 1
     - GPTJForCausalLM
     - GPTJForQuestionAnswering

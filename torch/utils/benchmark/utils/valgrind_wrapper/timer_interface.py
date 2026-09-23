@@ -232,7 +232,7 @@ class CallgrindStats:
         """Diff two sets of counts.
 
         One common reason to collect instruction counts is to determine the
-        the effect that a particular change will have on the number of instructions
+        effect that a particular change will have on the number of instructions
         needed to perform some unit of work. If a change increases that number, the
         next logical question is "why". This generally involves looking at what part
         if the code increased in instruction count. This function automates that

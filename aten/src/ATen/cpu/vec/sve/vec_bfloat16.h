@@ -242,9 +242,18 @@ convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
   return {Vectorized<float>(x1), Vectorized<float>(x2)};
 }
 
-inline Vectorized<c10::BFloat16> convert_float_bfloat16(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
+#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
+    !defined(__clang__) &&                                             \
+    ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
+     (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
+// GCC 14/15 can ICE when compiling AArch64 SVE intrinsics with PCH enabled
+// (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
+// backported to only some 14.3 and 15.2 packages, so conservatively guard by
+// upstream minor version.
+__attribute__((optimize("O0")))
+#endif
+inline Vectorized<c10::BFloat16>
+convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
   static_assert(
       Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   svbfloat16_t x1 = svcvt_bf16_f32_z(ptrue, a);
@@ -612,7 +621,7 @@ void inline transpose_mxn<BFloat16>(
     }
     // Works for any count<= vector lanes
     svbool_t pg = svwhilelt_b16((uint64_t)0, (uint64_t)count);
-    const uint16_t* pu16 = reinterpret_cast<const uint16_t*>(p);
+    const uint16_t* pu16 = &p->x;
     svuint16_t v = svld1_u16(pg, pu16);
     return svsel_u16(pg, v, z);
   };
@@ -623,7 +632,7 @@ void inline transpose_mxn<BFloat16>(
       return;
     }
     svbool_t pg = svwhilelt_b16((uint64_t)0, (uint64_t)count);
-    uint16_t* pu16 = reinterpret_cast<uint16_t*>(p);
+    uint16_t* pu16 = &p->x;
     svst1_u16(pg, pu16, v);
   };
 
@@ -636,7 +645,7 @@ void inline transpose_mxn<BFloat16>(
       // Use SVE load+store(from the helpers above) into each row
       for (int r = 0; r < TILE; r++) {
         for (int c = 0; c < TILE; c++) {
-          tile_in[r * TILE + c] = BFloat16(0);
+          tile_in[r * TILE + c].x = 0;
         }
         if (r < m_blk) {
           const BFloat16* srow = src + (i0 + r) * ld_src + j0;
@@ -648,12 +657,12 @@ void inline transpose_mxn<BFloat16>(
       // Transpose tile_in to tile_out (scalar on tiny tile)
       for (int r = 0; r < TILE; r++) {
         for (int c = 0; c < TILE; c++) {
-          tile_out[r * TILE + c] = BFloat16(0);
+          tile_out[r * TILE + c].x = 0;
         }
       }
       for (int r = 0; r < m_blk; r++) {
         for (int c = 0; c < n_blk; c++) {
-          tile_out[c * TILE + r] = tile_in[r * TILE + c];
+          tile_out[c * TILE + r].x = tile_in[r * TILE + c].x;
         }
       }
 
