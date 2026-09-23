@@ -290,11 +290,7 @@ def fused_grad_logits_into(
     if tiles < 1:
         raise ValueError(f"tiles_per_stage must be at least 1, got {tiles}")
     num_rows, V = logits.shape
-    # A launch on the NULL stream, PyTorch's default, goes to the current device
-    # rather than the tensors', so make theirs current. The compiled kernel is
-    # context-independent, so one compile serves every device.
-    with torch.accelerator.device_index(logits.device.index):
-        compiled = _compile_fused_grad_logits(logits.dtype, g.dtype, threads, tiles)
-        compiled(
-            logits, row_scale, target, g, log_row_sum, shifted_target_logit, V, num_rows
-        )
+    compiled = _compile_fused_grad_logits(logits.dtype, g.dtype, threads, tiles)
+    compiled(
+        logits, row_scale, target, g, log_row_sum, shifted_target_logit, V, num_rows
+    )
