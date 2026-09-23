@@ -2581,7 +2581,17 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.add(left, right), torch.add(left.to_dense(), right.to_dense()))
         out = self._make_blocked_add_operand(layout, device, [], dtype=torch.float64)
         self.assertIs(torch.add(left, left, out=out), out)
-        self.assertEqual(out, torch.add(left.to_dense(), left.to_dense()))
+        dense_out = torch.empty(left.shape, device=device, dtype=torch.float64)
+        torch.add(left.to_dense(), left.to_dense(), out=dense_out)
+        self.assertEqual(out, dense_out)
+
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, 16777217)], dtype=torch.int64)
+        right = self._make_blocked_add_operand(layout, device, [], dtype=torch.float32)
+        out = self._make_blocked_add_operand(layout, device, [], dtype=torch.float64)
+        dense_out = torch.empty(left.shape, device=device, dtype=torch.float64)
+        torch.add(left.to_dense(), right.to_dense(), out=dense_out)
+        self.assertIs(torch.add(left, right, out=out), out)
+        self.assertEqual(out, dense_out, atol=0, rtol=0)
 
     @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
     @dtypes(torch.float16, torch.bfloat16)

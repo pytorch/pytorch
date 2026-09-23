@@ -362,7 +362,7 @@ void add_out_sparse_compressed_blocked(
   const auto index_dtype = promoteTypes(compressed1.scalar_type(), compressed2.scalar_type());
 
   if (mat2._nnz() == 0) {
-    auto out_values = mat1.values().to(out_dtype, /*non_blocking=*/false, /*copy=*/true);
+    auto out_values = mat1.values().to(common_dtype).to(out_dtype, /*non_blocking=*/false, /*copy=*/true);
     result_impl->set_member_tensors(compressed1.to(index_dtype), plain1.to(index_dtype), out_values, mat1.sizes());
     return;
   }
