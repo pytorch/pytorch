@@ -725,6 +725,7 @@
 # /torch/numa/
 # /torch/overrides.py
 # /torch/py.typed
+/torch/pytree.py @XuehaiPan
 # /torch/quasirandom.py
 # /torch/random.py
 # /torch/return_types.py
