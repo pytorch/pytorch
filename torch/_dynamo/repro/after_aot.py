@@ -86,6 +86,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
+from torch._functorch.fx_minifier import symbolic_meta_leaves
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._library.fake_class_registry import FakeScriptObject
@@ -760,10 +761,21 @@ if "__compile_source__" in globals():
     used_syms = {}
 
     # Extract from graph placeholders and their corresponding arguments
+    placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
     placeholder_targets = fx_placeholder_targets(gm)
-    for placeholder, arg in zip(placeholder_targets, args):
+    for placeholder_node, placeholder, arg in zip(
+        placeholder_nodes, placeholder_targets, args
+    ):
         if isinstance(arg, (int, torch.SymInt)):
-            writer.symint(placeholder, arg)
+            placeholder_val = placeholder_node.meta.get("val")
+            if (
+                isinstance(arg, int)
+                and isinstance(placeholder_val, torch.SymInt)
+                and placeholder_val.node.hint == arg
+            ):
+                writer.symint(placeholder, placeholder_val)
+            else:
+                writer.symint(placeholder, arg)
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
@@ -904,6 +916,10 @@ def save_graph_repro(
         tracing_mode = "real"
         if any(
             has_free_symbols(a) for a in args if not isinstance(a, FakeScriptObject)
+        ) or any(
+            has_free_symbols(symbolic_meta_leaves(node.meta.get(meta_name)))
+            for node in gm.graph.nodes
+            for meta_name in ("val", "example_value")
         ):
             tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
