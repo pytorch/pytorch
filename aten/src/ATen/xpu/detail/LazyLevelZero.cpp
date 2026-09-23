@@ -63,11 +63,13 @@ ZE_STUB(
     const ze_module_desc_t*,
     ze_module_handle_t*,
     ze_module_build_log_handle_t*)
+ZE_STUB(zeModuleDestroy, ze_module_handle_t)
 ZE_STUB(
     zeKernelCreate,
     ze_module_handle_t,
     const ze_kernel_desc_t*,
     ze_kernel_handle_t*)
+ZE_STUB(zeKernelDestroy, ze_kernel_handle_t)
 ZE_STUB(zeKernelGetProperties, ze_kernel_handle_t, ze_kernel_properties_t*)
 ZE_STUB(
     zeMemGetAllocProperties,
