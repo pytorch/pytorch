@@ -16,6 +16,8 @@
 #include <ATen/ops/_unique_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/equal.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/index_select.h>
 #include <ATen/ops/narrow.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/unbind.h>
@@ -48,7 +50,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
     if (return_inverse) {
       inverse_indices.resize_(input.sizes());
     }
-    return std::make_tuple(output, inverse_indices, counts);
+    return std::make_tuple(
+        std::move(output), std::move(inverse_indices), std::move(counts));
   }
 
   int num_threads = at::get_num_threads();
@@ -103,7 +106,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
       }
     });
   }
-  return std::make_tuple(output, inverse_indices, counts);
+  return std::make_tuple(
+      std::move(output), std::move(inverse_indices), std::move(counts));
 }
 
 // check whether the element on index i is `unique`,
@@ -171,7 +175,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
     if (return_inverse) {
       inverse_indices.resize_(input.sizes());
     }
-    return std::make_tuple(output, inverse_indices, counts);
+    return std::make_tuple(
+        std::move(output), std::move(inverse_indices), std::move(counts));
   }
 
   // index of first unique in each consecutive section
@@ -260,7 +265,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
       }
     });
   }
-  return std::make_tuple(output, inverse_indices, counts);
+  return std::make_tuple(
+      std::move(output), std::move(inverse_indices), std::move(counts));
 }
 
 template <typename scalar_t>
@@ -318,7 +324,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     output.resize_({output_size});
   }
 
-  return std::make_tuple(output, inverse_indices, counts);
+  return std::make_tuple(
+      std::move(output), std::move(inverse_indices), std::move(counts));
 }
 
 template<class ForwardIt>
@@ -375,7 +382,8 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
           at::empty({0}, self.options().dtype(kLong));
       Tensor counts = at::empty({0}, self.options().dtype(kLong));
 
-      return std::make_tuple(output, inverse_indices, counts);
+      return std::make_tuple(
+          std::move(output), std::move(inverse_indices), std::move(counts));
     }
 
     TORCH_CHECK(num_zero_dims == 0,
@@ -410,12 +418,13 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
   Tensor input_sorted;
   if (!consecutive) {
-    input_sorted = at::empty(input_flat.sizes(), input_flat.options());
-    for (const auto i : c10::irange(indices.size())) {
-      input_sorted[i] = input_flat[indices[i]];
-    }
+    const auto indices_tensor = at::from_blob(
+        indices.data(),
+        {static_cast<int64_t>(indices.size())},
+        at::kLong);
+    input_sorted = at::index_select(input_flat, 0, indices_tensor);
   } else {
-    input_sorted = input_flat;
+    input_sorted = std::move(input_flat);
   }
 
   Tensor inverse_indices = at::empty(indices.size(), self.options().dtype(kLong));
@@ -443,14 +452,14 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
   if (self.scalar_type() == kBool) {
     auto [output, inverse, _] = unique_cpu_bool_template(
         self, return_inverse, /* return_counts */false);
-    return std::make_tuple(output, inverse);
+    return std::make_tuple(std::move(output), std::move(inverse));
   }
   return AT_DISPATCH_V2(self.scalar_type(), "unique", [&] AT_WRAP({
     // The current CPU implementation of unique always sort due to
     // this is faster than hash table
     auto [output, inverse, _] = unique_cpu_sorted_template<scalar_t>(
         self, return_inverse, /* return_counts */false, IsUnique<scalar_t, /* equal_nan */false>());
-    return std::make_tuple(output, inverse);
+    return std::make_tuple(std::move(output), std::move(inverse));
   }), AT_EXPAND(AT_ALL_TYPES), kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 

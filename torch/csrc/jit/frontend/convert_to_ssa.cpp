@@ -108,7 +108,7 @@ struct ControlFlowLoadStores {
   //                    }
   // all loop_carried_... lists are the same length and represent the value of
   // loop-carried variables whose definitions are updated as the loop executes
-  // in a way that ensure single static assignment.
+  // in a way that ensures single static assignment.
   void addLoopLoadStores(Node* n) {
     auto body_block = n->blocks().at(0);
     auto loop_vars = addControlFlowLoadStores(body_block);
@@ -328,7 +328,7 @@ struct LoopContinuations {
 
 // Converting to SSA works in multiple parts. First, we add control flow
 // loads and stores to the graph. Now that control flow outputs are set,
-// we can set remove Break & Continue to have the correct continuations to the
+// we can remove Break & Continue to have the correct continuations to the
 // end of the block (LoopContinuation). Then we inline the loop condition into
 // the graph. Then, we erase Loads & Stores. Finally, we remove
 // LoopContinuations from the graph.

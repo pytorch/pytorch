@@ -15,22 +15,27 @@ Instructions to update:
 
 ## `quack`
 
-This is a subset of the full quack library, currently vendoring the following implementation paths:
+This is a subset of the full quack library, currently vendoring RMSNorm, the
+EpiMod GEMM runtime used by `torch._inductor.kernel.flex_gemm`, and the
+symmetric GEMM, together with their transitive dependencies.
 
-- RMSNorm
-- Lower-level GEMM epilogue implementation dependencies used by PyTorch-owned adapters
-
-Note: There are a couple of patchsets applied to make the library vendorable - at a high level:
-- Change exports from absolute `quack.module` to relative `.module`
-- Rename cache directories / worker module paths so this copy is independent of any external `quack` package
-- Remove custom-op registration from RMSNorm; PyTorch owns the public operator adapters
+`tools/vendoring/quack/flex_gemm_patches/series` is applied to the pristine
+upstream checkout before copying. The patches are git-format against the
+upstream repository layout (`quack/`, `tests/`) so they remain directly
+upstreamable. After copying, the vendoring script mechanically rewrites every
+`quack` package reference: imports become absolute `torch._vendor.quack`
+imports, and `torch.library` op namespaces, the autotuner package name, and the
+on-disk cache name get a `torch_vendor_quack` prefix so the copy cannot collide
+with a pip-installed `quack`.
 
 Source: https://github.com/Dao-AILab/quack
 
-The pinned upstream commit is the `PINNED_SHA` constant in
+The vendored subset's pinned upstream commit is the `PINNED_SHA` constant in
 `tools/vendoring/quack/vendor.sh` (`__version__` in the generated vendored
 package records the upstream version). That constant is the single source of
-truth; do not duplicate the pin here.
+truth; do not duplicate the pin here. The vendoring script verifies that the
+pinned commit is reachable from Dao-AILab/quack main before applying local
+patches.
 
 Instructions to update:
 
@@ -49,5 +54,7 @@ Instructions to update the subset of quack being vendored:
 
 - In the `vendor.sh script`:
   - Update the files to be copied (`FILES`)
-  - Update the `rewrite_imports` methods is there are more patterns required
-- Add any extra patchsets needed in `tools/vendoring/quack/patches`
+  - Update `rewrite_package_references` if the mechanical rewrite misses a
+    new `quack` reference form
+- Add FlexGEMM deltas as git-format patches to
+  `tools/vendoring/quack/flex_gemm_patches` and list them in `series`

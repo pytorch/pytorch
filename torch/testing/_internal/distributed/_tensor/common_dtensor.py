@@ -632,6 +632,15 @@ def skip_unless_torch_gpu(method: T) -> T:
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
+def _get_device_type(world_size: int) -> str:
+    if (
+        not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+        or DEVICE_COUNT < world_size
+    ):
+        return "cpu"
+    return DEVICE_TYPE
+
+
 class DTensorTestMixin:
     """Shared test helpers for DTensorTestBase and DTensorContinuousTestBase."""
 
@@ -641,13 +650,7 @@ class DTensorTestMixin:
 
     @property
     def device_type(self) -> str:
-        if (
-            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
-            or DEVICE_COUNT < self.world_size
-        ):
-            return "cpu"
-        else:
-            return DEVICE_TYPE
+        return _get_device_type(self.world_size)
 
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
@@ -697,17 +700,16 @@ class DTensorTestMixin:
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        device_type = _get_device_type(cls.world_size)
+        backend = dist.get_default_backend_for_device(device_type)
         return backend
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Set device before initializing process group to ensure
-        # each rank is bound to the correct GPU. However, if world_size > device_count,
-        # we skip the test.
-        if torch.accelerator.is_available():
+        # Bind accelerator ranks unless the test falls back to CPU.
+        if _get_device_type(world_size) != "cpu" and torch.accelerator.is_available():
             if world_size > torch.accelerator.device_count():
-                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+                sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             else:
                 torch.accelerator.set_device_index(rank)
 
@@ -802,12 +804,13 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
         )
         if requires_gpu and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
 
         if backend not in [
             "nccl",
+            "nccl-legacy",
             "gloo",
             "mpi",
             f"cpu:gloo,{self.device_type}:{curr_backend}",
@@ -821,8 +824,8 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if "nccl" in backend or "xccl" in backend:
-            # set device for nccl pg for collectives
+        if requires_gpu:
+            # set device for accelerator pg for collectives (nccl/xccl/hccl)
             # TODO: if users want to enable testing across hosts, we may need
             # to change this part.
             torch.accelerator.set_device_index(self.rank)
@@ -855,7 +858,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
 
         if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
-            # of the most pripority, which means if the test specifies to use CPU for
+            # of the most priority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
             # To avoid this and better respect `self.device_type`, we add this branch to
             # enforce barrier() to use CPU when `self.device_type` is CPU and other
@@ -1530,9 +1533,10 @@ def validate_sharding_rule_sample_backward(
         return None
 
     # DTensor backward
-    assert len(input_placements) == len(full_tensors), (  # noqa: S101
-        f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"
-    )
+    if len(input_placements) != len(full_tensors):
+        raise AssertionError(
+            f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"
+        )
     dt_tensors = [
         distribute_tensor(c, device_mesh, (p,))
         for c, p in zip(_clone_with_grad(full_tensors), input_placements, strict=True)

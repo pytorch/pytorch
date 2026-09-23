@@ -149,7 +149,7 @@ class StorageWriter(abc.ABC):
     @abc.abstractmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         """
-        Check if the given checkpoint_id is supported by the storage. This allow
+        Check if the given checkpoint_id is supported by the storage. This allows
         us to enable automatic storage selection.
         """
         ...
@@ -173,7 +173,7 @@ class StorageReader(abc.ABC):
     in a distributed checkpoint. As part of initialization, each instance
     is told its role.
 
-    A subclass should expected the following sequence of calls by ``load_state_dict``:
+    A subclass should expect the following sequence of calls by ``load_state_dict``:
 
     0) (all ranks) set checkpoint_id if users pass a valid checkpoint_id.
     1) (all ranks) read_metadata()
@@ -282,7 +282,7 @@ class StorageReader(abc.ABC):
     @abc.abstractmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         """
-        Check if the given checkpoint_id is supported by the storage. This allow
+        Check if the given checkpoint_id is supported by the storage. This allows
         us to enable automatic storage selection.
         """
         ...
