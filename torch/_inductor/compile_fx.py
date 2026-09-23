@@ -435,17 +435,13 @@ def record_original_output_strides(gm: GraphModule) -> None:
     output_node.meta["original_output_strides"] = output_strides
 
 
-def record_original_output_aliases(
-    gm: GraphModule,
-    user_visible_output_idxs: Sequence[int],
-) -> None:
+def record_original_output_aliases(gm: GraphModule) -> None:
     output = output_node(gm)
     if "original_output_aliases" in output.meta:
         return
 
     inputs = list(gm.graph.find_nodes(op="placeholder"))
     outputs = pytree.arg_tree_leaves(*output.args)
-    visible_output_idxs = tuple(user_visible_output_idxs)
 
     input_storages = [get_node_storage(node) for node in inputs]
     output_storages = [
@@ -456,13 +452,7 @@ def record_original_output_aliases(
     input_output_aliases: list[tuple[int, int]] = []
     output_output_aliases: list[tuple[int, int]] = []
 
-    for position, output_idx in enumerate(visible_output_idxs):
-        if not 0 <= output_idx < len(outputs):
-            raise AssertionError(
-                f"Output index {output_idx} is out of range for {len(outputs)} outputs"
-            )
-
-        storage = output_storages[output_idx]
+    for output_idx, storage in enumerate(output_storages):
         if storage is None:
             continue
 
@@ -473,7 +463,7 @@ def record_original_output_aliases(
         )
         output_output_aliases.extend(
             (other_output_idx, output_idx)
-            for other_output_idx in visible_output_idxs[:position]
+            for other_output_idx in range(output_idx)
             if output_storages[other_output_idx] == storage
         )
 
@@ -481,6 +471,16 @@ def record_original_output_aliases(
         "input_output": tuple(input_output_aliases),
         "output_output": tuple(output_output_aliases),
     }
+
+
+def _recursive_record_original_output_aliases(gm: GraphModule) -> None:
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(gm, node.args[0].target)
+        _recursive_record_original_output_aliases(subgraph)
+
+    record_original_output_aliases(gm)
 
 
 def _recursive_record_original_output_strides(gm: GraphModule) -> None:
@@ -1729,6 +1729,8 @@ class _InProcessFxCompile(FxCompile):
                     fake_mode = fake_tensor_prop(gm, example_inputs)
 
             _recursive_record_original_output_strides(gm)
+            # Capture aliases before post-grad passes when an earlier stage did not.
+            _recursive_record_original_output_aliases(gm)
 
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
@@ -2729,6 +2731,10 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
+    # In Training, capture input/output and output/output aliases before joint passes;
+    # partitioning later selects the forward outputs.
+    _recursive_record_original_output_aliases(gm)
+
     cuda_context = get_cuda_device_context(gm)
     with cuda_context:
         # We can skip the invoke_subgraph because the
@@ -2925,6 +2931,9 @@ def compile_fx_forward(
         # pad_mm (run as part of joint_graph_passes) can introduce views with
         # padded strides that would be incorrectly captured as "original".
         _recursive_record_original_output_strides(gm)
+        # Inference skips partition_fn, so capture input/output and output/output
+        # aliases here before joint passes.
+        _recursive_record_original_output_aliases(gm)
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
