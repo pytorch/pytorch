@@ -235,10 +235,18 @@ struct C10_API PyInterpreterVTable {
       torch::jit::Stack* stack,
       bool has_symbolic_sizes,
       bool* has_python_cia) const = 0;
-  // try a torch.library registered fake implementation for op
-  virtual bool fake_try_custom_op_impl(
+  // Try the op's registered Python Meta implementation while preserving the
+  // caller's Meta dispatch and in-kernel state.
+  virtual bool fake_try_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
+  // Try a torch.library fake implementation. real (nullable, borrowed) is the
+  // fake_run_real_op result, used if a profile-generated fake kernel has no
+  // profile for these inputs.
+  virtual bool fake_try_custom_op_impl(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      PyObject* real) const = 0;
   // try the Python op_implementations handlers for op
   virtual bool fake_try_op_impl(
       const c10::OperatorHandle& op,
@@ -253,19 +261,28 @@ struct C10_API PyInterpreterVTable {
   virtual bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
-  virtual bool fake_infer_from_real_tensors(
+  virtual bool is_symbolic_wrapped_number(const TensorImpl* self) const = 0;
+  // Infer the outputs of a custom op with no fake kernel from real (borrowed).
+  virtual bool fake_infer_from_real_out(
       const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const = 0;
+      torch::jit::Stack* stack,
+      PyObject* real) const = 0;
   // delegates to the mode's fake tensor converter to build a meta tensor
   virtual c10::intrusive_ptr<TensorImpl> to_meta_tensor(
       const c10::intrusive_ptr<TensorImpl>& real) const = 0;
   // whether the active fake mode permits non-fake (real) tensor inputs, reading
   // the live Python value (mode attr + fake_tensor_tls override)
   virtual bool allow_non_fake_inputs() const = 0;
-  // run op on real tensors to add hints to fake outputs
+  // propagate_real_tensors: run op on the real tensors shadowing its fake args,
+  // before any fake kernel runs. Returns a new reference, or nullptr if an arg
+  // has no real tensor yet.
+  virtual PyObject* fake_run_real_op(
+      const c10::OperatorHandle& op,
+      const torch::jit::Stack& fake_args) const = 0;
+  // stamp real (borrowed) onto the fake outputs on top of stack
   virtual void propagate_real_tensors(
       const c10::OperatorHandle& op,
-      const torch::jit::Stack& fake_args,
+      PyObject* real,
       torch::jit::Stack* stack) const = 0;
 };
 
