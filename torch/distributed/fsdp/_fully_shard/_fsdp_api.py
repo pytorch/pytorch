@@ -45,8 +45,8 @@ class MixedPrecisionPolicy:
             gradient dtypes instead of issuing additional collectives. Set an
             explicit ``reduce_dtype`` to give the group a common dtype. Reduced
             sharded gradients use each parameter's ``grad_dtype`` as specified before calling
-            :func:`fully_shard`. Changing this policy afterward is unsupported,
-            including before the first forward. (Default: ``None``)
+            :func:`fully_shard`. Changing this policy afterward is unsupported
+            and is not checked, including before the first forward. (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed

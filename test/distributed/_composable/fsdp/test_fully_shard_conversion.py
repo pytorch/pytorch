@@ -287,37 +287,6 @@ class TestFullyShardConversion(TestCase):
         self._assert_parity(model, reference, check_override=True)
 
     @parametrize(
-        "initial_policy,replacement_policy,boundary",
-        [
-            ("default", torch.float32, "forward"),
-            (torch.float32, None, "forward"),
-            (None, torch.float32, "forward"),
-            ("default", torch.bfloat16, "forward_after_warmup"),
-            ("default", torch.float32, "conversion"),
-        ],
-    )
-    def test_grad_dtype_change_after_fully_shard_rejected(
-        self, device, initial_policy, replacement_policy, boundary
-    ):
-        model = nn.Linear(4, 4, bias=False, device=device)
-        if initial_policy != "default":
-            model.weight.grad_dtype = initial_policy
-        fully_shard(model, mesh=self.mesh)
-        inp = torch.ones(2, 4, device=device)
-        if boundary == "forward_after_warmup":
-            model(inp).sum().backward()
-            model.zero_grad(set_to_none=True)
-
-        # Setting the default's current dtype explicitly also changes policy:
-        # future parameter conversions would otherwise stop following dtype.
-        model.weight.grad_dtype = replacement_policy
-        with self.assertRaisesRegex(RuntimeError, "grad_dtype.*fully_shard"):
-            if boundary == "conversion":
-                model.to(torch.bfloat16)
-            else:
-                model(inp)
-
-    @parametrize(
         "orig_dtype,param_dtype",
         [(torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32)],
     )

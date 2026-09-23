@@ -211,8 +211,6 @@ class FSDPParam:
     _orig_param_uid: int
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
-    _installed_has_grad_dtype_override: bool
-    unsharded_grad_dtype: torch.dtype | None
 
     def __init__(
         self,
@@ -279,10 +277,11 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
-        # Snapshot before any rewrite of `param` (e.g. spmd_types -> DTensor).
+        # Configure grad_dtype before fully_shard(); later direct edits are
+        # unsupported and are not checked, including before lazy initialization.
+        # Capture the policy before parameter rewrites (e.g. spmd_types -> DTensor).
         self._has_sharded_grad_dtype_override = param._has_grad_dtype_override
         self.sharded_grad_dtype = param.grad_dtype
-        self._installed_has_grad_dtype_override = self._has_sharded_grad_dtype_override
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -822,10 +821,6 @@ class FSDPParam:
             param_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
-        if reduce_dtype is not None:
-            self.unsharded_grad_dtype = reduce_dtype
-        else:
-            self.unsharded_grad_dtype = self.sharded_grad_dtype
 
     def _init_extensions(self) -> None:
         inner_tensor = self._sharded_local_tensor
@@ -972,7 +967,6 @@ class FSDPParam:
         )
 
     def to_sharded(self) -> None:
-        self.check_grad_dtype()
         self._setattr_on_modules(self.sharded_param)
         self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
@@ -1018,7 +1012,6 @@ class FSDPParam:
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:
-        self.check_grad_dtype()
         # Assume that the data has been allocated and all-gathered
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
         self._setattr_on_modules(self._unsharded_param)
@@ -1177,6 +1170,16 @@ class FSDPParam:
         return self._unsharded_param
 
     @property
+    def unsharded_grad_dtype(self) -> torch.dtype | None:
+        if self.reduce_dtype is not None:
+            return self.reduce_dtype
+        if self._has_sharded_grad_dtype_override:
+            return self.sharded_grad_dtype
+        # Match init_dtype_attrs()'s snapshot even if conversion or loading
+        # has already changed sharded_grad_dtype.
+        return self.orig_dtype
+
+    @property
     def unsharded_grad_data(self) -> torch.Tensor:
         grad = self.unsharded_param.grad
         if grad is None:
@@ -1279,39 +1282,11 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
-    def check_grad_dtype(self) -> None:
-        # Direct grad_dtype edits after fully_shard(), including before lazy
-        # init, are intentionally unsupported. Conversion and state-dict loading
-        # restore the captured policy instead of adopting a new user policy.
-        owners = [
-            (
-                self.sharded_param,
-                self._installed_has_grad_dtype_override,
-                self.sharded_grad_dtype,
-            )
-        ]
-        if (param := getattr(self, "_unsharded_param", None)) is not None:
-            owners.append((param, True, self.unsharded_grad_dtype))
-        if (
-            self.sharded_state == ShardedState.SHARDED_POST_FORWARD
-            and (param := self._sharded_post_forward_param) is not None
-        ):
-            owners.append((param, True, self.sharded_grad_dtype))
-        for param, has_override, dtype in owners:
-            if param._has_grad_dtype_override != has_override or (
-                has_override and param.grad_dtype != dtype
-            ):
-                raise RuntimeError(
-                    "Changing grad_dtype after fully_shard() is not supported. "
-                    "Configure grad_dtype before calling fully_shard()."
-                )
-
     def check_gradient_conversion(
         self,
         converted_dtype: Callable[[torch.Tensor], torch.dtype],
         converted_device: Callable[[torch.Tensor], torch.device] | None = None,
     ) -> None:
-        self.check_grad_dtype()
         param = self.sharded_param
         has_override = self._has_sharded_grad_dtype_override
         grad_dtype = self.sharded_grad_dtype
@@ -1366,10 +1341,6 @@ class FSDPParam:
             and not self.sharded_param._has_grad_dtype_override
         ):
             self.sharded_param.grad_dtype = grad_dtype
-        # Parameter-valued checkpoints may bring explicit metadata even when
-        # FSDP's captured policy follows the parameter dtype.
-        self._installed_has_grad_dtype_override = new_param._has_grad_dtype_override
-
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
