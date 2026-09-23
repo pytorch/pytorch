@@ -1152,7 +1152,14 @@ def export_python(
     on-disk artifact and returns a runnable, so ``fn`` arrives via ``@`` and the
     example inputs move to a keyword-only ``example_inputs`` list.
 
-    Python attributes and Python control flow are specialized at capture and must remain compatible with the example.
+    Keyword call arguments and positional defaults are normalized onto ``fn``'s full
+    positional signature (so ``rope(q=..., k=...)`` works and omitted defaults do not
+    change the artifact arity). Runtime arguments must be ``Tensor`` pytrees or direct
+    ``nn.Module`` arguments. Python scalar/config arguments are rejected because
+    ``make_fx`` specializes their values without emitting runtime guards; close such
+    constants over in ``fn`` instead. Other keyword-only parameters are not expressible
+    in the artifact's positional convention and are rejected.
+    Other Python attributes and Python control flow are specialized at capture and must remain compatible with the example.
     That includes ``torch.is_grad_enabled()``: capture traces with grad enabled so a
     backward inside ``fn`` is built as graph ops, so a ``fn`` that branches on it always
     captures the grad-enabled branch, whatever the grad mode of the call that triggered
