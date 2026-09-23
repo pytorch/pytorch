@@ -2942,11 +2942,10 @@ class TestPrecompile(TestCase):
         self.assertTrue(all(f["trivial"] for f in frames[1:]))
         self.assertEqual([len(f["variants"]) for f in frames[:2]], [1, 0])
         self.assertEqual(_serving_mode(frames), "standalone")
-        # Only a continuation Dynamo never traced is served that way: one it
-        # compiled but kept no variant of still sends the capture to installing.
-        frames[1]["trivial"] = False
+        # A bypassed continuation still sends the capture to installing.
+        frames[1].update(trivial=False, bypassed=True)
         self.assertEqual(_serving_mode(frames), "installed")
-        frames[1]["trivial"] = True
+        frames[1].update(trivial=True, bypassed=False)
         backends = {
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
             for backend_id, backend in package.cached_backends.items()
@@ -4807,6 +4806,11 @@ class TestPrecompileDynamoCapture(TestCase):
                 cap(self.model, self.x2)
                 raise KeyError("the block's own")
         self.assertFalse(os.path.exists(self.artifact))
+        disk_full = OSError("disk full")
+        with mock.patch("torch._precompile._write_artifact", side_effect=disk_full):
+            with self.assertRaisesRegex(PrecompileError, "could not write"):
+                with self._capture(self.mod.single, backend="eager") as cap:
+                    cap(self.model, self.x2)
 
     def test_the_tracer_knobs_reach_the_session(self):
         from torch._dynamo.precompile_package import default_guard_filter_fn
@@ -4827,8 +4831,19 @@ class TestPrecompileDynamoCapture(TestCase):
             with self._capture(self.mod.single, backend="eager", tracer=risky) as cap:
                 cap(self.model, self.x2)
         accept = DynamoTracer(guard_filter_fn=drop_x, require_no_risky_drops=False)
+        os.remove(self.artifact)
         with self._capture(self.mod.single, backend="eager", tracer=accept) as cap:
             cap(self.model, self.x2)
+        load(self.artifact, self.cache)
+
+        # Without automatic dynamic the second shape recompiles, which the limit
+        # stops: the artifact holds only the first shape's variant.
+        limited = DynamoTracer(dynamic=False, recompile_limit=1)
+        with self._capture(self.mod.single, backend="eager", tracer=limited) as cap:
+            cap(self.model, self.x2)
+            cap(self.model, self.x3)
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+            load(self.artifact, self.cache)(self.model, self.x3)
 
     def test_the_strict_gate_refuses_dropped_guards(self):
         # The default filter drops the identity guards that cannot be
