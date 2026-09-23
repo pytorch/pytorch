@@ -3175,6 +3175,20 @@ def compile_fx(
                 compile_region_name=compile_region_name,
             )
 
+    if config.readable_wrapper and config.triton.autotune_at_compile_time is None:
+        # readable_wrapper pins each Triton kernel to its compile-time tuned config.
+        # Decompositions read the flag too, so it is set before tracing, and again in
+        # compile_fx_inner for a lazy backward.
+        with config.patch({"triton.autotune_at_compile_time": True}):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=inner_compile,
+                decompositions=decompositions,
+                ignore_shape_env=ignore_shape_env,
+                compile_region_name=compile_region_name,
+            )
+
     # Keep region names out of graph_kwargs so they don't perturb FX cache keys.
     inner_compile = functools.partial(
         inner_compile,
