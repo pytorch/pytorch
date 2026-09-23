@@ -241,8 +241,8 @@ def bind_args_cached(
     spec = _get_spec(func)
 
     se = tx.output.side_effects
-    pending_defaults = func.__defaults__ or ()
-    pending_kwdefaults = func.__kwdefaults__ or {}
+    pending_defaults: tuple[object, ...] = func.__defaults__ or ()
+    pending_kwdefaults: dict[str, object] = func.__kwdefaults__ or {}
 
     if se.has_pending_mutation_of_attr(vt, "__defaults__"):
         d = vt.tp_getattro_impl(tx, "__defaults__")

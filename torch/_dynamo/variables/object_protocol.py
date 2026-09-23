@@ -2475,6 +2475,24 @@ def object_generic_setattr_str(
       4. AttributeError
     """
 
+    if (
+        torch.distributed.is_available()
+        and isinstance(obj, variables.UserDefinedObjectVariable)
+        and type(obj.value) is torch.distributed.P2POp
+        and (
+            tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+            or name in obj.value.__dict__
+        )
+    ):
+        unimplemented(
+            gb_type="P2POp mutation",
+            context=f"object={obj}, name={name}, value={value}",
+            explanation="Dynamo does not support mutating torch.distributed.P2POp instances.",
+            hints=[
+                "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile.",
+            ],
+        )
+
     getset = obj.lookup_tp_getset_member(name)
     if getset is not None:
         if getset.setter is None:

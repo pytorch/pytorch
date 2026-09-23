@@ -4223,6 +4223,14 @@
   "GB9860": [
     {
       "Gb_type": "P2POp mutation",
+      "Context": "object={obj}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating torch.distributed.P2POp instances.",
+      "Hints": [
+        "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile."
+      ]
+    },
+    {
+      "Gb_type": "P2POp mutation",
       "Context": "object={self}, name={name}, value={value}",
       "Explanation": "Dynamo does not support mutating torch.distributed.P2POp instances.",
       "Hints": [
