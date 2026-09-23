@@ -2190,8 +2190,18 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_records_consumer_stream(self):
+        # A backend can register a device impl of fsdp::record_grad_output_stream at
+        # import time. Then the op is not a no-op on that device, so the not-opted-in
+        # case is not testable there. Run only the opted-in case on such a device.
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives  # noqa: F401
+
+        backend_has_impl = torch._C._dispatch_has_kernel_for_dispatch_key(
+            "fsdp::record_grad_output_stream",
+            torch._C._dispatch_key_for_device(device_type.type),
+        )
+        needs_record_stream = [True] if backend_has_impl else [True, False]
         self.run_subtests(
-            {"needs_record_stream": [True, False], "mixed_precision": [False, True]},
+            {"needs_record_stream": needs_record_stream, "mixed_precision": [False, True]},
             self._test_reduce_scatter_records_consumer_stream,
         )
 
