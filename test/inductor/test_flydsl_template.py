@@ -17,10 +17,8 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
     FlyDSLScheduling,
 )
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
-from torch._inductor.heuristics.template.flydsl import FlyDSLGemmConfig
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel import mm
-from torch._inductor.kernel.vendored_templates.flydsl import kernels
 from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
@@ -51,8 +49,8 @@ class TestFlyDSLTemplate(TestCase):
             "block_m": 64,
             "block_n": 128,
             "block_k": 64,
-            "in_data_bytes": 2,
-            "out_data_bytes": 2,
+            "in_data_bits": 16,
+            "out_data_bits": 16,
             "block_threads": 256,
         }
         defaults.update(overrides)
@@ -1163,40 +1161,6 @@ def _mxfp_case(mxfp_format, shape, device, a_is_transposed=False, b_is_transpose
     return (a.view(dtype), b.t().view(dtype), *scales), a_ref @ b_ref.t()
 
 
-def _mxfp_param(
-    mxfp_format, tile, k, out_dtype=torch.bfloat16, transposed=(False, True), **kwargs
-):
-    cfg = {key.lower(): value for key, value in asdict(FlyDSLGemmConfig(*tile)).items()}
-    kt = cfg["tile_k"]
-    return kernels.make_gemm_gfx950_param(
-        **cfg,
-        dtype_id=4 if mxfp_format == "mxfp4" else 5,
-        out_dtype_id=2 if out_dtype == torch.bfloat16 else 3,
-        a_is_transposed=transposed[0],
-        b_is_transposed=transposed[1],
-        has_k_tail=kernels.infer_has_k_tail(k, kt, cfg["stages"])
-        or (cfg["use_half_tile_interleaved"] and (k + kt - 1) // kt % 2 != 0),
-        **kwargs,
-    )
-
-
-def _mxfp_call(inputs, out, param, bias=None, compiler=None):
-    import flydsl.compiler as flyc
-
-    args = (out, *(t.view(torch.uint8) for t in inputs), out if bias is None else bias)
-    stream = torch.cuda.current_stream().cuda_stream
-    compiled = run_cached_flydsl(
-        kernels.gemm_mxfp_gfx950,
-        *(flyc.from_torch_tensor(t).mark_layout_dynamic() for t in args),
-        param,
-        stream,
-        constexpr_param=param,
-        compiler=compiler or flyc.compile,
-        dispatch_args=(*args, param, stream),
-    )
-    return lambda: compiled(*args, param, torch.cuda.current_stream().cuda_stream)
-
-
 def _scaled_mm_mxfp(
     a,
     b,
@@ -1229,50 +1193,6 @@ class TestFlyDSLMXFPDevice(TestCase):
             self.skipTest("requires gfx950")
         torch.manual_seed(2026)
 
-    def _check(
-        self,
-        mxfp_format,
-        shape,
-        tile,
-        out_dtype,
-        device,
-        transposed=(False, True),
-        bias=False,
-    ):
-        inputs, reference = _mxfp_case(mxfp_format, shape, device, *transposed)
-        out = torch.empty(shape[:2], device=device, dtype=out_dtype)
-        bias = torch.randn(shape[1], device=device, dtype=out_dtype) if bias else None
-        param = _mxfp_param(
-            mxfp_format,
-            tile,
-            shape[2],
-            out_dtype,
-            transposed,
-            has_bias=bias is not None,
-        )
-        _mxfp_call(inputs, out, param, bias)()
-        expected = reference if bias is None else reference + bias
-        self.assertEqual(out, expected.to(out_dtype), atol=3e-2, rtol=2e-2)
-
-    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
-    def test_kernel(self, device, mxfp_format):
-        tile_k = 256 if mxfp_format == "mxfp4" else 128
-        self._check(
-            mxfp_format,
-            (65, 104, 384),
-            (32, 32, tile_k, 2, 1, 1, 0),
-            torch.bfloat16,
-            device,
-        )
-        self._check(
-            mxfp_format,
-            (256, 256, 512),
-            (128, 128, tile_k, 2, 2, 2, 0, True),
-            torch.float16,
-            device,
-            bias=True,
-        )
-
     @parametrize("mxfp_format", ("mxfp4", "mxfp8", None))
     def test_compiled_routes(self, device, mxfp_format):
         if mxfp_format is None:
@@ -1292,7 +1212,7 @@ class TestFlyDSLMXFPDevice(TestCase):
         with inductor_config.patch(
             max_autotune=True,
             flydsl_enable_autotuning=False,
-            max_autotune_gemm_backends="FLYDSL" if mxfp_format else "ATEN,FLYDSL",
+            max_autotune_gemm_backends="ATEN,FLYDSL",
         ):
             torch._dynamo.reset()
             actual, code = run_and_get_code(

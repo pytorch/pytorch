@@ -1331,6 +1331,8 @@ def _flydsl_mxfp_bias_supported(
         return False
     if bias.get_device() != mat_b.get_device():
         return False
+    # Bias dtype must match the output. The JIT name only records bias presence,
+    # so a different bias dtype would reuse the same cached symbol.
     if bias.get_dtype() != out_dtype:
         return False
     return V.graph.sizevars.statically_known_equals(size[0], mat_b.get_size()[-1])
@@ -1395,8 +1397,6 @@ def get_flydsl_mxfp_template_kwargs(
         node.get_device() != layout.device or len(node.get_size()) != 2
         for node in nodes
     ):
-        return []
-    if bias is not None and bias.get_device() != layout.device:
         return []
     if is_unaligned(scale_a) or is_unaligned(scale_b):
         return []
@@ -1601,7 +1601,13 @@ def tuned_scaled_mm_v2(
                 **mxfp_kwargs,
             )
         if mxfp_choices:
-            if use_aten_gemm_kernels():
+            # ATen rejects non-multiples of 32 with ValueError, which autotune
+            # does not treat as a skipped choice. k is the packed storage dim.
+            aten_mxfp_ok = all(
+                V.graph.sizevars.statically_known_multiple_of(dim, 32)
+                for dim in (m, n, k)
+            )
+            if use_aten_gemm_kernels() and aten_mxfp_ok:
                 mxfp_choices.insert(
                     0,
                     aten__scaled_mm_v2.bind(

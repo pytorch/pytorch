@@ -400,6 +400,7 @@ def make_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
         f"x{param.block_k}x{param.stages}_ks1"
     )
     name += f"_w{param.m_waves}x{param.n_waves}x1"
+    # Bias dtype is not part of the name; callers must keep it equal to out_dtype.
     name += f"_gm{param.group_m}_bias{int(param.has_bias)}"
     name += f"_ktail{int(param.has_k_tail)}"
     a_layout = "t" if param.a_is_transposed else "n"
@@ -1787,9 +1788,16 @@ def _launch_gemm(out, a, b, bias, param, stream, scale_a=(), scale_b=()):
     )
 
 
-def infer_has_k_tail(k: int, tile_k: int, stages: int):
+def infer_has_k_tail(
+    k: int, tile_k: int, stages: int, use_half_tile_interleaved: bool = False
+):
+    # HTI consumes K tiles in pairs, so an odd count is also a tail.
     k_tiles = (k + tile_k - 1) // tile_k
-    return (k % tile_k != 0) or (k_tiles < stages - 1)
+    return (
+        (k % tile_k != 0)
+        or (k_tiles < stages - 1)
+        or (use_half_tile_interleaved and k_tiles % 2 != 0)
+    )
 
 
 def make_gemm_param_and_validate(m, n, k, kwargs):
@@ -1799,7 +1807,7 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
     requested_out_dtype_id = kwargs.pop("out_dtype_id", None)
     try:
         result = make_gemm_gfx950_param(**kwargs)
-    except Exception:
+    except (AssertionError, ValueError):
         return None
     if (
         requested_out_dtype_id is not None

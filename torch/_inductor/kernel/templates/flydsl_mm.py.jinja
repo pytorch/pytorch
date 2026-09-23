@@ -46,9 +46,7 @@ def _inductor_tensor_arg(tensor):
         with _gemm_param_lock:
             param = _gemm_param
             if param is None:
-                has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
-                if USE_HALF_TILE_INTERLEAVED:
-                    has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
+                has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES, USE_HALF_TILE_INTERLEAVED)
                 param = make_gemm_param_and_validate(
                     GEMM_M,
                     GEMM_N,

@@ -107,7 +107,9 @@ def is_gemm_config_worth_tuning(
     m: int, n: int, k: int, gemm_config: dict[str, int | bool]
 ) -> bool:
     """Restrict large GEMMs to the largest M/N tile with eight-wave HTI."""
-    # This pruning was validated against AITER for BF16/FP16.
+    # Checked against AITER for BF16/FP16. MXFP uses logical K, so MXFP4
+    # prunes at storage K >= 2048. Smaller tiles and non-HTI 2x2 waves were
+    # slower; the 256x256 HTI 2x4-wave pair also won the MXFP 4096^3 runs.
     if not config.flydsl_enable_autotuning or min(m, n, k) < 4096:
         return True
     return (
@@ -141,10 +143,7 @@ def is_gemm_config_valid_for_shape(
     use_half_tile_interleaved = bool(
         gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
     )
-    has_k_tail = infer_has_k_tail(k, tile_k, stages)
-    if use_half_tile_interleaved:
-        k_tiles = (k + tile_k - 1) // tile_k
-        has_k_tail = has_k_tail or (k_tiles % 2 != 0)
+    has_k_tail = infer_has_k_tail(k, tile_k, stages, use_half_tile_interleaved)
 
     return (
         make_gemm_param_and_validate(
@@ -201,7 +200,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
             candidate = FlyDSLGemmConfig(**cast(FlyDSLGemmConfigDict, gemm_config))
             _make_gemm_param(asdict(candidate))
             valid_configs.append(candidate)
-        except Exception as e:
+        except (AssertionError, ValueError) as e:
             log.debug(
                 "Skipping invalid exhaustive FlyDSL config %s: %s", gemm_config, e
             )
@@ -262,7 +261,7 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
         try:
             _make_gemm_param(asdict(gemm_config))
             valid_configs.append(gemm_config)
-        except Exception as e:
+        except (AssertionError, ValueError) as e:
             log.debug("Skipping invalid default FlyDSL config %s: %s", gemm_config, e)
     return valid_configs
 
@@ -426,7 +425,7 @@ def _get_default_gfx950_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
         try:
             _make_gemm_param(asdict(gemm_config))
             valid_configs.append(gemm_config)
-        except Exception as e:
+        except (AssertionError, ValueError) as e:
             log.debug(
                 "Skipping invalid default FlyDSL grouped config %s: %s",
                 gemm_config,
