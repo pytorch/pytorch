@@ -3,12 +3,14 @@
 import os
 import re
 import tempfile
-from unittest import mock
 
 import torch
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor import config
-from torch._inductor.codegen.common import device_codegens, init_backend_registration
+from torch._inductor.codegen.common import (
+    get_wrapper_codegen_for_device,
+    init_backend_registration,
+)
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -16,6 +18,10 @@ from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+)
+from torch.testing._internal.inductor_utils import (
+    has_cpp_wrapper_for_device,
+    patch_inductor_backend,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -144,6 +150,19 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
 
     @requires_cuda_and_triton
+    @config.patch({"triton.multi_kernel": 1})
+    def test_multi_kernel_runs_standalone(self):
+        # The one module that mixes hoisted kernel defs with an async_compile binding:
+        # multi_kernel_N = async_compile.multi_kernel(..., [<hoisted kernels>]).
+        x = torch.rand(2, 1024, device="cuda")
+        result, code = _code_for(torch.softmax, x, -1, readable_wrapper=True)
+        self.assertIn("= async_compile.multi_kernel(", code)
+        self.assertNotIn("async_compile.triton", code)
+        expected = torch.softmax(x, -1)
+        self.assertEqual(result, expected)
+        self.assertEqual(self._run_standalone(code, [x])[0], expected)
+
+    @requires_cuda_and_triton
     @parametrize("case", ["scan", "flex_attention"])
     def test_same_named_helpers_do_not_shadow(self, case):
         # Kernels define @triton.jit helpers under names unique only per kernel: scan
@@ -232,11 +251,21 @@ class TestReadableWrapperCodegen(TestCase):
         class OutOfTreeWrapper(PythonWrapperCodegen):
             pass
 
-        init_backend_registration()
-        cpu = device_codegens["cpu"]
-        with mock.patch.object(cpu, "wrapper_codegen", OutOfTreeWrapper):
+        with patch_inductor_backend("cpu", python_wrapper_codegen=OutOfTreeWrapper):
             with self.assertRaisesRegex(Exception, "OutOfTreeWrapper"):
                 _code_for(torch.relu, torch.randn(8), readable_wrapper=True)
+
+    @config.patch(readable_wrapper=True)
+    def test_registration_accessor_is_unaffected(self):
+        # get_wrapper_codegen_for_device also reads back what a device registered (for
+        # patch_inductor_backend's restore and capability probes), so the flag must not
+        # leak into it, or a restore would register the readable class for good.
+        init_backend_registration()
+        self.assertIs(get_wrapper_codegen_for_device("cpu"), PythonWrapperCodegen)
+        self.assertTrue(has_cpp_wrapper_for_device("cpu"))
+        with patch_inductor_backend("cpu"):
+            pass
+        self.assertIs(get_wrapper_codegen_for_device("cpu"), PythonWrapperCodegen)
 
 
 instantiate_parametrized_tests(TestReadableWrapperCodegen)
