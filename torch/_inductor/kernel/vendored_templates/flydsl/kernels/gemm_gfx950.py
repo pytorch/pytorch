@@ -311,7 +311,6 @@ def make_gemm_gfx950_param(
     mma_m_repeat = mma_tile_m // m_waves // mma_m
     mma_n_repeat = mma_tile_n // n_waves // mma_n
     mma_k_repeat = block_k // mma_k
-    assert mma_m_repeat <= 4 and mma_n_repeat <= 4
     if mma_m_repeat * m_waves * mma_m != mma_tile_m:
         raise ValueError(
             "M MMA tile must be divisible by m_waves * mma_m: "
