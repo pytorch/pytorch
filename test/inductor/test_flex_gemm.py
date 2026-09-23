@@ -846,7 +846,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
     def test_grouped_layout_rejects_inexact_inferred_preserved_dimension(self):
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
 
         with self.assertRaisesRegex(
             NotImplementedError, "grouped reshape must split exactly"
@@ -855,7 +855,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     @parametrize("unbacked_dim", (1, 2))
     def test_grouped_layout_rejects_unbacked_structural_dimensions(self, unbacked_dim):
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape = [4, -1, 2]
@@ -864,7 +864,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     def test_grouped_layout_rejected_backed_group_does_not_guard(self):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape_env = ShapeEnv()
