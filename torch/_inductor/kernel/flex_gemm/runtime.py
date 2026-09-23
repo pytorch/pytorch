@@ -129,7 +129,7 @@ def normalize_c(
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeLocalReducePlan:
-    """QuACK EpiOp configuration for one analyzed grouped local reduction."""
+    """QuACK EpiOp configuration for one grouped local reduction (physical geometry)."""
 
     geometry: FlexGemmLocalReduceGeometry
     stores: bool = False
@@ -138,6 +138,7 @@ class FlexGemmRuntimeLocalReducePlan:
     combine: str | None = None
     finalize: Callable[..., Any] | str | None = None
     finalize_operands: tuple[str, ...] = ()
+    fragment_reduced: bool = False
     store_finalize: Callable[..., Any] | str | None = None
     binary_store_finalize: bool = False
     prepass: Callable[..., Any] | None = None
@@ -187,6 +188,7 @@ class FlexGemmRuntimeLocalReducePlan:
             self.combine,
             self.finalize,
             self.finalize_operands,
+            self.fragment_reduced,
             self.store_finalize,
             self.prepass,
             self.prepass_combine,
@@ -253,7 +255,20 @@ def flex_gemm_epimod(
             GroupedMainStore,
         )
 
-        outputs: tuple[Any, ...] = (GroupedMainStore("main", output_contraction.group),)
+        min_fragment_n = (
+            local_reduce.group
+            if local_reduce is not None
+            and local_reduce.feeds_main
+            and local_reduce.fragment_reduced
+            else None
+        )
+        outputs: tuple[Any, ...] = (
+            GroupedMainStore(
+                "main",
+                output_contraction.group,
+                min_fragment_n=min_fragment_n,
+            ),
+        )
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
     sinks: dict[str, Any] = {}
@@ -307,7 +322,7 @@ def flex_gemm_epimod(
                     )
                 sinks[LOCAL_REDUCE_STORE_ARG_NAME] = sink
         else:
-            if local_reduce.feeds_main:
+            if local_reduce.feeds_main and not local_reduce.fragment_reduced:
                 if output_layout is not None:
                     raise RuntimeError(
                         "feed-main local reductions do not support output layouts"
@@ -319,7 +334,8 @@ def flex_gemm_epimod(
                     combine=local_reduce.combine,
                     finalize=finalize,
                 )
-            else:
+                ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
+            elif local_reduce.stores:
                 reduce_op = grouped_reduce.GroupedLocalReduce(
                     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
                     axis=local_reduce.axis,
@@ -327,11 +343,9 @@ def flex_gemm_epimod(
                     combine=local_reduce.combine,
                     finalize=finalize,
                     finalize_operands=local_reduce.finalize_operands,
+                    fragment_reduced=local_reduce.fragment_reduced,
                     output_layout=output_layout,
                 )
-            if local_reduce.feeds_main:
-                ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-            else:
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
     epimod = epilogue_module.fragment_epilogue(
         outputs=outputs,
