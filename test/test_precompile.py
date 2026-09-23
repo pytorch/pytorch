@@ -2933,11 +2933,10 @@ class TestPrecompile(TestCase):
         self.assertTrue(all(f["trivial"] for f in frames[1:]))
         self.assertEqual([len(f["variants"]) for f in frames[:2]], [1, 0])
         self.assertEqual(_serving_mode(frames), "standalone")
-        # Only a continuation Dynamo never traced is served that way: one it
-        # compiled but kept no variant of still sends the capture to installing.
-        frames[1]["trivial"] = False
+        # A bypassed continuation still sends the capture to installing.
+        frames[1].update(trivial=False, bypassed=True)
         self.assertEqual(_serving_mode(frames), "installed")
-        frames[1]["trivial"] = True
+        frames[1].update(trivial=True, bypassed=False)
         backends = {
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
             for backend_id, backend in package.cached_backends.items()
