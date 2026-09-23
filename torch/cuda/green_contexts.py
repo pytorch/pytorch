@@ -181,7 +181,7 @@ class SMPartition:
 
         Children are subsets of this resource and overlap it. Siblings from
         this operation, including the remainder, are disjoint. Results from
-        separate split operations may overlap.
+        separate splits on the same or overlapping input resources may overlap.
 
         Example::
 
