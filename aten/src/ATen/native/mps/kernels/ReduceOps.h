@@ -14,7 +14,7 @@ static_assert(
     INNER_TG_SIZE <= MAX_THREADGROUP_SIZE,
     "exceeds the Metal threadgroup size limit");
 
-// Inner-dim routing thresholds, see reduction_dispatch_mps in ReduceOps.mm.
+// Inner-dim routing thresholds, see select_inner_reduction in ReduceOps.mm.
 C10_METAL_CONSTEXPR uint32_t CHUNK_MAX_ROW_LEN = 256;
 C10_METAL_CONSTEXPR uint32_t CHUNK_ELEMS_PER_LANE = 16;
 C10_METAL_CONSTEXPR uint32_t CHUNK_MIN_NUMEL = 65536;
@@ -49,7 +49,7 @@ C10_METAL_CONSTEXPR uint32_t OUTER_SPLIT_MIN_SEG_LEN = 512;
 C10_METAL_CONSTEXPR uint32_t OUTER_SPLIT_MAX_TGS = 2048;
 C10_METAL_CONSTEXPR uint32_t OUTER_SPLIT_STRIDED_TARGET_TGS = 256;
 
-// argmax/argmin inner split-K thresholds (argmax_argmin_out_mps in
+// argmax/argmin inner split-K thresholds (select_inner_reduction in
 // ReduceOps.mm). The arg inner kernel keeps one compare chain per lane (no
 // NCHAINS ILP), so it saturates the GPU later than the value kernels and
 // splits at a higher threadgroup count.
