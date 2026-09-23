@@ -1834,15 +1834,18 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     keeps its record, flagged and without variants, the way install() keeps its
     global binding but none of its guarded codes: a continuation the frame ahead
     of it names must stay bound, and a bypassed code's guarded codes are dead.
+    A code that is neither bypassed nor has variants is ``trivial``: it ran as
+    plain Python during capture, and the driver rebuilds it as plain Python.
     """
     return [
         {
             "is_entry": i == 0,
             "bypassed": code.bypassed,
-            # Never entered Dynamo: skipped before tracing (no tensor in the
-            # frame, e.g. the continuation after a trailing .backward()), so
-            # it ran eager during capture and the driver runs it eager too.
-            "trivial": not code.has_compile_id and not code.bypassed,
+            # No variant and not bypassed: Dynamo skipped the frame (no tensor
+            # reached it) or traced no ops in it, e.g. the continuation after a
+            # trailing .backward(). Either way it ran eager during capture, so
+            # the driver runs it eager too.
+            "trivial": not code.guarded_codes and not code.bypassed,
             "code": code.python_code,
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
@@ -1906,16 +1909,13 @@ def _serving_mode(frames: list[dict[str, Any]]) -> str:
     variant; a frame it reaches but has no variant of (a bypassed continuation)
     would raise on the very path capture exercised. Either way the capture is
     served by installing instead, which has a compiler behind it. A trivial
-    continuation -- one Dynamo never traced because no tensor reached it --
-    ran eager during capture and is served eager, so it counts as covered.
+    continuation ran eager during capture and is served eager, so it counts as
+    covered when reached and costs nothing when not.
     """
     reachable = _reachable_frames(frames)
-    covered = {
-        i
-        for i, frame in enumerate(frames)
-        if frame["variants"] or (frame.get("trivial") and not frame["is_entry"])
-    }
-    return "standalone" if covered == reachable else "installed"
+    compiled = {i for i, frame in enumerate(frames) if frame["variants"]}
+    trivial = {i for i, f in enumerate(frames) if f["trivial"] and not f["is_entry"]}
+    return "standalone" if compiled <= reachable <= compiled | trivial else "installed"
 
 
 def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
@@ -1994,6 +1994,7 @@ def _entry_binding(fn: object) -> dict[str, Any]:
 
 def _build_multigraph_python_source(
     entry: Any,
+    frames: list[dict[str, Any]],
     backends: Mapping[str, Any],
     summary: PrecompileSummary,
     backend: str,
@@ -2010,7 +2011,6 @@ def _build_multigraph_python_source(
     from torch._dynamo.package import SerializedCode
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
 
-    frames = _multigraph_frames(entry)
     buf = PySourceBuilder()
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES["standalone"])
@@ -2122,12 +2122,17 @@ def _build_multigraph_artifact(
     python_code is self-contained -- it carries the frames, the guard trees and
     the compiled subgraphs -- so cache is the same acceleration it is for the
     make_fx form: the inductor bundle that primes the kernel caches, and the tag
-    binding it to this python_code (invariant 7).
+    binding it to this python_code (invariant 7). The bundle is whatever
+    ``CacheArtifactManager`` recorded, so the caller must have run the capture
+    under ``with_fresh_cache()``.
     """
     frames = _multigraph_frames(entry)
+    # First: an entry with no variant reaches nothing, which the unreachable
+    # check below would misreport as a graph break to move.
+    _reject_uninstallable_entry(frames, entry)
     reachable = _reachable_frames(frames)
     unreachable = sorted(
-        f"{frame['python_module']}.{entry.codes[i].python_code.co_name}"
+        f"{frame['python_module']}.{frame['code'].co_name}"
         for i, frame in enumerate(frames)
         if frame["variants"] and i not in reachable
     )
@@ -2145,14 +2150,11 @@ def _build_multigraph_artifact(
             f"graph break into the entry, or make the child module compile in one "
             f"piece."
         )
-    _reject_uninstallable_entry(frames, entry)
     python_code = _build_multigraph_python_source(
-        entry, backends, summary, backend, _entry_binding(entry_fn)
+        entry, frames, backends, summary, backend, _entry_binding(entry_fn)
     )
     inductor_bundle = None
     if backend != "eager":
-        # The dynamo capture runs under with_fresh_cache(), so this is exactly
-        # what the capture's compiles recorded.
         from torch.compiler._cache import CacheArtifactManager
 
         saved = CacheArtifactManager.serialize()
