@@ -842,7 +842,7 @@ class DistMathOpsTest(DTensorTestBase):
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
-        # dtype is _foreach_norm.Scalar's keyword argument: (self, ord, *, dtype).
+        # dtype is _foreach_norm.Scalar's third argument: (self, ord, dtype).
         for input_dtype, dtype in (
             (torch.float32, None),
             (torch.bfloat16, torch.float32),
@@ -998,6 +998,18 @@ class DistMathOpsTest(DTensorTestBase):
 
             self.assertEqual(sharded_out[0].full_tensor(), expected0)
             self.assertEqual(sharded_out[1].full_tensor(), expected1)
+
+        # dtype sits where linalg__powsum has dim: _foreach_powsum.Scalar is (self, ord, dtype).
+        low = [grad0.bfloat16(), grad1.bfloat16()]
+        sharded_low = [distribute_tensor(t, device_mesh, [Shard(0)]) for t in low]
+        out = torch.ops.aten._foreach_powsum(low, 2, dtype=torch.float32)
+        sharded_out = torch.ops.aten._foreach_powsum(
+            sharded_low, 2, dtype=torch.float32
+        )
+        for o, so in zip(out, sharded_out):
+            self.assertEqual(so.placements, (Partial("sum"),))
+            self.assertEqual(so.dtype, o.dtype)
+            self.assertEqual(so.full_tensor(), o)
 
     @with_comms
     def test_foreach_norm_different_mesh(self):

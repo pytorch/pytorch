@@ -923,6 +923,24 @@ def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
         return NormReduction(norm_type)
 
 
+def _dim_keepdim_from_schema(
+    op: torch._ops.OpOverload, args_schema: tuple[Any, ...]
+) -> tuple[Any, bool]:
+    """Read dim and keepdim from the positions op's schema gives them.
+
+    The _foreach_*.Scalar overloads reduce each tensor fully and have neither:
+    their schema is (self, ord, dtype), so a positional read would take dtype for dim.
+    """
+    names = [arg.name for arg in op._schema.arguments]
+    dim = None
+    keepdim = False
+    if "dim" in names and len(args_schema) > names.index("dim"):
+        dim = args_schema[names.index("dim")]
+    if "keepdim" in names and len(args_schema) > names.index("keepdim"):
+        keepdim = args_schema[names.index("keepdim")]
+    return dim, keepdim
+
+
 @register_single_dim_strategy(
     [aten.linalg_vector_norm.default, aten.norm.Scalar],
     schema_info=RuntimeSchemaInfo(1),
@@ -949,14 +967,7 @@ def vector_norm_single_dim_strategy(
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
-    # Specialize for _foreach_norm.Scalar since it reduces each tensor fully and
-    # has no dim/keepdim (its schema is (self, ord, *, dtype)).
-    if op == aten._foreach_norm.Scalar:
-        dim = None
-        keepdim = False
-    else:
-        dim = args_schema[2] if len(args_schema) > 2 else None
-        keepdim = args_schema[3] if len(args_schema) > 3 else False
+    dim, keepdim = _dim_keepdim_from_schema(op, args_schema)
     dims = _infer_reduction_dims(dim, ndim)
 
     return _reduction_single_dim_strategy(
@@ -993,8 +1004,7 @@ def powsum_single_dim_strategy(
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
 
-    dim = args_schema[2] if len(args_schema) > 2 else None
-    keepdim = args_schema[3] if len(args_schema) > 3 else False
+    dim, keepdim = _dim_keepdim_from_schema(op, args_schema)
     dims = _infer_reduction_dims(dim, ndim)
 
     return _reduction_single_dim_strategy(
