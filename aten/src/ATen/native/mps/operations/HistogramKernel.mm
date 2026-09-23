@@ -151,15 +151,25 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
 }
 
-template <typename input_t>
-void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_edges, const Tensor& input) {
+static void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_edges, const Tensor& input) {
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(input) || isIntegralType(input.scalar_type(), /*includeBool=*/false),
+                              "\"histc_mps\" not implemented for '",
+                              input.scalar_type(),
+                              "'");
   TORCH_INTERNAL_ASSERT(input.dim() == 2 && input.size(1) == 1);
   TORCH_INTERNAL_ASSERT(bin_edges.size() == 1);
   TORCH_INTERNAL_ASSERT(hist_output.numel() + 1 == bin_edges[0].numel());
 
+  TORCH_CHECK(hist_output.device() == input.device(),
+              "Expected out tensor to have device ",
+              input.device(),
+              ", but got ",
+              hist_output.device(),
+              " instead");
+
   const int64_t num_bins = hist_output.numel();
   const auto num_elements = c10::checked_convert<uint32_t>(input.numel(), "uint32_t");
-  Tensor counts = at::zeros({num_bins}, hist_output.options().dtype(kLong));
+  Tensor counts = at::zeros({num_bins}, input.options().dtype(kLong));
   if (num_elements == 0) {
     hist_output.copy_(counts);
     return;
@@ -201,7 +211,7 @@ void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_edges, 
                                              dense ? "dense" : "strided",
                                              scalarToMetalTypeString(input));
       id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
-      getMPSProfiler().beginProfileKernel(histogramPSO, "histc", {input, counts});
+      getMPSProfiler().beginProfileKernel(histogramPSO, "histc", {input, counts}, mpsStream);
       [computeEncoder setComputePipelineState:histogramPSO];
       mtl_setArgs(computeEncoder, input, counts, stridedIndicesBuffer, num_elements, num_bins, bin_edges[0]);
 
@@ -222,7 +232,7 @@ void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_edges, 
       } else {
         mtl_dispatch1DJob(computeEncoder, histogramPSO, num_elements);
       }
-      getMPSProfiler().endProfileKernel(histogramPSO);
+      getMPSProfiler().endProfileKernel(histogramPSO, mpsStream);
     }
   });
   hist_output.copy_(counts);
@@ -297,13 +307,7 @@ static void histogramdd_linear_kernel(const Tensor& self,
   } else {
     // histc codepath: bin_edges are not returned to the caller
     TORCH_INTERNAL_ASSERT(!weight.has_value() && !density);
-    AT_DISPATCH_V2(self.scalar_type(),
-                   "histc_mps",
-                   AT_WRAP([&]() { mps::histc_atomic_kernel_impl<scalar_t>(hist, bin_edges, self); }),
-                   AT_EXPAND(AT_ALL_TYPES),
-                   kBFloat16,
-                   kHalf,
-                   AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+    mps::histc_atomic_kernel_impl(hist, bin_edges, self);
   }
 }
 
