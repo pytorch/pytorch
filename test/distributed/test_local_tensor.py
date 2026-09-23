@@ -105,11 +105,13 @@ class LocalTensorRankTest(LocalTensorTestBase):
 
 
 class LocalTensorWorldTest(LocalTensorTestBase):
+    rank = 0
+
     def setUp(self):
         super().setUp()
         torch.distributed.init_process_group(
             "fake",
-            rank=0,
+            rank=self.rank,
             world_size=self.world_size,
         )
 
@@ -1032,6 +1034,240 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         self.assertIsInstance(coord.node, LocalIntNode)
         expected = {r: r for r in range(self.world_size)}
         self.assertEqual(coord.node._local_ints, expected)
+
+
+class TestLocalTensorWorld12(LocalTensorWorldTest):
+    world_size = 12
+
+    def test_dist_get_rank_permuted_row(self):
+        # 3x4 mesh row with caller order; siblings mirror the same permutation.
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        self.assertEqual(dist.get_process_group_ranks(sub_pg), sub_ranks)
+        with LocalTensorMode(self.world_size):
+            rank = dist.get_rank(sub_pg)
+            self.assertEqual(
+                set(rank.node._local_ints.keys()), set(range(self.world_size))
+            )
+            # Fibers [0,3,1,2], [4,7,5,6], [8,11,9,10]
+            expected = {
+                0: 0,
+                3: 1,
+                1: 2,
+                2: 3,
+                4: 0,
+                7: 1,
+                5: 2,
+                6: 3,
+                8: 0,
+                11: 1,
+                9: 2,
+                10: 3,
+            }
+            self.assertEqual(rank.node._local_ints, expected)
+
+    def test_allgather_permuted_row(self):
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        shards = {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor(shards)
+            out = torch.zeros(len(sub_ranks), dtype=torch.float32)
+            dist.all_gather_single(out, lt, group=sub_pg)
+            self.assertEqual(out._local_tensors[0].tolist(), [0.0, 3.0, 1.0, 2.0])
+            self.assertEqual(out._local_tensors[4].tolist(), [4.0, 7.0, 5.0, 6.0])
+            self.assertEqual(out._local_tensors[8].tolist(), [8.0, 11.0, 9.0, 10.0])
+
+    def test_reduce_scatter_permuted_row(self):
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        with LocalTensorMode(self.world_size):
+            lt_in = LocalTensor(
+                {
+                    r: torch.tensor([float(100 * r + i) for i in range(len(sub_ranks))])
+                    for r in range(self.world_size)
+                }
+            )
+            lt_out = torch.zeros(1)
+            dist.reduce_scatter_single(lt_out, lt_in, group=sub_pg)
+            for fiber, base in zip(
+                ((0, 3, 1, 2), (4, 7, 5, 6), (8, 11, 9, 10)),
+                (600.0, 2200.0, 3800.0),
+            ):
+                for i, r in enumerate(fiber):
+                    self.assertEqual(lt_out._local_tensors[r].item(), base + 4 * i)
+
+    def test_all_to_all_permuted_row(self):
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        with LocalTensorMode(self.world_size):
+            lt_in = LocalTensor(
+                {
+                    r: torch.tensor([float(100 * r + i) for i in range(len(sub_ranks))])
+                    for r in range(self.world_size)
+                }
+            )
+            lt_out = torch.zeros(len(sub_ranks), dtype=torch.float32)
+            dist.all_to_all_single(lt_out, lt_in, group=sub_pg)
+            for fiber in ((0, 3, 1, 2), (4, 7, 5, 6), (8, 11, 9, 10)):
+                for i, dst in enumerate(fiber):
+                    self.assertEqual(
+                        lt_out._local_tensors[dst].tolist(),
+                        [100.0 * src + i for src in fiber],
+                    )
+
+    def test_broadcast_permuted_row(self):
+        # Global src=3 -> group-local 1 on [0,3,1,2]; siblings use local 1 (7, 11).
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        shards = {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor({r: t.clone() for r, t in shards.items()})
+            dist.broadcast(lt, src=3, group=sub_pg)
+            for r in (0, 3, 1, 2):
+                self.assertEqual(lt._local_tensors[r].item(), 3.0)
+            for r in (4, 7, 5, 6):
+                self.assertEqual(lt._local_tensors[r].item(), 7.0)
+            for r in (8, 11, 9, 10):
+                self.assertEqual(lt._local_tensors[r].item(), 11.0)
+
+    def test_scatter_permuted_row(self):
+        # Global src=3 -> group-local 1 on [0,3,1,2]; siblings use local 1 (7, 11).
+        from torch.distributed._local_tensor._c10d import _local_scatter_
+
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        with LocalTensorMode(self.world_size):
+            scatter_list = [
+                LocalTensor(
+                    {
+                        r: torch.tensor([float(100 * r + i)])
+                        for r in range(self.world_size)
+                    }
+                )
+                for i in range(len(sub_ranks))
+            ]
+            out = LocalTensor({r: torch.zeros(1) for r in range(self.world_size)})
+            _local_scatter_([out], [scatter_list], sub_pg, root_rank=1)
+            for r, i in zip((0, 3, 1, 2), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 300.0 + i)
+            for r, i in zip((4, 7, 5, 6), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 700.0 + i)
+            for r, i in zip((8, 11, 9, 10), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 1100.0 + i)
+
+    def test_broadcast_strided_group(self):
+        sub_pg = dist.new_group(ranks=[0, 4, 8])
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor(
+                {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+            )
+            dist.broadcast(lt, src=4, group=sub_pg)
+            for fiber in ((0, 4, 8), (1, 5, 9), (2, 6, 10), (3, 7, 11)):
+                for r in fiber:
+                    self.assertEqual(lt._local_tensors[r].item(), float(fiber[1]))
+
+    def test_scatter_strided_group(self):
+        from torch.distributed._local_tensor._c10d import _local_scatter_
+
+        sub_pg = dist.new_group(ranks=[0, 4, 8])
+        with LocalTensorMode(self.world_size):
+            scatter_list = [
+                LocalTensor(
+                    {
+                        r: torch.tensor([float(100 * r + i)])
+                        for r in range(self.world_size)
+                    }
+                )
+                for i in range(3)
+            ]
+            out = LocalTensor({r: torch.zeros(1) for r in range(self.world_size)})
+            _local_scatter_([out], [scatter_list], sub_pg, root_rank=1)
+            for fiber in ((0, 4, 8), (1, 5, 9), (2, 6, 10), (3, 7, 11)):
+                for i, r in enumerate(fiber):
+                    self.assertEqual(out._local_tensors[r].item(), 100.0 * fiber[1] + i)
+
+
+class TestLocalTensorWorld12Rank4(LocalTensorWorldTest):
+    world_size = 12
+    rank = 4
+
+    def test_broadcast_nonzero_offset_group(self):
+        sub_pg = dist.new_group(ranks=[4, 5, 6, 7])
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor(
+                {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+            )
+            dist.broadcast(lt, src=5, group=sub_pg)
+            for fiber in ((0, 1, 2, 3), (4, 5, 6, 7), (8, 9, 10, 11)):
+                for r in fiber:
+                    self.assertEqual(lt._local_tensors[r].item(), float(fiber[1]))
+
+    def test_scatter_nonzero_offset_group(self):
+        from torch.distributed._local_tensor._c10d import _local_scatter_
+
+        sub_pg = dist.new_group(ranks=[4, 5, 6, 7])
+        with LocalTensorMode(self.world_size):
+            scatter_list = [
+                LocalTensor(
+                    {
+                        r: torch.tensor([float(100 * r + i)])
+                        for r in range(self.world_size)
+                    }
+                )
+                for i in range(4)
+            ]
+            out = LocalTensor({r: torch.zeros(1) for r in range(self.world_size)})
+            _local_scatter_([out], [scatter_list], sub_pg, root_rank=1)
+            for fiber in ((0, 1, 2, 3), (4, 5, 6, 7), (8, 9, 10, 11)):
+                for i, r in enumerate(fiber):
+                    self.assertEqual(out._local_tensors[r].item(), 100.0 * fiber[1] + i)
+
+    def test_broadcast_permuted_nonzero_offset_group(self):
+        sub_pg = dist.new_group(ranks=[4, 7, 5, 6], sort_ranks=False)
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor(
+                {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+            )
+            dist.broadcast(lt, src=7, group=sub_pg)
+            for r in (0, 3, 1, 2):
+                self.assertEqual(lt._local_tensors[r].item(), 3.0)
+            for r in (4, 7, 5, 6):
+                self.assertEqual(lt._local_tensors[r].item(), 7.0)
+            for r in (8, 11, 9, 10):
+                self.assertEqual(lt._local_tensors[r].item(), 11.0)
+
+    def test_scatter_permuted_nonzero_offset_group(self):
+        from torch.distributed._local_tensor._c10d import _local_scatter_
+
+        sub_pg = dist.new_group(ranks=[4, 7, 5, 6], sort_ranks=False)
+        with LocalTensorMode(self.world_size):
+            scatter_list = [
+                LocalTensor(
+                    {
+                        r: torch.tensor([float(100 * r + i)])
+                        for r in range(self.world_size)
+                    }
+                )
+                for i in range(4)
+            ]
+            out = LocalTensor({r: torch.zeros(1) for r in range(self.world_size)})
+            _local_scatter_([out], [scatter_list], sub_pg, root_rank=1)
+            for r, i in zip((0, 3, 1, 2), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 300.0 + i)
+            for r, i in zip((4, 7, 5, 6), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 700.0 + i)
+            for r, i in zip((8, 11, 9, 10), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 1100.0 + i)
+
+    def test_prepare_collective_groups_rejects_misaligned_group(self):
+        from torch.distributed._local_tensor._c10d import _prepare_collective_groups
+
+        sub_pg = dist.new_group(ranks=[1, 2, 3, 4])
+        with self.assertRaisesRegex(
+            AssertionError, r"\[1, 2, 3, 4\].*are not a fiber of the global mesh"
+        ):
+            _prepare_collective_groups(sub_pg)
 
 
 class TestLocalTensorWorld8(LocalTensorWorldTest):
