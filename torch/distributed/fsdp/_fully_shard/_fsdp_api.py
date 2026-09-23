@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import torch
@@ -197,3 +197,53 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
+
+
+@dataclass(frozen=True)
+class AllGatherInput:
+    r"""Describe one payload returned by an FSDP all-gather extension.
+
+    Return these records in the inputs of ``(inputs, metadata)`` from
+    ``fsdp_pre_all_gather``. Each rank's payload is concatenated along ``dim``
+    using its own shape, independently of the parameter's shard dimension.
+    For example, a payload of shape ``(2, F, D)`` with ``dim=1`` produces
+    ``(2, world_size * F, D)``. Scalar payloads are treated as shape ``(1,)``.
+    The gathered payload is optionally reshaped to ``output_size`` before
+    being passed to the unchanged ``fsdp_post_all_gather`` hook.
+
+    Payloads must be flattenable with ``view(-1)``. Each rank must return the
+    same payload shapes, dtypes, and layouts; extensions own any padding.
+    The number, element counts, and dtypes of payloads must stay fixed across
+    calls so FSDP can reuse their output buffers.
+
+    Attributes:
+        tensor (Tensor): Local payload to communicate.
+        dim (int): Payload dimension to concatenate across ranks. Negative
+            dimensions are supported. Defaults to 0.
+        output_size (torch.Size, optional): Shape passed to the post hook, with
+            the same number of elements as the gathered payload. Defaults to
+            the concatenated shape.
+    """
+
+    tensor: torch.Tensor
+    dim: int = 0
+    output_size: torch.Size | None = None
+
+
+@dataclass
+class ReduceScatterInput:
+    r"""Describe a parameter group's reduce-scatter input layout and copy.
+
+    Attributes:
+        padded_unsharded_sizes (Sequence[torch.Size]): Padded sizes in parameter
+            order, used to allocate the collective buffer and unpack its result.
+        copy_in (Callable): Function taking ``(unsharded_grads, output, world_size)``
+            that fills FSDP's flat, contiguous ``output`` in rank-major order.
+            It must convert inputs to the output dtype and enqueue copies on the
+            current stream. Strategy-specific metadata may be bound to this
+            callable. FSDP releases this result and clears ``unsharded_grads``
+            after the copy is submitted.
+    """
+
+    padded_unsharded_sizes: Sequence[torch.Size]
+    copy_in: Callable[[list[torch.Tensor], torch.Tensor, int], None]

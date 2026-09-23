@@ -47,7 +47,7 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
     TrainingState,
 )
-from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
 if TYPE_CHECKING:
@@ -452,28 +452,26 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
-                # Use all_gather_inputs which already handles conversion to param_dtype
-                # This is consistent with the world_size > 1 path
-                all_gather_input = fsdp_param.all_gather_inputs[0]
-
-                # Make sure the all_gather_outputs has proper storage size before using it
-                # First ensure we have at least one tensor in all_gather_outputs
+                all_gather_inputs = fsdp_param.all_gather_inputs
                 fsdp_param.init_all_gather_outputs(
-                    [all_gather_input.numel()],
-                    [all_gather_input.dtype],
+                    [tensor.numel() for tensor in all_gather_inputs],
+                    [tensor.dtype for tensor in all_gather_inputs],
                     world_size,
                     self.device,
                 )
-
-                tensor = fsdp_param.all_gather_outputs[0]
-                alloc_storage(tensor)
-
-                with (
-                    torch.autograd._unsafe_preserve_version_counter(tensor)
+                fsdp_param.alloc_all_gather_outputs()
+                non_inference_outputs = tuple(
+                    tensor
+                    for tensor in fsdp_param.all_gather_outputs
                     if not tensor.is_inference()
-                    else contextlib.nullcontext()
+                )
+                with torch.autograd._unsafe_preserve_version_counter(
+                    non_inference_outputs
                 ):
-                    tensor.copy_(all_gather_input)
+                    for output, tensor in zip(
+                        fsdp_param.all_gather_outputs, all_gather_inputs
+                    ):
+                        output.copy_(tensor)
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
