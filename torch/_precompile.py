@@ -262,8 +262,11 @@ _CAPTURE_LOCK = threading.RLock()
 
 def _reinit_capture_lock_after_fork() -> None:
     # A child that inherits this lock held by a thread the fork did not carry over
-    # would block on it forever; only the forking thread survives, so nothing that
-    # held it can still be running.
+    # would block on it forever. Rebind rather than _at_fork_reinit(): the forking
+    # thread may itself hold the lock (fn runs for real during capture and can fork),
+    # and it must still be able to release the old object when its `with` exits;
+    # reinit would clear the owner and make that release raise. The cost is that a
+    # thread started in such a child can capture alongside the inherited capture.
     global _CAPTURE_LOCK
     _CAPTURE_LOCK = threading.RLock()
 
