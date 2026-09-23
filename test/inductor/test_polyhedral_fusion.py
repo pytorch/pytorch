@@ -85,6 +85,13 @@ def indirect_shifted_mla_indexer(x, ln_w, ln_b, cos, sin):
     return leading * cos[..., :32] + leading * sin[..., :32], gathered[..., 32:]
 
 
+def stride_three_norm(x, ln_w, ln_b, scale):
+    mean = x.mean(-1, keepdim=True)
+    var = ((x - mean) ** 2).mean(-1, keepdim=True)
+    normed = (x - mean) / torch.sqrt(var + 1e-5) * ln_w + ln_b
+    return (normed[..., ::3] * scale,)
+
+
 def equal_split_mla_indexer(x, ln_w, ln_b):
     mean = x.mean(-1, keepdim=True)
     var = ((x - mean) ** 2).mean(-1, keepdim=True)
@@ -536,6 +543,28 @@ class PolyhedralMLAFusionTest(TestCase):
         )
         self.assertEqual(observation.staged_fusion_count, 0)
         self.assertEqual(observation.translations, ())
+
+    def test_non_power_of_two_rate_falls_back(self):
+        base_inputs = _make_mla_inputs(batch_size=2, seq_len=8, head_dim=192)
+        inputs = (*base_inputs[:3], base_inputs[3].squeeze(2))
+        eager = tuple(stride_three_norm(*inputs))
+        disabled = _observe(
+            stride_three_norm,
+            inputs,
+            polyhedral_fusion=False,
+            force_persistent=True,
+        )
+        enabled = _observe(
+            stride_three_norm,
+            inputs,
+            polyhedral_fusion=True,
+            force_persistent=True,
+        )
+        self.assertEqual(disabled.outputs, eager, atol=6e-2, rtol=2e-2)
+        self.assertEqual(enabled.outputs, eager, atol=6e-2, rtol=2e-2)
+        self.assertEqual(disabled.staged_fusion_count, 0)
+        self.assertEqual(enabled.staged_fusion_count, 0)
+        self.assertEqual(enabled.translations, ())
 
     def test_flinear_boundary(self):
         inputs = _make_flinear_inputs(batch_size=2, seq_len=8)
