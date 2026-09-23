@@ -809,6 +809,11 @@ class TestFxGraphCache(TestCase):
             raise AssertionError("cached graph callable is not loaded")
         return graph.current_callable.__globals__[static_autotuner.kernel_name]
 
+    def emit_static(self, bundle, autotuner):
+        metadata = TritonBundler.read_and_emit(bundle)
+        self.assertIsNotNone(metadata)
+        self.assertIn(autotuner.kernel_name, metadata.statically_launched_kernel_names)
+
     @staticmethod
     def clear_retained_static_binaries(bundle, cached_autotuner):
         """Exercise source fallback as if the bundle omitted GPU binaries."""
@@ -1146,11 +1151,7 @@ class TestFxGraphCache(TestCase):
         self.assertTrue(os.path.isdir(triton_dir))
         _, _, bundled_binary = self.find_bundled_binary(bundle)
         self.clear_retained_static_binaries(bundle, static_autotuner.kernel)
-        metadata = TritonBundler.read_and_emit(bundle)
-        self.assertIsNotNone(metadata)
-        self.assertIn(
-            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
-        )
+        self.emit_static(bundle, static_autotuner)
         self.assertEqual(
             static_autotuner.kernel.compile_results[0].kernel.cubin_raw,
             bundled_binary.payload,
@@ -1221,12 +1222,7 @@ class TestFxGraphCache(TestCase):
             self.reset()
             triton_dir = os.path.join(cache_dir(), "triton")
             shutil.rmtree(triton_dir)
-            metadata = TritonBundler.read_and_emit(bundle)
-            self.assertIsNotNone(metadata)
-            self.assertIn(
-                static_autotuner.kernel_name,
-                metadata.statically_launched_kernel_names,
-            )
+            self.emit_static(bundle, static_autotuner)
             cubin_path = os.path.join(
                 triton_cache_dir(artifacts.device),
                 artifacts.kernel_hash,
@@ -1519,11 +1515,7 @@ class TestFxGraphCache(TestCase):
 
         self.reset()
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
-        metadata = TritonBundler.read_and_emit(bundle)
-        self.assertIsNotNone(metadata)
-        self.assertIn(
-            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
-        )
+        self.emit_static(bundle, static_autotuner)
         emitted_binary = os.path.join(
             triton_cache_dir(duplicate_device),
             conflicting_artifacts.kernel_hash,
@@ -1566,11 +1558,7 @@ class TestFxGraphCache(TestCase):
 
         self.reset()
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
-        metadata = TritonBundler.read_and_emit(bundle)
-        self.assertIsNotNone(metadata)
-        self.assertIn(
-            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
-        )
+        self.emit_static(bundle, static_autotuner)
         self.assertEqual(compile_result.kernel.cubin_raw, retained_cubin)
         graph.after_deserialization(CompiledFxGraphConstants())
         loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
@@ -1612,11 +1600,7 @@ class TestFxGraphCache(TestCase):
 
         self.reset()
         shutil.rmtree(os.path.join(cache_dir(), "triton"))
-        metadata = TritonBundler.read_and_emit(bundle)
-        self.assertIsNotNone(metadata)
-        self.assertIn(
-            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
-        )
+        self.emit_static(bundle, static_autotuner)
         cubin_path = compile_result.cubin_path()
         self.assertIsNone(compile_result.kernel.cubin_path)
         write_atomic(cubin_path, alternate_binary.payload, make_dirs=True)
@@ -1694,11 +1678,7 @@ class TestFxGraphCache(TestCase):
         with open(emitted_binary, "rb") as file:
             self.assertEqual(file.read(), b"damaged preexisting binary")
 
-        metadata = TritonBundler.read_and_emit(bundle)
-        self.assertIsNotNone(metadata)
-        self.assertIn(
-            static_autotuner.kernel_name, metadata.statically_launched_kernel_names
-        )
+        self.emit_static(bundle, static_autotuner)
         graph.after_deserialization(CompiledFxGraphConstants())
         loaded_autotuner = self.loaded_static_autotuner(graph, static_autotuner)
         self.assertIsNot(loaded_autotuner, static_autotuner.kernel)
@@ -1708,13 +1688,7 @@ class TestFxGraphCache(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @requires_cuda_and_triton
-    @parametrize(
-        "cache_damage",
-        (
-            "delete",
-            "truncate",
-        ),
-    )
+    @parametrize("cache_damage", ("delete", "truncate"))
     @torch.compiler.config.patch(compile_on_one_rank=True)
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_bundled_cubin_on_second_device_recovers_without_jit(self, cache_damage):

@@ -3,7 +3,7 @@ import inspect
 import os
 import threading
 from functools import cached_property
-from typing import Any
+from typing import Any, NoReturn
 from typing_extensions import Unpack
 
 from ..utils import is_rocm
@@ -73,6 +73,16 @@ def _is_invalid_kernel_image_error(error: RuntimeError) -> bool:
 def _is_missing_kernel_file_error(error: RuntimeError) -> bool:
     message = str(error).lower()
     return "file not found" in message or "failed to open kernel image" in message
+
+
+def _raise_kernel_load_error(
+    error: RuntimeError, source: str, missing: bool = False
+) -> NoReturn:
+    if _is_invalid_kernel_image_error(error):
+        raise InvalidTritonKernelArtifactError(f"{source} is unusable") from error
+    if missing or _is_missing_kernel_file_error(error):
+        raise MissingTritonKernelError(f"{source} is unavailable") from error
+    raise error
 
 
 @functools.lru_cache(None)
@@ -167,6 +177,8 @@ class StaticallyLaunchedTritonKernel:
     There are two main versions of triton that we wish to support: 3.3 and 3.2. Triton makes considerable changes
     to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
+
+    cubin_raw: bytes | None
 
     @cached_property
     def C_impl(self):
@@ -290,33 +302,22 @@ class StaticallyLaunchedTritonKernel:
         try:
             return self.C_impl._load_kernel(cubin_path, self.name, self.shared, device)
         except RuntimeError as error:
-            if _is_invalid_kernel_image_error(error):
-                raise InvalidTritonKernelArtifactError(
-                    f"Triton kernel binary is unusable at {cubin_path}"
-                ) from error
-            if _is_missing_kernel_file_error(error) or not os.path.exists(cubin_path):
-                raise MissingTritonKernelError(
-                    f"Triton kernel binary is unavailable at {cubin_path}"
-                ) from error
-            raise
+            _raise_kernel_load_error(
+                error,
+                f"Triton kernel binary at {cubin_path}",
+                not os.path.exists(cubin_path),
+            )
 
     def _load_kernel_from_binary(self, device: int):
-        if self.cubin_raw is None:
+        cubin_raw = self.cubin_raw
+        if cubin_raw is None:
             raise AssertionError("retained Triton kernel binary is not set")
         try:
             return self.C_impl._load_kernel_from_binary(
-                self.cubin_raw, self.name, self.shared, device
+                cubin_raw, self.name, self.shared, device
             )
         except RuntimeError as error:
-            if _is_invalid_kernel_image_error(error):
-                raise InvalidTritonKernelArtifactError(
-                    "Retained Triton kernel binary is unusable"
-                ) from error
-            if _is_missing_kernel_file_error(error):
-                raise MissingTritonKernelError(
-                    "Retained Triton kernel binary is unavailable"
-                ) from error
-            raise
+            _raise_kernel_load_error(error, "Retained Triton kernel binary")
 
     def _load_kernel_for_device(self, device: int):
         if self.cubin_raw is not None:
