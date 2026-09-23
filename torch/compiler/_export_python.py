@@ -189,6 +189,56 @@ def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float | None]:
     return (float(override_rtol) if override_rtol else rtol, atol, atol_frac)
 
 
+def _eager_draws(
+    fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    rng: torch.Tensor,
+) -> bool:
+    """Whether fn's result depends on the generator, i.e. whether it draws.
+
+    Only consulted after a mismatch, to tell "the edit broke it" apart from "this
+    function draws". Drawing has to be detected by running from two DIFFERENT generator
+    states -- running twice from the same state proves nothing, because eager is
+    perfectly reproducible at a fixed seed. What makes the comparison meaningless is that
+    inductor lowers random ops to its own philox and differs from eager at the same seed
+    by design.
+    """
+    devices = (
+        list(range(torch.cuda.device_count())) if torch.cuda.is_available() else []
+    )
+    try:
+        # fork_rng so neither the reseed below nor anything fn draws escapes: this runs
+        # only to answer a question, and must leave the caller's streams untouched.
+        with torch.random.fork_rng(devices=devices, enabled=True):
+            torch.random.set_rng_state(rng)
+            first = pytree.tree_leaves(fn(*copy.deepcopy(args)))
+            torch.random.manual_seed(int(torch.random.initial_seed()) + 1)
+            second = pytree.tree_leaves(fn(*copy.deepcopy(args)))
+    except Exception:
+        return False
+    pairs = [
+        (a, b)
+        for a, b in zip(first, second)
+        if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)
+    ]
+    for a, b in pairs:
+        if a.shape != b.shape or a.dtype != b.dtype:
+            return True
+        rtol, atol, atol_frac = _check_tolerances(a.dtype)
+        # Cap it exactly as the real comparison does. Using the raw absolute tolerance
+        # here made a small-magnitude random fn look deterministic to this function while
+        # looking wrong to the caller, so it was reported as a bad hand-edit instead of
+        # being skipped.
+        if atol_frac is not None:
+            finite = _finite_mask(a)
+            values = a[finite] if finite is not None else a.flatten()
+            if values.numel():
+                atol = min(atol, atol_frac * values.double().abs().max().item())
+        if not _allclose(a, b, rtol, atol):
+            return True
+    return False
+
+
 def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
     """torch.allclose, but tolerant of dtypes that have no comparison kernel.
 
@@ -220,9 +270,11 @@ def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
 
 def _verify_against_eager(
     fn: Callable[..., Any],
+    args: tuple[Any, ...],
     reference_args: tuple[Any, ...],
     produced: Any,
     path: str,
+    rng: torch.Tensor,
 ) -> None:
     """Re-run fn eagerly on a pre-call copy of the inputs and compare the results.
 
@@ -231,11 +283,16 @@ def _verify_against_eager(
     function. Under COMPILER_EXPORT_PYTHON_CHECK every call does exactly that.
     """
     expected = fn(*reference_args)
+    # Outputs AND inputs. A graph is free to mutate what it was handed, and a fn whose
+    # whole job is an in-place write returns nothing to compare -- checking only the
+    # return value rubber-stamps exactly those.
     got_leaves = [
-        t for t in pytree.tree_leaves(produced) if isinstance(t, torch.Tensor)
+        t for t in pytree.tree_leaves((produced, args)) if isinstance(t, torch.Tensor)
     ]
     want_leaves = [
-        t for t in pytree.tree_leaves(expected) if isinstance(t, torch.Tensor)
+        t
+        for t in pytree.tree_leaves((expected, reference_args))
+        if isinstance(t, torch.Tensor)
     ]
     if len(got_leaves) != len(want_leaves):
         raise _precompile_error(
@@ -292,6 +349,16 @@ def _verify_against_eager(
             rel = f"{(diff[significant] / want.double().abs()[significant]).max().item():.3e}"
         else:
             rel = "n/a (reference is all near-zero)"
+        if _eager_draws(fn, reference_args, rng):
+            log.warning(
+                "%s: %s draws from the generator, and inductor lowers random ops to its "
+                "own philox, which differs from eager at the same seed by design -- so "
+                "comparing the two says nothing. Skipping the check for %s.",
+                _CHECK_ENV,
+                getattr(fn, "__name__", "fn"),
+                path,
+            )
+            return
         raise _precompile_error(
             f"{_CHECK_ENV}: output {i} of the artifact at {path} does not match "
             f"{getattr(fn, '__name__', 'fn')} run eagerly on the same inputs "
@@ -1216,8 +1283,21 @@ class ExportedPythonArtifact:
                 self._path,
             )
             return loaded(*args)
+        # Three states matter here. `before` is what the artifact saw; the reference run
+        # is rewound to it so a draw is not mistaken for a bad edit. `after` is what the
+        # caller must be left with -- restoring `before` instead would discard whatever
+        # the artifact consumed and freeze the caller's stream, so a random function
+        # would return the same numbers on every checked call.
+        before = torch.random.get_rng_state()
         produced = loaded(*args)
-        _verify_against_eager(self._fn, reference, produced, self._path)
+        after = torch.random.get_rng_state()
+        try:
+            torch.random.set_rng_state(before)
+            _verify_against_eager(
+                self._fn, args, reference, produced, self._path, before
+            )
+        finally:
+            torch.random.set_rng_state(after)
         return produced
 
 

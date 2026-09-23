@@ -6211,7 +6211,8 @@ class TestExportPython(TestCase):
 
     def test_check_env_var_passes_an_honest_artifact(self, device):
         # And it must not cry wolf: an unedited artifact, and a fn that mutates its input
-        # in place (the reference run gets a copy).
+        # in place (the reference run gets a copy), and a fn that draws (the generators
+        # are rewound so both runs see the same stream).
         x = make_tensor((32,), device=device, dtype=torch.float32)
 
         def pure(inp):
@@ -6221,8 +6222,15 @@ class TestExportPython(TestCase):
             inp.add_(1.0)
             return inp * 3
 
+        def drawing(inp):
+            return inp + torch.rand_like(inp)
+
         with mock.patch.dict(os.environ, {"COMPILER_EXPORT_PYTHON_CHECK": "1"}):
-            for name, fn in (("pure", pure), ("mutating", mutating)):
+            for name, fn in (
+                ("pure", pure),
+                ("mutating", mutating),
+                ("drawing", drawing),
+            ):
                 run = torch.compiler.export_python(path=self._tmp_path(f"{name}.py"))(
                     fn
                 )
@@ -6603,7 +6611,9 @@ class TestExportPython(TestCase):
         nonfinite = produced.clone()
         nonfinite[0] = float("nan")
         with self.assertRaisesRegex(PrecompileError, "where the result is finite"):
-            _verify_against_eager(fn, (x,), nonfinite, path)
+            _verify_against_eager(
+                fn, (x,), (x,), nonfinite, path, torch.random.get_rng_state()
+            )
 
     def test_check_does_not_report_a_relative_diff_of_1e308(self, device):
         # The denominator was clamped to float64 tiny, so every exactly-zero reference
@@ -6620,7 +6630,9 @@ class TestExportPython(TestCase):
         torch.compiler.export_python(path=path)(fn)(x)
         wrong = torch.relu(x) + 1.0
         with self.assertRaises(PrecompileError) as cm:
-            _verify_against_eager(fn, (x,), wrong, path)
+            _verify_against_eager(
+                fn, (x,), (x,), wrong, path, torch.random.get_rng_state()
+            )
         message = str(cm.exception)
         self.assertIn("max rel diff", message)
         for absurd in ("e+30", "e+29", "e+308"):
@@ -6763,8 +6775,38 @@ class TestExportPython(TestCase):
         x = make_tensor((256,), device=device, dtype=torch.float32, low=-1, high=1)
         with mock.patch.dict(os.environ, {"COMPILER_EXPORT_PYTHON_CHECK_ATOL": "1e-9"}):
             with self.assertRaises(PrecompileError) as cm:
-                _verify_against_eager(fn, (x,), torch.relu(x) + 1.0, path)
+                _verify_against_eager(
+                    fn,
+                    (x,),
+                    (x,),
+                    torch.relu(x) + 1.0,
+                    path,
+                    torch.random.get_rng_state(),
+                )
         self.assertNotIn("all near-zero", str(cm.exception))
+
+    def test_a_small_magnitude_random_fn_is_skipped_not_blamed(self, device):
+        # The draw detector compared with the UNCAPPED tolerance while the real
+        # comparison used the capped one, so a small-magnitude random fn looked
+        # deterministic to the detector and wrong to the caller: reported as a bad
+        # hand-edit of an artifact nobody had touched.
+        path = self._tmp_path("smallrand.py")
+
+        def fn(x):
+            return torch.rand_like(x) * 1e-4
+
+        x = make_tensor((4096,), device=device, dtype=torch.float32)
+        from torch.compiler._export_python import _CHECK_ENV
+
+        with mock.patch.dict(os.environ, {_CHECK_ENV: "1"}):
+            torch.compiler.export_python(path=path)(fn)(x)
+            with self.assertLogs(
+                "torch.compiler._export_python", level="WARNING"
+            ) as lg:
+                torch.compiler.export_python(path=path)(fn)(x)
+        self.assertTrue(
+            any("draws from the generator" in line for line in lg.output), lg.output
+        )
 
     def test_a_dtype_without_comparison_kernels_does_not_crash_the_check(self, device):
         # float8 is is_floating_point() but has neither isfinite nor the mul that

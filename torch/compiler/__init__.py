@@ -1124,7 +1124,8 @@ def export_python(
     is reported instead of trusted. This is how you qualify an edit before shipping it;
     it is a debug mode -- it doubles the work per call -- so turn it off in production,
     where the eager ``fn`` is the reference the artifact has already departed from for
-    speed. It compares outputs at the working dtype's resolution:
+    speed. It compares outputs *and* any input
+    the graph mutated in place, and it compares them at the working dtype's resolution:
     it will catch an edit that changes the answer, but it is not a proof that the edit
     computes the same function. Swapping an exact special function for an approximation
     whose error is below the dtype's own noise passes, by construction. It also compares
@@ -1133,7 +1134,8 @@ def export_python(
     where the eager function would have worked. "Doubles the work" is the floor: the reference run needs a
     deep copy of every argument, so an ``nn.Module`` argument is copied -- weights and
     all -- on every checked call. ``COMPILER_EXPORT_PYTHON_CHECK_RTOL`` and ``..._ATOL``
-    override the per-dtype tolerances. Note that
+    override the per-dtype tolerances; a ``fn`` that draws from the generator is skipped
+    with a warning, since inductor's philox differs from eager's by design. Note that
     ``fn`` runs a second time on every checked call, so any side effect it has -- writing
     a log, appending to a list, stepping a counter -- happens twice while the check is on,
     and a test that deliberately makes the artifact disagree with ``fn`` will fail under
