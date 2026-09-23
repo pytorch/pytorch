@@ -77,6 +77,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
@@ -287,6 +288,33 @@ class TestGradTransform(TestCase):
         x = torch.randn(2, 3, 4, device=device)
         result = grad(lambda x: torch.flatten(x).sum())(x)
         self.assertEqual(result, torch.ones_like(x))
+
+    def test_linear_nd_inplace_activation(self, device):
+        # linear_hack shadows at::native::linear under functorch transforms, so its
+        # nD fast path needs its own coverage: it must unflatten with _unsafe_view,
+        # otherwise the relu_ below rebases history onto CopySlices.
+        x = torch.randn(2, 3, 8, device=device, dtype=torch.double)
+        w = torch.randn(16, 8, device=device, dtype=torch.double)
+        b = torch.randn(16, device=device, dtype=torch.double)
+
+        ops = []
+
+        class RecordOps(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        def f(x, w, b):
+            return F.linear(x, w, b).relu_().sum()
+
+        with RecordOps():
+            result = torch.func.grad(f, argnums=(0, 1, 2))(x, w, b)
+
+        self.assertIn(torch.ops.aten._unsafe_view.default, ops)
+
+        xr, wr, br = (t.clone().requires_grad_() for t in (x, w, b))
+        (xr @ wr.t() + br).relu().sum().backward()
+        self.assertEqual(result, (xr.grad, wr.grad, br.grad))
 
     def test_fn_with_kwargs(self, device):
         def foo(x, y):
@@ -1282,6 +1310,47 @@ class TestGradTransform(TestCase):
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):
+    @skipIfTorchDynamo("internal API test")
+    def test_unwrap_dead_wrappers(self, device):
+        ft = torch._C._functorch
+        unwrap_dead_wrappers = torch._functorch.utils.unwrap_dead_wrappers
+
+        def make_dead_wrapper(tensor):
+            level = ft._grad_increment_nesting()
+            try:
+                wrapped = ft._wrap_for_grad(tensor, level)
+            finally:
+                ft._grad_decrement_nesting()
+            self.assertTrue(ft.is_dead_tensor_wrapper(wrapped))
+            return wrapped
+
+        empty = ()
+        self.assertIs(unwrap_dead_wrappers(empty), empty)
+
+        non_tensors = (None, 1, "arg")
+        self.assertIs(unwrap_dead_wrappers(non_tensors), non_tensors)
+
+        live_tensor = torch.randn(2, device=device)
+        mixed_live = ("arg", live_tensor, None)
+        self.assertIs(unwrap_dead_wrappers(mixed_live), mixed_live)
+
+        for dead_idx in range(3):
+            live_before = torch.randn(2, device=device)
+            live_after = torch.randn(2, device=device)
+            base = torch.randn(2, device=device)
+            dead = make_dead_wrapper(base)
+            args = [live_before, "arg", live_after]
+            args[dead_idx] = dead
+            args = tuple(args)
+
+            result = unwrap_dead_wrappers(args)
+            self.assertIsNot(result, args)
+            self.assertEqual(result[dead_idx], base)
+            self.assertFalse(ft.is_dead_tensor_wrapper(result[dead_idx]))
+            for idx in range(3):
+                if idx != dead_idx:
+                    self.assertIs(result[idx], args[idx])
+
     def test_set_materialize_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
@@ -2665,6 +2734,10 @@ class TestHessian(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 14),
+        "Frame Handling Difference between Python versions",
+    )
     def test_jacfwd_different_levels(self, device):
         # Test case from:
         # https://github.com/pytorch/functorch/issues/597
@@ -4911,6 +4984,37 @@ class TestFunctionalize(TestCase):
             return x
 
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+
+    def test_multioutput_view_preserves_autograd_metadata(self, device):
+        # Regenerating the view rebuilds it as a select, so it carries a
+        # SelectBackward, but autograd must still reject mutating it: the
+        # restriction rides on CreationMeta, which the replay restores.
+        def f(x):
+            base = x.clone()
+            out = base.unbind(0)[0]
+            base.add_(1)
+            return out
+
+        out = torch.func.functionalize(f)(
+            torch.ones(2, 3, device=device, requires_grad=True)
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple views"
+        ):
+            out.mul_(2)
+
+    def test_multioutput_view_regeneration_matches_eager(self, device):
+        # An uneven split exercises the short final chunk, where the generated
+        # single-output replay relies on slice clamping the end, and the
+        # accumulating offsets of split_with_sizes.
+        def f(x):
+            base = x.clone()
+            outs = base.split(2)
+            base.add_(1)
+            return tuple(o.clone() for o in outs)
+
+        x = torch.arange(15.0, device=device).reshape(5, 3)
+        self.assertEqual(torch.func.functionalize(f)(x), f(x))
 
     def test_inplace_view(self, device):
         def f(x: torch.Tensor) -> torch.Tensor:

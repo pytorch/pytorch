@@ -52,6 +52,7 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
+from fx.test_fx_traceback import TestFXNodeSource  # noqa: F401
 
 from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     AnnotationsTest,
@@ -66,7 +67,10 @@ from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBI
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
-from torch.testing._internal.common_cuda import blas_library_context
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    blas_library_context,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -215,6 +219,13 @@ def side_effect_func(x: torch.Tensor):
     print(x)
 
 
+@torch.fx.wrap
+def wrapped_optional_typing_dict(
+    value: dict[int, tuple[torch.Tensor, torch.Tensor]] | None,
+):
+    return value
+
+
 def _enrich_profiler_traces(prof):
     """
     Helper function to extract and augment profiler events with stack traces.
@@ -245,6 +256,18 @@ def _enrich_profiler_traces(prof):
         return actual_traces
 
 
+def _parse_profiler_trace_lines(traces: str) -> list[tuple[str, str, str]]:
+    lines = []
+    for line in traces.splitlines():
+        if not line:
+            continue
+        event_part, rest = line.split(" node=", 1)
+        event = event_part.removeprefix("event=")
+        node, stack_trace = rest.split(" stack_trace=", 1)
+        lines.append((event, node, stack_trace))
+    return lines
+
+
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -264,6 +287,29 @@ class TestFX(JitTestCase):
         torch.fx.proxy.TracerBase.check_mutable_operations = (
             self.orig_tracer_mutable_flag
         )
+
+    def _assert_profiler_stack_traces_for_nodes(
+        self,
+        traces: str,
+        node_requirements: dict[str, tuple[str, ...]],
+    ) -> None:
+        parsed = _parse_profiler_trace_lines(traces)
+        self.assertTrue(len(parsed) > 0, "expected enriched profiler events with stack traces")
+
+        by_node: dict[str, list[str]] = collections.defaultdict(list)
+        for _event, node, stack_trace in parsed:
+            by_node[node].append(stack_trace)
+
+        for node, required_substrings in node_requirements.items():
+            self.assertIn(node, by_node, f"no enriched events for node={node}")
+            stacks = by_node[node]
+            matched = any(
+                all(sub in st for sub in required_substrings) for st in stacks
+            )
+            self.assertTrue(
+                matched,
+                f"node={node}: no stack trace containing {required_substrings}; got {stacks}",
+            )
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
@@ -350,6 +396,76 @@ class TestFX(JitTestCase):
         gm = GraphModule(torch.nn.Module(), graph)
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(torch.sin(x + y), gm(x, y))
+
+    def test_tuple_return_annotation_for_schemas(self):
+
+        # Target an op that returns multiple tensors (e.g., var_mean)
+        op = torch.ops.aten.var_mean.default
+
+        # get_signature_for_torch_op returns a list of signatures
+        sigs = get_signature_for_torch_op(op)
+        self.assertTrue(len(sigs) > 0, "Expected at least one signature")
+
+        # Grab the first signature schema
+        sig = sigs[0]
+        ret_ann = sig.return_annotation
+
+        # 1. Ensure it's not a raw Python tuple (The bug you fixed)
+        self.assertNotEqual(
+            type(ret_ann), tuple,
+            "return_annotation should be a generic type hint, not a raw tuple of types"
+        )
+
+        # 2. Ensure it resolves to a proper tuple typing origin (tuple or typing.Tuple)
+        origin = getattr(ret_ann, "__origin__", None)
+        self.assertIn(
+            origin, (tuple, tuple),
+            f"Expected tuple or typing.Tuple origin, got {origin}"
+        )
+
+        # 3. Ensure the inner arguments are properly set to torch.Tensor
+        args = getattr(ret_ann, "__args__", None)
+        self.assertIsNotNone(args, "Tuple annotation must have __args__")
+        self.assertTrue(
+            all(issubclass(a, torch.Tensor) for a in args),
+            "Inner tuple arguments should be subclass of torch.Tensor"
+        )
+
+    def test_boxed_arg_indices_codegen(self):
+        def multi_boxed_call(left, passthrough, right):
+            return left[0] + left[1] + passthrough + right[0]
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        c = graph.placeholder("c")
+        d = graph.placeholder("d")
+        out = graph.call_function(multi_boxed_call, ([a, b], c, [d]))
+        out.meta["boxed_arg_indices"] = (0, 2)
+        graph.output(out)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        self.assertEqual(gm(1, 2, 3, 4), 10)
+        self.assertIn("multi_boxed_call_boxed_arg_0 = [a, b]", gm.code)
+        self.assertIn("multi_boxed_call_boxed_arg_2 = [d];  a = b = d = None", gm.code)
+        self.assertRegex(
+            gm.code,
+            r"multi_boxed_call\(multi_boxed_call_boxed_arg_0, c, multi_boxed_call_boxed_arg_2\)",
+        )
+        boxed_arg_cleanup = "multi_boxed_call_boxed_arg_0 = multi_boxed_call_boxed_arg_2 = None"
+        self.assertIn(boxed_arg_cleanup, gm.code)
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        out = graph.call_function(multi_boxed_call, ([a, b], a, [b]))
+        out.meta["boxed_arg_indices"] = (0, 2)
+        graph.output(out)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        self.assertEqual(gm(1, 2), 6)
+        self.assertIn("multi_boxed_call_boxed_arg_2 = [b];  b = None", gm.code)
+        self.assertNotIn("a = b = None", gm.code)
 
     def test_args_kwargs(self):
         class T(torch.nn.Module):
@@ -1376,6 +1492,58 @@ class TestFX(JitTestCase):
                 f"Expected 2 occurrences of '_torch__ops_aten_aten_relu_', got {count}"
             )
 
+    def test_print_readable_with_sparse_meta_val(self):
+        # The compressed sparse layouts have no strides; annotating a node
+        # whose meta["val"] carries one used to raise from Tensor.stride().
+        for layout in (
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ):
+            with self.subTest(layout=layout):
+                dense = torch.eye(4)
+                kwargs = (
+                    {"blocksize": (2, 2)}
+                    if layout in (torch.sparse_bsr, torch.sparse_bsc)
+                    else {}
+                )
+                sparse = dense.to_sparse(layout=layout, **kwargs)
+
+                graph = torch.fx.Graph()
+                node = graph.create_node("placeholder", "x")
+                node.meta["val"] = sparse
+                graph.output(node)
+                gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+                text = gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                self.assertIn("x", text)
+
+    def test_print_sparse_tensor_metadata(self):
+        crow = torch.tensor([0, 1, 2])
+        col = torch.tensor([0, 1])
+        vals = [
+            torch.sparse_coo_tensor(torch.tensor([[0, 1], [0, 1]]), torch.randn(2), (2, 2)),
+            torch.sparse_csr_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_csc_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_bsr_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+            torch.sparse_bsc_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+        ]
+
+        for val in vals:
+            graph: torch.fx.Graph = torch.fx.Graph()
+            x: torch.fx.Node = graph.create_node("placeholder", "x")
+            node: torch.fx.Node = graph.create_node("call_function", torch.relu, args=(x,))
+            node.meta["val"] = val
+            graph.output(node)
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+            text = gm.print_readable(print_output=False, include_stride=True, include_device=True)
+            if val.layout is not torch.sparse_coo:
+                self.assertIn(f'"f32{list(val.shape)}cpu"', text)
+                self.assertIn(f'"f32{list(val.shape)}cpu"', node.format_node(include_tensor_metadata=True))
+
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
         # print_readable() should not produce lines with trailing whitespace.
@@ -1419,7 +1587,7 @@ class TestFX(JitTestCase):
             self.assertEqual(
                 line,
                 line.rstrip(),
-                f"Line {i + 1} has trailing whitespace: {repr(line)}",
+                lambda msg: f"{msg}\nLine {i + 1} has trailing whitespace: {repr(line)}",
             )
 
     def test_script_tensor_constant(self):
@@ -1802,6 +1970,42 @@ class TestFX(JitTestCase):
         input = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
         offsets = torch.LongTensor([0, 4])
         self.assertEqual(loaded(input, offsets), traced(input, offsets))
+
+    def test_save_string_type_annotation(self):
+        def f(x: "torch.Tensor") -> "torch.Tensor":
+            return x
+
+        traced = symbolic_trace(f)
+        _, (body, import_block) = traced.__reduce__()
+        self.assertExpectedInline(
+            import_block + body["_code"].rstrip(),
+            """\
+NoneType = type(None)
+_torch_Tensor_ = 'torch.Tensor'
+from math import inf
+from math import nan
+from torch import device
+import torch
+import torch.fx._pytree as fx_pytree
+import torch.utils._pytree as pytree
+
+
+def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
+    return x""",
+        )
+
+        bio = io.BytesIO()
+        torch.save(traced, bio)
+        bio.seek(0)
+        loaded = torch.load(bio, weights_only=False)
+        loaded.graph.lint()
+
+        x = torch.randn(2, 3)
+        self.assertEqual(loaded(x), traced(x))
+        self.assertEqual(
+            loaded.forward.__annotations__,
+            {"x": "torch.Tensor", "return": "torch.Tensor"},
+        )
 
     def test_return_tuple(self):
         class M(torch.nn.Module):
@@ -2440,6 +2644,25 @@ class TestFX(JitTestCase):
 
         torch.jit.script(symbolic_trace(forward))
 
+    def test_optional_typing_dict_placeholder_annotation_python314(self):
+        class OptionalTypingDictModule(torch.nn.Module):
+            def forward(
+                self,
+                value: typing.Optional[  # noqa: UP045
+                    typing.Dict[  # noqa: UP006
+                        int, typing.Tuple[torch.Tensor, torch.Tensor]  # noqa: UP006
+                    ]
+                ],
+            ):
+                return wrapped_optional_typing_dict(value)
+
+        traced = symbolic_trace(OptionalTypingDictModule())
+
+        FileCheck().check("value : typing_Union[typing_Dict").check(
+            "typing_Tuple"
+        ).check("NoneType]").run(traced.code)
+        torch.jit.script(traced)
+
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
             @functools.wraps(fn)
@@ -2462,6 +2685,29 @@ class TestFX(JitTestCase):
         graph = torch.fx.Graph()
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(gm(), None)
+
+    def test_complex_constant_codegen_preserves_signed_zero(self):
+        values = [
+            complex(-0.0, -1e-28),
+            complex(-0.0, 1e-28),
+            complex(0.0, -1e-28),
+            complex(1.0, -0.0),
+            complex(0.0, -0.0),
+        ]
+
+        graph = torch.fx.Graph()
+        tensor = graph.call_function(
+            torch.tensor, args=(values,), kwargs={"dtype": torch.complex64}
+        )
+        graph.output(tensor)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        expected = torch.tensor(values, dtype=torch.complex64)
+        result = gm()
+        self.assertEqual(result, expected)
+        self.assertEqual(torch.signbit(result.real), torch.signbit(expected.real))
+        self.assertEqual(torch.signbit(result.imag), torch.signbit(expected.imag))
+        self.assertIn("complex(-0.0, -1e-28)", gm.code)
 
     def test_sequential(self):
         m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
@@ -3954,6 +4200,37 @@ class TestFX(JitTestCase):
     def test_graph_module_init_buffer_param_copied_mod_init(self):
         self._test_graph_module_init_buffer_param_copied(use_dict_init=False)
 
+    def test_graph_module_init_preserves_non_persistent_buffers(self):
+        class Child(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("nested", torch.ones(1), persistent=False)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("top_level", torch.ones(1), persistent=False)
+                self.child = Child()
+
+            def forward(self, x):
+                return x + self.top_level + self.child.nested
+
+        module = MyModule()
+        graph_module = GraphModule(module, symbolic_trace(module).graph)
+
+        self.assertEqual(torch.full((1,), 2.0), graph_module(torch.zeros(1)))
+        self.assertEqual(
+            {"top_level", "child.nested"},
+            {name for name, _ in graph_module.named_buffers()},
+        )
+        self.assertEqual(
+            {"top_level"}, graph_module._non_persistent_buffers_set
+        )
+        self.assertEqual(
+            {"nested"}, graph_module.child._non_persistent_buffers_set
+        )
+        self.assertEqual({}, graph_module.state_dict())
+
     def test_annotations_with_no_forward_references(self):
         class A:
             def __call__(self, x: torch.Tensor):
@@ -4476,7 +4753,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         actual_traces = _enrich_profiler_traces(prof)
 
-        # Handle platform-specific event names
         if torch.version.hip:
             actual_traces = '\n'.join(
                 line for line in actual_traces.split('\n')
@@ -4487,34 +4763,37 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         else:
             kernel_event = "cudaLaunchKernel"
             kernel_event_relu = "cudaLaunchKernel"
+
         if IS_WINDOWS:
-            expected = f"""\
-event=aten::t node=t stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::transpose node=t stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::as_strided node=t stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::addmm node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::expand node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::as_strided node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::relu node=relu stack_trace=return F.relu(input, inplace=self.inplace)
-event=aten::clamp_min node=relu stack_trace=return F.relu(input, inplace=self.inplace)
-event={kernel_event_relu} node=relu stack_trace=return F.relu(input, inplace=self.inplace)
-event=aten::t node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::transpose node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::as_strided node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::addmm node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::expand node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::as_strided node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)"""
+            self._assert_profiler_stack_traces_for_nodes(
+                actual_traces,
+                {
+                    "addmm": ("linear",),
+                    "relu": ("relu",),
+                    "addmm_1": ("linear",),
+                },
+            )
         else:
+            # cuBLASLt added two internal cudaStreamIsCapturing checks before
+            # launching GEMM kernels starting with CUDA 13.4, which show up
+            # as extra runtime events ahead of each addmm's kernel launch.
+            extra_event = not torch.version.hip and _get_torch_cuda_version() >= (13, 4)
+            capture_1, capture_2 = "", ""
+            if extra_event:
+                capture_1 = (
+                    "event=cudaStreamIsCapturing node=addmm "
+                    "stack_trace=x = self.linear1(x)\n"
+                ) * 2
+                capture_2 = (
+                    "event=cudaStreamIsCapturing node=addmm_1 "
+                    "stack_trace=x = self.linear2(x)\n"
+                ) * 2
             expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
+{capture_1}event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
 event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
@@ -4522,9 +4801,8 @@ event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
-
-        self.assertExpectedInline(actual_traces, expected)
+{capture_2}event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+            self.assertExpectedInline(actual_traces, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
@@ -5121,6 +5399,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         None: "None",
         typing.Iterator: "Iterator",
         collections.abc.Iterator: "Iterator",
+        types.ModuleType: "types.ModuleType",
     }
 
     _UNBOUND_TYPES = {
@@ -5452,6 +5731,7 @@ class TestFunctionalTracing(JitTestCase):
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
+        "scaled_addmm_": MUTABLE,
         "scaled_dot_product_attention": BUILT_IN_FUNC,
         "softplus": BUILT_IN_FUNC,
         "softshrink": BUILT_IN_FUNC,

@@ -1,5 +1,4 @@
 #include <c10/core/ScalarType.h>
-#include <c10/util/Array.h>
 #include <array>
 
 namespace c10 {
@@ -22,8 +21,8 @@ constexpr auto bf = ScalarType::BFloat16;
 constexpr auto cb = ScalarType::BComplex32;
 constexpr auto ud = ScalarType::Undefined;
 
-constexpr auto index2dtype = array_of<
-    c10::ScalarType>(u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf, cb);
+constexpr auto index2dtype = std::to_array<c10::ScalarType>(
+    {u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf, cb});
 
 constexpr std::array<int64_t, static_cast<size_t>(ScalarType::NumOptions)>
 calculate_dtype2index() {

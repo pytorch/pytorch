@@ -42,8 +42,9 @@ from torch.distributed.tensor.placement_types import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     generate_shard_orders,
+    LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
     patched_distribute_tensor as _distribute_tensor,
     shard_order_to_placement,
@@ -389,10 +390,8 @@ class LocalTest(TestCase):
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
 
-class UtilTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 8
+class UtilTest(DTensorContinuousTestBase):
+    world_size = 8
 
     def _compute_start_end_offsets(self, global_offset, local_size, n_dim):
         offset = []
@@ -813,10 +812,8 @@ class UtilSingleDeviceTest(TestCase):
         torch.distributed.destroy_process_group()
 
 
-class TestStridedSharding(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
+class TestStridedSharding(DTensorContinuousTestBase):
+    world_size = 4
 
     @with_comms
     def test_1d_mesh_strided_sharding(self):
@@ -1285,7 +1282,7 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
             )
 
 
-class Test_StridedShard_Optimizer(DTensorTestBase):
+class Test_StridedShard_Optimizer(DTensorContinuousTestBase):
     """Test optimizer updates with _StridedShard placement using FSDP+TP.
 
     This test uses FSDP+TP to create parameters with placement
@@ -1295,9 +1292,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
     The pattern follows _TestClipGradNormBase from test_fully_shard_clip_grad_norm_.py
     """
 
-    @property
-    def world_size(self) -> int:
-        return 4
+    world_size = 4
 
     def _test_optimizer_with_fsdp_tp(
         self,
@@ -1377,7 +1372,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
             self.assertIsInstance(
                 fsdp_placement,
                 (_StridedShard, Shard),
-                f"Parameter {name} has unexpected FSDP placement: {fsdp_placement}",
+                lambda msg: f"{msg}\nParameter {name} has unexpected FSDP placement: {fsdp_placement}",
             )
 
         # Run training loop
@@ -1408,7 +1403,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
                 self.assertEqual(
                     ref_param,
                     param.full_tensor(),
-                    msg=f"Parameter mismatch at iteration {iter_idx}",
+                    msg=lambda msg: f"{msg}\nParameter mismatch at iteration {iter_idx}",
                 )
 
     @with_comms
@@ -1499,10 +1494,8 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
                 self.assertIsNone(shard_order)
 
 
-class Test2DStridedLocalShard(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
+class Test2DStridedLocalShard(DTensorContinuousTestBase):
+    world_size = 4
 
     @with_comms
     def test_fsdp1_tp_2d_dtensor_local_shards_and_offsets(self):
@@ -1641,6 +1634,10 @@ class TestStridedShardCollectiveOpUtils:
 
     ShardConfig = namedtuple("ShardConfig", ["mesh_dim", "split_factor"], defaults=(1,))
 
+    def _range_tensor(self, *shape) -> torch.Tensor:
+        """Create a tensor with sequential values reshaped to the given shape."""
+        return torch.arange(math.prod(shape)).view(shape)
+
     def _convert_default_order_placements_to_ShardConfig(
         self, placements: Sequence[Placement]
     ) -> dict[int, list["TestStridedShardCollectiveOpUtils.ShardConfig"]]:
@@ -1720,10 +1717,10 @@ class TestStridedShardCollectiveOpUtils:
         return new_logical_shape
 
 
-class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
+class TestStridedShardReplicate(
+    TestStridedShardCollectiveOpUtils, DTensorContinuousTestBase
+):
+    world_size = 4
 
     @with_comms
     def test_StridedShard_to_replicate(self):
@@ -1747,7 +1744,7 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                 self.assertEqual(
                     a_dt_after_to_replicate,
                     b_dt.to_local(),
-                    f"{tensor_size=}, placements={src_p}",
+                    lambda msg: f"{msg}\n{tensor_size=}, placements={src_p}",
                 )
 
     @with_comms
@@ -1769,6 +1766,119 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                     a_dt_strided,
                     b_dt.to_local(),
                 )
+
+
+class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTestBase):
+    """Tests for _StridedShard layout and collective operations."""
+
+    @property
+    def world_size(self):
+        return 126
+
+    def _do_alltoall(
+        self,
+        local_tensor: torch.Tensor,
+        shard_spec: Placement,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        logical_shape: list[int],
+        target_tensor_dim: int,
+    ) -> torch.Tensor:
+        """Perform alltoall redistribution to a new shard dimension."""
+        if not isinstance(shard_spec, _StridedShard):
+            raise AssertionError(f"expected _StridedShard, got {type(shard_spec)}")
+        return shard_spec._to_new_shard_dim(
+            local_tensor, mesh, mesh_dim, logical_shape, target_tensor_dim
+        )
+
+    @with_comms
+    def test_StridedShard_alltoall_to_Shard(self):
+        """
+        Test _StridedShard alltoall from _StridedShard to Shard.
+        """
+        S = Shard
+        SS = lambda x, y: S(x) if y == 1 else _StridedShard(x, split_factor=y)  # noqa: E731
+        # Each test case format: (mesh shape, tensor shape, src_placements,
+        # src_tensor_dim, target_placements, target_tensor_dim,
+        # operate_mesh_dim). src_placements should be convertible to
+        # target_placements with an a2a collective op.
+        test_cases = [
+            ((3,), (4, 4), (SS(0, 2),), 0, (S(1),), 1, 0),
+            # Regression: num_chunks > first_chunk_size causes empty ranks
+            # that need padding (6 rows, sf=2 -> first_chunk=3, but 8 ranks)
+            ((8,), (6, 8), (SS(0, 2),), 0, (S(1),), 1, 0),
+            ((3, 3), (274, 71), (S(0), SS(0, 2)), 0, (S(0), S(1)), 1, 1),
+            (
+                (3, 3, 5),
+                (147, 173, 322),
+                (SS(0, 5), S(1), SS(0, 2)),
+                0,
+                (SS(0, 5), S(1), S(1)),
+                1,
+                2,
+            ),
+            (
+                (3, 7, 2),
+                (143, 71, 147),
+                (SS(0, 5), S(1), SS(0, 2)),
+                0,
+                (SS(0, 5), S(1), S(1)),
+                1,
+                2,
+            ),
+            (
+                (3, 7, 2, 3),
+                (143, 71, 147),
+                (SS(1, 5), S(0), S(2), SS(0, 2)),
+                0,
+                (SS(1, 5), S(0), S(2), S(1)),
+                1,
+                3,
+            ),
+        ]
+        for (
+            mesh_shape,
+            tensor_shape,
+            src_p,
+            src_tensor_dim,
+            tgt_p,
+            tgt_tensor_dim,
+            operate_mesh_dim,
+        ) in test_cases:
+            world_size = math.prod(mesh_shape)
+            with LocalTensorMode(ranks=world_size):
+                mesh = init_device_mesh("cpu", mesh_shape)
+                tensor = self._range_tensor(*tensor_shape)
+                dt = distribute_tensor(
+                    tensor,
+                    mesh,
+                    src_p,
+                    src_data_rank=None,
+                )
+                logical_shape = self._get_logical_shape(
+                    # To be rigorous, we should test with the device order.
+                    # Currently we use the default left-to-right order.
+                    self._convert_default_order_placements_to_ShardConfig(src_p),
+                    mesh,
+                    operate_mesh_dim,
+                    tensor.shape,
+                )
+                dt_after_a2a = self._do_alltoall(
+                    dt.to_local(),
+                    src_p[operate_mesh_dim],
+                    mesh,
+                    operate_mesh_dim,
+                    logical_shape,
+                    tgt_tensor_dim,
+                )
+
+                dt_expected = distribute_tensor(
+                    tensor,
+                    mesh,
+                    tgt_p,
+                    src_data_rank=None,
+                )
+                self.assertEqual(dt_after_a2a, dt_expected.to_local())
 
 
 class TestExplicitRedistribute(LocalTensorTestBase):
@@ -1902,10 +2012,14 @@ class TestIsTensorShardable(LocalTensorTestBase):
         self.assertFalse(is_tensor_evenly_shardable([16, 8], spec))
 
 
-UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
-TestStridedShardingWithLocalTensor = create_local_tensor_test_class(TestStridedSharding)
+UtilTestWithLocalTensor = create_local_tensor_test_class(
+    UtilTest, base_class=LocalDTensorContinuousTestBase
+)
+TestStridedShardingWithLocalTensor = create_local_tensor_test_class(
+    TestStridedSharding, base_class=LocalDTensorContinuousTestBase
+)
 Test2DStridedLocalShardWithLocalTensor = create_local_tensor_test_class(
-    Test2DStridedLocalShard
+    Test2DStridedLocalShard, base_class=LocalDTensorContinuousTestBase
 )
 
 if __name__ == "__main__":

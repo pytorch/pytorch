@@ -19,10 +19,16 @@ import os
 
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class FakeBackendNewGroupTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
         os.environ.setdefault("MASTER_PORT", "29517")
@@ -39,8 +45,14 @@ class FakeBackendNewGroupTest(TestCase):
         self.assertEqual(dist.get_backend(g), "fake")
         # Hashed-name path preserved: sha1 hexdigest (40 chars), not a counter int.
         name = g.group_name
-        self.assertFalse(name.isdigit(), f"expected hashed name, got int {name!r}")
-        self.assertEqual(len(name), 40, f"expected 40-char sha1 hash, got {name!r}")
+        self.assertFalse(
+            name.isdigit(), lambda msg: f"{msg}\nexpected hashed name, got int {name!r}"
+        )
+        self.assertEqual(
+            len(name),
+            40,
+            lambda msg: f"{msg}\nexpected 40-char sha1 hash, got {name!r}",
+        )
 
     def test_fake_subgroup_of_real_parent_builds_fake_pg(self):
         """With TorchComms 'enabled', new_group(backend='fake',

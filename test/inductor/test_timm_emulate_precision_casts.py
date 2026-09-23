@@ -28,6 +28,7 @@ BENCHMARKS_DYNAMO = (
 @unittest.skipUnless(BENCHMARKS_DYNAMO.is_dir(), "benchmarks/dynamo not present")
 class TimmEmulatePrecisionCastsTest(TestCase):
     LISTED = "vit_base_patch14_dinov2.lvd142m"
+    LISTED_FP16 = "mobilenetv2_100"
     UNLISTED = "vit_base_patch16_siglip_256"
 
     @classmethod
@@ -83,12 +84,15 @@ class TimmEmulatePrecisionCastsTest(TestCase):
             pass
 
     def test_flag_toggles_per_model_no_carryover(self):
-        """Listed model flips flag True; subsequent unlisted model resets it."""
-        inductor_config.emulate_precision_casts = False
-        self._load(self.LISTED)
-        self.assertTrue(inductor_config.emulate_precision_casts)
-        self._load(self.UNLISTED)
-        self.assertFalse(inductor_config.emulate_precision_casts)
+        """Each listed model (bf16: LISTED, fp16: LISTED_FP16) flips the flag
+        True; a subsequent unlisted model resets it (no carryover)."""
+        for listed in (self.LISTED, self.LISTED_FP16):
+            with self.subTest(model=listed):
+                inductor_config.emulate_precision_casts = False
+                self._load(listed)
+                self.assertTrue(inductor_config.emulate_precision_casts)
+                self._load(self.UNLISTED)
+                self.assertFalse(inductor_config.emulate_precision_casts)
 
     def test_user_override_preserved_in_production_order(self):
         """Mirrors timm_main(): TimmRunner() runs in setUp, BEFORE the CLI

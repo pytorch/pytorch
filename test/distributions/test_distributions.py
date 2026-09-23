@@ -120,6 +120,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     load_tests,
+    parametrize,
     run_tests,
     set_default_dtype,
     set_default_dtype_if_supported,
@@ -1353,7 +1354,17 @@ class TestDistributions(DistributionsTestCase):
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
         if not distribution.support.is_discrete:
-            s = s.detach().requires_grad_()
+            s = s.detach()
+            # For simplex-constrained distributions (e.g. RelaxedOneHotCategorical),
+            # samples near the boundary cause numerical Jacobian to produce nan
+            # because log_prob inverts ExpTransform via log(), and finite
+            # differencing (eps=1e-6) near zero yields log(<=0) = -inf/nan.
+            # Clamp to the simplex interior (1e-4 gives ~100x margin above
+            # gradcheck eps) and renormalize.
+            if isinstance(distribution.support, constraints._Simplex):
+                s = s.clamp(min=1e-4)
+                s = s / s.sum(-1, keepdim=True)
+            s.requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
@@ -1405,7 +1416,7 @@ class TestDistributions(DistributionsTestCase):
                 sample = dist.sample()
                 self.assertFalse(
                     sample.requires_grad,
-                    msg=f"{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached",
+                    msg=lambda msg: f"{msg}\n{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached",
                 )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
@@ -1420,7 +1431,7 @@ class TestDistributions(DistributionsTestCase):
                 sample = dist.rsample()
                 self.assertTrue(
                     sample.requires_grad,
-                    msg=f"{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad",
+                    msg=lambda msg: f"{msg}\n{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad",
                 )
 
     @expectedFailureMPS
@@ -1431,10 +1442,13 @@ class TestDistributions(DistributionsTestCase):
                 try:
                     self.assertTrue(
                         type(dist.sample()) is type(dist.enumerate_support()),
-                        msg=(
-                            "{} example {}/{}, return type mismatch between "
-                            + "sample and enumerate_support."
-                        ).format(Dist.__name__, i + 1, len(params)),
+                        msg=lambda msg: f"{msg}\n"
+                        + (
+                            (
+                                "{} example {}/{}, return type mismatch between "
+                                + "sample and enumerate_support."
+                            ).format(Dist.__name__, i + 1, len(params))
+                        ),
                     )
                 except NotImplementedError:
                     pass
@@ -1476,7 +1490,7 @@ class TestDistributions(DistributionsTestCase):
                 self.assertIn(
                     Dist,
                     distributions_with_examples,
-                    f"Please add {Dist.__name__} to the _get_examples list in test_distributions.py",
+                    lambda msg: f"{msg}\nPlease add {Dist.__name__} to the _get_examples list in test_distributions.py",
                 )
 
     def test_support_attributes(self):
@@ -1680,7 +1694,6 @@ class TestDistributions(DistributionsTestCase):
     test_binomial_bfloat16 = set_default_dtype(torch.bfloat16)(test_binomial)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @expectedFailureMPS
     def test_binomial_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for prob in [0.01, 0.1, 0.5, 0.8, 0.9]:
@@ -1832,7 +1845,6 @@ class TestDistributions(DistributionsTestCase):
             ).logpmf(sample.cpu().numpy())
             self.assertEqual(log_prob, expected, atol=1e-4, rtol=0)
 
-    @expectedFailureMPS
     def test_zero_excluded_binomial(self):
         vals = Binomial(
             total_count=torch.tensor(1.0),
@@ -1860,7 +1872,6 @@ class TestDistributions(DistributionsTestCase):
                 f"Expected (vals == 1.0).sum() > 4000, got {ones_count}"
             )
 
-    @expectedFailureMPS
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
 
@@ -2271,6 +2282,24 @@ class TestDistributions(DistributionsTestCase):
             dist = RelaxedOneHotCategorical(1e10, probs)
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_rand_excludes_upper_bound(self, device, dtype):
+        values = torch.rand(65537, device=device, dtype=dtype)
+        self.assertTrue((values >= 0).all().item())
+        self.assertTrue((values < 1).all().item())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("bounds", [(0, 4), (-4, -2), (-2, 3), (2, 2)])
+    def test_uniform_excludes_upper_bound(self, device, dtype, bounds):
+        low, high = bounds
+        values = torch.empty(65537, device=device, dtype=dtype)
+        values.uniform_(low, high)
+        if low == high:
+            self.assertEqual(values, torch.full_like(values, low))
+        else:
+            self.assertTrue((values >= low).all().item())
+            self.assertTrue((values < high).all().item())
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -2688,7 +2717,6 @@ class TestDistributions(DistributionsTestCase):
         )
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPS
     def test_mixture_same_family_binomial_log_prob(self):
         max_count = 20
         probs = torch.rand(10, 5).softmax(dim=-1)
@@ -3337,7 +3365,6 @@ class TestDistributions(DistributionsTestCase):
         Wishart(torch.tensor(ndim), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_log_prob(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3518,7 +3545,7 @@ class TestDistributions(DistributionsTestCase):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
         loc_1d = torch.randn(1, requires_grad=True)
-        scale_1d = torch.randn(1, requires_grad=True)
+        scale_1d = torch.randn(1).abs().requires_grad_()
         loc_delta = torch.tensor([1.0, 0.0])
         scale_delta = torch.tensor([1e-5, 1e-5])
         self.assertEqual(Laplace(loc, scale).sample().size(), (5, 5))
@@ -3616,6 +3643,31 @@ class TestDistributions(DistributionsTestCase):
                 f"Gamma(alpha={alpha}, beta={beta})",
                 failure_rate=1e-4,
             )
+
+    def test_gamma_sample_generator(self):
+        gamma = Gamma(torch.tensor(2.0), torch.tensor(1.0))
+        device = gamma.concentration.device
+        # sampling with a generator honors the requested shape
+        gen = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(gamma.sample((5,), generator=gen).size(), (5,))
+        self.assertEqual(gamma.sample((5, 3), generator=gen).size(), (5, 3))
+        # sampling without a generator still works
+        self.assertEqual(gamma.sample((5,)).size(), (5,))
+        # same seed produces identical samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(
+            gamma.sample((5,), generator=gen1), gamma.sample((5,), generator=gen2)
+        )
+        # different seeds produce different samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(99)
+        self.assertFalse(
+            torch.allclose(
+                gamma.sample((5,), generator=gen1),
+                gamma.sample((5,), generator=gen2),
+            )
+        )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto(self):
@@ -3807,7 +3859,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertLess(
                 max_error,
                 0.01,
-                f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .mean",
+                lambda msg: f"{msg}\nKumaraswamy example {i + 1}/{len(cases)}, incorrect .mean",
             )
             expected = samples.var(0)
             actual = m.variance
@@ -3816,7 +3868,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertLess(
                 max_error,
                 0.01,
-                f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
+                lambda msg: f"{msg}\nKumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -4052,7 +4104,10 @@ class TestDistributions(DistributionsTestCase):
         # Check that small alphas do not cause NANs.
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
-            self.assertTrue(np.isfinite(x) and x > 0, f"Invalid Beta.sample(): {x}")
+            self.assertTrue(
+                np.isfinite(x) and x > 0,
+                lambda msg: f"{msg}\nInvalid Beta.sample(): {x}",
+            )
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
@@ -4470,7 +4525,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(
                 actual_size,
                 expected_size,
-                msg=f"{dist} actual size: {actual_size} != expected size: {expected_size}",
+                msg=lambda msg: f"{msg}\n{dist} actual size: {actual_size} != expected size: {expected_size}",
             )
 
             sample_shape = torch.Size((2,))
@@ -4479,7 +4534,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(
                 actual_size,
                 expected_size,
-                msg=f"{dist} actual size: {actual_size} != expected size: {expected_size}",
+                msg=lambda msg: f"{msg}\n{dist} actual size: {actual_size} != expected size: {expected_size}",
             )
 
     def test_invalid_parameter_broadcasting(self):
@@ -4693,7 +4748,7 @@ class TestDistributionsGPU(DistributionsTestCase):
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
-        device = "cuda"
+        device = device_type
 
         for count_dtype in dtypes:
             total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
@@ -6005,6 +6060,29 @@ class TestKL(DistributionsTestCase):
         )
         self.assertEqual(expected_kl, actual_kl)
 
+    @skipIfTorchDynamo("This test explicitly invokes torch.compile")
+    def test_compile_kl_multivariate_normal(self):
+        def fn(p_mu, p_log_var, q_mu, q_log_var):
+            q_var = torch.diag_embed(torch.exp(q_log_var))
+            p_var = torch.diag_embed(torch.exp(p_log_var))
+            p = MultivariateNormal(p_mu, p_var)
+            q = MultivariateNormal(q_mu, q_var)
+            return kl_divergence(p, q).mean()
+
+        set_rng_seed(0)
+        p_mu = torch.randn(4, 3)
+        p_log_var = torch.randn(4, 3)
+        q_mu = torch.randn(4, 3)
+        q_log_var = torch.randn(4, 3)
+
+        expected = fn(p_mu, p_log_var, q_mu, q_log_var)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                actual = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=dynamic
+                )(p_mu, p_log_var, q_mu, q_log_var)
+                self.assertEqual(actual, expected)
+
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
@@ -6115,7 +6193,7 @@ class TestKL(DistributionsTestCase):
         for p, q in self.infinite_examples:
             self.assertTrue(
                 (kl_divergence(p, q) == inf).all(),
-                f"Incorrect KL({type(p).__name__}, {type(q).__name__})",
+                lambda msg: f"{msg}\nIncorrect KL({type(p).__name__}, {type(q).__name__})",
             )
 
     def test_kl_edgecases(self):
@@ -6302,7 +6380,7 @@ class TestNumericalStability(DistributionsTestCase):
             expected_value,
             atol=atol,
             rtol=0,
-            msg=f"Incorrect value for tensor type: {type(x)}. Expected = {expected_value}, Actual = {log_pdf}",
+            msg=lambda msg: f"{msg}\nIncorrect value for tensor type: {type(x)}. Expected = {expected_value}, Actual = {log_pdf}",
         )
         if expected_gradient is not None:
             self.assertEqual(
@@ -6310,7 +6388,7 @@ class TestNumericalStability(DistributionsTestCase):
                 expected_gradient,
                 atol=atol,
                 rtol=0,
-                msg=f"Incorrect gradient for tensor type: {type(x)}. Expected = {expected_gradient}, Actual = {p.grad}",
+                msg=lambda msg: f"{msg}\nIncorrect gradient for tensor type: {type(x)}. Expected = {expected_gradient}, Actual = {p.grad}",
             )
 
     def test_bernoulli_gradient(self):
@@ -6964,6 +7042,28 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
+    def test_valid_does_not_format_error(self):
+        class UnformattableConstraint(Constraint):
+            def check(self, value):
+                return torch.ones_like(value, dtype=torch.bool)
+
+            def __repr__(self):
+                raise AssertionError("valid constraints should not be formatted")
+
+        constraint = UnformattableConstraint()
+
+        class UnformattableDistribution(Distribution):
+            arg_constraints = {"value": constraint}
+            support = constraint
+
+            def __init__(self, value, validate_args):
+                self.value = value
+                super().__init__(validate_args=validate_args)
+
+        value = torch.tensor(0.0)
+        UnformattableDistribution(value, validate_args=False)._validate_sample(value)
+        UnformattableDistribution(value, validate_args=True)
+
     def test_valid(self):
         for Dist, params in _get_examples():
             for param in params:
@@ -7197,7 +7297,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     def test_enumerate_support(self):
@@ -7224,7 +7324,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     def test_mean(self):
@@ -7249,7 +7349,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     def test_variance(self):
@@ -7276,7 +7376,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     @set_default_dtype(torch.double)
@@ -7304,7 +7404,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     @set_default_dtype(torch.double)
@@ -7329,7 +7429,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
 

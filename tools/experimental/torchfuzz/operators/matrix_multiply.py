@@ -11,7 +11,7 @@ from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 # Type promotion imports removed since we now use explicit casting in codegen
 
 
-class MatrixMultiplyOperator(Operator):
+class MatrixMultiplyOperatorBase(Operator):
     """Base class for matrix multiplication operations."""
 
     def __init__(self, name: str):
@@ -43,7 +43,7 @@ class MatrixMultiplyOperator(Operator):
         return [output_dtype, output_dtype]
 
 
-class MMOperator(MatrixMultiplyOperator):
+class MMOperator(MatrixMultiplyOperatorBase):
     """Operator for matrix multiplication (torch.mm)."""
 
     def __init__(self):
@@ -113,22 +113,13 @@ class MMOperator(MatrixMultiplyOperator):
         if len(input_names) != 2:
             raise ValueError("torch.mm requires exactly 2 inputs")
 
-        # Get target dtype
-        if isinstance(output_spec, TensorSpec):
-            target_dtype_str = f"torch.{output_spec.dtype}".replace(
-                "torch.torch.", "torch."
-            )
-            # Cast inputs to ensure compatible types
-            return (
-                f"{output_name} = torch.mm("
-                f"{input_names[0]}.to({target_dtype_str}), "
-                f"{input_names[1]}.to({target_dtype_str}))"
-            )
-        else:
-            return f"{output_name} = torch.mm({input_names[0]}, {input_names[1]})"
+        # No cast: fuzz_inputs_specs gives every input the output dtype, via
+        # _get_compatible_dtype, so a .to(output dtype) here is always a no-op
+        # and only adds a redundant _to_copy node to the traced graph.
+        return f"{output_name} = torch.mm({input_names[0]}, {input_names[1]})"
 
 
-class AddmmOperator(MatrixMultiplyOperator):
+class AddmmOperator(MatrixMultiplyOperatorBase):
     """Operator for additive matrix multiplication (torch.addmm)."""
 
     def __init__(self):
@@ -205,23 +196,13 @@ class AddmmOperator(MatrixMultiplyOperator):
         if len(input_names) != 3:
             raise ValueError("torch.addmm requires exactly 3 inputs")
 
-        # Get target dtype
-        if isinstance(output_spec, TensorSpec):
-            target_dtype_str = f"torch.{output_spec.dtype}".replace(
-                "torch.torch.", "torch."
-            )
-            # Cast inputs to ensure compatible types
-            return (
-                f"{output_name} = torch.addmm("
-                f"{input_names[0]}.to({target_dtype_str}), "
-                f"{input_names[1]}.to({target_dtype_str}), "
-                f"{input_names[2]}.to({target_dtype_str}))"
-            )
-        else:
-            return f"{output_name} = torch.addmm({input_names[0]}, {input_names[1]}, {input_names[2]})"
+        # No cast: fuzz_inputs_specs gives every input the output dtype, via
+        # _get_compatible_dtype, so a .to(output dtype) here is always a no-op
+        # and only adds a redundant _to_copy node to the traced graph.
+        return f"{output_name} = torch.addmm({input_names[0]}, {input_names[1]}, {input_names[2]})"
 
 
-class BmmOperator(MatrixMultiplyOperator):
+class BmmOperator(MatrixMultiplyOperatorBase):
     """Operator for batch matrix multiplication (torch.bmm)."""
 
     def __init__(self):
@@ -291,22 +272,13 @@ class BmmOperator(MatrixMultiplyOperator):
         if len(input_names) != 2:
             raise ValueError("torch.bmm requires exactly 2 inputs")
 
-        # Get target dtype
-        if isinstance(output_spec, TensorSpec):
-            target_dtype_str = f"torch.{output_spec.dtype}".replace(
-                "torch.torch.", "torch."
-            )
-            # Cast inputs to ensure compatible types
-            return (
-                f"{output_name} = torch.bmm("
-                f"{input_names[0]}.to({target_dtype_str}), "
-                f"{input_names[1]}.to({target_dtype_str}))"
-            )
-        else:
-            return f"{output_name} = torch.bmm({input_names[0]}, {input_names[1]})"
+        # No cast: fuzz_inputs_specs gives every input the output dtype, via
+        # _get_compatible_dtype, so a .to(output dtype) here is always a no-op
+        # and only adds a redundant _to_copy node to the traced graph.
+        return f"{output_name} = torch.bmm({input_names[0]}, {input_names[1]})"
 
 
-class MatmulOperator(MatrixMultiplyOperator):
+class MatmulOperator(MatrixMultiplyOperatorBase):
     """Operator for general matrix multiplication (torch.matmul)."""
 
     def __init__(self):
@@ -422,16 +394,7 @@ class MatmulOperator(MatrixMultiplyOperator):
         if len(input_names) != 2:
             raise ValueError("torch.matmul requires exactly 2 inputs")
 
-        # Get target dtype
-        if isinstance(output_spec, TensorSpec):
-            target_dtype_str = f"torch.{output_spec.dtype}".replace(
-                "torch.torch.", "torch."
-            )
-            # Cast inputs to ensure compatible types
-            return (
-                f"{output_name} = torch.matmul("
-                f"{input_names[0]}.to({target_dtype_str}), "
-                f"{input_names[1]}.to({target_dtype_str}))"
-            )
-        else:
-            return f"{output_name} = torch.matmul({input_names[0]}, {input_names[1]})"
+        # No cast: fuzz_inputs_specs gives every input the output dtype, via
+        # _get_compatible_dtype, so a .to(output dtype) here is always a no-op
+        # and only adds a redundant _to_copy node to the traced graph.
+        return f"{output_name} = torch.matmul({input_names[0]}, {input_names[1]})"
