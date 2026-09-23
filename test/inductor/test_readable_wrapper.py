@@ -8,7 +8,10 @@ from unittest import mock
 import torch
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor import config
-from torch._inductor.codegen.common import device_codegens, init_backend_registration
+from torch._inductor.codegen.common import (
+    get_wrapper_codegen_for_device,
+    init_backend_registration,
+)
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -16,6 +19,10 @@ from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+)
+from torch.testing._internal.inductor_utils import (
+    has_cpp_wrapper_for_device,
+    patch_inductor_backend,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -153,6 +160,19 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
 
     @requires_cuda_and_triton
+    @config.patch({"triton.multi_kernel": 1})
+    def test_multi_kernel_runs_standalone(self):
+        # The one module that mixes hoisted kernel defs with an async_compile binding:
+        # multi_kernel_N = async_compile.multi_kernel(..., [<hoisted kernels>]).
+        x = torch.rand(2, 1024, device="cuda")
+        result, code = _code_for(torch.softmax, x, -1, readable_wrapper=True)
+        self.assertIn("= async_compile.multi_kernel(", code)
+        self.assertNotIn("async_compile.triton", code)
+        expected = torch.softmax(x, -1)
+        self.assertEqual(result, expected)
+        self.assertEqual(self._run_standalone(code, [x])[0], expected)
+
+    @requires_cuda_and_triton
     @parametrize("case", ["scan", "flex_attention"])
     def test_same_named_helpers_do_not_shadow(self, case):
         # Kernels define @triton.jit helpers under names unique only per kernel: scan
@@ -260,6 +280,25 @@ class TestReadableWrapperCodegen(TestCase):
             self.assertEqual(code.count(line), 1, line)
         # with its two blank separator lines, exactly as the default wrapper writes it
         self.assertIn("\n\n\nasync_compile.wait(globals())\ndel async_compile\n", code)
+
+    @requires_cuda_and_triton
+    def test_async_compile_survives_for_a_user_defined_triton_kernel(self):
+        # A user @triton.jit kernel is still an async_compile.triton(...) source string,
+        # the one Triton kernel that keeps the lifecycle alive in a readable module.
+        from torch.testing._internal.triton_utils import add_kernel
+
+        def fn(x):
+            out = torch.empty_like(x)
+            add_kernel[(4,)](x, x, out, x.numel(), BLOCK_SIZE=64)
+            return out
+
+        x = torch.randn(256, device="cuda")
+        expected, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertEqual(expected, x + x)
+        self.assertEqual(code.count("= async_compile.triton("), 1)
+        for line in ("async_compile = AsyncCompile()", "async_compile.wait(globals())"):
+            self.assertEqual(code.count(line), 1, line)
+        self.assertEqual(self._run_standalone(code, [x])[0], expected)
 
     def test_cpp_kernels_in_root_and_subgraphs_run_standalone(self):
         # A subgraph's C++ kernel binds through the root's async_compile, and only the
@@ -405,11 +444,21 @@ class TestReadableWrapperCodegen(TestCase):
         class OutOfTreeWrapper(PythonWrapperCodegen):
             pass
 
-        init_backend_registration()
-        cpu = device_codegens["cpu"]
-        with mock.patch.object(cpu, "wrapper_codegen", OutOfTreeWrapper):
+        with patch_inductor_backend("cpu", python_wrapper_codegen=OutOfTreeWrapper):
             with self.assertRaisesRegex(Exception, "OutOfTreeWrapper"):
                 _code_for(torch.relu, torch.randn(8), readable_wrapper=True)
+
+    @config.patch(readable_wrapper=True)
+    def test_registration_accessor_is_unaffected(self):
+        # get_wrapper_codegen_for_device also reads back what a device registered (for
+        # patch_inductor_backend's restore and capability probes), so the flag must not
+        # leak into it, or a restore would register the readable class for good.
+        init_backend_registration()
+        self.assertIs(get_wrapper_codegen_for_device("cpu"), PythonWrapperCodegen)
+        self.assertTrue(has_cpp_wrapper_for_device("cpu"))
+        with patch_inductor_backend("cpu"):
+            pass
+        self.assertIs(get_wrapper_codegen_for_device("cpu"), PythonWrapperCodegen)
 
     def test_profile_bandwidth_output_is_refused(self):
         # profile_bandwidth_output runs the benchmark harness, which this mode drops.
