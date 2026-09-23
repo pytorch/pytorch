@@ -280,8 +280,10 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from contextlib import AbstractContextManager
     from typing_extensions import Self
 
+    from torch._dynamo.precompile_package import PrecompileSession
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.compiler._precompile_types import PrecompileSummary
@@ -386,9 +388,10 @@ class DynamoTracer:
     as many calls as you make, keyword arguments included. Part of the prototype
     ``torch.compiler.precompile`` API, so it may change without a deprecation cycle.
 
-    ``guard_filter_fn`` filters the guards kept in the SERIALIZED artifact (runtime
-    capture guards are always retained; the default drops only what cannot be
-    serialized); ``recompile_limit`` caps recompilations per frame; ``dynamic``
+    ``guard_filter_fn`` takes the ``GuardFilterEntry`` records (``guard_type``,
+    ``name``, ...) and returns one keep flag per entry, filtering the guards kept
+    in the SERIALIZED artifact (runtime capture guards are always retained; the
+    default drops only what cannot be serialized); ``recompile_limit`` caps recompilations per frame; ``dynamic``
     forces dynamic shapes as ``torch.compile(dynamic=)`` does. The ``require_*``
     gates refuse, at write time, an artifact with a coverage gap
     (``require_complete``: a bypassed or uncovered frame, a call that raised), one
@@ -657,7 +660,7 @@ class _DynamoCapture(Capture):
 
     def __init__(
         self,
-        session: Any,
+        session: PrecompileSession,
         artifact_path: str | os.PathLike[str],
         cache_path: str | os.PathLike[str],
         *,
@@ -674,7 +677,7 @@ class _DynamoCapture(Capture):
             "require_no_dropped_guards": require_no_dropped_guards,
         }
         self._call: Callable[..., object] | None = None
-        self._fresh_cache: Any = None
+        self._fresh_cache: AbstractContextManager[None] | None = None
         self._exited = False
         self._in_call = False
         self._calls = 0
@@ -704,13 +707,14 @@ class _DynamoCapture(Capture):
             # The capture's compiles record into the process-global cache-artifact
             # list, which the cache half of the artifact bundles to prime the
             # kernel caches on load. A fresh one so the bundle holds only this
-            # capture's compiles; left in __exit__.
+            # capture's compiles; left in __exit__. The swap spans the whole
+            # block, so anything else compiled inside the block records here too.
             self._fresh_cache = CacheArtifactManager.with_fresh_cache()
             self._fresh_cache.__enter__()
             try:
                 self._call = self._map(self._session.__enter__)
             except BaseException:
-                self._fresh_cache.__exit__(*sys.exc_info())
+                self._fresh_cache.__exit__(None, None, None)
                 self._fresh_cache = None
                 raise
         return self
@@ -729,20 +733,21 @@ class _DynamoCapture(Capture):
                     "inside fn."
                 )
             self._in_call = True
+            # Counted before the call: a call that raised is for the session's
+            # require_complete gate to report, not "nothing was captured".
+            self._calls += 1
             try:
-                result = self._map(self._call, *args, **kwargs)
+                return self._map(self._call, *args, **kwargs)
             finally:
                 self._in_call = False
-            self._calls += 1
-            return result
 
     def _write(self) -> None:
         rendered = self._map(self._session.snapshot_artifact, **self._gates)
         try:
             _write_artifact(self._artifact_path, self._cache_path, *rendered)
         except OSError as e:
-            # Only the on-disk rewrite failed; _write_artifact leaves the previous
-            # pair in place, so the last good checkpoint is still loadable.
+            # Only the on-disk rewrite failed; _write_artifact leaves whatever
+            # pair was already at these paths in place.
             raise PrecompileError(
                 f"precompile could not write the artifact: {e}"
             ) from e
@@ -793,10 +798,15 @@ class _DynamoCapture(Capture):
                     except BaseException as e:
                         error = e
                 self._exited = True
-                self._map(self._session.__exit__, *exc)
+                try:
+                    self._map(self._session.__exit__, *exc)
+                except BaseException as e:
+                    if error is None:
+                        raise
+                    raise e from error
             finally:
                 if self._fresh_cache is not None:
-                    self._fresh_cache.__exit__(*sys.exc_info())
+                    self._fresh_cache.__exit__(None, None, None)
                     self._fresh_cache = None
         if exc[0] is None and error is not None:
             raise error
@@ -2040,15 +2050,18 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     keeps its record, flagged and without variants, the way install() keeps its
     global binding but none of its guarded codes: a continuation the frame ahead
     of it names must stay bound, and a bypassed code's guarded codes are dead.
+    A code that is neither bypassed nor has variants is ``trivial``: it ran as
+    plain Python during capture, and the driver rebuilds it as plain Python.
     """
     return [
         {
             "is_entry": i == 0,
             "bypassed": code.bypassed,
-            # Never entered Dynamo: skipped before tracing (no tensor in the
-            # frame, e.g. the continuation after a trailing .backward()), so
-            # it ran eager during capture and the driver runs it eager too.
-            "trivial": not code.has_compile_id and not code.bypassed,
+            # No variant and not bypassed: Dynamo skipped the frame (no tensor
+            # reached it) or traced no ops in it, e.g. the continuation after a
+            # trailing .backward(). Either way it ran eager during capture, so
+            # the driver runs it eager too.
+            "trivial": not code.guarded_codes and not code.bypassed,
             "code": code.python_code,
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
@@ -2112,16 +2125,13 @@ def _serving_mode(frames: list[dict[str, Any]]) -> str:
     variant; a frame it reaches but has no variant of (a bypassed continuation)
     would raise on the very path capture exercised. Either way the capture is
     served by installing instead, which has a compiler behind it. A trivial
-    continuation -- one Dynamo never traced because no tensor reached it --
-    ran eager during capture and is served eager, so it counts as covered.
+    continuation ran eager during capture and is served eager, so it counts as
+    covered when reached and costs nothing when not.
     """
     reachable = _reachable_frames(frames)
-    covered = {
-        i
-        for i, frame in enumerate(frames)
-        if frame["variants"] or (frame.get("trivial") and not frame["is_entry"])
-    }
-    return "standalone" if covered == reachable else "installed"
+    compiled = {i for i, frame in enumerate(frames) if frame["variants"]}
+    trivial = {i for i, f in enumerate(frames) if f["trivial"] and not f["is_entry"]}
+    return "standalone" if compiled <= reachable <= compiled | trivial else "installed"
 
 
 def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
@@ -2200,6 +2210,7 @@ def _entry_binding(fn: object) -> dict[str, Any]:
 
 def _build_multigraph_python_source(
     entry: Any,
+    frames: list[dict[str, Any]],
     backends: Mapping[str, Any],
     summary: PrecompileSummary,
     backend: str,
@@ -2216,7 +2227,6 @@ def _build_multigraph_python_source(
     from torch._dynamo.package import SerializedCode
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
 
-    frames = _multigraph_frames(entry)
     buf = PySourceBuilder()
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES["standalone"])
@@ -2328,12 +2338,17 @@ def _build_multigraph_artifact(
     python_code is self-contained -- it carries the frames, the guard trees and
     the compiled subgraphs -- so cache is the same acceleration it is for the
     make_fx form: the inductor bundle that primes the kernel caches, and the tag
-    binding it to this python_code (invariant 7).
+    binding it to this python_code (invariant 7). The bundle is whatever
+    ``CacheArtifactManager`` recorded, so the caller must have run the capture
+    under ``with_fresh_cache()``.
     """
     frames = _multigraph_frames(entry)
+    # First: an entry with no variant reaches nothing, which the unreachable
+    # check below would misreport as a graph break to move.
+    _reject_uninstallable_entry(frames, entry)
     reachable = _reachable_frames(frames)
     unreachable = sorted(
-        f"{frame['python_module']}.{entry.codes[i].python_code.co_name}"
+        f"{frame['python_module']}.{frame['code'].co_name}"
         for i, frame in enumerate(frames)
         if frame["variants"] and i not in reachable
     )
@@ -2351,14 +2366,11 @@ def _build_multigraph_artifact(
             f"graph break into the entry, or make the child module compile in one "
             f"piece."
         )
-    _reject_uninstallable_entry(frames, entry)
     python_code = _build_multigraph_python_source(
-        entry, backends, summary, backend, _entry_binding(entry_fn)
+        entry, frames, backends, summary, backend, _entry_binding(entry_fn)
     )
     inductor_bundle = None
     if backend != "eager":
-        # The dynamo capture runs under with_fresh_cache(), so this is exactly
-        # what the capture's compiles recorded.
         from torch.compiler._cache import CacheArtifactManager
 
         saved = CacheArtifactManager.serialize()
@@ -3132,7 +3144,9 @@ def capture(
     To write the artifact before the block ends, call ``cap.save()`` inside it.
     A block that raises writes nothing it has not already saved, and a block
     that made no call raises ``PrecompileError`` on exit. A capture is single-use:
-    to capture again, call ``capture()`` again.
+    to capture again, call ``capture()`` again. A :class:`DynamoTracer` capture
+    records the kernel-cache artifacts of everything compiled inside the block,
+    so compile nothing else there, and do not overlap two such captures.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
