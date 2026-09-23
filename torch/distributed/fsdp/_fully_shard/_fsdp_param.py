@@ -1002,9 +1002,8 @@ class FSDPParam:
 
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
-        unsharded_param = self.unsharded_param
-        set_requires_grad_if_needed(self.sharded_param, unsharded_param)
-        self._setattr_on_modules(unsharded_param)
+        set_requires_grad_if_needed(self.sharded_param, self.unsharded_param)
+        self._setattr_on_modules(self.unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
             # reshard and must be kept alive for the next all-gather copy-in.
@@ -1147,6 +1146,7 @@ class FSDPParam:
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
+        # Callers must initialize the parameter with init_unsharded_param() first.
         return cast(nn.Parameter, self._unsharded_param)
 
     @property

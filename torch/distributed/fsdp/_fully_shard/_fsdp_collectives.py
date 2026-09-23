@@ -588,7 +588,8 @@ def foreach_reduce(
     all_reduce_group: dist.ProcessGroup | None,  # HSDP or replication
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
-    partial_reduce_output: torch.Tensor | None,  # Gradients awaiting all-reduce
+    # Gradients awaiting all-reduce (HSDP or replication)
+    partial_reduce_output: torch.Tensor | None,
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
     *,
