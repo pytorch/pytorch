@@ -167,6 +167,26 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertNotIn(aten.index_put_.default, targets)
         self.assertEqual(gm(x), f(x))
 
+    def test_index_put_cross_dtype_indices_alias_should_not_reinplace(self):
+        def f(x):
+            x = x.clone()
+            # The int64 view shares bytes with x[4:8] even though their
+            # dtype-relative element offsets do not intersect.
+            index = x.view(torch.int64)[2:3]
+            values = torch.zeros(1, dtype=x.dtype, device=x.device)
+            return aten.index_put.default(x[4:8], [index], values)
+
+        x = torch.zeros(8, dtype=torch.int32, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+        self.assertEqual(gm(x), f(x))
+
     def test_unsafe_index_put_source_alias_should_not_reinplace(self):
         def f(x, y):
             x = x.cos()

@@ -393,8 +393,14 @@ def _may_overlap(lhs: Any, rhs: Any) -> bool:
     if lhs_storage is None or lhs_storage != rhs_storage:
         return False
 
+    lhs_val, rhs_val = lhs.meta["val"], rhs.meta["val"]
+    # compute_overlapping_tensors compares dtype-relative element offsets, so
+    # views with different element sizes can share bytes without overlapping
+    # element ranges.
+    if lhs_val.dtype.itemsize != rhs_val.dtype.itemsize:
+        return True
     try:
-        return len(compute_overlapping_tensors([lhs.meta["val"], rhs.meta["val"]])) != 0
+        return len(compute_overlapping_tensors([lhs_val, rhs_val])) != 0
     except GuardOnDataDependentSymNode:
         return True
 
