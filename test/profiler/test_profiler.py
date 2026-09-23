@@ -3207,6 +3207,8 @@ instantiate_device_type_tests(TestProfilerDevice, globals())
 
 @instantiate_parametrized_tests
 class TestExperimentalUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def make_tree(self) -> list[MockNode]:
         tree = {
             "root_0": {
@@ -3485,20 +3487,23 @@ class TestExperimentalUtils(TestCase):
         self.assertEqual(event.metadata, typed_metadata)
         self.assertEqual(event.event_metadata.grid, [1, 2, 3])
 
+
+class TestExperimentalUtilsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/158727",
     )
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_profiler_debug_autotuner(self):
+    def test_profiler_debug_autotuner(self, device):
         """
         This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
         """
         if not is_big_gpu():
             raise unittest.SkipTest("requires large gpu to max-autotune")
-        in1 = torch.randn((256, 512), device="cuda", dtype=torch.float16)
-        in2 = torch.randn((512, 768), device="cuda", dtype=torch.float16)
+        in1 = torch.randn((256, 512), device=device, dtype=torch.float16)
+        in2 = torch.randn((512, 768), device=device, dtype=torch.float16)
 
         def mm():
             return torch.mm(in1, in2)
@@ -3536,6 +3541,11 @@ class TestExperimentalUtils(TestCase):
         n1 = names(prof1)
         n2 = names(prof2)
         self.assertEqual(n1, n2)
+
+
+instantiate_device_type_tests(
+    TestExperimentalUtilsDevice, globals(), except_for=("cpu",)
+)
 
 
 class TestPrivateUse1ProfilerState(TestCase):
