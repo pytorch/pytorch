@@ -2238,8 +2238,8 @@ class PrecompiledModule(PrecompiledRunnable):
         # <hash>.best_config next to it -- into the directory the artifact is meant to be
         # committed from -- and that sidecar is keyed on basename(__file__), so two
         # unrelated artifacts both named artifact.py share one entry and can pick up each
-        # other's launch config. The docs already promise autotuning is re-run on load
-        # rather than recorded; this makes that true.
+        # other's launch config. The kernels launch with the configs fixed at capture
+        # (the module's KERNEL_CONFIGS), so the cache has nothing to add.
         options: dict[str, object] = {
             "size_asserts": True,
             "cpp.dynamic_threads": True,
