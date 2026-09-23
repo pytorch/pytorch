@@ -7,6 +7,7 @@ exclude:
   - ".*/**"
   - "**/.*/**"
   - "**/.*"
+  - "torch/distributed/nccl4py_backend.py"
   - "**/_*/**"
   - "**/_*.py"
   - "**/test/**"

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 class LazyCache:
     """Container to cache the real VariableTracker"""
 
-    def __init__(self, value: Any, source: Any) -> None:
+    def __init__(self, value: object, source: Any) -> None:
         if not isinstance(value, LazySymNodeFormatString):
             if not source:
                 raise AssertionError(
@@ -68,7 +68,7 @@ class ComputedLazyCache:
 
     def __init__(
         self,
-        value: Any,
+        value: object,
         lazy_vars: list[LazyConstantVariable],
         args: list[VariableTracker],
         op: Callable[..., Any],
@@ -133,7 +133,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
 
     @staticmethod
     def create(
-        value: Any,
+        value: object,
         source: Any,
         *,
         tx: InstructionTranslatorBase | None = None,
@@ -327,7 +327,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         # Checks that the underlying value is hashable without realizing the VT.
         # This is used by the is_hashable() function in hashable.py as a fast
         # path for unrealized LazyVTs.
-        def _helper(value: Any) -> bool:
+        def _helper(value: object) -> bool:
             # TODO: Add support for more types
             return (
                 inspect.isbuiltin(value)
@@ -388,7 +388,7 @@ class LazyConstantVariable(LazyVariableTracker):
 
     @staticmethod
     def create(
-        value: Any,
+        value: object,
         source: Any,
         **options: Any,
     ) -> VariableTracker:

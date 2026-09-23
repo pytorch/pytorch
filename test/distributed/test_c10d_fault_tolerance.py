@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
     TEST_CUDA,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -390,6 +391,11 @@ def _make_fault_tolerance_test_class(backend):
         cls = unittest.skipIf(
             not TEST_CUDA or torch.cuda.device_count() < 3,
             "fault tolerance CUDA tests require at least 3 GPUs",
+        )(cls)
+    if backend.name == "nccl2":
+        cls = unittest.skipIf(
+            TEST_WITH_ROCM,
+            "nccl2 reconfigure is not supported with RCCL",
         )(cls)
     return cls
 
