@@ -149,6 +149,7 @@ if TYPE_CHECKING:
 # a feed can reduce inside one warp. The device paths below derive the real
 # per-thread geometry instead of assuming this value.
 GROUPED_FRAGMENT_WIDTH = 32
+SM120_GROUPED_FRAGMENT_WIDTH = 16
 
 
 def nan_propagating_max(a, b):
@@ -201,7 +202,11 @@ def grouped_reduce_supports_config(config, axis: int, group: int) -> bool:
     if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH or tile % group:
         return False
 
-    fragment_width = GROUPED_FRAGMENT_WIDTH
+    fragment_width = (
+        SM120_GROUPED_FRAGMENT_WIDTH
+        if getattr(config, "device_capacity", None) == 12
+        else GROUPED_FRAGMENT_WIDTH
+    )
     if (
         axis == 1
         and config.tile_m == 128
