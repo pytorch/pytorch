@@ -552,6 +552,38 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(outputs, expected, atol=0, rtol=0)
 
     @parametrize("byte_input", [False, True])
+    @parametrize("resize", [False, True])
+    def test_split_copy_strided_input(self, device, byte_input, resize):
+        expected = [
+            torch.arange(16, device=device, dtype=torch.float32).view(4, 4),
+            torch.arange(16, device=device, dtype=torch.bfloat16).view(2, 8),
+        ]
+        if not byte_input:
+            expected[1] = expected[1].float()
+        dtype = torch.uint8 if byte_input else torch.float32
+        parts = [
+            torch.stack(
+                [shard.contiguous().view(dtype).flatten() for shard in t.chunk(2, dim)]
+            )
+            for dim, t in enumerate(expected)
+        ]
+        if resize:
+            parts = [part[:, :-1] for part in parts]
+        packed = torch.cat(parts, dim=1).flatten()
+        buffer = packed.new_full((packed.numel(), 2), 7)
+        source = buffer[:, 0]
+        source.copy_(packed)
+        outputs = [torch.empty_like(t).flatten() for t in expected]
+        torch.ops.fsdp._all_gather_copy_out_(
+            outputs, source, [part.size(1) for part in parts], [1, 2], 2
+        )
+        for output, part, outer_size in zip(outputs, parts, (1, 2)):
+            restored = output.view(dtype).view(outer_size, 2, -1).transpose(0, 1)
+            self.assertEqual(restored.flatten()[: part.numel()], part.flatten())
+        self.assertEqual(source, packed)
+        self.assertEqual(buffer[:, 1], buffer.new_full((packed.numel(),), 7))
+
+    @parametrize("byte_input", [False, True])
     @parametrize("all_empty", [False, True])
     def test_split_copy_cached_output_size(self, device, byte_input, all_empty):
         num_chunks = 2
@@ -682,7 +714,6 @@ class TestPrefixCopy(TestCase):
             ("output_size", "output size"),
             ("output_outer_size", "output size"),
             ("dtype", "dtype"),
-            ("input_contiguity", "contiguous"),
             ("output_contiguity", "contiguous"),
         ],
     )
@@ -712,8 +743,6 @@ class TestPrefixCopy(TestCase):
             outputs = [outputs[0][:-2]]
         elif invalid == "dtype":
             outputs = [outputs[0].to(torch.float64)]
-        elif invalid == "input_contiguity":
-            source = torch.zeros(32, device=device)[::2]
         elif invalid == "output_contiguity":
             outputs = [torch.empty(32, device=device)[::2]]
         with self.assertRaisesRegex(RuntimeError, match):
@@ -795,6 +824,19 @@ class TestPrefixCopy(TestCase):
         )
         self.assertEqual(output, expected, atol=0, rtol=0)
 
+    @parametrize("dim", [0, 1])
+    def test_chunk_cat_strided_output(self, device, dim):
+        tensor = torch.arange(32, device=device, dtype=torch.bfloat16).view(4, 8)
+        expected = torch.stack([t.flatten() for t in tensor.chunk(2, dim)]).float()
+        buffer = expected.new_full((expected.numel() * 2,), 7)
+        output = buffer[::2].view_as(expected)
+        version = output._version
+        result = torch.ops.fsdp._reduce_scatter_copy_in_(output, [tensor], [dim], 2)
+        self.assertIs(result, output)
+        self.assertGreater(output._version, version)
+        self.assertEqual(output, expected)
+        self.assertEqual(buffer[1::2], buffer.new_full((expected.numel(),), 7))
+
     @parametrize(
         "invalid,match",
         [
@@ -807,7 +849,6 @@ class TestPrefixCopy(TestCase):
             ("indivisible_shard", "evenly divisible"),
             ("dtype", "same dtype"),
             ("input_contiguity", "contiguous"),
-            ("output_contiguity", "contiguous"),
         ],
     )
     def test_chunk_cat_invalid(self, device, invalid, match):
@@ -833,8 +874,6 @@ class TestPrefixCopy(TestCase):
             dims.append(1)
         elif invalid == "input_contiguity":
             tensors = [torch.zeros(8, 2, device=device).t()]
-        elif invalid == "output_contiguity":
-            output = output.t()
         with self.assertRaisesRegex(RuntimeError, match):
             torch.ops.fsdp._reduce_scatter_copy_in_(output, tensors, dims, num_chunks)
 
@@ -886,6 +925,24 @@ class TestPrefixCopy(TestCase):
         result = torch.func.functionalize(copy)(output)
         self.assertEqual(output, expected, atol=0, rtol=0)
         self.assertEqual(result, expected, atol=0, rtol=0)
+
+    def test_all_gather_schema(self, device):
+        source = torch.arange(8, device=device, dtype=torch.float32)
+        torch.library.opcheck(
+            torch.ops.fsdp._all_gather_copy_out_.default,
+            ([torch.empty_like(source)], source, [4], [2], 2),
+            test_utils="test_schema",
+        )
+
+    def test_all_gather_fake_constant(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            source = torch.tensor([1.0], device=device)
+            output = torch.empty_like(source)
+            self.assertIsNotNone(source.constant)
+            torch.ops.fsdp._all_gather_copy_out_([output], source, [1], [1], 1)
+            self.assertEqual(output.size(), (1,))
 
     @onlyCUDA
     def test_device_mismatch(self, device):
