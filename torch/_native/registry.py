@@ -24,6 +24,7 @@ R = TypeVar("R")
 
 _OpCondFn = Callable[P, bool]
 _OpImplFn = Callable[P, R]
+_OpRuntimeInitFn = Callable[[], bool]
 
 
 def _unconditional_is_masked() -> bool:
@@ -70,6 +71,7 @@ class _OverrideNode:
     node_id: str
     unconditional_override: bool = False
     active: bool = True
+    try_initialize_runtime: _OpRuntimeInitFn | None = None
 
 
 # (op_symbol, dispatch_key, graph) -> graph. The namespace is deliberately not
@@ -682,6 +684,7 @@ def register_op_override(
     cond: _OpCondFn | None,
     impl: _OpImplFn,
     *,
+    try_initialize_runtime: _OpRuntimeInitFn | None = None,
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
 ) -> None:
@@ -702,6 +705,9 @@ def register_op_override(
         cond: Predicate choosing whether `impl` applies to a given call. May
             be None if `unconditional_override=True`.
         impl: Implementation function for the override
+        try_initialize_runtime: Optional initialization hook run after `cond`
+            matches and immediately before `impl`. A false result continues
+            routing; the hook is not run during compile/export routing.
         allow_multiple_override: Allow overriding an existing override
         unconditional_override: This impl IS the op's implementation, not a
             faster route to the same answer. It doesn't have a fallback and
@@ -716,7 +722,8 @@ def register_op_override(
         ValueError: If lib_symbol is not in _ALLOWED_LIB_SYMBOLS, if
             dispatch_key is in _DISALLOWED_DISPATCH_KEYS (Meta /
             CompositeImplicitAutograd / CompositeExplicitAutograd), or if cond
-            is None without unconditional_override=True.
+            is None without unconditional_override=True, or if
+            try_initialize_runtime is provided with unconditional_override=True.
     """
     if lib_symbol not in _ALLOWED_LIB_SYMBOLS:
         raise ValueError(
@@ -731,6 +738,11 @@ def register_op_override(
             f"installed at a backend key (e.g. CPU, CUDA, XPU); the router's fake "
             f"kernel redispatches to the overridden op and would recurse "
             f"otherwise."
+        )
+
+    if unconditional_override and try_initialize_runtime is not None:
+        raise ValueError(
+            "try_initialize_runtime cannot be provided with unconditional_override=True"
         )
 
     if cond is None:
@@ -759,6 +771,7 @@ def register_op_override(
             dispatch_key=dispatch_key,
             cond_fn=cond,
             impl_fn=impl,
+            try_initialize_runtime=try_initialize_runtime,
             unconditional_override=unconditional_override,
             node_id=node_id,
         )
@@ -978,7 +991,7 @@ def _register_overrides_from_graph(
     """
     lib = _get_or_create_library(dispatch_key)
 
-    cond_impl: list[tuple[_OpCondFn, str]] = []
+    cond_impl: list[tuple[_OpCondFn, str, _OpRuntimeInitFn | None]] = []
 
     # node.node_id is minted once at `register_op_override` time and is
     # stable across reorder / deregister / reenable -- never regenerate it
@@ -990,7 +1003,7 @@ def _register_overrides_from_graph(
 
         if enable:
             _register_node_impl(lib, node, dispatch_key)
-            cond_impl.append((node.cond_fn, node.node_id))
+            cond_impl.append((node.cond_fn, node.node_id, node.try_initialize_runtime))
             node.active = True
         else:
             node.active = False
@@ -1025,17 +1038,20 @@ def _register_overrides_from_graph(
     )
 
     # Build the router closures. Both share a first-match-wins loop over
-    # `cond_impl`; they differ only in
-    #   (a) whether cond exceptions fail loudly or silently, and
-    #   (b) what to do when no cond matches.
+    # `cond_impl`; they differ in
+    #   (a) whether cond exceptions fail loudly or silently,
+    #   (b) whether a matching candidate initializes its runtime, and
+    #   (c) what to do when no candidate matches.
     #
     # Eager routers run on real tensors where cond exceptions indicate a
-    # genuine bug; missing a match falls back to the captured native kernel.
+    # genuine bug. A failed runtime initialization declines that candidate so
+    # routing can continue; no match falls back to the captured original kernel.
     #
     # Compile/export routers run under FakeTensor where some predicates are
-    # undefined (e.g. _is_cow_tensor), so we swallow cond exceptions and
-    # treat them as non-matches. On no-match we return NotImplemented so
-    # Inductor reuses the default lowering rather than recursing.
+    # undefined (e.g. _is_cow_tensor), so we swallow cond exceptions and treat
+    # them as non-matches. They skip eager runtime initialization, and on no
+    # match return NotImplemented so Inductor can use its default lowering
+    # rather than recursing.
     _NO_MATCH = object()  # sentinel; impl return values of None would be valid outputs
 
     # Calls served by an AOT kernel embedded in the aten implementation must decline
@@ -1046,11 +1062,17 @@ def _register_overrides_from_graph(
 
     coverage = aot_manifest.get_coverage(op_symbol, dispatch_key)
 
-    def _dispatch(args, kwargs, swallow_cond_exceptions: bool):
+    def _dispatch(
+        args,
+        kwargs,
+        *,
+        swallow_cond_exceptions: bool,
+        initialize_runtime: bool,
+    ):
         # covers() degrades exceptions to "uncovered", so this is safe on FakeTensors.
         if coverage is not None and coverage.covers(args, kwargs):
             return _NO_MATCH
-        for cond, impl_name in cond_impl:
+        for cond, impl_name, try_initialize_runtime in cond_impl:
             try:
                 matched = cond(*args, **kwargs)
             except Exception:
@@ -1058,7 +1080,14 @@ def _register_overrides_from_graph(
                     raise
                 continue
             if matched:
-                return getattr(torch.ops._native, impl_name)(*args, **kwargs)
+                if (
+                    initialize_runtime
+                    and try_initialize_runtime is not None
+                    and not try_initialize_runtime()
+                ):
+                    continue
+                native_impl = getattr(torch.ops._native, impl_name)
+                return native_impl(*args, **kwargs)
         return _NO_MATCH
 
     def eager_router(
@@ -1106,13 +1135,23 @@ def _register_overrides_from_graph(
             finally:
                 _router_active.on = False
 
-        result = _dispatch(args, kwargs, swallow_cond_exceptions=False)
+        result = _dispatch(
+            args,
+            kwargs,
+            swallow_cond_exceptions=False,
+            initialize_runtime=True,
+        )
         if result is _NO_MATCH:
             return _fallback.call_boxed(keyset, *args, **kwargs)
         return result
 
     def compile_router(*args, **kwargs):
-        result = _dispatch(args, kwargs, swallow_cond_exceptions=True)
+        result = _dispatch(
+            args,
+            kwargs,
+            swallow_cond_exceptions=True,
+            initialize_runtime=False,
+        )
         if result is _NO_MATCH:
             return NotImplemented
         return result
