@@ -1742,41 +1742,6 @@ class skipPRIVATEUSE1If(skipIf):
         super().__init__(dep, reason, device_type=device_type)
 
 
-def _cgroup_memory_dirs():
-    """Directories that may hold this process's memory cgroup, best guess first.
-
-    Under a private cgroup namespace -- what Kubernetes and Docker on cgroup v2
-    give you -- /sys/fs/cgroup is already this process's own cgroup and the
-    relative path below is just "/". Under a host namespace it is the root,
-    whose limit says nothing about us, so the path from /proc/self/cgroup has to
-    be appended or the container's limit is invisible.
-    """
-    relative = {"v2": "", "v1": ""}
-    try:
-        with open("/proc/self/cgroup") as f:
-            for line in f:
-                hierarchy, _, rest = line.strip().partition(":")
-                controllers, _, path = rest.partition(":")
-                path = "" if path == "/" else path
-                if hierarchy == "0":
-                    relative["v2"] = path
-                elif "memory" in controllers.split(","):
-                    relative["v1"] = path
-    except OSError:
-        pass
-
-    v2 = ("memory.max", "memory.current", "")
-    v1 = ("memory.limit_in_bytes", "memory.usage_in_bytes", "total_")
-    candidates = []
-    for root, rel, (limit, usage, prefix) in (
-        ("/sys/fs/cgroup", relative["v2"], v2),
-        ("/sys/fs/cgroup/memory", relative["v1"], v1),
-    ):
-        for directory in dict.fromkeys([root + rel, root]):
-            candidates.append((directory, limit, usage, prefix))
-    return candidates
-
-
 def _cgroup_available_memory():
     """Memory still usable inside this process's cgroup, or None if uncapped.
 
@@ -1785,10 +1750,25 @@ def _cgroup_available_memory():
     CI pod on a 768GiB node looks like it has hundreds of gigabytes free, so a
     largeTensorTest asking for 180GB is admitted and then killed mid-test.
     """
-    for directory, limit_name, usage_name, prefix in _cgroup_memory_dirs():
-        limit_path = f"{directory}/{limit_name}"
-        usage_path = f"{directory}/{usage_name}"
-        stat_path = f"{directory}/memory.stat"
+    # (limit, usage, stat, stat-key prefix), cgroup v2 first then v1. These fixed
+    # paths are this process's own cgroup under a private cgroup namespace, which
+    # is what Kubernetes and Docker on cgroup v2 give us. Under a host namespace
+    # they are the root's, which reads as uncapped, and the host figure stands --
+    # the same answer as before this check existed.
+    for limit_path, usage_path, stat_path, prefix in (
+        (
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory.stat",
+            "",
+        ),
+        (
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+            "/sys/fs/cgroup/memory/memory.stat",
+            "total_",
+        ),
+    ):
         try:
             with open(limit_path) as f:
                 raw = f.read().strip()
