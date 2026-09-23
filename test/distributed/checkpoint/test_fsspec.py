@@ -274,10 +274,23 @@ class TestFileSystem(TestCase):
         )
 
         # 2. Opt into auto-tuning with thread_count=None.
-        writer_auto = FsspecWriter("memory://test_fsspec_auto_tune", thread_count=None)
+        writer_auto = FsspecWriter(
+            "memory://test_fsspec_auto_tune",
+            thread_count=None,
+            max_threads=4,
+            min_size_per_thread=1,
+        )
         self.assertIsNone(writer_auto.thread_count)
 
-        dcp.save(state_dict, storage_writer=writer_auto, no_dist=True)
+        with (
+            patch("os.sched_getaffinity", return_value=set(range(4)), create=True),
+            patch.object(
+                writer_auto, "_write_data", wraps=writer_auto._write_data
+            ) as mock_write_data,
+        ):
+            dcp.save(state_dict, storage_writer=writer_auto, no_dist=True)
+            mock_write_data.assert_called_once()
+            self.assertEqual(mock_write_data.call_args.args[2], 4)
 
         loaded_auto = {f"k_{i}": torch.zeros(10, 10) for i in range(8)}
         dcp.load(

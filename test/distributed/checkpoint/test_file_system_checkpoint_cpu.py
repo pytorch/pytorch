@@ -668,8 +668,27 @@ class TestThreadCountAutoTuning(TestCase):
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = {f"tensor_{i}": torch.randn(10, 10) for i in range(8)}
             # Save with auto-tuned thread_count (None)
-            fs_writer = FileSystemWriter(path=path, thread_count=None)
-            save(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
+            fs_writer = FileSystemWriter(
+                path=path,
+                thread_count=None,
+                max_threads=4,
+                min_size_per_thread=1,
+            )
+            with (
+                mock.patch(
+                    "os.sched_getaffinity", return_value=set(range(4)), create=True
+                ),
+                mock.patch.object(
+                    fs_writer, "_write_data", wraps=fs_writer._write_data
+                ) as mock_write_data,
+            ):
+                save(
+                    state_dict=state_dict_to_save,
+                    storage_writer=fs_writer,
+                    no_dist=True,
+                )
+                mock_write_data.assert_called_once()
+                self.assertEqual(mock_write_data.call_args.args[2], 4)
 
             state_dict_to_load = {f"tensor_{i}": torch.zeros(10, 10) for i in range(8)}
             fs_reader = FileSystemReader(path=path)
