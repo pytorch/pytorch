@@ -1060,6 +1060,10 @@ def compile_fx_inner(
             stack.enter_context(
                 config.patch(get_cpp_wrapper_config(log_cudagraph_skip=False))
             )
+        # readable_wrapper pins each Triton kernel to its compile-time tuned config.
+        # Applied here, like the cpp_wrapper patch, so a lazy backward compile sees it.
+        if config.readable_wrapper and config.triton.autotune_at_compile_time is None:
+            stack.enter_context(config.patch({"triton.autotune_at_compile_time": True}))
         # Host-side TMA only selects the descriptor flavor; it needs the TMA path
         # itself enabled. Warn (don't silently no-op) if it's set without its
         # prerequisites.
