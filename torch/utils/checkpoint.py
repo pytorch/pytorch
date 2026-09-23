@@ -413,6 +413,67 @@ def checkpoint(
 # looks likes this
 #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
 #     speculatively checking if the forward function is safe to trace.
+_checkpoint_region_counter = itertools.count()
+
+
+def _should_checkpoint_via_invoke_subgraph() -> bool:
+    """Whether to lower this region to an invoke_subgraph HOP while tracing.
+
+    This is the non-strict counterpart of the dynamo front door in
+    CheckpointHigherOrderVariable: under strict tracing dynamo intercepts
+    ``checkpoint`` symbolically and never runs this function, so reaching here
+    with a proxy mode active means we are being traced non-strictly (make_fx /
+    non-strict export). Emitting the HOP here gives those flows the same
+    representation -- and therefore the same joint-graph passes, shared
+    recompute slice, and no-drift guarantee -- as the strict path.
+    """
+    if not torch._functorch.config.checkpoint_via_invoke_subgraph:
+        return False
+    return (
+        torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
+    )
+
+
+def _checkpoint_via_invoke_subgraph(function, args, kwargs, context_fn):
+    """Emit the checkpoint region as an invoke_subgraph HOP under proxy tracing."""
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+    from torch._higher_order_ops.utils import materialize_as_graph
+
+    if kwargs:
+        raise NotImplementedError(
+            "checkpoint_via_invoke_subgraph does not support keyword arguments to "
+            "the checkpointed function under non-strict tracing; pass them "
+            "positionally or disable the flag."
+        )
+
+    import torch.utils._pytree as pytree
+
+    # invoke_subgraph returns a flat tuple, so trace a flattened wrapper and
+    # restore the region's real output structure afterwards.
+    out_spec = None
+
+    def flat_fn(*flat_args):
+        nonlocal out_spec
+        flat_out, out_spec = pytree.tree_flatten(function(*flat_args))
+        return tuple(flat_out)
+
+    # materialize_as_graph (not make_fx/reenter_make_fx) is required here: we are
+    # already inside the caller's functionalized proxy trace, and it suspends
+    # those modes correctly to trace the region.
+    gm = materialize_as_graph(flat_fn, tuple(args))
+    gm.meta["_checkpoint_region"] = True
+    if context_fn is not noop_context_fn:
+        # The SAC policy; trace_joint_graph_as_bwd runs the region's forward
+        # under it so its caching dispatch mode tags save/recompute.
+        gm.meta["_checkpoint_context_fn"] = context_fn
+
+    identifier = f"checkpoint_{next(_checkpoint_region_counter)}"
+    flat_res = invoke_subgraph(gm, identifier, *args)
+    if out_spec is None:
+        raise AssertionError("expected materialize_as_graph to trace the region")
+    return pytree.tree_unflatten(list(flat_res), out_spec)
+
+
 #  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
 #     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
 #  3) If not, then TorchDynamo falls back to eager by performing a graph
@@ -661,6 +722,11 @@ def _checkpoint_impl(
             )
         return CheckpointFunction.apply(function, preserve, *args)
     else:
+        if _should_checkpoint_via_invoke_subgraph():
+            return _checkpoint_via_invoke_subgraph(
+                function, args, kwargs, context_fn
+            )
+
         gen = _checkpoint_without_reentrant_generator_impl(
             function,
             args,
