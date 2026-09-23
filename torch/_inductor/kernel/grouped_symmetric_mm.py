@@ -2,20 +2,10 @@
 
 import math
 
-import cutlass
-import cutlass.cute as cute
-import cutlass.torch as cutlass_torch
-import cutlass.utils as cutlass_utils
 import triton
 import triton.language as tl
 
 import torch
-
-# pyrefly: ignore [missing-import]
-from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm import (
-    create_tensor_and_stride,
-    GroupedGemmKernel,
-)
 
 
 @triton.jit
@@ -48,9 +38,10 @@ def _mirror_symmetric_pairs(
         tl.store(output + row * m + col, value, mask=mask)
         tl.store(output + col * m + row, value, mask=mask)
     else:
-        mask = valid & (col > row)
-        value = tl.load(output + col * m + row, mask=mask)
+        mask = valid & (row >= col)
+        value = alpha * tl.load(output + row * m + col, mask=mask)
         tl.store(output + row * m + col, value, mask=mask)
+        tl.store(output + col * m + row, value, mask=mask)
 
 
 class GroupedSymmetricPlan:
@@ -73,9 +64,12 @@ class GroupedSymmetricPlan:
         cluster_shape: tuple[int, int] = (2, 1),
         use_2cta: bool = True,
         row_block: int = 256,
-        tensormap_update_mode=cutlass_utils.TensorMapUpdateMode.SMEM,
+        tensormap_update_mode=None,
         compiled_plan: "GroupedSymmetricPlan | None" = None,
     ) -> None:
+        inputs = list(inputs)
+        c = list(c) if c is not None else None
+        outputs = list(outputs) if outputs is not None else None
         if not inputs:
             raise ValueError("grouped symmetric GEMM requires at least one input")
         if torch.version.hip is not None:
@@ -98,6 +92,10 @@ class GroupedSymmetricPlan:
             raise ValueError("grouped symmetric GEMM row block must be 8-aligned")
         if any(x.device != inputs[0].device for x in inputs):
             raise ValueError("grouped symmetric GEMM inputs must use one device")
+        if torch.cuda.get_device_capability(inputs[0].device)[0] not in (10, 11):
+            raise ValueError("grouped symmetric GEMM requires SM100 or SM110")
+        if not use_2cta and mma_tiler == (256, 256):
+            mma_tiler = (128, 256)
         if c is not None and any(
             tensor.shape != (x.shape[0], x.shape[0])
             or tensor.dtype != x.dtype
@@ -112,10 +110,14 @@ class GroupedSymmetricPlan:
         self.c = c
         self.alpha = alpha
         self.beta = beta
-        self.outputs = outputs or [
-            torch.empty(x.shape[0], x.shape[0], dtype=x.dtype, device=x.device)
-            for x in inputs
-        ]
+        self.outputs = (
+            outputs
+            if outputs is not None
+            else [
+                torch.empty(x.shape[0], x.shape[0], dtype=x.dtype, device=x.device)
+                for x in inputs
+            ]
+        )
         if len(self.outputs) != len(inputs) or any(
             out.shape != (x.shape[0], x.shape[0])
             or out.dtype != x.dtype
@@ -159,6 +161,19 @@ class GroupedSymmetricPlan:
                     )
                 )
 
+        import cutlass
+        import cutlass.cute as cute
+        import cutlass.torch as cutlass_torch
+        import cutlass.utils as cutlass_utils
+
+        # pyrefly: ignore [missing-import]
+        from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm import (
+            create_tensor_and_stride,
+            GroupedGemmKernel,
+        )
+
+        if tensormap_update_mode is None:
+            tensormap_update_mode = cutlass_utils.TensorMapUpdateMode.SMEM
         with torch.cuda.device(inputs[0].device):
             self.problem_sizes, self._problem_sizes_torch = self._metadata(
                 problems, torch.int32, cutlass.Int32
@@ -238,6 +253,8 @@ class GroupedSymmetricPlan:
 
     @staticmethod
     def _metadata(values, torch_dtype, cutlass_dtype):
+        import cutlass.torch as cutlass_torch
+
         return cutlass_torch.cute_tensor_like(
             torch.tensor(values, dtype=torch_dtype),
             cutlass_dtype,
@@ -246,6 +263,8 @@ class GroupedSymmetricPlan:
         )
 
     def __call__(self) -> list[torch.Tensor]:
+        import cutlass.torch as cutlass_torch
+
         with torch.cuda.device(self.inputs[0].device):
             stream = cutlass_torch.current_stream()
             compiled = self.compiled
@@ -303,7 +322,8 @@ class SymmetricMuonPlan:
             ):
                 raise ValueError("symmetric Muon workspace has invalid metadata")
         self.num_steps = steps
-        self.outputs = self.inputs if steps % 2 == 0 else self.alternate
+        output = self.inputs if steps <= 0 or steps % 2 == 0 else self.alternate
+        self.outputs = output.T if shape[0] > shape[1] else output
 
     def __call__(self, updates: list[torch.Tensor], eps: float) -> list[torch.Tensor]:
         from torch._vendor.quack.gemm_interface import gemm_symmetric
@@ -341,13 +361,15 @@ class SequentialSymmetricMuonPlan:
     ) -> None:
         if not shapes:
             raise ValueError("sequential symmetric Muon plan requires an input")
-        first = SymmetricMuonPlan(shapes[0], device, coefficients, steps)
-        workspace = (first.gram, first.update)
-        self.plans = [first]
-        self.plans.extend(
-            SymmetricMuonPlan(shape, device, coefficients, steps, workspace)
-            for shape in shapes[1:]
-        )
+        workspaces = {}
+        self.plans = []
+        for shape in shapes:
+            m = min(shape)
+            plan = SymmetricMuonPlan(
+                shape, device, coefficients, steps, workspaces.get(m)
+            )
+            workspaces.setdefault(m, (plan.gram, plan.update))
+            self.plans.append(plan)
 
     def __call__(self, updates: list[torch.Tensor], eps: float) -> list[torch.Tensor]:
         if len(updates) != len(self.plans):
@@ -380,8 +402,11 @@ class PackedSymmetricMuonPlan:
         self.update = torch.empty_like(self.gram)
         self.input_views = list(self.inputs.unbind())
         self.num_steps = steps
-        outputs = self.inputs if steps % 2 == 0 else self.alternate
-        self.outputs = list(outputs.unbind())
+        outputs = self.inputs if steps <= 0 or steps % 2 == 0 else self.alternate
+        self.outputs = [
+            output.T if shape[0] > shape[1] else output
+            for shape, output in zip(shapes, outputs.unbind())
+        ]
 
     def __call__(self, updates: list[torch.Tensor], eps: float) -> list[torch.Tensor]:
         from torch._vendor.quack.gemm_interface import gemm_symmetric
@@ -433,11 +458,11 @@ class GroupedMuonPlan:
         cluster_shape: tuple[int, int] = (2, 1),
         use_2cta: bool = True,
         row_block: int = 256,
-        tensormap_update_mode=cutlass_utils.TensorMapUpdateMode.SMEM,
+        tensormap_update_mode=None,
     ) -> None:
         if not shapes:
             raise ValueError("grouped Muon plan requires an input")
-        self.shapes = shapes
+        self.shapes = list(shapes)
         self.a, self.b, self.c = coefficients
         normalized = [(min(shape), max(shape)) for shape in shapes]
         counts: dict[tuple[int, int], int] = {}
@@ -506,7 +531,11 @@ class GroupedMuonPlan:
             **plan_kwargs,
         )
         self.num_steps = steps
-        self.outputs = self.inputs if steps % 2 == 0 else self.alternate
+        outputs = self.inputs if steps <= 0 or steps % 2 == 0 else self.alternate
+        self.outputs = [
+            output.T if shape[0] > shape[1] else output
+            for shape, output in zip(shapes, outputs)
+        ]
 
     def __call__(self, updates: list[torch.Tensor], eps: float) -> list[torch.Tensor]:
         sources = [
