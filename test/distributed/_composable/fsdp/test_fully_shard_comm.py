@@ -75,9 +75,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
-    TEST_XPU,
     TestCase,
-    xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     FeedForward,
@@ -2119,11 +2117,11 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
                     divisions.append(func)
                 return func(*args, **(kwargs or {}))
 
-        model = nn.Linear(8, 4, bias=False, device=device_type)
-        fully_shard(model, mesh=init_device_mesh(device_type.type, (1,)))
+        model = nn.Linear(8, 4, bias=False, device=device.type)
+        fully_shard(model, mesh=init_device_mesh(device.type, (1,)))
         if divide_factor is not None:
             model.set_gradient_divide_factor(divide_factor)
-        inp = torch.ones(3, 8, device=device_type)
+        inp = torch.ones(3, 8, device=device.type)
         loss = model(inp).sum()
         with RecordDivisions():
             loss.backward()
