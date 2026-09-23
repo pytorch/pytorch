@@ -74,15 +74,15 @@ class _GlobalItemStats(Stats):
 # it's a remote cache).
 
 
+@dataclasses.dataclass(slots=True)
 class _GlobalStats(threading.local):
-    def __init__(self) -> None:
-        self.autotune_local = _GlobalItemStats()
-        self.autotune_remote = _GlobalItemStats()
-        self.bundled_autotune = _GlobalItemStats()
-        self.fx_graph = _GlobalItemStats()
-        self.triton = _GlobalItemStats()
-        self.aot_autograd = _GlobalItemStats()
-        self.dynamo_pgo = _GlobalItemStats()
+    autotune_local = _GlobalItemStats()
+    autotune_remote = _GlobalItemStats()
+    bundled_autotune = _GlobalItemStats()
+    fx_graph = _GlobalItemStats()
+    triton = _GlobalItemStats()
+    aot_autograd = _GlobalItemStats()
+    dynamo_pgo = _GlobalItemStats()
 
     def reset(self) -> None:
         self.autotune_local.reset()

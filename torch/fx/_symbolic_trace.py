@@ -10,6 +10,7 @@ import os
 import threading
 import warnings
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType, TracebackType
 from typing import Any, get_args, NamedTuple, overload, ParamSpec, TypeAlias, TypeVar
@@ -44,6 +45,7 @@ _orig_module_getattr: Callable[..., Any] = torch.nn.Module.__getattr__
 _proxyable_classes: dict[type, None] = {}
 
 
+@dataclass(slots=True)
 class _FxTracingFlag(threading.local):
     flag: bool = False
 

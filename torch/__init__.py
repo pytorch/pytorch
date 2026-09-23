@@ -3308,9 +3308,9 @@ def compile(
         use_aoti = options.pop("use_aoti", False)
 
     if torch.compiler.is_exporting():
-        from torch._higher_order_ops.utils import _in_hop_compile
+        from torch._higher_order_ops.utils import _hop_compile_tls
 
-        if not _in_hop_compile():
+        if not _hop_compile_tls.in_hop_compile:
             warnings.warn(
                 "torch.compile is ignored when called inside torch.export region",
                 stacklevel=2,

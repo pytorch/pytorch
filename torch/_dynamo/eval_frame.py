@@ -41,7 +41,7 @@ import unittest
 import warnings
 import weakref
 from collections.abc import Generator, Sized
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from os.path import dirname, join
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
@@ -206,22 +206,25 @@ class DynamoStance:
 
 
 _stance = DynamoStance()
-_force_eager_nested_compile = threading.local()
+
+
+@dataclass(slots=True)
+class _ForceEagerNestedCompile(threading.local):
+    depth: int = 0
+
+
+_force_eager_nested_compile = _ForceEagerNestedCompile()
 
 
 @contextlib.contextmanager
 def _use_eager_on_nested_compile() -> Generator[None, None, None]:
     """Run torch.compile wrappers eagerly inside compiler-internal tracing."""
-    prior = getattr(_force_eager_nested_compile, "depth", 0)
+    prior = _force_eager_nested_compile.depth
     _force_eager_nested_compile.depth = prior + 1
     try:
         yield
     finally:
         _force_eager_nested_compile.depth = prior
-
-
-def _is_eager_on_nested_compile() -> bool:
-    return getattr(_force_eager_nested_compile, "depth", 0) > 0
 
 
 def _set_stance(stance: DynamoStance) -> DynamoStance:
@@ -790,10 +793,11 @@ def set_enable_dynamic(enable: bool) -> Generator[None, None, None]:
 
 # A thread local storage that serves to store information as Dynamo traces
 # through a user provided function.
+@dataclass(slots=True)
 class DynamoTLS(threading.local):
     # Each string is a summary of a frame Dynamo attempted to trace, stored in
     # temporal order.
-    traced_frame_infos: list[str] = []
+    traced_frame_infos: list[str] = field(default_factory=list)
 
     # Accumulated skip reasons during a fullgraph compile_wrapper call.
     # Each entry is a formatted string like "fn (file.py:42): reason".
@@ -1162,12 +1166,12 @@ class _TorchDynamoContext:
             # intentionally enable force_compile_during_fx_trace to get nested
             # subgraphs.
             if (
-                _is_eager_on_nested_compile()
+                _force_eager_nested_compile.depth > 0
                 and not config.force_compile_during_fx_trace
             ):
-                from torch._higher_order_ops.utils import _in_hop_compile
+                from torch._higher_order_ops.utils import _hop_compile_tls
 
-                if not _in_hop_compile():
+                if not _hop_compile_tls.in_hop_compile:
                     try:
                         return fn(*args, **kwargs)
                     finally:
@@ -1183,22 +1187,22 @@ class _TorchDynamoContext:
                         reset_skip_reasons()
             try:
                 # We shouldn't compile inside kernel invocation.
-                if tracing_context := torch._guards.TracingContext.try_get():
-                    if (
-                        tracing_context.fake_mode is not None
-                        and tracing_context.fake_mode.in_kernel_invocation
-                    ):
-                        return fn(*args, **kwargs)
+                if (
+                    (tracing_context := torch._guards.TracingContext.try_get())
+                    and tracing_context.fake_mode is not None
+                    and tracing_context.fake_mode.in_kernel_invocation
+                ):
+                    return fn(*args, **kwargs)
                 # Skip nested compile during export (but not HOP internal compile)
                 # Only skip if there's an active TracingContext (nested), not for top-level export
                 if (
                     torch.compiler.is_exporting()
                     and not config.force_compile_during_fx_trace
                 ):
-                    from torch._higher_order_ops.utils import _in_hop_compile
+                    from torch._higher_order_ops.utils import _hop_compile_tls
 
-                    if not _in_hop_compile():
-                        if torch._guards.TracingContext.try_get() is not None:
+                    if not _hop_compile_tls.in_hop_compile:
+                        if tracing_context:
                             return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
                 if (
