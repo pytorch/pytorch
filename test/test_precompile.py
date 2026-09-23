@@ -4804,6 +4804,31 @@ class TestExportPython(TestCase):
         self.assertEqual(m.running_mean, ref.running_mean)
         self.assertEqual(m.running_var, ref.running_var)
 
+    def test_clobbered_non_artifact_source_raises_clean_error(self, device):
+        # A clobbered non-artifact source degrades to a clean PrecompileError
+        # referencing the path, not a raw KeyError/SyntaxError, so a stale hand-edit
+        # that drops the forward() surfaces an actionable message.
+        path = self._tmp_path("clobber.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("x = 1\n")
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run2(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(
+            PrecompileError, "could not be run as precompile source"
+        ):
+            run2(x)
+
     def test_kwargs_bound_positionally(self, device):
         path = self._tmp_path("kw.py")
         x = make_tensor((4,), device=device, dtype=torch.float32)
@@ -4902,6 +4927,68 @@ class TestExportPython(TestCase):
         self.assertEqual(run2(x), x + 1)
         with open(path, encoding="utf-8") as f:
             self.assertEqual(f.read(), first)
+
+    def test_artifact_raising_at_module_scope_is_a_distinct_error(self, device):
+        # The third arm of _load's taxonomy: not a syntax/structure problem and not a
+        # failed import, but source that blows up while being exec'd.
+        path = self._tmp_path("raises.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            code = f.read()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("raise RuntimeError('boom')\n" + code)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def loaded(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "unexpected error occurred"):
+            loaded(x)
+
+    def test_artifact_deleted_between_gate_and_read_regenerates(self, device):
+        # A peer deleting the artifact to force a regenerate must not surface as a bare
+        # FileNotFoundError from behind the presence gate.
+        path = self._tmp_path("toctou.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def seed(inp):
+            return inp + 1
+
+        self.assertEqual(seed(x), x + 1)
+
+        real_exists = os.path.exists
+
+        def exists_then_delete(p):
+            result = real_exists(p)
+            if p == path and result:
+                os.remove(p)
+            return result
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def racer(inp):
+            return inp + 1
+
+        with mock.patch.object(os.path, "exists", exists_then_delete):
+            self.assertEqual(racer(x), x + 1)
+        self.assertTrue(real_exists(path))
+
+    def test_path_naming_a_directory_is_a_clean_error(self, device):
+        path = self._tmp_path("adirectory.py")
+        os.makedirs(path)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "readable file"):
+            run(make_tensor((4,), device=device, dtype=torch.float32))
 
     def test_none_and_nested_module_arguments_name_their_own_cause(self, device):
         x = make_tensor((4,), device=device, dtype=torch.float32)
