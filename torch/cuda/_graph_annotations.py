@@ -43,7 +43,9 @@ control (e.g. resolving once before remapping several graphs).
 
 from __future__ import annotations
 
+import gzip
 import importlib.metadata
+import json
 import threading
 import warnings
 from collections.abc import Mapping
@@ -479,6 +481,8 @@ class _GraphAnnotations:
     def __init__(self) -> None:
         self.annotations: dict[int, dict[str, Any]] = {}
         self.sourceless_nodes: set[int] = set()
+        # Annotations go into profiler traces; Python stacks are dumped separately.
+        self.py_stacks: dict[int, str] = {}
 
 
 # toolsIds pack the graph id into the high 32 bits and the node id into the low 32.
@@ -518,6 +522,12 @@ def _merge_annotation(tools_id: int, annotation: Any) -> None:
             return
         for key, value in incoming.items():
             entry.setdefault(key, value)
+
+
+def record_node_py_stack(tools_id: int, stack: str) -> None:
+    with _REGISTRY_LOCK:
+        graph = _GRAPH_ANNOTATIONS.setdefault(tools_id >> 32, _GraphAnnotations())
+        graph.py_stacks[tools_id & 0xFFFFFFFF] = stack
 
 
 def annotation_for(tools_id: int) -> dict[str, Any] | None:
@@ -1156,6 +1166,8 @@ def alias_sourceless_to_exec_graph(
         for node_id in graph.sourceless_nodes.copy():
             if node_id in graph.annotations:
                 aliases.annotations[node_id] = graph.annotations[node_id]
+            if node_id in graph.py_stacks:
+                aliases.py_stacks[node_id] = graph.py_stacks[node_id]
         if previous is not None:
             _GRAPH_ANNOTATIONS.pop(previous, None)
         _GRAPH_ANNOTATIONS[exec_graph_id] = aliases
@@ -1233,6 +1245,15 @@ def get_kernel_annotations() -> Mapping[int, list[Any]]:
     graphs have been instantiated. The mapping is read-only; snapshot it
     with ``dict(...)`` if isolation is needed.
 
+    .. note::
+        Keep graphs alive until all profiles using their annotations have been
+        exported. For asynchronous Cuspy exports, also call
+        :meth:`~torch.profiler.profile.wait_for_exports` before resetting or
+        destroying the graphs. Stopping the profiler or synchronizing CUDA alone
+        does not guarantee that buffered profiling records have been processed.
+        Graph cleanup removes entries from this live view; it can leave pending
+        profiles without annotations.
+
     .. warning::
         This API is in prototype and may change in future releases.
 
@@ -1244,6 +1265,79 @@ def get_kernel_annotations() -> Mapping[int, list[Any]]:
         ...     pickle.dump(dict(annotations), f)
     """
     return _annotations_view
+
+
+class _PyStacksView(Mapping[int, str]):
+    def __getitem__(self, tools_id: int) -> str:
+        with _REGISTRY_LOCK:
+            return _GRAPH_ANNOTATIONS[tools_id >> 32].py_stacks[tools_id & 0xFFFFFFFF]
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self.copy())
+
+    def __len__(self) -> int:
+        with _REGISTRY_LOCK:
+            return sum(
+                len(graph.py_stacks) for graph in _GRAPH_ANNOTATIONS.copy().values()
+            )
+
+    def copy(self) -> dict[int, str]:
+        with _REGISTRY_LOCK:
+            graphs = _GRAPH_ANNOTATIONS.copy()
+            return {
+                (graph_id << 32) | node_id: stack
+                for graph_id, graph in graphs.items()
+                for node_id, stack in graph.py_stacks.copy().items()
+            }
+
+
+_PY_STACKS_VIEW = _PyStacksView()
+
+
+def get_kernel_py_stacks() -> Mapping[int, str]:
+    r"""Return Python launch stacks recorded during CUDA graph capture.
+
+    Enable recording with ``torch.cuda.graph(..., enable_annotations=True,
+    annotation_config={"record_py_stacks": True})``. Values contain user launch
+    frames as newline-separated ``filename:line:function`` strings, innermost
+    first. Framework and generated Inductor frames are omitted by default;
+    ``annotation_config["py_stack_filter_paths"]`` can replace the excluded
+    directories, or disable filtering with an empty list.
+
+    With the default ``key_by="exec"``, match a Cuspy Chrome trace event using
+    ``(args["graph id"] << 32) | args["graph node id"]``. For consumers reading
+    CUPTI's ``sourceGraphNodeId``, set ``annotation_config["key_by"]="source"``
+    and use that ID directly (requires CUPTI and driver >= 13.4).
+    Conditional/child-body stacks require ``"source"`` keying; they are omitted
+    with ``"exec"``.
+
+    The mapping is a live, read-only view. Save it with
+    :func:`dump_kernel_py_stacks` after instantiation and before resetting or
+    destroying the graph, which removes its entries.
+
+    .. warning::
+        This API is in prototype and may change in future releases.
+    """
+    return _PY_STACKS_VIEW
+
+
+def dump_kernel_py_stacks(path: str) -> None:
+    r"""Save recorded CUDA graph launch stacks as gzip-compressed JSON.
+
+    The file maps decimal node-id strings to the stack strings described by
+    :func:`get_kernel_py_stacks`.
+    Call after instantiation and before resetting or destroying the graphs.
+
+    Args:
+        path (str): Output file path.
+
+    .. warning::
+        This API is in prototype and may change in future releases.
+    """
+    # JSON encoding and gzip writes can trigger finalizers that remove graph entries.
+    snapshot = _PY_STACKS_VIEW.copy()
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        json.dump(snapshot, f)
 
 
 def _reset_kernel_annotations() -> None:
