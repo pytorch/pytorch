@@ -8,6 +8,7 @@ import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.decompose_mem_bound_mm import (
     check_device,
+    check_gpu_device,
     should_decompose_bmm,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -596,6 +597,45 @@ class TestDecomposeBmmCpuDynamicShape(TestCase):
         )
         self.assertEqual(counters["inductor"]["decompose_bmm"], 1)
         counters.clear()
+
+
+class _FakeDevice:
+    def __init__(self, device_type):
+        self.type = device_type
+
+
+class _FakeTensor:
+    def __init__(self, device_type):
+        self.device = _FakeDevice(device_type)
+
+
+class TestCheckGpuDevice(TestCase):
+    """check_gpu_device gates the accelerator branch of decompose_mm_pass.
+
+    Kept out of TestDecomposeMemMM because these cases need no GPU; the
+    operands are duck-typed objects that only carry ``.device``.
+    """
+
+    def test_same_registered_gpu_device_types(self):
+        for device_type in ("cuda", "xpu", "mps", "mtia"):
+            fake_a = _FakeTensor(device_type)
+            fake_b = _FakeTensor(device_type)
+            self.assertTrue(check_gpu_device(fake_a, fake_b))
+
+    def test_cpu_device_not_treated_as_gpu(self):
+        fake_a = _FakeTensor("cpu")
+        fake_b = _FakeTensor("cpu")
+        self.assertFalse(check_gpu_device(fake_a, fake_b))
+
+    def test_unregistered_device_type_not_treated_as_gpu(self):
+        fake_a = _FakeTensor("fakedev")
+        fake_b = _FakeTensor("fakedev")
+        self.assertFalse(check_gpu_device(fake_a, fake_b))
+
+    def test_mixed_device_types_rejected(self):
+        fake_a = _FakeTensor("cuda")
+        fake_b = _FakeTensor("cpu")
+        self.assertFalse(check_gpu_device(fake_a, fake_b))
 
 
 if __name__ == "__main__":
