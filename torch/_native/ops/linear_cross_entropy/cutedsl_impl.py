@@ -327,64 +327,61 @@ def _batch_chunked_kernel(
     if linear_bias is not None and linear_bias.dtype not in (logits_dtype, dtype):
         bias_arg = linear_bias.to(logits_dtype)
 
-    # The Python-native dispatch path sets no CUDA device guard, and the kernel
-    # launches on the current device, so make that the input's.
-    with torch.accelerator.device_index(device.index):
-        for start in range(0, num_batches, chunk_rows):
-            rows = min(chunk_rows, num_batches - start)
-            input_chunk = input.narrow(0, start, rows)
-            target_chunk = target_hat.narrow(0, start, rows)
-            scale_chunk = row_scale.narrow(0, start, rows)
-            logits = logits_buf.narrow(0, 0, rows)
+    for start in range(0, num_batches, chunk_rows):
+        rows = min(chunk_rows, num_batches - start)
+        input_chunk = input.narrow(0, start, rows)
+        target_chunk = target_hat.narrow(0, start, rows)
+        scale_chunk = row_scale.narrow(0, start, rows)
+        logits = logits_buf.narrow(0, 0, rows)
 
-            # `bias_arg`, not `linear_bias`: it is None exactly when that is, and
-            # branching on it is what narrows its type for the `addmm` below.
-            if bias_arg is None:
-                torch.mm(input_chunk, weight_t, out_dtype=logits_dtype, out=logits)
+        # `bias_arg`, not `linear_bias`: it is None exactly when that is, and
+        # branching on it is what narrows its type for the `addmm` below.
+        if bias_arg is None:
+            torch.mm(input_chunk, weight_t, out_dtype=logits_dtype, out=logits)
+        else:
+            torch.addmm(
+                bias_arg, input_chunk, weight_t, out_dtype=logits_dtype, out=logits
+            )
+
+        g = g_alias.narrow(0, 0, rows) if compute_grads else None
+        if g is not None:
+            # This consumes `logits`: on return those bytes hold `g`. Nothing
+            # below reads them again, and the next chunk's matmul overwrites
+            # the buffer.
+            fused_grad_logits_into(
+                g,
+                term_buf.narrow(0, start, rows),
+                logits,
+                scale_chunk,
+                target_chunk,
+            )
+        else:
+            # Shift in place -- so this pass allocates no (Bc, V) temporary --
+            # then read the target logit BEFORE exponentiating, since `exp_`
+            # overwrites the shifted logits.
+            row_max = row_max_buf.narrow(0, 0, rows)
+            torch.amax(logits, dim=1, keepdim=True, out=row_max)
+            logits.sub_(row_max)
+            target_logit = logits.gather(1, target_chunk.unsqueeze(1)).squeeze(1)
+            logits.exp_()
+            row_sum = logits.sum(dim=1, dtype=acc_dtype)
+            # Both terms shifted by the row max, which keeps their difference
+            # from collapsing in fp32 at large row offsets.
+            loss.add_((scale_chunk * (row_sum.log() - target_logit)).sum())
+            continue
+
+        if compute_linear_bias_grad:
+            # Accumulated in acc_dtype like eager's bias-grad scratch, and
+            # committed once after the loop.
+            bias_grad_acc.add_(g.sum(dim=0, dtype=acc_dtype))
+        if compute_input_grad:
+            torch.mm(g, linear_weight, out=grad_input.narrow(0, start, rows))
+        if compute_linear_weight_grad:
+            # The first chunk writes the accumulator (beta=0) rather than adding to it.
+            if start == 0:
+                torch.mm(g.t(), input_chunk, out=grad_linear_weight)
             else:
-                torch.addmm(
-                    bias_arg, input_chunk, weight_t, out_dtype=logits_dtype, out=logits
-                )
-
-            g = g_alias.narrow(0, 0, rows) if compute_grads else None
-            if g is not None:
-                # This consumes `logits`: on return those bytes hold `g`. Nothing
-                # below reads them again, and the next chunk's matmul overwrites
-                # the buffer.
-                fused_grad_logits_into(
-                    g,
-                    term_buf.narrow(0, start, rows),
-                    logits,
-                    scale_chunk,
-                    target_chunk,
-                )
-            else:
-                # Shift in place -- so this pass allocates no (Bc, V) temporary --
-                # then read the target logit BEFORE exponentiating, since `exp_`
-                # overwrites the shifted logits.
-                row_max = row_max_buf.narrow(0, 0, rows)
-                torch.amax(logits, dim=1, keepdim=True, out=row_max)
-                logits.sub_(row_max)
-                target_logit = logits.gather(1, target_chunk.unsqueeze(1)).squeeze(1)
-                logits.exp_()
-                row_sum = logits.sum(dim=1, dtype=acc_dtype)
-                # Both terms shifted by the row max, which keeps their difference
-                # from collapsing in fp32 at large row offsets.
-                loss.add_((scale_chunk * (row_sum.log() - target_logit)).sum())
-                continue
-
-            if compute_linear_bias_grad:
-                # Accumulated in acc_dtype like eager's bias-grad scratch, and
-                # committed once after the loop.
-                bias_grad_acc.add_(g.sum(dim=0, dtype=acc_dtype))
-            if compute_input_grad:
-                torch.mm(g, linear_weight, out=grad_input.narrow(0, start, rows))
-            if compute_linear_weight_grad:
-                # The first chunk writes the accumulator (beta=0) instead of adding.
-                if start == 0:
-                    torch.mm(g.t(), input_chunk, out=grad_linear_weight)
-                else:
-                    grad_linear_weight.addmm_(g.t(), input_chunk)
+                grad_linear_weight.addmm_(g.t(), input_chunk)
 
     if compute_grads:
         torch.sum(term_buf, dim=0, out=loss)
