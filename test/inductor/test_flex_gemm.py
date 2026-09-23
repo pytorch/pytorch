@@ -1951,7 +1951,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     torch.compile(fn, backend="inductor", fullgraph=True)(x, w_t, offs)
 
     def test_fake_tensor_mode_tuple_aux_returns_fake_tensors(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_mode
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode() as mode:
             a = mode.from_tensor(torch.randn(8, 16))
@@ -1966,8 +1966,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(aux.shape, torch.Size([8, 12]))
         self.assertEqual(actual.dtype, torch.float32)
         self.assertEqual(aux.dtype, torch.float32)
-        self.assertIs(maybe_get_fake_mode(actual), mode)
-        self.assertIs(maybe_get_fake_mode(aux), mode)
+        self.assertIs(actual.fake_mode, mode)
+        self.assertIs(aux.fake_mode, mode)
 
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"

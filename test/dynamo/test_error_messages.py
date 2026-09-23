@@ -24,12 +24,7 @@ from torch._dynamo.exc import (
 )
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
-    IS_FBCODE,
-    IS_S390X,
-    munge_exc,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, IS_S390X, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -1036,7 +1031,10 @@ User code traceback:
         def fn(x):
             return torch.ops.mylib.error_messages_faketensor(x)
 
-        expected = """\
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
+            """\
 NotImplementedError/UnsupportedFakeTensorException when running FX node
   Explanation: Dynamo failed to run FX node with fake tensors: call_function mylib.error_messages_faketensor(*(FakeTensor(..., size=(3,)),), **{}): got NotImplementedError()
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
@@ -1049,22 +1047,19 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    return torch.ops.mylib.error_messages_faketensor(x)"""
-        expected = expectedIfCppFakeTensor(
-            expected.replace("FakeTensor(...", "tensor(..."), expected
-        )
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
-            expected,
+    return torch.ops.mylib.error_messages_faketensor(x)""",
         )
 
     def test_fx_node_error_bad_user_code(self):
         def fn(x, y):
             return x + y
 
-        expected = """\
+        self.assertExpectedInlineMunged(
+            TorchRuntimeError,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(3), torch.randn(4)
+            ),
+            """\
 RuntimeError when making fake tensor call
   Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(3,)), FakeTensor(..., size=(4,))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 4 at -1! Mismatching argument at index 1 had torch.Size([4]); but expected shape should be broadcastable to [3]')
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
@@ -1075,17 +1070,7 @@ RuntimeError when making fake tensor call
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    return x + y"""
-        expected = expectedIfCppFakeTensor(
-            expected.replace("FakeTensor(...", "tensor(..."), expected
-        )
-
-        self.assertExpectedInlineMunged(
-            TorchRuntimeError,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.randn(3), torch.randn(4)
-            ),
-            expected,
+    return x + y""",
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -1099,24 +1084,12 @@ from user code:
             torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
 
         msg = str(cm.exception)
-        self.assertIn(
-            expectedIfCppFakeTensor(
-                "RuntimeError when making fake tensor call", "Tensor device mismatch"
-            ),
-            msg,
-        )
+        self.assertIn("Tensor device mismatch", msg)
         self.assertIn("Expected all tensors to be on the same device", msg)
         self.assertIn("cpu", msg)
         self.assertIn("cuda", msg)
-        unexpected_messages = expectedIfCppFakeTensor(
-            ("Unhandled FakeTensor Device Propagation",),
-            (
-                "Dynamo failed to run FX node with fake tensors",
-                "Unhandled FakeTensor Device Propagation",
-            ),
-        )
-        for unexpected in unexpected_messages:
-            self.assertNotIn(unexpected, msg)
+        self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
+        self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
 
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
@@ -2271,7 +2244,10 @@ from user code:
             s = re.sub(r"s\d+: hint = 10", "s94: hint = 10", s)
             return s
 
-        expected = """\
+        self.assertExpectedInlineMunged(
+            TorchRuntimeError,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, y),
+            """\
 RuntimeError when making fake tensor call
   Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
@@ -2282,15 +2258,7 @@ RuntimeError when making fake tensor call
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    return x + y"""
-        expected = expectedIfCppFakeTensor(
-            expected.replace("FakeTensor(...", "tensor(..."), expected
-        )
-
-        self.assertExpectedInlineMunged(
-            TorchRuntimeError,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, y),
-            expected,
+    return x + y""",
             post_munge=post_munge,
         )
 

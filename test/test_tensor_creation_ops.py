@@ -35,8 +35,6 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     parametrize,
     TEST_WITH_TORCHDYNAMO,
-    expectedIfCppFakeTensor,
-    xfailIf,
     xfailIfTorchDynamo,
     skipIfTorchDynamo,
 )
@@ -3497,9 +3495,7 @@ class TestRandomTensorCreation(TestCase):
                     torch.normal(input, std)
 
     # https://github.com/pytorch/pytorch/issues/126834
-    @xfailIf(
-        TEST_WITH_TORCHDYNAMO and not torch._dynamo.config.use_cpp_fake_tensor
-    )
+    @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
@@ -3519,10 +3515,6 @@ class TestRandomTensorCreation(TestCase):
             max_val = torch.finfo(dtype).max
 
         values = [double_min, float_min, -42, 0, 42, float_max, double_max]
-        error_type = expectedIfCppFakeTensor(
-            (RuntimeError, torch._dynamo.exc.TorchDynamoException), RuntimeError
-        )
-        wrapped_error = "Unexpected exception when running generated GraphModule"
 
         for from_ in values:
             for to_ in values:
@@ -3530,23 +3522,15 @@ class TestRandomTensorCreation(TestCase):
                 if not (min_val <= from_ <= max_val) or not (min_val <= to_ <= max_val):
                     pass
                 elif to_ < from_:
-                    message = expectedIfCppFakeTensor(
-                        f"uniform_ expects to return|{wrapped_error}",
-                        "uniform_ expects to return",
-                    )
                     self.assertRaisesRegex(
-                        error_type,
-                        message,
+                        RuntimeError,
+                        "uniform_ expects to return",
                         lambda: t.uniform_(from_, to_)
                     )
                 elif to_ - from_ > max_val:
-                    message = expectedIfCppFakeTensor(
-                        f"uniform_ expects to-from|{wrapped_error}",
-                        "uniform_ expects to-from",
-                    )
                     self.assertRaisesRegex(
-                        error_type,
-                        message,
+                        RuntimeError,
+                        "uniform_ expects to-from",
                         lambda: t.uniform_(from_, to_)
                     )
                 else:

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing_extensions import deprecated
 
 import torch
-from torch._library.utils import Kernel, lookup_op, RegistrationHandle
+from torch._library.utils import Kernel, RegistrationHandle
 
 
 log = logging.getLogger(__name__)
@@ -78,21 +78,13 @@ class FakeImplHolder:
         # Store the kernel in this holder
         kernel = Kernel(func, source)
         self.kernels.append(kernel)
-        schema = lookup_op(self.qualname)._schema
 
         def deregister_fake_kernel():
             self.kernels.remove(kernel)
-            if not self.kernels:
-                torch._C._fake_dispatch_deregister_custom_op_impl(
-                    schema.name, schema.overload_name
-                )
 
         meta_kernel = construct_meta_kernel(self.qualname, self)
         try:
             lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
-            torch._C._fake_dispatch_register_custom_op_impl(
-                schema.name, schema.overload_name
-            )
         except Exception:
             log.info(
                 "Failed to register fake_impl '%s':",
@@ -131,28 +123,6 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
             return fake_impl_holder.kernel(*args, **kwargs)
 
     return meta_kernel
-
-
-def run_fake_impl(fake_mode, func, args, kwargs, real=None):
-    # real: the RealOpResult precomputed under propagate_real_tensors, used when
-    # a profile-generated fake kernel has no profile for these inputs.
-    from torch._library.fake_profile import MissingOpProfile
-
-    fake_impl = torch._library.simple_registry.singleton.find(
-        func.name()
-    ).fake_impl.kernel
-    if fake_impl is None:
-        raise AssertionError(f"expected a fake implementation for {func}")
-    ctx = FakeImplCtx(fake_mode, func)
-    with set_ctx_getter(lambda: ctx), fake_mode:
-        try:
-            return fake_impl(*args, **kwargs)
-        except MissingOpProfile:
-            if real is None or fake_mode.shape_env is None:
-                raise
-            from torch._subclasses.fake_tensor import infer_fake_from_real_out
-
-            return infer_fake_from_real_out(fake_mode, func, real)
 
 
 def get_none():
