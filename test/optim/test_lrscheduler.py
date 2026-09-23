@@ -478,6 +478,11 @@ class TestLRScheduler(TestCase):
         with self.assertRaises(ValueError):
             LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
 
+    @parametrize("factor", [0.0, 1.1])
+    def test_constantlr_factor_limits(self, factor):
+        with self.assertRaises(ValueError):
+            ConstantLR(self.opt, factor=factor, total_iters=4)
+
     def test_constantlr_with_epoch(self):
         # lr = 0.025     if epoch < 5
         # lr = 0.005    if 5 <= epoch
