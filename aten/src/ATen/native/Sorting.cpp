@@ -16,6 +16,7 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -187,6 +188,16 @@ void quick_select_template(
 }
 
 namespace {
+
+bool deviceSupportsDouble(c10::Device device) {
+  try {
+    c10::impl::VirtualGuardImpl impl(device.type());
+    return impl.getDeviceCapability(device)
+        .capability_data.supported_scalar_types.has_Double;
+  } catch (const c10::Error&) {
+    return true;
+  }
+}
 
 // Resolve the order statistics at the requested `ranks` (distinct, ascending) for one
 // row: nth_element around the middle rank, then recurse into the lower/upper rank
@@ -370,13 +381,14 @@ Tensor quantile_compute(
 
   // quantile maps q to ranks via q * (size - 1), rounded to gather indices, so
   // size must be exactly representable in the rank dtype. float32 reaches only
-  // 2^24, so ranks use double (exact to 2^53) where it exists; MPS has no
-  // double, so float32 there keeps float32 ranks and the 2^24 cap.
+  // 2^24, so ranks use double (exact to 2^53) where the device supports it;
+  // devices without double support (e.g. MPS) keep float32 ranks and the 2^24
+  // cap.
   TORCH_INTERNAL_ASSERT(
       self.scalar_type() == kFloat || self.scalar_type() == kDouble,
       "quantile() rank computation assumes a float or double input");
-  const bool double_ranks =
-      self.scalar_type() == kDouble || self.device().type() != kMPS;
+  const bool double_ranks = self.scalar_type() == kDouble ||
+      deviceSupportsDouble(self.device());
   const auto rank_dtype = double_ranks ? kDouble : self.scalar_type();
   const int64_t max_size = double_ranks
       ? (1LL << std::numeric_limits<double>::digits)

@@ -2786,10 +2786,18 @@ class TestReductions(TestCase):
     @onlyNativeDeviceTypes
     def test_quantile_size_limit(self, device):
         # float32 ranks are exact only to 2^24; computing them in float64 lifts
-        # the limit to 2^53. MPS has no float64, so it keeps the 2^24 cap and
-        # raises past it, while CPU/CUDA support larger float32 inputs.
+        # the limit to 2^53. Devices without double support keep the 2^24 cap
+        # and raise past it; devices that support double accept larger float32
+        # inputs.
         over_cap = (1 << 24) + 1
-        if self.device_type == "mps":
+        try:
+            cap = torch.accelerator.get_device_capability(0)
+            no_double = torch.double not in cap["supported_dtypes"]
+        except RuntimeError:
+            # No accelerator, or the backend has not implemented
+            # get_device_capability (e.g. CUDA): treat as double-supported.
+            no_double = False
+        if no_double:
             torch.quantile(torch.empty(1 << 24, dtype=torch.float32, device=device), 0.5)
             with self.assertRaisesRegex(RuntimeError, r'quantile\(\) input tensor is too large'):
                 torch.quantile(torch.empty(over_cap, dtype=torch.float32, device=device), 0.5)
