@@ -569,12 +569,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 f"unknown GemmConfig constraint {sorted(unknown_fields)}; "
                 f"choose one of {', '.join(config_fields)}"
             )
-
     explicit_swap_ab = config_constraints.get("swap_ab") is True
 
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
-        expand_epimod_prepare_softmax_online,
         flex_gemm_indexed_output_plan,
         flex_gemm_output_values,
         gemm_node as flex_gemm_node,
@@ -699,8 +697,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         lowering_name=subgraph.name,
     )
-    # Normalize supported online-softmax forms before shared analysis.
-    expand_epimod_prepare_softmax_online(subgraph.graph_module)
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
     log_flex_gemm_artifact(
         "analysis",
