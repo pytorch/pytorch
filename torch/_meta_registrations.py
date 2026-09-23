@@ -5957,11 +5957,11 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
-    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
-    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
+    # Only CPU, CUDA and XPU sample 5D bicubic; the trace refuses it elsewhere, as
+    # eager does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
         interpolation_mode != GridSamplerInterpolation.BICUBIC.value
-        or device_hint(input) in ("cpu", "cuda"),
+        or device_hint(input) in ("cpu", "cuda", "xpu"),
         lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
         f"on {device_hint(input)}",
     )
