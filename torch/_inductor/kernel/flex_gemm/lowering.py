@@ -356,18 +356,21 @@ def normalize_flex_gemm_1d_captures(
     placeholders: Sequence[torch.fx.Node],
     epilogue_args: list[TensorBox],
     gemm_shape: Sequence[Any],
+    *,
+    indices: torch.fx.Node | None,
 ) -> list[TensorBox]:
     """Rewrite 0-D/1-D captures to the 2-D broadcast views QuACK binds.
 
     The placeholder metadata and the realized template input become the 2-D
     view, and body reshapes producing that view fold into the placeholder so
     ``w[None, :]`` inside the epilogue lowers like a hoisted ``[1, N]`` capture.
+    Indexed-output ``indices`` stay 1-D for the gather store.
     """
     m, n = gemm_shape[-2:]
     normalized = list(epilogue_args)
     changed = False
     for index, (node, arg) in enumerate(zip(placeholders, epilogue_args, strict=True)):
-        shape = flex_gemm_1d_capture_shape(node, m, n)
+        shape = None if node is indices else flex_gemm_1d_capture_shape(node, m, n)
         if shape is None:
             continue
         for user in tuple(node.users):
@@ -428,6 +431,15 @@ def allocate_flex_gemm_aux_outs(
     )
 
 
+def append_flex_gemm_template_inputs(
+    input_nodes: list[IRNode], nodes: list[IRNode]
+) -> tuple[int, ...]:
+    """Append template inputs and return their assigned positions."""
+    start = len(input_nodes)
+    input_nodes.extend(nodes)
+    return tuple(range(start, len(input_nodes)))
+
+
 def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
     """Return metadata for the optional compressed local-reduce output."""
     if local_reduce is None or local_reduce.store is None:
@@ -436,9 +448,7 @@ def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
 
 
 def flex_gemm_quack_configs(
-    template_config: FlexGemmEpilogueConfig,
-    gemm_input_nodes: list[IRNode],
-    epilogue_input_nodes: list[IRNode],
+    template_config: FlexGemmEpilogueConfig, input_nodes: list[IRNode]
 ) -> tuple[QuackConfigKey, ...]:
     """Ask QuACK which GemmConfigs this call may pin, default first.
 
@@ -457,12 +467,12 @@ def flex_gemm_quack_configs(
     output_contraction = template_config.output_contraction
     epimod = template_config.epimod(
         selection_callback,
-        [node.get_dtype() for node in (*gemm_input_nodes, *epilogue_input_nodes)],
+        [node.get_dtype() for node in input_nodes],
         lambda name: selection_callback,
     )
     sizevars = V.graph.sizevars
-    mat1 = gemm_input_nodes[template_config.gemm_op.mat1_index]
-    mat2 = gemm_input_nodes[template_config.gemm_op.mat2_index]
+    mat1 = input_nodes[template_config.gemm_op.mat1_index]
+    mat2 = input_nodes[template_config.gemm_op.mat2_index]
     device = mat1.get_device_or_error()
     problem = flex_gemm_problem(
         device,
@@ -565,12 +575,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
         expand_epimod_prepare_softmax_online,
+        flex_gemm_indexed_output_plan,
+        flex_gemm_output_values,
         gemm_node as flex_gemm_node,
         materialize_flex_gemm_epilogue,
     )
     from torch._inductor.kernel.flex_gemm.template import (
         flex_gemm_epilogue_template,
         FlexGemmEpilogueConfig,
+        FlexGemmEpilogueIndexedOutputConfig,
         FlexGemmEpilogueLocalReduceConfig,
     )
     from torch._inductor.select_algorithm import autotune_select_algorithm
@@ -580,6 +593,27 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     gemm_fx_node = flex_gemm_node(subgraph.graph_module, gemm_op)
     scaled_mm = gemm_op is torch.ops.aten._scaled_mm_v2.default
     grouped_mm = gemm_op is torch.ops.aten._grouped_mm.default
+    indexed_output_error = (
+        f"FlexGEMM QUACK {op_spec.name} does not yet support indexed outputs"
+    )
+    try:
+        indexed_store = flex_gemm_indexed_output_plan(
+            *flex_gemm_output_values(subgraph.graph_module)
+        )
+    except NotImplementedError as exc:
+        if scaled_mm:
+            raise NotImplementedError(
+                "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
+            ) from exc
+        if grouped_mm:
+            raise NotImplementedError(indexed_output_error) from exc
+        raise
+    if scaled_mm and indexed_store is not None:
+        raise NotImplementedError(
+            "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
+        )
+    if grouped_mm and indexed_store is not None:
+        raise NotImplementedError(indexed_output_error)
     placeholders = [
         node for node in subgraph.graph_module.graph.nodes if node.op == "placeholder"
     ]
@@ -638,6 +672,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_arg_placeholders[capture_start:],
         epilogue_args[capture_start:],
         gemm_fx_node.meta["val"].shape,
+        indices=None if indexed_store is None else indexed_store.indices,
     )
     gemm_input_names = tuple(
         arg.name if isinstance(arg, torch.fx.Node) else f"gemm_arg{index}"
@@ -688,6 +723,28 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(
             "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped reductions"
         )
+    indexed_output = outputs.indexed_output
+    indexed_input = None
+    if indexed_output is not None:
+        if gemm_op is not torch.ops.aten.mm.default:
+            raise NotImplementedError(
+                "FlexGEMM indexed outputs currently support only aten.mm"
+            )
+        indexed_input = placeholder_args[indexed_output.indices]
+        if not isinstance(indexed_input, TensorBox):
+            raise NotImplementedError("FlexGEMM indexed outputs require tensor indices")
+        epilogue_pairs = tuple(
+            (placeholder, arg)
+            for placeholder, arg in zip(
+                epilogue_arg_placeholders, epilogue_args, strict=True
+            )
+            if placeholder is not indexed_output.indices
+        )
+        epilogue_arg_placeholders = tuple(
+            placeholder for placeholder, _ in epilogue_pairs
+        )
+        epilogue_args = [arg for _, arg in epilogue_pairs]
+
     output_contraction = outputs.output_contraction
     if (
         blockscaled is not None
@@ -710,6 +767,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, logical_output_size
     )
+    indexed_metas = () if indexed_output is None else (indexed_output.node.meta["val"],)
     if not has_flex_gemm_quack():
         raise NotImplementedError("FlexGEMM QUACK backend requires CuTeDSL")
     # A terminal ``view(dtype)`` reinterprets bits: the kernel stores the source
@@ -758,29 +816,47 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     epilogue_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
     ]
+    indexed_index_input_nodes = (
+        []
+        if indexed_input is None
+        else [ir.TemplateBuffer.realize_template_input(indexed_input)]
+    )
     aux_outs = allocate_flex_gemm_aux_outs(aux_metas, gemm_args[mat1_index])
+    indexed_outs = allocate_flex_gemm_aux_outs(indexed_metas, gemm_args[mat1_index])
     local_reduce_outs = allocate_flex_gemm_aux_outs(
         local_reduce_metas, gemm_args[mat1_index]
     )
     aux_input_nodes = [
         ir.TemplateBuffer.realize_template_input(aux_out) for aux_out in aux_outs
     ]
+    indexed_out_input_nodes = [
+        ir.TemplateBuffer.realize_template_input(indexed_out)
+        for indexed_out in indexed_outs
+    ]
     local_reduce_input_nodes = [
         ir.TemplateBuffer.realize_template_input(local_reduce_out)
         for local_reduce_out in local_reduce_outs
     ]
-    input_nodes = [
-        *gemm_input_nodes,
-        *epilogue_input_nodes,
-        *aux_input_nodes,
-        *local_reduce_input_nodes,
-    ]
-    mutated_input_nodes = aux_input_nodes + local_reduce_input_nodes
-    aux_out_start = len(gemm_input_nodes) + len(epilogue_input_nodes)
-    aux_out_indices = tuple(range(aux_out_start, aux_out_start + len(aux_input_nodes)))
-    gemm_input_indices = tuple(range(len(gemm_input_nodes)))
+    input_nodes: list[IRNode] = []
+    gemm_input_indices = append_flex_gemm_template_inputs(input_nodes, gemm_input_nodes)
+    epilogue_arg_indices = append_flex_gemm_template_inputs(
+        input_nodes, epilogue_input_nodes
+    )
+    indexed_index_input_indices = append_flex_gemm_template_inputs(
+        input_nodes, indexed_index_input_nodes
+    )
+    aux_out_indices = append_flex_gemm_template_inputs(input_nodes, aux_input_nodes)
+    indexed_out_indices = append_flex_gemm_template_inputs(
+        input_nodes, indexed_out_input_nodes
+    )
+    local_reduce_out_indices = append_flex_gemm_template_inputs(
+        input_nodes, local_reduce_input_nodes
+    )
+    mutated_input_nodes = (
+        aux_input_nodes + indexed_out_input_nodes + local_reduce_input_nodes
+    )
     local_reduce_out_index = (
-        aux_out_start + len(aux_input_nodes) if local_reduce_input_nodes else None
+        local_reduce_out_indices[0] if local_reduce_out_indices else None
     )
     mainloop_scale_count = len(mainloop_scale_nodes)
     epilogue_arg_kinds = (
@@ -828,6 +904,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 )
             ),
             aux_metas,
+            indexed_metas,
             local_reduce_metas,
             local_reduce_layout=(
                 None if local_reduce_store is None else local_reduce_store.output_layout
@@ -841,18 +918,18 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         lowering_name=subgraph.name,
         verbose=True,
     )
+    template_indexed_output = None
+    if indexed_output is not None:
+        template_indexed_output = FlexGemmEpilogueIndexedOutputConfig(
+            out_index=indexed_out_indices[0],
+            indices_index=indexed_index_input_indices[0],
+        )
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_plan(
         outputs.local_reduce, local_reduce_out_index, epimod_source
     )
     if epimod_source.local_reduce_fragment_reduced:
         # Fragment partials are lowered for the unswapped accumulator geometry.
         config_constraints["swap_ab"] = False
-    epilogue_arg_indices = tuple(
-        range(
-            len(gemm_input_nodes),
-            len(gemm_input_nodes) + len(epilogue_input_nodes),
-        )
-    )
     template_config = FlexGemmEpilogueConfig(
         epilogue_name=epimod_source.name,
         epilogue_source=epimod_source.source,
@@ -865,6 +942,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_arg_indices=epilogue_arg_indices,
         epilogue_arg_kinds=epilogue_arg_kinds,
         aux_out_indices=aux_out_indices,
+        indexed_output=template_indexed_output,
         local_reduce=template_local_reduce,
         output_contraction=output_contraction,
     )
@@ -873,9 +951,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         layout=layout,
         mutated_inputs=mutated_input_nodes or None,
     )
-    legal_configs = flex_gemm_quack_configs(
-        template_config, gemm_input_nodes, epilogue_input_nodes
-    )
+    legal_configs = flex_gemm_quack_configs(template_config, input_nodes)
     if config_constraints:
         legal_configs = tuple(
             config
@@ -945,6 +1021,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         # lazy first-call compilation and allocate no example tensors.
         choices[0].precompile(use_workers=False)
     structural_outs = {}
+    if indexed_output is not None:
+        structural_outs[indexed_output.node] = indexed_outs[0]
     if local_reduce_store is not None:
         structural_outs[local_reduce_store.node] = local_reduce_outs[0]
     aux_iter = iter(aux_outs)
