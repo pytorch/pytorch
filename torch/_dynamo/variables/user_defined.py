@@ -1729,13 +1729,49 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if issubclass(self.value, torch.Stream):
                 from .lists import TupleVariable
 
+                if _coor_enabled():
+                    # As with device contexts, an explicit index names a GPU that
+                    # is wrong on every other rank.
+                    device_arg = args[0] if args else kwargs.get("device")
+                    index = None
+                    if device_arg is not None and device_arg.is_python_constant():
+                        dev = device_arg.as_python_constant()
+                        dev = torch.device(dev) if isinstance(dev, str) else dev
+                        index = dev.index if isinstance(dev, torch.device) else dev
+                    if index is not None or "device_index" in kwargs:
+                        name = f"{self.value.__module__}.{self.value.__qualname__}"
+                        raise CompileOnOneRankUnsupported(
+                            f"Cannot construct {name} with an explicit device index "
+                            "under compile_on_one_rank: the index names a specific "
+                            "GPU, but the compiled artifact runs on every rank.\n"
+                            "Next steps: pass a tensor's `.device` or an index-less "
+                            "device to follow the current device, or turn off "
+                            "compile_on_one_rank for this region."
+                        )
+
                 var_kwargs = ConstDictVariable(
                     {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
                 )
                 var_args = TupleVariable(list(args))
+                # Use the tracing rank for the example stream, but retain the
+                # CurrentDeviceVariable for rank-relative reconstruction.
+                example_args: list[Any] = [
+                    arg.value
+                    if isinstance(arg, CurrentDeviceVariable)
+                    else arg.as_python_constant()
+                    for arg in args
+                ]
+                example_kwargs: dict[str, Any] = {
+                    key: (
+                        value.value
+                        if isinstance(value, CurrentDeviceVariable)
+                        else value.as_python_constant()
+                    )
+                    for key, value in kwargs.items()
+                }
                 stream = self.value(
-                    *(var_args.as_python_constant()),
-                    **(var_kwargs.as_python_constant()),
+                    *example_args,
+                    **example_kwargs,
                 )
                 from ..graph_bytecode_inputs import register_graph_created_object
                 from .streams import StreamVariable
