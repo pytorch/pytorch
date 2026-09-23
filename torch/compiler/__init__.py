@@ -1122,19 +1122,19 @@ def export_python(
     .. warning::
         An artifact is only valid on the machine type that produced it. The emitted
         source hardcodes the CPU vector width inductor chose, and for CUDA the compute
-        capability and device ordinal of the producing GPU. The vector width and the
-        compute capability are never re-checked; the device ordinal is re-checked by the
-        default driver. Running a CPU artifact
+        capability and device ordinal of the producing GPU. The compute capability is
+        never re-checked, and the device ordinal is re-checked by the default driver. Running a CPU artifact
         under a DIFFERENT ISA than it captured on is unsafe in both directions, and the
         loop stride is baked at capture while the ISA is re-picked when the artifact
         compiles. Loading under a WIDER ISA writes past the end of the output -- heap
         corruption. Loading under a NARROWER one leaves roughly half of each vectorized
         strip unwritten, so the output is part uninitialized memory. Neither raises. ``torch._inductor.config.cpp.simdlen``
         and ``ATEN_CPU_CAPABILITY`` change this on one machine, so they count as part of
-        the machine type. Running a CUDA artifact on a
+        the machine type, and an artifact containing a C++ kernel records the ISA it was
+        generated against and refuses to run under any other. Running a CUDA artifact on a
         different architecture fails with a kernel-image error. Commit an artifact only
         alongside the machine type it captured on, and regenerate (delete ``path``) when
-        that changes; nothing detects the change for you.
+        that changes; apart from the CPU ISA, nothing detects the change for you.
 
     ``export_python`` is a decorator wrapping :func:`torch.compiler.precompile`.
     On the first run in an environment it precompiles the decorated function (make_fx
@@ -1158,7 +1158,7 @@ def export_python(
     ``nn.Module`` arguments. Python scalar/config arguments are rejected because
     ``make_fx`` specializes their values without emitting runtime guards; close such
     constants over in ``fn`` instead. Other keyword-only parameters are not expressible
-    in the artifact's positional convention and are rejected. Five things that
+    in the artifact's positional convention and are rejected. Six things that
     ``make_fx`` or the code generator resolves without emitting a guard are recorded as
     comment stamps and checked on every call:
     each ``nn.Module`` argument's per-submodule ``training`` state, which input tensors
@@ -1182,8 +1182,8 @@ def export_python(
     runs with capture's relative offsets baked in and may compute the wrong thing.
     ``torch.compile`` has the same hole *there*, but this list is not a complete
     account of what the artifact bakes: a tensor subclass's inner shapes and a DTensor's
-    placements are unrecorded, and so is the CPU vector ISA (see the machine-type warning
-    above). Where ``torch.compile`` would recompile, an artifact cannot, so treat any
+    placements are unrecorded, and so is a CUDA artifact's compute capability (see the
+    machine-type warning above). Where ``torch.compile`` would recompile, an artifact cannot, so treat any
     ambient change between capture and call as needing a fresh capture unless a stamp
     covers it. A hand-edit that drops a stamp turns that one check off with a warning.
     All seven stamps (these six plus the version stamp) must stay in the artifact's

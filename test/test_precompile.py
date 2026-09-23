@@ -5386,7 +5386,7 @@ class TestExportPython(TestCase):
         tag = "# torch.compiler.export_python torch-version: "
         self.assertTrue(lines[0].startswith(tag))
         lines[0] = tag + repr("0.0.0-bogus")
-        # Displaced from line 1 on purpose: all four stamps are read from the leading
+        # Displaced from line 1 on purpose: every stamp is read from the leading
         # comment block, so a hand-edit that adds a comment above them must not quietly
         # disable the one check that catches a stale committed artifact.
         lines.insert(0, "# a hand-edit above the stamps")
@@ -5658,6 +5658,10 @@ class TestExportPython(TestCase):
         # that decides. SDPA is what actually exercises it: dropout(train=False) traces
         # to no seeded op at all, so it would pass without any gate, and
         # dropout(train=True) decomposes to bernoulli_, which is not a gated name.
+        if torch.device(device).type != "cpu":
+            # capture lowers SDPA on other devices to its math decomposition, which
+            # holds no gated seeded op
+            self.skipTest("only the CPU SDPA kernel traces to a gated seeded op")
         from torch._precompile import (
             _capture,
             _graph_rng_devices,
