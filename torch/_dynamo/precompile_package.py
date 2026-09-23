@@ -19,8 +19,7 @@ rather than beside the serializer's pre-check in ``guards.py``: it is the
 capture's policy over that pre-check, not part of it. Everything here is
 internal; the filter alone is unprefixed because the capture session passes it
 as the default a caller may name. ``PrecompileSession`` at the end of the module
-is the multi-graph capture itself, which ``torch.compiler.precompile.capture``
-drives for its ``DynamoTracer``.
+is the multi-graph capture itself.
 """
 
 from __future__ import annotations
@@ -88,7 +87,10 @@ def _capture_config() -> Iterator[None]:
     AOTAutograd otherwise defers it to the first ``.backward()``, and a graph
     compiled with grad enabled whose backward was never lowered is never saved,
     so a capture that never makes one -- a training step, or an inference call
-    made outside ``torch.no_grad()`` -- would record no backend at all.
+    made outside ``torch.no_grad()`` -- would record no backend at all. Such an
+    inference call therefore compiles a backward too, and a backward the
+    backend cannot compile fails the capture; capturing under
+    ``torch.no_grad()`` avoids both.
     ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
     guards reach the artifact; it also extends the lifetime of objects the frame
     holds -- with it on, a weakref callback on a value the frame captured does
@@ -1591,12 +1593,6 @@ class PrecompileSession:
     bundled AOTAutograd entry, and under the package's guard filter, which this
     session wraps to record what it kept and dropped for the
     :class:`PrecompileSummary`. Rendering the artifact is the next commit's.
-
-    The artifact is STANDALONE: it rebuilds each captured frame from its code
-    object and guard trees (see ``torch._precompile_driver._build_multigraph_forward``)
-    and installs nothing, so a frame the entry cannot reach through a graph-break
-    continuation -- one entered by an ordinary call, such as a child module's
-    forward that graph-breaks -- is refused at render rather than served eager.
     """
 
     def __init__(
@@ -1657,7 +1653,9 @@ class PrecompileSession:
             )
             facts: set[_GuardFact] = set()
             for keep, by_default, entry in zip(decisions, default_kept, entries):
-                slot = (entry.guard_type, strip_local_scope(entry.name))
+                # One spelling for every slot and fact, so the dropped, risky and
+                # kept sets and the per-variant facts compare as equals.
+                slot = (entry.guard_type, _normalize(strip_local_scope(entry.name)))
                 # A no-op type's check, where it has one, is GLOBAL_STATE's leaf.
                 enforced = keep or (
                     _is_noop_guard_type(entry.guard_type) and global_state_kept
@@ -1677,7 +1675,7 @@ class PrecompileSession:
                 facts.add(
                     _GuardFact(
                         guard_type=entry.guard_type,
-                        source=_normalize(slot[1]),
+                        source=slot[1],
                         code=_render_code(entry.code_parts),
                         value=_value_fingerprint(entry),
                         enforced=enforced,
@@ -1729,23 +1727,24 @@ class PrecompileSession:
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
             ):
                 return self._compiled(*args, **kwargs)
-        except BaseException as e:
+        except Exception as e:
             message = f"{type(e).__name__}: {e}"
             if message not in self._capture_errors:
                 self._capture_errors.append(message)
             raise
+        finally:
+            self._take_backend_artifacts()
 
     def __exit__(self, *exc: object) -> None:
         self._finished = True
         self._compiled = None
-        self._take_backend_artifacts()
 
     def _take_backend_artifacts(self) -> None:
         """Move this capture's backend artifacts out of the process-global list.
 
         The AOTAutograd cache records a bundled entry under each graph's backend
-        id as the graph compiles; taking them as the capture goes keeps another
-        capture's ``PrecompileContext.clear()`` from losing them.
+        id as the graph compiles; taking them after every call keeps another
+        capture's ``PrecompileContext.clear()`` between calls from losing them.
         """
         from torch._dynamo.precompile_context import PrecompileContext
 
@@ -1812,6 +1811,14 @@ def precompile_capture(
             "precompile cannot capture an nn.Module directly: capture the function "
             "that CALLS the model, e.g. a module-level 'def step(model, x): return "
             "model(x)', calling cap(model, x)."
+        )
+    if isinstance(fn, types.MethodType):
+        # The artifact rebuilds fn from its code object, which takes the
+        # receiver as its first argument: served, it would not take fn's calls.
+        raise PackageError(
+            "precompile cannot capture a bound method: capture a module-level "
+            "function that takes the receiver as an argument, e.g. 'def step(model, "
+            "x): return model(x)', calling cap(model, x)."
         )
     return PrecompileSession(
         fn,

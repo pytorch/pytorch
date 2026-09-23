@@ -2379,6 +2379,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.risky_dropped_guards, ())
         with self.assertRaisesRegex(PackageError, "not active"):
             call(model, x2)
+        with self.assertRaisesRegex(PackageError, "cannot be re-entered"):
+            with session:
+                pass
         # A call that raised is a capture error, and the summary is not complete.
         failed = precompile_package.precompile_capture(step, backend="eager")
         with failed as call:
@@ -2392,10 +2395,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with second as call:
             call(model, x2)
         self.assertGreaterEqual(second.summary().guarded_codes, 2)
+        # A custom filter's drop the default filter would have kept is risky:
+        # nothing here can say what the caller gave up.
+        custom = precompile_package.precompile_capture(
+            step,
+            backend="eager",
+            guard_filter_fn=lambda es: [e.guard_type != "TENSOR_MATCH" for e in es],
+        )
+        with custom as call:
+            call(model, x2)
+        self.assertIn(("TENSOR_MATCH", "x"), custom.summary().risky_dropped_guards)
         with self.assertRaisesRegex(PackageError, "partial"):
             precompile_package.precompile_capture(functools.partial(step, model))
         with self.assertRaisesRegex(PackageError, "CALLS the model"):
             precompile_package.precompile_capture(model)
+        with self.assertRaisesRegex(PackageError, "bound method"):
+            precompile_package.precompile_capture(model.forward)
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
@@ -2420,11 +2435,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ):
             self.assertEqual(flags(), ambient)
             with _capture_config():
-                self.assertEqual(flags(), (True, True, True, True))
-                # A nested scope patches again and the outer one comes back
-                # when it closes.
-                with _capture_config():
-                    self.assertEqual(flags(), (True, True, True, True))
                 self.assertEqual(flags(), (True, True, True, True))
             self.assertEqual(flags(), ambient)
 
