@@ -20,8 +20,7 @@ import threading
 import traceback
 import warnings
 from collections.abc import Callable
-from enum import auto, Enum
-from functools import cache, lru_cache
+from functools import lru_cache
 from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
@@ -790,29 +789,13 @@ def _primary_context_devices() -> list[int]:
     return [d for d in range(device_count()) if torch._C._cuda_hasPrimaryContext(d)]
 
 
-class _StrayContextCheckType(Enum):
-    DISABLED = auto()
-    WARN = auto()
-    ERROR = auto()
-
-
-@cache
-def _get_stray_context_mode() -> _StrayContextCheckType:
-    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
-    if mode == "warn":
-        return _StrayContextCheckType.WARN
-    if mode == "error":
-        return _StrayContextCheckType.ERROR
-    return _StrayContextCheckType.DISABLED
-
-
 def _check_stray_context(expected: int) -> None:
     # Diagnostic, off unless TORCH_CUDA_CHECK_STRAY_CONTEXT is "warn" or "error".
     # Invoked from set_device so it runs once when a process pins its device, not
     # on the hot device-guard path. The check is creator-agnostic (it inspects
     # end state), so it catches stray contexts from any source.
-    mode = _get_stray_context_mode()
-    if mode == _StrayContextCheckType.DISABLED:
+    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
+    if mode not in ("warn", "error"):
         return
     stray = [d for d in _primary_context_devices() if d != expected]
     if not stray:
@@ -820,11 +803,11 @@ def _check_stray_context(expected: int) -> None:
     msg = (
         f"set_device({expected}) found an existing CUDA primary context on "
         f"device(s) {stray}. Something created a CUDA context before this process "
-        "pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
+        f"pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
         f"before set_device). On a rank whose device is not among {stray}, each "
-        "stray context wastes hundreds of MB on that shared device."
+        f"stray context wastes hundreds of MB on that shared device."
     )
-    if mode == _StrayContextCheckType.ERROR:
+    if mode == "error":
         raise RuntimeError(msg)
     warnings.warn(msg, stacklevel=3)
 

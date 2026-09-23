@@ -2211,13 +2211,15 @@ def is_nvidia_sm100_or_later() -> bool:
     )
 
 
-def get_num_sms() -> int:
+def get_num_sms(two_ctas: bool = False) -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
     if torch.xpu.is_available():
-        return get_max_num_sms()
-    carveout = torch._C._get_sm_carveout_experimental()
-    return get_max_num_sms() - (carveout if carveout is not None else 0)
+        num_sms = get_max_num_sms()
+    else:
+        carveout = torch._C._get_sm_carveout_experimental()
+        num_sms = get_max_num_sms() - (carveout if carveout is not None else 0)
+    return num_sms // 2 * 2 if two_ctas else num_sms
 
 
 def get_tma_workspace_arg(
@@ -3884,7 +3886,8 @@ def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
-        sm_clock = max_clock_rate(device_idx)
+        # Triton's tflops helpers are dimensioned in kHz; max_clock_rate is MHz.
+        sm_clock = max_clock_rate(device_idx) * 1e3
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype, sm_clock, device_idx)
 
