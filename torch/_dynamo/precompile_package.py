@@ -1906,6 +1906,9 @@ class PrecompileSession:
 
         Leaves the session able to capture more, which is what lets a capture
         checkpoint mid-block. The gates run first, so a refusal renders nothing.
+        Under inductor the cache half bundles whatever ``CacheArtifactManager``
+        recorded, so run the session under ``with_fresh_cache()`` (``capture()``
+        does) to keep it to this session's compiles.
         """
         from torch._precompile import _build_multigraph_artifact
 
