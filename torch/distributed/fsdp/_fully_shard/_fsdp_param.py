@@ -211,7 +211,7 @@ class FSDPParam:
     _orig_param_uid: int
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
-    _installed_grad_dtype_policy: tuple[bool, torch.dtype | None]
+    _installed_has_grad_dtype_override: bool
     unsharded_grad_dtype: torch.dtype | None
 
     def __init__(
@@ -282,10 +282,7 @@ class FSDPParam:
         # Snapshot before any rewrite of `param` (e.g. spmd_types -> DTensor).
         self._has_sharded_grad_dtype_override = param._has_grad_dtype_override
         self.sharded_grad_dtype = param.grad_dtype
-        self._installed_grad_dtype_policy = (
-            self._has_sharded_grad_dtype_override,
-            self.sharded_grad_dtype if self._has_sharded_grad_dtype_override else None,
-        )
+        self._installed_has_grad_dtype_override = self._has_sharded_grad_dtype_override
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -1286,7 +1283,13 @@ class FSDPParam:
         # Direct grad_dtype edits after fully_shard(), including before lazy
         # init, are intentionally unsupported. Conversion and state-dict loading
         # restore the captured policy instead of adopting a new user policy.
-        owners = [(self.sharded_param, *self._installed_grad_dtype_policy)]
+        owners = [
+            (
+                self.sharded_param,
+                self._installed_has_grad_dtype_override,
+                self.sharded_grad_dtype,
+            )
+        ]
         if (param := getattr(self, "_unsharded_param", None)) is not None:
             owners.append((param, True, self.unsharded_grad_dtype))
         if (
@@ -1365,11 +1368,7 @@ class FSDPParam:
             self.sharded_param.grad_dtype = grad_dtype
         # Parameter-valued checkpoints may bring explicit metadata even when
         # FSDP's captured policy follows the parameter dtype.
-        has_override = self.sharded_param._has_grad_dtype_override
-        self._installed_grad_dtype_policy = (
-            has_override,
-            grad_dtype if has_override else None,
-        )
+        self._installed_has_grad_dtype_override = new_param._has_grad_dtype_override
 
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
