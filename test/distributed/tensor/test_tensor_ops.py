@@ -956,6 +956,52 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                     self.assertIn(p.dim, [1, 2])
             self.assertEqual(output_dt.full_tensor(), ref)
 
+    @with_comms
+    def test_index_put_backward(self):
+        """Test that index_put backward produces DTensor gradients."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        global_input = torch.randn(4, 4, device=self.device_type)
+        global_value = torch.randn(2, device=self.device_type)
+        idx0 = torch.tensor([0, 2], device=self.device_type)
+        idx1 = torch.tensor([1, 3], device=self.device_type)
+
+        input_dt = distribute_tensor(
+            global_input, device_mesh, [Replicate()]
+        )
+        value_dt = distribute_tensor(
+            global_value, device_mesh, [Replicate()]
+        )
+        idx0_dt = distribute_tensor(
+            idx0, device_mesh, [Replicate()]
+        )
+        idx1_dt = distribute_tensor(
+            idx1, device_mesh, [Replicate()]
+        )
+
+        input_dt.requires_grad_()
+        value_dt.requires_grad_()
+
+        output_dt = torch.index_put(
+            input_dt,
+            [idx0_dt, idx1_dt],
+            value_dt,
+            accumulate=False,
+        )
+
+        output_dt.sum().backward()
+
+        self.assertIsInstance(input_dt.grad, DTensor)
+        self.assertIsInstance(value_dt.grad, DTensor)
+
+        expected_input_grad = torch.ones_like(global_input)
+        expected_input_grad[0, 1] = 0
+        expected_input_grad[2, 3] = 0
+        expected_value_grad = torch.ones_like(global_value)
+
+        self.assertEqual(input_dt.grad.full_tensor(), expected_input_grad)
+        self.assertEqual(value_dt.grad.full_tensor(), expected_value_grad)
+
     def test_index_put_requires_replicated_index(self):
         """Test that index_put correctly replicates sharded indices."""
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -1508,6 +1554,64 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                     unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
                 ):
                     self.assertEqual(x.full_tensor(), y)
+
+    @with_comms
+    def test_slice_scatter_backward(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+        src = torch.randn(2, 4, 6, device=self.device_type)
+        dt_inp = distribute_tensor(inp, device_mesh, [Replicate()])
+        dt_src = distribute_tensor(src, device_mesh, [Replicate()])
+        dt_inp.requires_grad_()
+        dt_src.requires_grad_()
+        output = dt_inp.slice_scatter(dt_src, dim=0, start=2, end=4)
+        output.sum().backward()
+        self.assertIsInstance(dt_inp.grad, DTensor)
+        self.assertIsInstance(dt_src.grad, DTensor)
+        expected_inp_grad = torch.ones_like(inp)
+        expected_inp_grad[2:4] = 0
+        expected_src_grad = torch.ones_like(src)
+        self.assertEqual(dt_inp.grad.full_tensor(), expected_inp_grad)
+        self.assertEqual(dt_src.grad.full_tensor(), expected_src_grad)
+
+    @with_comms
+    def test_select_scatter_backward(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+        src = torch.randn(4, 6, device=self.device_type)
+        dt_inp = distribute_tensor(inp, device_mesh, [Replicate()])
+        dt_src = distribute_tensor(src, device_mesh, [Replicate()])
+        dt_inp.requires_grad_()
+        dt_src.requires_grad_()
+        output = dt_inp.select_scatter(dt_src, dim=0, index=3)
+        output.sum().backward()
+        self.assertIsInstance(dt_inp.grad, DTensor)
+        self.assertIsInstance(dt_src.grad, DTensor)
+        expected_inp_grad = torch.ones_like(inp)
+        expected_inp_grad[3] = 0
+        expected_src_grad = torch.ones_like(src)
+        self.assertEqual(dt_inp.grad.full_tensor(), expected_inp_grad)
+        self.assertEqual(dt_src.grad.full_tensor(), expected_src_grad)
+
+    @with_comms
+    def test_diagonal_scatter_backward(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+        src = torch.randn(8, 4, device=self.device_type)
+        dt_inp = distribute_tensor(inp, device_mesh, [Replicate()])
+        dt_src = distribute_tensor(src, device_mesh, [Replicate()])
+        dt_inp.requires_grad_()
+        dt_src.requires_grad_()
+        output = dt_inp.diagonal_scatter(dt_src, offset=0, dim1=1, dim2=2)
+        output.sum().backward()
+        self.assertIsInstance(dt_inp.grad, DTensor)
+        self.assertIsInstance(dt_src.grad, DTensor)
+        expected_inp_grad = torch.ones_like(inp)
+        diag = torch.arange(4, device=self.device_type)
+        expected_inp_grad[:, diag, diag] = 0
+        expected_src_grad = torch.ones_like(src)
+        self.assertEqual(dt_inp.grad.full_tensor(), expected_inp_grad)
+        self.assertEqual(dt_src.grad.full_tensor(), expected_src_grad)
 
     @with_comms
     def test_select_scatter(self):
