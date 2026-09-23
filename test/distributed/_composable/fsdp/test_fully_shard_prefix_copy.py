@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -507,6 +508,74 @@ class TestPrefixCopy(TestCase):
             self.assertGreater(output._version, version)
             self.assertEqual(buffer[:3], buffer.new_full((3,), 7))
             self.assertEqual(buffer[-3:], buffer.new_full((3,), 7))
+
+    @parametrize("count", [65, 129])
+    def test_split_copy_cached_output_batches(self, device, count):
+        num_chunks = 8
+        inner_sizes = (1, 15, 16, 17, 31, 32, 4097)
+        outer_sizes = [2 + i % 3 for i in range(count)]
+        rank_sizes = [
+            outer_size * inner_sizes[i % len(inner_sizes)]
+            for i, outer_size in enumerate(outer_sizes)
+        ]
+        offsets = [1 + i % 17 for i in range(count)]
+        buffers = [
+            torch.full(
+                (num_chunks * rank_size + offset + 3,),
+                7,
+                device=device,
+                dtype=torch.uint8,
+            )
+            for rank_size, offset in zip(rank_sizes, offsets)
+        ]
+        outputs = [buffer[offset:-3] for buffer, offset in zip(buffers, offsets)]
+        splits = [rank_size - 1 for rank_size in rank_sizes]
+        source = torch.arange(num_chunks * sum(splits), device=device)
+        source = source.remainder(127).to(torch.uint8)
+        parts = source.view(num_chunks, -1).split(splits, dim=1)
+
+        with DeterministicGuard(True):
+            torch.ops.fsdp._all_gather_copy_out_(
+                outputs, source, splits, outer_sizes, num_chunks
+            )
+
+        for output, part, outer_size, buffer, offset in zip(
+            outputs, parts, outer_sizes, buffers, offsets
+        ):
+            staging = torch.full_like(output, 255)
+            staging[: part.numel()] = part.flatten()
+            chunks = staging.view(num_chunks, outer_size, -1).unbind(0)
+            expected = torch.cat(chunks, dim=1).flatten()
+            self.assertEqual(output, expected)
+            self.assertEqual(buffer[:offset], buffer.new_full((offset,), 7))
+            self.assertEqual(buffer[-3:], buffer.new_full((3,), 7))
+
+    @parametrize("dlpack", [False, True])
+    def test_split_copy_cached_output_aliases(self, device, dlpack):
+        num_chunks = 8
+        size = num_chunks * 4 * 17
+        buffer = torch.full((size + 22,), 7, device=device, dtype=torch.uint8)
+        offsets = [3, 19]
+        outputs = [buffer[offset : offset + size] for offset in offsets]
+        if dlpack:
+            outputs[1] = torch.from_dlpack(outputs[1])
+        outer_sizes, splits = [2, 4], [65, 33]
+        source = torch.arange(num_chunks * sum(splits), device=device)
+        source = source.remainder(127).to(torch.uint8)
+        parts = source.view(num_chunks, -1).split(splits, dim=1)
+        expected = buffer.clone()
+        for part, outer_size, offset in zip(parts, outer_sizes, offsets):
+            staging = torch.full_like(outputs[0], 255)
+            staging[: part.numel()] = part.flatten()
+            chunks = staging.view(num_chunks, outer_size, -1).unbind(0)
+            expected[offset : offset + size] = torch.cat(chunks, dim=1).flatten()
+
+        with DeterministicGuard(True):
+            torch.ops.fsdp._all_gather_copy_out_(
+                outputs, source, splits, outer_sizes, num_chunks
+            )
+
+        self.assertEqual(buffer, expected)
 
     @parametrize("all_empty", [False, True])
     def test_split_copy_empty(self, device, all_empty):
