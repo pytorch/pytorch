@@ -563,15 +563,18 @@ class _MakeFxCapture(Capture):
         # (``.grad`` gets the same treatment inside _capture). A parameter updated in
         # place, e.g. by an optimizer step inside fn, is refused rather than every
         # parameter being cloned up front.
+        if _has_unbacked_marks(args):
+            # An unbacked capture traces on fakes; only the serve touches the reals.
+            self._module._compile(args)
+            return
         mods = [a for a in args if isinstance(a, torch.nn.Module)]
-        params = {id(p): p for m in mods for p in m.parameters()}
+        params = {id(p) for m in mods for p in m.parameters()}
         tensors = [*(b for m in mods for b in m.buffers()), *pytree.tree_leaves(args)]
         saved = {
             id(t): (t, t.detach().clone())
             for t in tensors
             if isinstance(t, torch.Tensor) and id(t) not in params
         }
-        param_versions = {k: p._version for k, p in params.items()}
         try:
             self._module._compile(args)
         finally:
@@ -581,7 +584,10 @@ class _MakeFxCapture(Capture):
                 for t, value in saved.values():
                     if not torch.equal(t, value):
                         t.copy_(value)
-        if any(p._version != param_versions[k] for k, p in params.items()):
+        gm = self._module._gm
+        if gm is None:
+            raise AssertionError("_compile left no traced graph")
+        if _writes_a_parameter(gm, len(self._module._param_names)):
             raise PrecompileError(
                 "MakeFxTracer cannot capture a fn that updates a parameter in place "
                 "(e.g. an optimizer step): serving the capture would apply the update "
@@ -639,6 +645,33 @@ def _resolved_get_attrs(
             attr = getattr(attr, part, None)
         resolved.append((node.target, attr))
     return resolved
+
+
+def _writes_a_parameter(gm: torch.fx.GraphModule, num_params: int) -> bool:
+    """Whether a traced op writes into one of the first ``num_params`` placeholders
+    (the lifted parameters), directly or through a view or alias of one such as
+    ``p.data``. Read off the graph because neither the version counter nor a view's
+    own counter records a write through ``.data``."""
+    placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+    param_nodes = set(placeholders[:num_params])
+    for node in gm.graph.nodes:
+        schema = getattr(node.target, "_schema", None)
+        if schema is None:
+            continue
+        for i, arg in enumerate(schema.arguments):
+            if arg.alias_info is None or not arg.alias_info.is_write:
+                continue
+            base = node.args[i] if i < len(node.args) else node.kwargs.get(arg.name)
+            while isinstance(base, torch.fx.Node) and base not in param_nodes:
+                base_schema = getattr(base.target, "_schema", None)
+                if base_schema is None or not base_schema.returns:
+                    break
+                if base_schema.returns[0].alias_info is None or not base.args:
+                    break
+                base = base.args[0]
+            if base in param_nodes:
+                return True
+    return False
 
 
 # Note [precompile reads private dynamo mark attributes]
