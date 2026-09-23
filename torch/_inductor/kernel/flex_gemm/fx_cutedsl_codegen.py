@@ -442,14 +442,6 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
     def clamp_max(x: Any, max: Any) -> Any:
         return FlexGemmCuteDSLOpOverrides.minimum(x, max)
 
-    @staticmethod
-    def sigmoid(x: Any) -> Any:
-        return CuteDSLOpOverrides.sigmoid(x)
-
-    @staticmethod
-    def erf(x: Any) -> Any:
-        return CuteDSLOpOverrides.erf(x)
-
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpiModSource:
