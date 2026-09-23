@@ -500,4 +500,26 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
+
+// Focal loss: -alpha * (1 - pt)^gamma * log(pt), pt = softmax(self)[target].
+// reduction is at::Reduction (None, Mean, Sum). self is [N, C] floating
+// point, target is [N] int64.
+Tensor focal_loss(
+    const Tensor& self,
+    const Tensor& target,
+    double alpha,
+    double gamma,
+    int64_t reduction) {
+  TORCH_CHECK(self.is_floating_point(), "focal_loss is defined on floating point input");
+  TORCH_CHECK(
+      target.scalar_type() == at::ScalarType::Long,
+      "focal_loss expects an int64 target");
+  TORCH_CHECK(
+      self.dim() == 2 && target.dim() == 1 && self.size(0) == target.size(0),
+      "focal_loss expects self of shape [N, C] and target of shape [N]");
+  auto nll = -at::log_softmax(self, 1).gather(1, target.unsqueeze(1)).squeeze(1);
+  auto pt = nll.neg().exp();
+  auto focal = alpha * (1 - pt).pow(gamma) * nll;
+  return apply_loss_reduction(focal, reduction);
+}
 }  // namespace at::native
