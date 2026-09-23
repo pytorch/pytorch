@@ -154,7 +154,12 @@ class TestReadableWrapperCodegen(TestCase):
     @parametrize(
         "cfg",
         [
-            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"},
+            # coordinate_descent_tuning would have the template read the autotune cache
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "coordinate_descent_tuning": True,
+            },
             {"combo_kernels": True},
         ],
         name_fn=lambda cfg: next(iter(cfg)),
@@ -191,6 +196,12 @@ class TestReadableWrapperCodegen(TestCase):
             ("persistent_reduction", _softmax, (64, 128)),
             ("reduction", lambda x: x.sum(-1), (64, 3000)),
             ("pointwise", lambda x: (x.sin() * 2).relu(), (4096,)),
+            # its inductor_meta holds an AutotuneHint, which is not a literal
+            (
+                "bucketize",
+                lambda x: torch.bucketize(x, torch.linspace(-1, 1, 8, device=x.device)),
+                (4096,),
+            ),
             ("subgraph", _cond_softmax, (64, 128)),
         ],
         name_fn=lambda case: case[0],
@@ -246,6 +257,22 @@ class TestReadableWrapperCodegen(TestCase):
                 readable_wrapper=True,
                 **{"triton.autotune_at_compile_time": False},
             )
+
+    @requires_cuda_and_triton
+    def test_compile_time_autotuning_is_on_before_decompositions(self):
+        # repeat_interleave's data-dependent decomposition is skipped under
+        # autotune_at_compile_time, whose block runs kernels on generated inputs.
+        def fn(x, repeats):
+            return torch.repeat_interleave(x, repeats, output_size=6)
+
+        x = torch.randn(3, device="cuda")
+        repeats = torch.tensor([1, 2, 3], device="cuda")
+        result, code = _code_for(fn, x, repeats, readable_wrapper=True)
+        self.assertEqual(result, fn(x, repeats))
+        # decomposed, it would fuse into a Triton kernel
+        self.assertIsNone(
+            re.search(r"^def triton_\w*repeat_interleave", code, re.MULTILINE)
+        )
 
     @requires_cuda_and_triton
     def test_user_kernel_autotuned_over_several_configs_is_refused(self):
