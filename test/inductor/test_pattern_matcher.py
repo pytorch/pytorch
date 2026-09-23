@@ -961,6 +961,19 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(get_node_storage(replacement), get_node_storage(conversion))
         torch.testing.assert_close(gm(*args), expected)
 
+    @inductor_config.patch(fallback_random=True)
+    def test_reuse_conversion_skips_fallback_random(self):
+        def fn(x):
+            base = convert(x, torch.bfloat16)
+            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return aten.sum.default(base), aten.sum.default(viewed)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=2, expected_rewrites=0
+        )
+
     # Reuse is safe when at most one conversion storage reaches a graph output,
     # but must be skipped when both do to preserve output-output aliasing.
     def test_reuse_conversion_allows_output_candidate_with_internal_base(self):

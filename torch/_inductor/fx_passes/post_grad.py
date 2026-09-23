@@ -1444,6 +1444,10 @@ def reuse_dtype_conversions(graph: torch.fx.Graph) -> None:
     and replaces the second conversion with:
         replacement = view_op(base_conversion, ...)
     """
+    # RNG ordering dependencies are added later in the post-grad pipeline.
+    if config.fallback_random:
+        return
+
     # Skip if the graph contains mutation beyond the copy_ output epilogue.
     if graph.find_nodes(op="call_function", target=aten.set_.default):
         return
