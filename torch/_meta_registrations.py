@@ -6572,6 +6572,12 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     S_KV = key.size(-2)
     D_V = value.size(-1)
 
+    torch._check(
+        S_KV == value.size(-2),
+        lambda: f"key sequence length ({S_KV}) must match "
+        f"value sequence length ({value.size(-2)})",
+    )
+
     if attn_bias is not None:
         bias_s_kv = attn_bias.size(-1)
         if bias_s_kv != 1:
