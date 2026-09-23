@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipIfTorchDynamo,
+    skipIfXpu,
     subtest,
     suppress_warnings,
     TEST_CUDA_CUDSS,
@@ -3674,7 +3675,7 @@ def skipIfNoTriton(cls):
         return skipped_cls
 
 @skipIfNoTriton
-class TestSparseCompressedTritonKernels(TestCase):
+class TestSparseCompressedTritonKernelsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _to_block_triangular_inplace(self, d, row_block, col_block):
@@ -3696,6 +3697,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         return d
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3165")
     @onlyAccelerator
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
@@ -3824,8 +3826,8 @@ class TestSparseCompressedTritonKernels(TestCase):
         with self.assertRaisesRegex(ValueError, "on the same GPU device"):
             bsr_dense_mm(lhs, rhs.cpu())
         if torch.accelerator.device_count() > 1:
+            device_type = torch.device(device).type
             with self.assertRaisesRegex(ValueError, "on the same GPU device"):
-                device_type = device.split(":")[0]
                 bsr_dense_mm(lhs.to(f"{device_type}:0"), rhs.to(f"{device_type}:1"))
         with self.assertRaisesRegex(ValueError, "all inputs are expected to be of the same dtype"):
             bsr_dense_mm(lhs, rhs.to(torch.float))
@@ -4577,7 +4579,7 @@ instantiate_device_type_tests(TestSparseCSRCpuOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSparseCSRDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestSparseCSRCudaOnly, globals(), only_for="cuda")
 
-instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
+instantiate_device_type_tests(TestSparseCompressedTritonKernelsDevice, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()
