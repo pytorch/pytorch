@@ -7,19 +7,19 @@ module scope, since torchgen loads those during stage 1.
 
 For each ``torch/_native/ops/<op>/aot.py`` this expands the spec grid (list fields
 cross-multiply) and, per grid point, runs the toolchain's compile and export into
-``<out-dir>/<arch>/<op>/`` -- one tree per arch, whatever the arch count -- writing:
+``<out-dir>/<target>/<op>/`` -- one tree per selected compile target -- writing:
 
     <prefix>.h / <prefix>.o    C-ABI header + kernel object
     <prefix>.json              marshalling sidecar {spec, arch, tensor_args}
 
-Prefixes carry their arch (``topk_..._det__sm100a``): every exported C symbol derives
-from the prefix, so two arches sharing one would collide in libtorch_cuda.
+Prefixes carry their target (``my_kernel__sm100a``): every exported C symbol derives
+from the prefix, so two targets sharing one would collide in libtorch_cuda.
 
 The builder module exposes ``build(spec)`` returning a dict whose ``kind`` selects
 the toolchain; tools/native_aot/toolchains.py holds the per-kind contracts. Existing
 artifacts are skipped unless --force.
 
-Spec points compile on a forkserver pool, one job per (point, arch), so results do
+Spec points compile on a forkserver pool, one job per (point, target), so results do
 not depend on --jobs, which follows the torch build's parallelism (MAX_JOBS, then
 CMAKE_BUILD_PARALLEL_LEVEL, then half the CPU count). Plain fork is unusable: the
 parent may have initialized CUDA, and forked workers inherit a dead context silently.
@@ -33,8 +33,8 @@ tools/native_aot/cutedsl_warmup.py.
 
 Usage (from the repo root, in a venv with torch built and the DSL wheel active):
     python tools/native_aot/export.py [--out-dir build/native_aot]
-                                        [--ops topk] [--force] [--jobs 8]
-                                        [--arch sm_90 sm_100f]
+                                        [--ops my_op] [--force] [--jobs 8]
+                                        [--arch sm_90 sm_100]
 """
 
 import argparse
@@ -165,12 +165,10 @@ def _json_normal(value):
 
 
 def _detected_arch() -> str | None:
-    """The local device as an sm string ("sm_100"), or None without CUDA.
+    """The local device as a plain sm string ("sm_100"), or None without CUDA.
 
-    Recorded in the sidecar so an on-device export's artifacts carry an arch identity;
-    without one the generated gate would fall back to the declaration's ARCHS and
-    advertise hardware nothing was compiled for. No "a" suffix: the gate compares
-    major.minor, which both spellings share."""
+    This is a supported-device input to declaration target selection, not necessarily
+    the compile target recorded in the sidecar."""
     try:
         import torch
 
@@ -183,23 +181,16 @@ def _detected_arch() -> str | None:
 
 
 def _arch_tag(arch: str) -> str:
-    """Arch as an artifact-name tag: "sm_100a" -> "sm100a". Short because it lands in
-    every exported C symbol, and those are already long."""
+    """Compile target as an artifact-name tag: "sm_100a" -> "sm100a"."""
     return arch.replace("_", "", 1)
 
 
 def _effective_arch(arch: str | None) -> str | None:
-    """The arch the artifacts are really compiled for: the explicit one if
-    given, else whatever a toolchain's own env var selects
-    (Toolchain.ARCH_ENV_VAR, e.g. CUTE_DSL_ARCH), else the local device.
+    """Resolve an explicit sm spelling, or detect the local device when absent.
 
-    One resolver for both the sidecar and the directory name, so a tree cannot
-    disagree with its own sidecars -- the runtime gate comes from the sidecar, and a
-    directory saying otherwise would make the layout lie. The skip check recomputes
-    it, so two runs differing only in the environment are told apart.
-
-    Takes no toolchain by design: with a kind's arch variable refused rather than
-    honoured, resolution is --arch or the device, neither of which varies by kind."""
+    A toolchain-specific arch variable cannot describe a build containing several
+    kinds, so it is refused rather than used. Declaration target selection happens
+    after this function resolves the supported device."""
     if arch:
         return arch
     # A toolchain's arch variable without --arch is refused rather than honoured: it
@@ -215,8 +206,9 @@ def _effective_arch(arch: str | None) -> str | None:
         raise RuntimeError(
             f"{listed} {'is' if len(named) == 1 else 'are'} set but --arch is not. "
             f"A toolchain's arch variable is per-kind, so it cannot name the arch "
-            f"for every kind in one export; pass --arch (e.g. --arch "
-            f"{named[min(named)]}) to state it once."
+            f"for every kind in one export; remove it and pass --arch (e.g. "
+            f"--arch {named[min(named)]}) to state the supported device once. "
+            f"Each declaration's ARCHS will select the compile target."
         )
     return _detected_arch()
 
@@ -227,7 +219,7 @@ def export_point(
     """Compile and export one spec point, and write its sidecar.
 
     Module-level with picklable arguments, so it runs identically inline and as a pool
-    job, and holds no process-global state, so one process serves any mix of arches.
+    job, and holds no process-global state, so one process serves any mix of targets.
 
     A missing DSL runtime is fatal here rather than a skip: a declaration reaching
     this point targets this build's backend, so its kernels were asked for, and
@@ -266,8 +258,8 @@ def export_point(
             f"embedded DSL kernels."
         )
     tc.validate_build_result(b)
-    # Arch-qualifying the prefix is what lets several arches ship in one library:
-    # every exported C symbol derives from it, so two arches sharing one are
+    # Target-qualifying the prefix lets several targets ship in one library:
+    # every exported C symbol derives from it, so two targets sharing one are
     # duplicate definitions at link time.
     effective_arch = _effective_arch(arch)
     if effective_arch:
@@ -293,13 +285,12 @@ def export_point(
 
 
 def _collect_jobs(ops_filter, out_root: str, archs):
-    """(op_pkg, kernel_module, point, out_dir, arch) per spec point per arch across
-    every declaration. Grids expand here, which is cheap and torch-light; skip
-    detection is _job_needed's sidecar scan.
+    """One job tuple per spec point and selected compile target.
 
-    One layout whatever the arch count, <out-root>/<arch>/<decl_id>/, so adding an
-    arch is another directory rather than a different shape. The generated .cpp sits
-    at <out-root>/<decl_id>/, covering all of them."""
+    Grids expand here, which is cheap and torch-light; skip detection is
+    _job_needed's sidecar scan. Targets always use
+    <out-root>/<target>/<decl_id>/, while the generated .cpp sits at
+    <out-root>/<decl_id>/ and covers every selected target."""
     jobs = []
     build_archs = _resolved_build_arches(archs)
     for entry, d in _iter_declarations(ops_filter):
@@ -335,9 +326,9 @@ def _iter_declarations(ops_filter):
             yield entry, d
 
 
-def _resolved_build_arches(archs) -> list[str]:
-    """Resolve and validate the device architectures supported by this build."""
-    out = []
+def _resolved_build_arches(archs) -> dict[str, tuple[int, int]]:
+    """Resolve supported-device spellings to compute capabilities."""
+    out: dict[str, tuple[int, int]] = {}
     for arch in archs:
         resolved = _effective_arch(arch)
         if not resolved:
@@ -346,18 +337,17 @@ def _resolved_build_arches(archs) -> list[str]:
                 "local GPU to detect from. Pass --arch (e.g. --arch sm_100a), "
                 "which also lets export run on a machine without a GPU."
             )
-        decl.cc_of(resolved)
-        if resolved not in out:
-            out.append(resolved)
+        cc = decl.cc_of(resolved)
+        out.setdefault(resolved, cc)
     return out
 
 
-def _targets_for_declaration(d, build_archs: list[str]) -> list[str]:
+def _targets_for_declaration(d, build_archs: dict[str, tuple[int, int]]) -> list[str]:
     """One declaration's widest compatible targets for the supported devices."""
     out = []
     candidates = decl.archs_of(d)
-    for arch in build_archs:
-        target = decl.widest_compatible_target(candidates, decl.cc_of(arch))
+    for device_cc in build_archs.values():
+        target = decl.widest_compatible_target(candidates, device_cc)
         if target is not None and target not in out:
             out.append(target)
     return out
@@ -432,7 +422,7 @@ def _check_no_orphan_artifacts(out_dir: str, specs) -> None:
     while the sidecar still makes it look exported.
 
     An empty directory is fine. ``specs`` is the expanded grid for this
-    (declaration, arch).
+    (declaration, compile target).
     """
     exts = toolchains.all_artifact_exts()
     names = os.listdir(out_dir)
@@ -532,13 +522,13 @@ def sources_current(sidecar: dict) -> bool:
 
 
 def _job_needed(job, force: bool) -> bool:
-    """Cheap skip check without compiling: skip only when the sidecar's spec, its arch
+    """Cheap skip check without compiling: skip only when the sidecar's spec, target
     and every file in its source closure still match, so an edited kernel module
     re-exports without --force.
 
-    The arch comparison covers a recorded arch differing from what this run resolves
-    to -- artifacts predating arch identity, or a tree carried between machines. Both
-    must re-export, since the recorded arch is what the runtime gate is built from.
+    The target comparison catches artifacts predating target identity or a tree
+    carried between configurations. Both must re-export, since the recorded target
+    is what the runtime gate is built from.
     Compared through _effective_arch, so both sides resolve the same way."""
     if force:
         return True
@@ -591,6 +581,12 @@ def build_arches_from_cuda_arch_list(arch_list: str) -> list[str]:
         if not all(p.isascii() and p.isdigit() for p in (major, minor)):
             continue  # named arch ("Hopper") or malformed: skip
         arch = f"sm_{int(major) * 10 + int(minor)}"
+        try:
+            cc = decl.cc_of(arch)
+        except RuntimeError:
+            continue
+        if cc not in decl.known_device_capabilities():
+            continue
         if arch not in out:
             out.append(arch)
     return out
@@ -624,7 +620,7 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         metavar="SM",
         help="device architecture(s) supported by the build, e.g. --arch sm_90 "
-        "sm_100a. Each op selects a compatible compiler target from its ARCHS. "
+        "sm_100. Each op selects a compatible compiler target from its ARCHS. "
         "With an explicit arch, export never touches the CUDA driver and runs "
         "on GPU-less machines. Default: detect from the local device.",
     )
@@ -652,11 +648,24 @@ def main(argv: list[str] | None = None) -> None:
         # Half the CPU count, not all of it: os.cpu_count() reports SMT
         # siblings, and one compile per virtual thread oversubscribes.
         args.jobs = int(env_jobs) if env_jobs else max(1, (os.cpu_count() or 2) // 2)
-    if args.arch is None and os.getenv("TORCH_CUDA_ARCH_LIST"):
+    from_arch_list = args.arch is None and bool(os.getenv("TORCH_CUDA_ARCH_LIST"))
+    if from_arch_list:
         # Standard-build integration: the main build supplies devices; declarations
         # supply compiler targets. Explicit --arch wins.
         args.arch = build_arches_from_cuda_arch_list(os.environ["TORCH_CUDA_ARCH_LIST"])
-        selected = targets_for_arches(args.arch, args.ops)
+    archs = args.arch if args.arch is not None else [None]
+    try:
+        jobs = _collect_jobs(args.ops, args.out_dir, archs)
+    except RuntimeError:
+        # Every refusal in there tells the user to remove a target tree, and the
+        # previous generation names every object in it -- so following the advice made
+        # the NEXT main build fail in CMake on a missing source, inside a @generated
+        # file that says nothing about native-AOT. Invalidate before re-raising, the
+        # same rule as below.
+        _invalidate_generation(args.out_dir)
+        raise
+    if from_arch_list:
+        selected = list(dict.fromkeys(job[4] for job in jobs))
         if not selected:
             print(
                 "TORCH_CUDA_ARCH_LIST matches no native-AOT declaration target; "
@@ -664,17 +673,6 @@ def main(argv: list[str] | None = None) -> None:
             )
             return
         print(f"AOT targets from TORCH_CUDA_ARCH_LIST: {' '.join(selected)}")
-    archs = args.arch if args.arch else [None]
-    try:
-        jobs = _collect_jobs(args.ops, args.out_dir, archs)
-    except RuntimeError:
-        # Every refusal in there tells the user to `rm -rf` an arch tree, and the
-        # previous generation names every object in it -- so following the advice made
-        # the NEXT main build fail in CMake on a missing source, inside a @generated
-        # file that says nothing about native-AOT. Invalidate before re-raising, the
-        # same rule as below.
-        _invalidate_generation(args.out_dir)
-        raise
     todo = [j for j in jobs if _job_needed(j, args.force)]
     if len(todo) < len(jobs):
         print(f"{len(jobs) - len(todo)} points already exported, skipped")
@@ -694,9 +692,9 @@ def main(argv: list[str] | None = None) -> None:
             print(f"  {prefix}: exported")
             total += 1
     else:
-        # ONE pool over every (point, arch) job: each toolchain takes its
-        # arch per compile (CuTeDSL --gpu-arch, Triton a fixed GPUTarget),
-        # so no process is pinned to an arch and mixed jobs pack freely.
+        # ONE pool over every (point, target) job: each toolchain takes its
+        # target per compile (CuTeDSL --gpu-arch, Triton a fixed GPUTarget),
+        # so no process is pinned to a target and mixed jobs pack freely.
         import multiprocessing
         from concurrent.futures import as_completed, ProcessPoolExecutor
 

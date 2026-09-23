@@ -23,7 +23,7 @@ and with CONTRIBUTING.md, which states them for users:
   * a static torch_cuda, which cannot take the version script
   * nothing declares kernels (no torch/_native/ops/*/aot.py)
   * TORCH_CUDA_ARCH_LIST matches no target declared by an op; with it unset,
-    on-device export runs if a supported GPU is present
+    on-device export runs if the local GPU matches a declared target
 
 Two modes, split by the skip list.
 
@@ -471,16 +471,15 @@ def should_run() -> bool:
             )
             return False
         if len(archs) > 1:
-            # Supported (export nests one tree per arch and the generated stub
-            # selects a compatible target at runtime); reported because several
-            # compile-target trees will be embedded.
-            _report(f"multi-arch: {' '.join(archs)}")
+            # Export nests one tree per selected target and the generated stub
+            # selects among them at runtime; report when several trees are embedded.
+            _report(f"multi-target: {' '.join(archs)}")
     elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")
         return False
     else:
-        # Check the detected device before committing to stage 2: an unsupported
-        # device would export nothing after a successful main build.
+        # Check the detected device before committing to stage 2: a device matching
+        # no declaration would export nothing after a successful main build.
         # Through a subprocess, not export._detected_arch(), which would
         # initialize CUDA here -- what _torch_probe exists to avoid.
         local = _torch_value("'sm_%d%d' % torch.cuda.get_device_capability()")
@@ -913,14 +912,14 @@ def main(argv: list[str] | None = None) -> int:
         gen += ["--archs", *export_mod.archs_from_cuda_arch_list(arch_list)]
         gen += ["--arch-list", arch_list]
     _run_child(gen, "generating stub sources", cwd=REPO)
-    # Nothing generated is legitimate: no declaration ships kernels for this arch.
+    # Nothing generated is legitimate: no declaration ships kernels for this build.
     # Stop rather than relink unchanged and then assert kernels are in it.
     sources = glob.glob(os.path.join(art, "*", "aot_*.cpp"))
     if not sources:
         _report("no declaration ships kernels for this build; nothing embedded")
         return 0
     # The count, and the size delta after the relink, rather than parsing the generated
-    # CMake: these bytes scale with declarations x precompile points x arches.
+    # CMake: these bytes scale with declarations x precompile points x targets.
     _report(f"embedding kernels from {len(sources)} generated source(s)")
     # Reconfigure explicitly: the generated file registers itself in
     # CMAKE_CONFIGURE_DEPENDS only from the reconfigure that first reads it.

@@ -3,8 +3,8 @@ name: CI for native-AOT embedded DSL kernels
 
 # Exercises the full native-AOT path: stage 2 of the build exports the DSL kernels and
 # embeds them in libtorch_cuda, then the test job asserts the wheel carries them and
-# runs the python_native suites on the GPUs the wheel supports. For top-k, the Hopper
-# build selects sm_90 and the Blackwell build selects the family-wide sm_100f target.
+# runs the python_native suites on the GPUs the wheel supports. The Hopper and
+# Blackwell builds exercise plain and family-wide targets.
 
 on:
   pull_request:

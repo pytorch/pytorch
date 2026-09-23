@@ -23,6 +23,7 @@ DECLARATION = """\
 ATEN_OP = "fakeop"
 DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "kernel.py"
+ARCHS = ("sm_90",)
 
 
 def kernel_precompile_grid():
@@ -68,6 +69,11 @@ class ManifestFixture:
         self._patch = mock.patch.object(aot_manifest, "_OPS_DIR", self._dir.name)
         self._patch.start()
         aot_manifest._load_coverage.cache_clear()
+        for coverage in aot_manifest._load_coverage().values():
+            # The fixture stands in for an embedded artifact library. Individual
+            # tests override this predicate when testing the generated gate.
+            coverage._runtime_probed = True
+            coverage._runtime_covers = lambda *args, **kwargs: True
         return self
 
     def __exit__(self, *exc):
@@ -153,6 +159,31 @@ class TestCovers(TestCase):
 
             coverage._runtime_covers = lambda *args, **kwargs: True
             self.assertTrue(coverage.covers((self._covered_tensor(), 8), {}))
+
+    def test_missing_runtime_gate_keeps_the_jit_route(self):
+        with ManifestFixture():
+            coverage = aot_manifest.get_coverage("fakeop", "CUDA")
+            coverage._runtime_covers = None
+            self.assertFalse(coverage.covers((self._covered_tensor(), 8), {}))
+
+    def test_registered_runtime_gate_binds_the_real_schema(self):
+        library = torch.library.Library("_native_aot", "FRAGMENT")  # noqa: SCOPED_LIBRARY
+        library.define(
+            "runtime_covers_manifest_binding_probe"
+            "(Tensor self, int k, Tensor? out=None) -> bool"
+        )
+        library.impl(
+            "runtime_covers_manifest_binding_probe",
+            lambda self, k, out=None: k == 8 and out is None,
+            "CompositeExplicitAutograd",
+        )
+        coverage = aot_manifest._Coverage(
+            "manifest_binding_probe",
+            lambda self, k, out=None: {"K": k},
+            [{"K": 8}],
+        )
+        self.assertTrue(coverage.covers((self._covered_tensor(),), {"k": 8}))
+        self.assertFalse(coverage.covers((self._covered_tensor(),), {"k": 16}))
 
 
 class TestGetCoverage(TestCase):

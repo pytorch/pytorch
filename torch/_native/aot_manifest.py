@@ -8,10 +8,10 @@ keeps its JIT override eligibility.
 
 A call is covered iff some point of the declaration's ``kernel_precompile_grid()``
 matches every field ``covered_axes()`` returns; dtypes match by canonical torch
-dtype and grid-only fields like block sizes are ignored. Generated runtime coverage
-first gates this answer on the artifact targets actually embedded, including CUDA
-family compatibility. An exception degrades to uncovered. The C++ dispatch chain in
-the AOT library is the authority on what actually launches.
+dtype and grid-only fields like block sizes are ignored. Generated coverage
+predicates gate this answer on the artifact targets actually embedded, including
+CUDA family compatibility. An exception degrades to uncovered. The C++ dispatch
+chain in the AOT library is the authority on what actually launches.
 """
 
 import functools
@@ -41,14 +41,14 @@ class _Coverage:
         self._covered_axes = covered_axes
         self._grid = grid
         # Declarations with cpp_covers() get a C++ predicate in the AOT library,
-        # registered as torch.ops._native_aot.covers_<op>: the same answer as the
-        # Python matching below for ~1.5us instead of ~7-10us. Resolved lazily,
-        # because the library loads after coverage is built.
+        # registered as torch.ops._native_aot.covers_<op>. Its declaration body
+        # mirrors the Python matching below, and codegen adds the artifact-target
+        # and ABI gates. Resolved lazily because the library loads after coverage
+        # is built.
         self._cpp_covers: Callable[..., bool] | None = None
         self._cpp_probed = False
-        # Every declaration also gets a generated predicate for the device and ABI
-        # gates. The Python path uses it when cpp_covers is absent, so declared
-        # support is not confused with the sidecars actually embedded.
+        # Declarations without cpp_covers() get a generated predicate for the
+        # device and ABI gates.
         self._runtime_covers: Callable[..., bool] | None = None
         self._runtime_probed = False
 
@@ -91,12 +91,15 @@ class _Coverage:
                 # Arguments the schema cannot bind: uncovered, so the cond decides.
                 return False
         runtime = self._resolve_runtime_covers()
-        if runtime is not None:
-            try:
-                if not runtime(*args, **kwargs):
-                    return False
-            except Exception:
+        if runtime is None:
+            # No predicate means no embedded artifact library for this declaration.
+            # Keep the JIT route instead of trusting the source declaration's grid.
+            return False
+        try:
+            if not runtime(*args, **kwargs):
                 return False
+        except Exception:
+            return False
         try:
             values = self._covered_axes(*args, **kwargs)
         except Exception:
@@ -142,8 +145,8 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
 
 
 def _base_name(op_symbol: str) -> str:
-    # Overload-qualified ("topk.values") and in-place ("scatter_add_") symbols
-    # share the base op's declaration: one structured wrapper serves all variants.
+    # Overload-qualified and in-place symbols share the base op's declaration:
+    # one structured wrapper serves all variants.
     base = op_symbol.split(".")[0]
     return base.removesuffix("_") if not base.endswith("__") else base
 

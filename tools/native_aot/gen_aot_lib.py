@@ -6,9 +6,10 @@ cpp_dispatch(spec) for one boolean per precompile point, cpp_launch(spec, launch
 for the invocation, and cpp_helpers() for family-shared C++. The Python-side coverage
 check, covered_axes, lives in the same module and is kept in sync by hand.
 
-Kernels are exported to ``<artifacts-dir>/<arch>/<op>/``, one tree per arch. For each
-op found there this emits ``<artifacts-dir>/<op>/aot_<op>_<key>.cpp``, one file
-covering every arch the op shipped for, containing:
+Kernels are exported to ``<artifacts-dir>/<target>/<op>/``, one tree per compile
+target. For each op found there this emits
+``<artifacts-dir>/<op>/aot_<op>_<key>.cpp``, one file covering every target the op
+shipped for, containing:
 
   * a launch_<prefix>() marshalling helper per exported kernel, emitted by the
     sidecar kind's Toolchain. Every toolchain produces the same launcher signature,
@@ -16,7 +17,8 @@ covering every arch the op shipped for, containing:
   * the stub kernel: an early-out over devices covered by the shipped targets, then
     helpers and prelude, then one condition chain per compile target -- an
     `if (cpp_dispatch(spec)) { cpp_launch; return true; }` per precompile point, and
-    `return false` at the end. Exact targets run before compatible family fallbacks.
+    `return false` at the end. Narrower targets run before broader compatible
+    fallbacks.
   * registration on the generated at::native DispatchStub (<op>_aot_stub) at
     static-init time.
 
@@ -209,6 +211,73 @@ def _first_tensor_name(params: str) -> str | None:
     return None
 
 
+_OPTIONAL_TENSOR_TYPES = {
+    "std::optional<at::Tensor>",
+    "::std::optional<at::Tensor>",
+    "at::OptionalTensorRef",
+}
+_TENSOR_LIST_TYPES = {"at::ITensorListRef"}
+_OPTIONAL_TENSOR_LIST_TYPES = {
+    "at::IOptTensorListRef",
+    "c10::List<std::optional<at::Tensor>>",
+    "c10::List<::std::optional<at::Tensor>>",
+}
+
+
+def _device_tensor_setup(params: str) -> str | None:
+    """C++ that selects a tensor-bearing argument for the runtime device gate."""
+    lines = ["  at::Tensor _naot_device_tensor;"]
+    found = False
+    for p in _split_params(params):
+        ctype, name = _param_type_and_name(p)
+        if ctype == "at::Tensor":
+            lines.append(
+                f"  if (!_naot_device_tensor.defined() && {name}.defined()) "
+                f"_naot_device_tensor = {name};"
+            )
+        elif ctype in _OPTIONAL_TENSOR_TYPES:
+            lines.append(
+                f"  if (!_naot_device_tensor.defined() && {name}.has_value()) "
+                f"_naot_device_tensor = *{name};"
+            )
+        elif ctype in _TENSOR_LIST_TYPES:
+            lines.extend(
+                (
+                    "  if (!_naot_device_tensor.defined()) {",
+                    f"    for (const auto& _naot_tensor : {name}) {{",
+                    "      if (_naot_tensor.defined()) {",
+                    "        _naot_device_tensor = _naot_tensor;",
+                    "        break;",
+                    "      }",
+                    "    }",
+                    "  }",
+                )
+            )
+        elif ctype in _OPTIONAL_TENSOR_LIST_TYPES:
+            lines.extend(
+                (
+                    "  if (!_naot_device_tensor.defined()) {",
+                    f"    for (const auto _naot_tensor : {name}) {{",
+                    "      if (_naot_tensor.has_value()) {",
+                    "        _naot_device_tensor = *_naot_tensor;",
+                    "        break;",
+                    "      }",
+                    "    }",
+                    "  }",
+                )
+            )
+        else:
+            continue
+        found = True
+    if not found:
+        return None
+    lines.append(
+        "  if (!_naot_device_tensor.defined() || "
+        "!_naot_device_tensor.is_cuda()) return false;"
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _device_match(arch: str) -> str:
     """The device predicate for one compile target.
 
@@ -251,6 +320,7 @@ def _by_arch(sidecars: list[dict]) -> dict[str, list[dict]]:
     device coverage are redundant, so only the strongest is linked.
     """
     groups: dict[str, list[dict]] = {}
+    coverage: dict[str, tuple[tuple[int, int], ...]] = {}
     for sc in sidecars:
         arch = sc.get("arch")
         if not isinstance(arch, str):
@@ -259,12 +329,12 @@ def _by_arch(sidecars: list[dict]) -> dict[str, list[dict]]:
                 f"records no arch. Re-export: the runtime gate is built from "
                 f"the arch each artifact was compiled for."
             )
-        decl.cc_of(arch)
+        coverage[arch] = decl.target_devices(arch)
         groups.setdefault(arch, []).append(sc)
 
     by_coverage: dict[tuple[tuple[int, int], ...], list[str]] = {}
     for arch in groups:
-        by_coverage.setdefault(decl.target_devices(arch), []).append(arch)
+        by_coverage.setdefault(coverage[arch], []).append(arch)
     for candidates in by_coverage.values():
         keep = min(candidates, key=decl.target_order_key)
         for arch in candidates:
@@ -275,10 +345,7 @@ def _by_arch(sidecars: list[dict]) -> dict[str, list[dict]]:
     return {arch: groups[arch] for arch in ordered}
 
 
-# Tensor-shaped C++ types the gate must recognize or refuse: torchgen renders
-# Tensor? as at::OptionalTensorRef and Tensor[] as at::ITensorListRef, and
-# index.Tensor's covers signature carries c10::List<optional<at::Tensor>> --
-# none of which fit the two accessors below.
+# Tensor-shaped C++ types the gate must recognize or refuse.
 _TENSOR_ISH = re.compile(r"\bat::\w*Tensor\w*|\bc10::List<")
 
 # A sidecar prefix must be usable as a C identifier: it is pasted into
@@ -295,8 +362,8 @@ def _int32_size_gate(params: str) -> str:
     aten sizes are int64_t while the exported ABI takes int32 shape slots, so the
     launcher's `static_cast<int32_t>(...)` would truncate a >=2^31 extent into a
     wrong, possibly negative one with no error. Emitted ahead of the prelude and into
-    cpp_covers, so no declaration hand-writes it and coverage never claims a shape the
-    stub will refuse.
+    whichever generated coverage predicate is used, so no declaration hand-writes it
+    and coverage never claims a shape the stub will refuse.
 
     Bounds the named tensors' dims, not numel(), which would decline a large tensor
     whose collapsed extent is tiny. A prelude that DERIVES an extent must bound that
@@ -307,38 +374,46 @@ def _int32_size_gate(params: str) -> str:
     fixed upstream and kernels ported off `t.shape[i]`, which is Int32 whatever the
     symbol; cute.sym_int64() alone is not enough.
     """
-    # The at::Tensor names in scope: the prelude sees plain `const at::Tensor&`,
-    # cpp_covers sees out-variant outputs as `const std::optional<at::Tensor>&`.
-    plain: list[str] = []
-    optional: list[str] = []
+    checks: list[str] = []
     for p in _split_params(params):
         ctype, name = _param_type_and_name(p)
-        if ctype in ("std::optional<at::Tensor>", "::std::optional<at::Tensor>"):
-            optional.append(name)
-        elif ctype == "at::Tensor":
-            plain.append(name)
+        if ctype == "at::Tensor":
+            checks.append(
+                f"{name}.sizes().end() != std::find_if({name}.sizes().begin(), "
+                f"{name}.sizes().end(), _naot_dim_too_big)"
+            )
+        elif ctype in _OPTIONAL_TENSOR_TYPES:
+            checks.append(
+                f"({name}.has_value() && {name}->sizes().end() != "
+                f"std::find_if({name}->sizes().begin(), {name}->sizes().end(), "
+                f"_naot_dim_too_big))"
+            )
+        elif ctype in _TENSOR_LIST_TYPES:
+            checks.append(
+                f"([&] {{ for (const auto& _naot_tensor : {name}) {{ "
+                f"if (_naot_tensor.sizes().end() != "
+                f"std::find_if(_naot_tensor.sizes().begin(), "
+                f"_naot_tensor.sizes().end(), _naot_dim_too_big)) return true; "
+                f"}} return false; }}())"
+            )
+        elif ctype in _OPTIONAL_TENSOR_LIST_TYPES:
+            checks.append(
+                f"([&] {{ for (const auto _naot_tensor : {name}) {{ "
+                f"if (_naot_tensor.has_value() && "
+                f"_naot_tensor->sizes().end() != "
+                f"std::find_if(_naot_tensor->sizes().begin(), "
+                f"_naot_tensor->sizes().end(), _naot_dim_too_big)) return true; "
+                f"}} return false; }}())"
+            )
         elif _TENSOR_ISH.search(ctype):
-            # Each remaining tensor-shaped type needs its own accessor
-            # (OptionalTensorRef has no has_value(); the others are
-            # sequences), so guessing emits an ungated dim or C++ that does
-            # not compile. The next op to use one gets this message.
             raise RuntimeError(
                 f"_int32_size_gate: unhandled tensor-like parameter type "
                 f"{ctype!r} (arg {name!r}). Teach the gate this type -- gating "
                 f"it wrongly would let a >=2^31 dim through the launcher's "
                 f"static_cast<int32_t>, or emit C++ that does not compile."
             )
-    if not plain and not optional:
+    if not checks:
         return ""
-    checks = [
-        f"{n}.sizes().end() != std::find_if({n}.sizes().begin(), {n}.sizes().end(), _naot_dim_too_big)"
-        for n in plain
-    ]
-    checks += [
-        f"({n}.has_value() && {n}->sizes().end() != "
-        f"std::find_if({n}->sizes().begin(), {n}->sizes().end(), _naot_dim_too_big))"
-        for n in optional
-    ]
     return (
         "  // Size gate: the DSL's exported ABI carries int32_t shape slots\n"
         "  // (see _int32_size_gate); a bigger dim would truncate silently.\n"
@@ -368,9 +443,9 @@ def gen_op(
 
     # One cond chain per compile target (see _by_arch).
     groups = _by_arch(sidecars)
-    # Shipping an arch the declaration disowns is a packaging bug: error rather
+    # Shipping a target the declaration disowns is a packaging bug: error rather
     # than gate on kernels the op does not claim to support. Over EVERY exported
-    # tree, ahead of the tie-break below: a disowned tree of the same capability as
+    # tree, ahead of the tie-break below: a disowned tree with the same coverage as
     # a claimed one loses that tie-break, and would pass unnoticed.
     declared_archs = decl.archs_of(d)
     if unclaimed := {sc["arch"] for sc in sidecars if sc["arch"] not in declared_archs}:
@@ -384,8 +459,8 @@ def gen_op(
         raise RuntimeError(
             f"{op}: artifacts exported for {sorted(unclaimed)} but the "
             f"declaration supports only {declared_archs}. Delete "
-            f"{', '.join(trees) or 'those arch trees'} -- export.py skips "
-            f"unsupported arches, so it will not remove them -- then re-export. "
+            f"{', '.join(trees) or 'those target trees'} -- export.py skips "
+            f"unsupported targets, so it will not remove them -- then re-export. "
             f"A bare re-export will NOT clear this; only deleting the tree does. "
             f"(A backstop: export only emits targets named by the declaration, so "
             f"reaching this means the tree predates that or ARCHS was narrowed since.)"
@@ -432,18 +507,17 @@ def gen_op(
     runtime_covers_fn = runtime_covers_reg = ""
     if runtime_covers is not None:
         runtime_params, runtime_schema = runtime_covers
-        runtime_tensor = _first_tensor_name(runtime_params)
-        if runtime_tensor is None:
+        device_setup = _device_tensor_setup(runtime_params)
+        if device_setup is None:
             raise RuntimeError(
-                f"{op}: runtime coverage needs a plain at::Tensor parameter to "
-                f"read the device from, and this signature has none "
-                f"({runtime_params})."
+                f"{op}: runtime coverage needs a tensor-bearing parameter to read "
+                f"the device from, and this signature has none ({runtime_params})."
             )
         runtime_props = (
-            f"at::cuda::getDeviceProperties({runtime_tensor}.device().index())"
+            "at::cuda::getDeviceProperties(_naot_device_tensor.device().index())"
         )
         runtime_body = (
-            f"  if (!{runtime_tensor}.is_cuda()) return false;\n"
+            device_setup
             + _gate_for(runtime_props)
             + (_int32_size_gate(runtime_params) if narrows else "")
         )
@@ -587,7 +661,7 @@ def precomputed_args(op: str) -> list[str]:
     return sorted(pre.replace.keys()) if pre is not None else []
 
 
-def covers_signature(op: str) -> tuple[str, str]:
+def covers_signature(op: str, name: str | None = None) -> tuple[str, str]:
     """(C++ params, torch.library schema) for generated coverage predicates.
 
     Uses the FUNCTIONAL schema arguments (SymInt degraded to int -- symbolic sizes
@@ -615,11 +689,11 @@ def covers_signature(op: str) -> tuple[str, str]:
         params.append(f"const std::optional<at::Tensor>& {a.name}")
         pieces.append(f"Tensor? {a.name}=None")
     schema_args = ", ".join(pieces)
-    # Op name in the registered schema is the decl_id (dots are illegal
-    # in custom-op names); the runtime resolves covers_<decl_id> too.
+    # Dots are illegal in custom-op names, so the default uses decl_id.
+    name = name or f"covers_{decl.decl_id_for_op(op)}"
     return (
         ", ".join(params),
-        f"covers_{decl.decl_id_for_op(op)}({schema_args}) -> bool",
+        f"{name}({schema_args}) -> bool",
     )
 
 
@@ -743,8 +817,8 @@ def _delete_generated(artifacts_dir: str, decl_id: str, why: str) -> None:
     """Drop a declaration's generated source. Regenerating is free; the artifacts
     it describes are never touched.
 
-    Called from both places a declaration can stop contributing: its arch trees gone,
-    or present but holding no sidecar. Skipping either leaves a source that compiles
+    Called from both places a declaration can stop contributing: its target trees
+    gone, or present but holding no sidecar. Skipping either leaves a source that compiles
     and references entry points whose object is not in the link set -- a green link
     and a symbol error at first use."""
     src_dir = os.path.join(artifacts_dir, decl_id)
@@ -979,8 +1053,8 @@ def main(argv: list[str] | None = None) -> None:
         # -- silently passed everything. Refused here rather than relying on the
         # caller having checked.
         nargs="+",
-        help="restrict generation to these arch trees (sm strings). Stage 2 "
-        "passes the arches this build targets, so a tree left by a build with "
+        help="restrict generation to these compile-target trees (sm strings). "
+        "Stage 2 passes the targets selected for this build, so a tree left by a "
         "a different TORCH_CUDA_ARCH_LIST is ignored rather than shipped",
     )
     parser.add_argument(
@@ -1045,36 +1119,36 @@ def main(argv: list[str] | None = None) -> None:
             original = (f.read(), st.st_atime_ns, st.st_mtime_ns)
         write_nothing_to_embed(args.artifacts_dir)
 
-    # decl_id -> its arch dirs, so one declaration generates once however many
-    # arches it shipped for: per-arch would emit one .cpp each, all registering
+    # decl_id -> its target dirs, so one declaration generates once however many
+    # targets it shipped for: per-target would emit one .cpp each, all registering
     # the same DispatchStub.
     dirs_by_id: dict[str, list[str]] = {}
     for entry in sorted(os.listdir(args.artifacts_dir)):
         art_dir = os.path.join(args.artifacts_dir, entry)
         if not os.path.isdir(art_dir):
             continue
-        # One layout: <root>/<arch>/<decl_id>/ holds artifacts, <root>/<decl_id>/
+        # One layout: <root>/<target>/<decl_id>/ holds artifacts, <root>/<decl_id>/
         # holds only the generated .cpp. So a top-level dir with subdirectories is
-        # an arch, and one without is a generated-source dir with nothing to find.
+        # a target, and one without is a generated-source dir with nothing to find.
         children = [
             c
             for c in sorted(os.listdir(art_dir))
             if os.path.isdir(os.path.join(art_dir, c))
         ]
-        # An arch tree this build did not ask for is left alone: nothing prunes trees,
+        # A target tree this build did not ask for is left alone: nothing prunes trees,
         # so an incremental build whose TORCH_CUDA_ARCH_LIST changed still holds the
-        # tree for the dropped arch. Generating from it would ship an unrequested
-        # target, and judging its staleness would demand re-exporting that arch.
+        # tree for the dropped target. Generating from it would ship an unrequested
+        # target, and judging its staleness would demand rebuilding that target.
         if children and args.archs and entry not in args.archs:
-            print(f"{entry}: not in this build's arch list, ignoring its artifacts")
+            print(f"{entry}: not in this build's target list, ignoring its artifacts")
             continue
         for child in children:
             dirs_by_id.setdefault(child, []).append(os.path.join(art_dir, child))
 
-    # A generated source whose artifacts are all gone -- an arch tree deleted by
+    # A generated source whose artifacts are all gone -- a target tree deleted by
     # hand, or every tree it had skipped by --archs -- is deleted here. It is not
     # reached by the loop below (which walks decl_ids that still HAVE artifacts).
-    # Left behind, its #include "../<arch>/<id>/..." no longer resolves: a compile
+    # Left behind, its #include "../<target>/<id>/..." no longer resolves: a compile
     # error naming a generated file, pointing at nothing. Regenerating a source is
     # free; artifacts never are.
     for entry in sorted(os.listdir(args.artifacts_dir)):
@@ -1100,7 +1174,7 @@ def main(argv: list[str] | None = None) -> None:
                 os.path.join(one, fn) for one in art_dirs for fn in os.listdir(one)
             ]
             # The stale .cpp sits with the generated sources at <root>/<decl_id>/,
-            # not in the arch tree. Deleted before the skips below, which protect
+            # not in the target tree. Deleted before the skips below, which protect
             # ARTIFACTS: left on disk it makes stage 2 read "kernels were generated"
             # while this run's include says nothing was embedded, and stage 2 then
             # fails the build blaming the CMake cache. Regenerating a source is free.
@@ -1120,7 +1194,7 @@ def main(argv: list[str] | None = None) -> None:
             # unnamed artifact cannot be linked, and the .cpp that could have
             # referenced one was just deleted. What remains is inert.
             #
-            # Reported per arch dir, since `entries` spans all of them, so the
+            # Reported per target dir, since `entries` spans all of them, so the
             # message names the tree the files are actually in.
             leftover_exts = toolchains.all_artifact_exts()
             for one in art_dirs:
@@ -1138,7 +1212,7 @@ def main(argv: list[str] | None = None) -> None:
                     )
             continue
         sidecars = []
-        # Across every arch dir this declaration exported into.
+        # Across every target dir this declaration exported into.
         for one_dir in art_dirs:
             for fn in sorted(os.listdir(one_dir)):
                 if fn.endswith(".json"):
@@ -1152,10 +1226,9 @@ def main(argv: list[str] | None = None) -> None:
                         raise RuntimeError(
                             f"{path}: sidecar schema version {sc.get('version')!r}, "
                             f"but this generator reads version "
-                            f"{export_mod.SIDECAR_VERSION}. Re-export this arch "
-                            f"({sc.get('arch') or 'unknown arch'}) or delete the "
-                            f"tree; generation cannot be forced past a schema "
-                            f"change."
+                            f"{export_mod.SIDECAR_VERSION}. Delete this target tree "
+                            f"({one_dir}) and re-run export; generation cannot be "
+                            f"forced past a schema change."
                         )
                     # kind beside version, because the stale check below reads it
                     # before anything else here does. Without it, this artifact would
@@ -1163,9 +1236,8 @@ def main(argv: list[str] | None = None) -> None:
                     if "kind" not in sc:
                         raise RuntimeError(
                             f"{path}: sidecar names no kind, so nothing can say "
-                            f"which toolchain built the artifacts beside it. "
-                            f"Re-export this arch ({sc.get('arch') or 'unknown'}) "
-                            f"or delete the tree."
+                            f"which toolchain built the artifacts beside it. Delete "
+                            f"this target tree ({one_dir}) and re-run export."
                         )
                     # The prefix names the extern "C" entry points and the
                     # launcher, so a non-identifier reaches the compiler as a
@@ -1192,7 +1264,7 @@ def main(argv: list[str] | None = None) -> None:
                         sc["_include_dir"] = rel.replace(os.sep, "/")
                     sidecars.append(sc)
         # One prefix must come from one artifact, or the generated file defines
-        # launch_<prefix> twice. Prefixes carry their arch, so export cannot
+        # launch_<prefix> twice. Prefixes carry their target, so export cannot
         # produce this; a copied or renamed tree can. Never deleted automatically.
         seen: dict[str, str] = {}
         for sc in sidecars:
@@ -1200,13 +1272,13 @@ def main(argv: list[str] | None = None) -> None:
             if p in seen:
                 raise RuntimeError(
                     f"{entry}: {p} is present in both {seen[p]} and "
-                    f"{sc['_dir']}. Each arch directory must hold its own "
+                    f"{sc['_dir']}. Each target directory must hold its own "
                     f"artifacts once; a copied or renamed tree duplicates them. "
                     f"Delete whichever is stale and re-run generation."
                 )
             seen[p] = sc["_dir"]
         # Filter BEFORE judging staleness: a dropped candidate can never reach the
-        # library, so a stale `sm_100` beside a fresh `sm_100a` failed the run and
+        # library, so a stale `sm_100` beside a fresh `sm_100f` failed the run and
         # advised re-exporting kernels generation drops again.
         sidecars = surviving_sidecars(entry, sidecars)
         # Both halves: the source closure catches an edited kernel, the recorded
@@ -1218,16 +1290,14 @@ def main(argv: list[str] | None = None) -> None:
             if not (export_mod.sources_current(sc) and export_mod.runtimes_current(sc))
         ]
         if stale and not args.allow_stale:
-            # Name the arches and re-export THEM: a bare export.py run maintains
-            # only the one arch it resolves for, leaving the others stale, so
-            # "just re-run export" is advice that does not work here.
-            archs = sorted({sc.get("arch") or "?" for sc in stale})
+            trees = sorted({sc.get("_dir", "?") for sc in stale})
             raise RuntimeError(
                 f"{entry}: {len(stale)} artifact(s) were exported from "
                 f"different kernel sources than the current tree (e.g. "
-                f"{stale[0].get('prefix')} in {stale[0]['_dir']}). Re-export "
-                f"those arches -- `python tools/native_aot/export.py --arch "
-                f"{' '.join(archs)}` -- or delete their trees. Pass "
+                f"{stale[0].get('prefix')} in {stale[0]['_dir']}). Delete the "
+                f"stale target trees ({', '.join(trees)}) and re-run export for "
+                f"this build; target selection comes from each declaration's "
+                f"current ARCHS. Pass "
                 f"--allow-stale to generate anyway."
             )
         if not sidecars:
@@ -1240,13 +1310,14 @@ def main(argv: list[str] | None = None) -> None:
             continue
         did, key = decl.decl_id(d), d.DISPATCH_KEY
         covers_params, covers_schema = covers_signature(d.ATEN_OP)
-        runtime_schema = covers_schema.replace(
-            f"covers_{did}(", f"runtime_covers_{did}(", 1
-        )
-        runtime_covers = (covers_params, runtime_schema)
         covers_fn = getattr(d, "cpp_covers", None)
         covers_body = (covers_fn() or "") if covers_fn else ""
         covers = (covers_params, covers_schema, covers_body) if covers_body else None
+        runtime_covers = (
+            covers_signature(d.ATEN_OP, f"runtime_covers_{did}")
+            if covers is None
+            else None
+        )
         # Every refusal runs before anything is written, and sources are buffered to
         # the end of the loop: a refusal partway through must not leave earlier
         # declarations' fresh sources paired with the previous run's link set, which
@@ -1264,8 +1335,8 @@ def main(argv: list[str] | None = None) -> None:
                     raise RuntimeError(
                         f"{art}: sidecar describes an artifact that is not on "
                         f"disk. The launcher would be emitted and the artifact "
-                        f"missing at compile or link time; re-export this arch "
-                        f"({sc.get('arch')}) or delete {sc['_dir']}."
+                        f"missing at compile or link time; delete {sc['_dir']} "
+                        f"and re-run export."
                     )
                 # `or ()`: link_exts is Optional so that a kind which never
                 # DECLARED one is refused at import (toolchains
@@ -1284,8 +1355,8 @@ def main(argv: list[str] | None = None) -> None:
             decl_path,
             runtime_covers,
         )
-        # The source covers every arch this declaration shipped, so it belongs to
-        # no single arch tree: always <root>/<decl_id>/.
+        # The source covers every target this declaration shipped, so it belongs to
+        # no single target tree: always <root>/<decl_id>/.
         out_dir = os.path.join(args.artifacts_dir, entry)
         out = os.path.join(out_dir, f"aot_{did}_{key.lower()}.cpp")
         pending.append((out_dir, out, src, len(sidecars)))

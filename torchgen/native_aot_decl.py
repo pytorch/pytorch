@@ -30,10 +30,9 @@ class AotDeclaration(Protocol):
     DISPATCH_KEY: str
     KERNEL_MODULE: str
     # Canonical compile targets this op supports (sm strings, e.g.
-    # ("sm_90", "sm_100f")). OPTIONAL in source declarations, so read it
-    # through archs_of(d), never d.ARCHS. The exporter chooses the widest target
-    # compatible with each device architecture supported by the containing build;
-    # gen_aot_lib gates on the artifacts actually shipped.
+    # ("sm_90", "sm_100f")). The exporter chooses the widest target compatible
+    # with each device architecture supported by the containing build, preferring
+    # an f target when coverage is equal; gen_aot_lib gates on shipped artifacts.
     ARCHS: tuple[str, ...]
 
     def kernel_precompile_grid(self) -> list[dict]: ...
@@ -81,13 +80,26 @@ _OPTIONAL_FNS = {
 FAMILY_TARGET_DEVICES = {
     "sm_100f": ((10, 0), (10, 3), (10, 7)),
     "sm_103f": ((10, 3), (10, 7)),
+    "sm_110f": ((11, 0),),
     "sm_120f": ((12, 0), (12, 1)),
     "sm_121f": ((12, 1),),
 }
 
+# Device capabilities understood by selection and generated routing. Some are
+# runtime-only: they need not be compiler targets when an earlier family target
+# covers them.
+KNOWN_DEVICE_CAPABILITIES = (
+    (9, 0),
+    (10, 0),
+    (10, 3),
+    (10, 7),
+    (11, 0),
+    (12, 0),
+    (12, 1),
+)
 
-# Compiler targets offered by the default ARCHS. Runtime-only family members need
-# not appear here; a build architecture selects among an op's declared targets.
+# Compiler targets declarations may offer. Runtime-only family members need not
+# appear here; a build architecture selects among an op's declared targets.
 KNOWN_ARCHES = (
     "sm_90",
     "sm_90a",
@@ -97,6 +109,9 @@ KNOWN_ARCHES = (
     "sm_103",
     "sm_103f",
     "sm_103a",
+    "sm_110",
+    "sm_110f",
+    "sm_110a",
     "sm_120",
     "sm_120f",
     "sm_120a",
@@ -104,12 +119,6 @@ KNOWN_ARCHES = (
     "sm_121f",
     "sm_121a",
 )
-
-# Default ARCHS covers every compiler target known to native-AOT. Declarations
-# override it to state their own ISA and tuning constraints.
-# The same tuple as KNOWN_ARCHES today, named separately because "the tooling can
-# target this arch" is not "every declaration's kernels work on it".
-_DEFAULT_ARCHS = KNOWN_ARCHES
 
 _SM_RE = r"sm_\d+[af]?"
 
@@ -135,11 +144,8 @@ def load_by_path(name: str, path: str):
 
 
 def archs_of(d: AotDeclaration) -> tuple[str, ...]:
-    """The declaration's architectures, defaulted when it omits ARCHS.
-
-    Read this instead of d.ARCHS: ARCHS is optional in a source
-    declaration and the loader validates it without writing it back."""
-    return tuple(getattr(d, "ARCHS", _DEFAULT_ARCHS))
+    """The declaration's validated compiler targets."""
+    return tuple(d.ARCHS)
 
 
 # Majors a generated gate could plausibly match. Narrow on purpose: see cc_of.
@@ -150,6 +156,24 @@ _KNOWN_MAJORS = range(3, 13)
 # str.isdigit(): both are Unicode-aware, and full-width or Arabic-Indic digits
 # then read as an ordinary capability.
 _SM_SPELLING = re.compile(r"sm_([1-9][0-9]{1,2})([af]?)")
+
+
+def _parse_arch(arch: str) -> tuple[tuple[int, int], str]:
+    """Validated ``sm`` spelling -> (compute capability, feature suffix)."""
+    m = _SM_SPELLING.fullmatch(arch)
+    if m is None:
+        raise RuntimeError(
+            f"cannot read a compute capability from arch {arch!r}: expected "
+            f"sm_<major><minor>[a|f], e.g. sm_90a, sm_100f or sm_100"
+        )
+    major, minor = divmod(int(m.group(1)), 10)
+    if major not in _KNOWN_MAJORS:
+        raise RuntimeError(
+            f"arch {arch!r} parses as compute capability {major}.{minor}, "
+            f"outside the known range {_KNOWN_MAJORS.start}-"
+            f"{_KNOWN_MAJORS.stop - 1}; a gate for it would match no device"
+        )
+    return (major, minor), m.group(2)
 
 
 def cc_of(arch: str) -> tuple[int, int]:
@@ -168,43 +192,30 @@ def cc_of(arch: str) -> tuple[int, int]:
     100.0), so the digit count in _SM_SPELLING is there for the DIAGNOSTIC: a
     malformed string should be reported as unreadable, not as hardware that does
     not exist."""
-    m = _SM_SPELLING.fullmatch(arch)
-    if m is None:
-        raise RuntimeError(
-            f"cannot read a compute capability from arch {arch!r}: expected "
-            f"sm_<major><minor>[a|f], e.g. sm_90a, sm_100f or sm_100"
-        )
-    major, minor = divmod(int(m.group(1)), 10)
-    if major not in _KNOWN_MAJORS:
-        raise RuntimeError(
-            f"arch {arch!r} parses as compute capability {major}.{minor}, "
-            f"outside the known range {_KNOWN_MAJORS.start}-"
-            f"{_KNOWN_MAJORS.stop - 1}; a gate for it would match no device"
-        )
-    return major, minor
+    return _parse_arch(arch)[0]
 
 
 def suffix_of(arch: str) -> str:
     """The CUDA feature-set suffix ("a", "f", or "") of a validated target."""
-    # cc_of owns the diagnostic for malformed strings and the known-major check.
-    cc_of(arch)
-    match = _SM_SPELLING.fullmatch(arch)
-    if match is None:
-        raise AssertionError(f"cc_of accepted an unparsable arch {arch!r}")
-    return match.group(2)
+    return _parse_arch(arch)[1]
 
 
 def target_devices(target: str) -> tuple[tuple[int, int], ...]:
     """Known device capabilities on which ``target`` can run."""
-    target_cc = cc_of(target)
-    if suffix_of(target) != "f":
+    target_cc, suffix = _parse_arch(target)
+    if suffix == "a":
         return (target_cc,)
-    devices = FAMILY_TARGET_DEVICES.get(target)
-    if devices is None:
-        raise RuntimeError(
-            f"family-specific target {target} has no entry in FAMILY_TARGET_DEVICES"
-        )
-    return devices
+    if suffix == "f":
+        devices = FAMILY_TARGET_DEVICES.get(target)
+        if devices is None:
+            raise RuntimeError(
+                f"family-specific target {target} has no entry in FAMILY_TARGET_DEVICES"
+            )
+        return devices
+    major, minor = target_cc
+    return tuple(
+        cc for cc in KNOWN_DEVICE_CAPABILITIES if cc[0] == major and cc[1] >= minor
+    )
 
 
 def target_can_run_on(target: str, device_cc: tuple[int, int]) -> bool:
@@ -242,7 +253,7 @@ def compatible_targets(
 def widest_compatible_target(
     targets: tuple[str, ...] | list[str], device_cc: tuple[int, int]
 ) -> str | None:
-    """The broadest declared target that can run on ``device_cc``."""
+    """The broadest declared target for ``device_cc``, preferring f on a tie."""
     compatible = [target for target in targets if target_can_run_on(target, device_cc)]
     if not compatible:
         return None
@@ -257,8 +268,8 @@ def widest_compatible_target(
 
 
 def known_device_capabilities() -> frozenset[tuple[int, int]]:
-    """Device capabilities covered by at least one known compile target."""
-    return frozenset(cc for target in KNOWN_ARCHES for cc in target_devices(target))
+    """Device capabilities understood by native-AOT selection and routing."""
+    return frozenset(KNOWN_DEVICE_CAPABILITIES)
 
 
 def _validate_family_targets() -> None:
@@ -279,6 +290,8 @@ def _validate_family_targets() -> None:
                 f"{target}: devices must have major {target_major} and minor >= "
                 f"{target_minor}"
             )
+        if any(device not in KNOWN_DEVICE_CAPABILITIES for device in devices):
+            raise AssertionError(f"{target}: devices must all be known capabilities")
     for target in KNOWN_ARCHES:
         target_devices(target)
 
@@ -306,6 +319,13 @@ def _validate(d, path: str, label: str) -> None:
     for const in _REQUIRED_CONSTS:
         if not isinstance(getattr(d, const, None), str):
             raise RuntimeError(f"{path}: {label} missing or non-str constant {const}")
+    if d.DISPATCH_KEY != "CUDA":
+        raise RuntimeError(
+            f"{path}: {label} native-AOT currently supports only CUDA, got "
+            f"DISPATCH_KEY={d.DISPATCH_KEY!r}"
+        )
+    if not hasattr(d, "ARCHS"):
+        raise RuntimeError(f"{path}: {label} missing required constant ARCHS")
 
     for name, arity in _REQUIRED_FNS.items():
         if not callable(getattr(d, name, None)):
@@ -316,9 +336,6 @@ def _validate(d, path: str, label: str) -> None:
         if getattr(d, name, None) is not None:
             _check_arity(d, name, arity, path)
 
-    # Validate ARCHS but do NOT write it back: a validating loader that
-    # mutates its input leaves the source module and the declaration
-    # disagreeing. archs_of() applies the default at every read instead.
     archs = archs_of(d)
     if not archs or not all(
         isinstance(a, str) and re.fullmatch(_SM_RE, a) for a in archs
@@ -335,6 +352,10 @@ def _validate(d, path: str, label: str) -> None:
             target_devices(a)
         except RuntimeError as e:
             raise RuntimeError(f"{path}: {label} ARCHS entry {a!r}: {e}") from e
+        if a not in KNOWN_ARCHES:
+            raise RuntimeError(
+                f"{path}: {label} ARCHS entry {a!r} is not a known compiler target"
+            )
 
     grid = d.kernel_precompile_grid()
     if not isinstance(grid, list) or not grid:
