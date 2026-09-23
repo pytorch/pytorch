@@ -475,7 +475,11 @@ def _default_all_gather_output_fn(
         split_with_sizes_out,
         world_size,
     )
-    _reassemble_all_gather_outputs(reorder_infos, world_size)
+    outputs = tuple(out for _, out, _ in reorder_infos if not out.is_inference())
+    with torch.autograd._unsafe_preserve_version_counter(outputs):
+        for copy_output, output, layout in reorder_infos:
+            chunks = copy_output.view(world_size, layout.outer_size, -1).unbind(0)
+            torch.cat(chunks, dim=1, out=output.view(layout.outer_size, -1))
 
 
 @torch.no_grad()
@@ -523,17 +527,6 @@ def _copy_all_gather_outputs(
         torch.ops.fsdp.split_with_sizes_copy(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
-
-
-def _reassemble_all_gather_outputs(
-    reorder_infos: list[tuple[torch.Tensor, torch.Tensor, _AllGatherOutputLayout]],
-    world_size: int,
-) -> None:
-    outputs = tuple(out for _, out, _ in reorder_infos if not out.is_inference())
-    with torch.autograd._unsafe_preserve_version_counter(outputs):
-        for copy_output, output, layout in reorder_infos:
-            chunks = copy_output.view(world_size, layout.outer_size, -1).unbind(0)
-            torch.cat(chunks, dim=1, out=output.view(layout.outer_size, -1))
 
 
 def _default_reduce_scatter_input_fn(
