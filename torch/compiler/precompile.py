@@ -2,13 +2,12 @@
 
 Prototype API: capture ``fn`` ahead of time from the caller's own calls and lower
 it to a self-contained Python source artifact plus an acceleration cache, then
-reload it in a fresh process. This module exports the types a capture takes and
-returns: the ``MakeFxTracer`` configuration, the ``Capture`` handle, the
-``PrecompiledRunnable`` a load returns, and the ``PrecompileSummary`` report; the
-entry points that produce and consume them follow in later commits. See Note
-[precompile programming model] in ``torch/_precompile.py`` for the contract.
-Signatures, error types and the artifact format may change between releases
-without a deprecation cycle.
+reload it in a fresh process with :func:`load`. This module exports the types a
+capture takes and returns: the ``MakeFxTracer`` configuration, the ``Capture``
+handle, the ``PrecompiledRunnable`` a load returns and the ``PrecompileSummary``
+report. See Note [precompile programming model]
+in ``torch/_precompile.py`` for the contract. Signatures, error types and the
+artifact format may change between releases without a deprecation cycle.
 
 Distinct from ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
 guard-serialization caching mode), despite the shared word.
@@ -18,6 +17,7 @@ import typing
 
 from torch._precompile import (
     Capture,
+    load,
     MakeFxTracer,
     PrecompiledRunnable,
     PrecompileError,  # noqa: F401
@@ -32,6 +32,8 @@ from torch.compiler._precompile_types import PrecompileSummary
 # Sphinx) resolves them under torch.compiler.precompile, where they are re-exported.
 # Their attributes are documented in the class docstring: Sphinx reads a bare
 # attribute docstring from the source of sys.modules[cls.__module__], now this file.
+# load is re-homed where it is defined: a function's annotations resolve through
+# its own globals, not its __module__.
 for _t in (Capture, MakeFxTracer, PrecompiledRunnable, PrecompileSummary):
     # torch._precompile uses ``from __future__ import annotations``, and
     # typing.get_type_hints resolves a class's string annotations through its
@@ -50,4 +52,10 @@ del typing  # not part of the public surface
 # (torch.compiler.PrecompileError, for the conventional ``except`` spelling), so
 # its __module__ is "torch.compiler". It is re-exported here only so
 # ``torch.compiler.precompile.PrecompileError`` also resolves.
-__all__ = ["Capture", "MakeFxTracer", "PrecompiledRunnable", "PrecompileSummary"]
+__all__ = [
+    "load",
+    "Capture",
+    "MakeFxTracer",
+    "PrecompiledRunnable",
+    "PrecompileSummary",
+]

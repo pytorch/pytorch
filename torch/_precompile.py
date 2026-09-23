@@ -3,8 +3,9 @@
 
 ``torch/compiler/precompile.py`` re-exports the public types defined here --
 ``Capture``, ``MakeFxTracer``, ``PrecompiledRunnable`` -- beside
-``PrecompileSummary``; the caller-driven entry points that produce and consume
-them (``capture`` and ``load``) are added by the commits that follow this one.
+``PrecompileSummary``, and ``load``, defined here, which reconstructs a runnable
+from the pair a capture wrote; the ``capture`` entry point that produces the pair
+is added by the commit that follows this one.
 ``PrecompiledModule`` drives a NON-STRICT make_fx trace of one execution of ``fn``
 and renders it as a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``: with ``backend="inductor"`` (the default) the
@@ -188,7 +189,7 @@ it.
 #    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
 #    run. The code_hash binds the cache to its python_code:
-#    load() rejects a (code, cache) pair from different precompile() calls (same
+#    load() rejects a (code, cache) pair from different precompile captures (same
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
 # self-contained: ``python_code`` runs on its own -- it inlines the composed graph
@@ -206,7 +207,7 @@ it.
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair that did not come from the same precompile() call.
+# (python_code, cache) pair that did not come from the same precompile capture.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -271,10 +272,10 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
-# The public types defined here (``Capture``, ``MakeFxTracer``, ``PrecompiledRunnable``)
-# are re-exported by torch/compiler/precompile.py and ``PrecompileError`` by
-# torch/compiler/__init__.py; they are deliberately kept out of this private module's
-# ``__all__`` so test_public_bindings sees a single public location for each.
+# The public surface (``capture``, ``load`` and the types they take and return) is
+# re-exported by torch/compiler/precompile.py, and ``PrecompileError`` by
+# torch/compiler/__init__.py; both re-home ``__module__`` there. This private module
+# therefore exports nothing, so test_public_bindings sees one public location.
 __all__: list[str] = []
 
 
@@ -2357,7 +2358,7 @@ def _read_artifact(
 def _runnable_from_pair(python_code: str, cache: bytes) -> PrecompiledRunnable:
     """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
-    The loader core the module's ``load`` builds on.
+    The core of :func:`load`, which reads the pair off disk first.
     """
     # Unpickling the cache references classes in AOTAutograd's runtime; import
     # dynamo first so that import completes in a non-circular order (otherwise
@@ -2385,7 +2386,7 @@ def _runnable_from_pair(python_code: str, cache: bytes) -> PrecompiledRunnable:
             _CACHE_VERSION
         ):
             log.warning(
-                "torch.compiler.precompile.load got a cache with format=%r "
+                "torch.compiler.precompile got a cache with format=%r "
                 "version=%r, expected %r / %r; it is likely from a different torch "
                 "build. Falling back to JIT from python_code.",
                 blob.get("format"),
@@ -2399,7 +2400,7 @@ def _runnable_from_pair(python_code: str, cache: bytes) -> PrecompiledRunnable:
                 raise PrecompileError(
                     f"cache backend {blob.get('backend')!r} does not match the "
                     f"python_code backend {backend!r}; the cache and python_code "
-                    "came from different precompile() calls."
+                    "came from different precompile captures."
                 )
             # Reject a cache whose code_hash does not match this python_code (a
             # mismatched pairing); see Note [precompile programming model], invariant 7.
@@ -2409,15 +2410,15 @@ def _runnable_from_pair(python_code: str, cache: bytes) -> PrecompiledRunnable:
                     "cache does not match python_code (its code_hash "
                     f"{blob.get('code_hash')!r} != sha256(python_code) "
                     f"{expected_code_hash!r}); the cache and python_code came from "
-                    "different precompile() calls. Pair each cache with the "
-                    "python_code from the same precompile() call."
+                    "different precompile captures. Pair each cache with the "
+                    "python_code from the same capture."
                 )
             artifact = blob.get("artifact")
     except PrecompileError:
         raise
     except Exception as e:
         log.warning(
-            "torch.compiler.precompile.load could not read the cache envelope (%s: %s); the "
+            "torch.compiler.precompile could not read the cache envelope (%s: %s); the "
             "cache is likely corrupt or from a different torch build. Falling back "
             "to JIT from python_code.",
             type(e).__name__,
@@ -2435,7 +2436,7 @@ def _runnable_from_pair(python_code: str, cache: bytes) -> PrecompiledRunnable:
             torch.compiler.load_cache_artifacts(artifact)
         except Exception as e:
             log.warning(
-                "torch.compiler.precompile.load could not prime the cache from the "
+                "torch.compiler.precompile could not prime the cache from the "
                 "artifact bundle (%s: %s); it is likely stale or from a different "
                 "torch build. Falling back to JIT from python_code.",
                 type(e).__name__,
@@ -2449,3 +2450,50 @@ def _runnable_from_pair(python_code: str, cache: bytes) -> PrecompiledRunnable:
     forward = _make_inlined_forward(python_code)
 
     return PrecompiledModule._from_loaded(forward, backend=backend)
+
+
+def load(
+    artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
+) -> PrecompiledRunnable:
+    """Reconstruct a runnable from the two files a precompile capture wrote.
+
+    .. warning::
+
+        This is a prototype API. Its signature, error types and artifact
+        format may change between releases without a deprecation cycle.
+
+    Name the two files a precompile capture wrote -- the ``python_code`` artifact
+    and its ``cache``. A readable, current-format cache loads only
+    against the ``python_code`` it was emitted with (it carries a sha256 of exactly
+    those bytes); an unreadable or other-format cache is ignored with a warning.
+
+    The driver runs from ``python_code`` -- the single source of truth for the whole
+    calling convention. ``load`` reads the source's ``BACKEND``, checks the cache's
+    ``backend`` tag against it, primes the inductor kernel caches when the cache
+    carries a bundle so a warm reload loads precompiled kernels instead of
+    JIT-compiling, and then exec's ``python_code``. With no usable cache it degrades to JIT'ing from
+    ``python_code``. Both files are trusted, EXECUTABLE input: load only artifacts
+    you produced or otherwise trust.
+
+    Call the result with the SAME argument structure ``fn`` took -- the model(s)
+    in their original positions plus the runtime inputs. The runtime model must
+    match the captured model's parameter/buffer structure; precompile re-derives
+    the param/buffer list from it. The result is a
+    :class:`torch.compiler.precompile.PrecompiledRunnable`.
+
+    Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
+    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend`` or
+    ``code_hash`` does not match ``python_code`` -- the pair came from different
+    captures. A cache whose ``format``/``version`` does not match (a foreign or
+    different-build envelope) is NOT fatal: the cache is acceleration only, so
+    ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
+    """
+    torch._C._log_api_usage_once("torch.compiler.precompile.load")
+    python_code, cache = _read_artifact(artifact_path, cache_path)
+    return _runnable_from_pair(python_code, cache)
+
+
+# The public surface is a module (torch.compiler.precompile); load is defined here
+# but reported and re-exported under that path, so introspection
+# (test_public_bindings, Sphinx, help()) resolves it there.
+load.__module__ = "torch.compiler.precompile"
