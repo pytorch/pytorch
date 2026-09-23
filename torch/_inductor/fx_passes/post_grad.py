@@ -255,9 +255,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
-        GraphTransformObserver(gm, "reuse_dtype_conversions").apply_graph_pass(
-            reuse_dtype_conversions
-        )
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
                 gm, "partitioned_scatter_optimization"
@@ -316,6 +313,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
+
+    # This pass adds data dependencies, so run it after mandatory ordering
+    # dependencies are explicit and the graph is topologically sorted.
+    if config.pattern_matcher:
+        GraphTransformObserver(gm, "reuse_dtype_conversions").apply_graph_pass(
+            reuse_dtype_conversions
+        )
 
     GraphTransformObserver(gm, "move_constructors_to_cuda").apply_graph_pass(
         move_constructors_to_gpu
@@ -1444,10 +1448,6 @@ def reuse_dtype_conversions(graph: torch.fx.Graph) -> None:
     and replaces the second conversion with:
         replacement = view_op(base_conversion, ...)
     """
-    # RNG ordering dependencies are added later in the post-grad pipeline.
-    if config.fallback_random:
-        return
-
     # Skip if the graph contains mutation beyond the copy_ output epilogue.
     if graph.find_nodes(op="call_function", target=aten.set_.default):
         return
