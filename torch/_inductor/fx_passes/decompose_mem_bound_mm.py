@@ -11,7 +11,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 from .. import config
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
-from ..utils import is_bf16x9_matmul
+from ..utils import is_bf16x9_matmul, is_gpu
 from .split_cat import construct_pattern_matcher_pass
 
 
@@ -53,6 +53,11 @@ def check_device(a: Tensor, b: Tensor, device="cuda") -> bool:
     return (a.device.type == b.device.type) and (b.device.type == device)
 
 
+def check_gpu_device(a: Tensor, b: Tensor) -> bool:
+    device_type = a.device.type
+    return device_type == b.device.type and is_gpu(device_type)
+
+
 def realize_inputs(inputs: list[torch.fx.Node]):
     for inp in inputs:
         if isinstance(inp, torch.fx.node.Node):
@@ -71,9 +76,7 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         or is_bf16x9_matmul(mat1.device.type, mat1.dtype)
     ):
         return False
-    if check_device(mat1, mat2, device="cuda") or check_device(
-        mat1, mat2, device="xpu"
-    ):
+    if check_gpu_device(mat1, mat2):
         if mat1.shape[0] < min_first_dimension_decomposition:
             return False
         # 2 of m, n, k must be <= MAX_OTHER_DIMENSION_DECOMPOSITION
@@ -155,10 +158,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
         "skip_dynamic_shape_dim_check", False
     ):
         return (
-            (
-                check_device(mat1, mat2, device="cuda")
-                or check_device(mat1, mat2, device="xpu")
-            )
+            check_gpu_device(mat1, mat2)
             and statically_known_true(
                 mat1.shape[0] >= min_first_dimension_decomposition
             )
@@ -179,10 +179,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
     # case 2: we decompose mm if the input is dynamic shape
     else:
         return (
-            (
-                check_device(mat1, mat2, device="cuda")
-                or check_device(mat1, mat2, device="xpu")
-            )
+            check_gpu_device(mat1, mat2)
             and (
                 statically_known_true(
                     mat1.shape[0] >= min_first_dimension_decomposition
