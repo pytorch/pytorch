@@ -2203,6 +2203,8 @@ class MockNode:
 class TestProfilerDevice(TestCase):
     """Tests that should run on multiple backends (CPU, CUDA, XPU, etc.)."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def payload(self, device="cpu", tensor_size=10):
         x = torch.randn(tensor_size, tensor_size).to(device)
         y = torch.randn(tensor_size, tensor_size).to(device)
@@ -2310,7 +2312,6 @@ class TestProfilerDevice(TestCase):
                 report = json.load(f)
                 self._validate_basic_json(report["traceEvents"], device_available)
 
-    @onlyOn(["cpu", "cuda"])
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self, device):
         device_type = device.split(":")[0]
