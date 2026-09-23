@@ -589,7 +589,8 @@ static void _rrelu_with_noise_train(
   Tensor tmp_tensor = output.contiguous();
   scalar_t* output_data = tmp_tensor.mutable_data_ptr<scalar_t>();
   const scalar_t* input_data = input.const_data_ptr<scalar_t>();
-  scalar_t* noise_data = noise.mutable_data_ptr<scalar_t>();
+  Tensor tmp_noise = noise.contiguous();
+  scalar_t* noise_data = tmp_noise.mutable_data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
   for (const auto i : c10::irange(input.numel())) {
@@ -606,6 +607,9 @@ static void _rrelu_with_noise_train(
   if (!output.is_contiguous()) {
     output.copy_(tmp_tensor);
   }
+  if (!noise.is_contiguous()) {
+    noise.copy_(tmp_noise);
+  }
 }
 
 Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
@@ -617,8 +621,6 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     Tensor& output) {
   TORCH_CHECK(self.sym_sizes() == noise.sym_sizes(), "noise tensor shape must match self tensor shape. Got self.shape = ", self.sym_sizes(), " noise.shape = ", noise.sym_sizes());
   if (training) {
-    // The shape check above also passes for an expanded (0-stride) noise.
-    TORCH_CHECK(noise.is_contiguous(), "rrelu_with_noise: noise tensor must be contiguous, got one with sizes ", noise.sizes(), " and strides ", noise.strides());
     // Not a structured op, so nothing else has sized output for us.
     resize_output(output, self.sizes());
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {

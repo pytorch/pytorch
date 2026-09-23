@@ -12965,15 +12965,15 @@ if __name__ == '__main__':
         self.assertEqual(out.shape, x.shape)
 
     @onlyCPU
-    def test_rrelu_with_noise_expanded_noise_rejected(self, device):
-        # An expanded noise's storage holds one element; the same defect as
-        # an undersized out.
+    def test_rrelu_with_noise_expanded_noise(self, device):
+        # An expanded noise's storage holds one element; writing through its
+        # data pointer used to go past the storage. It materializes now.
         x = torch.randn(64, device=device)
         expanded_noise = torch.zeros(1, device=device).expand(64)
         out = torch.empty(64, device=device)
-        with self.assertRaisesRegex(RuntimeError, "noise tensor must be contiguous"):
-            torch._C._nn.rrelu_with_noise(
-                x, expanded_noise, 0.1, 0.3, True, None, out=out)
+        torch._C._nn.rrelu_with_noise(x, expanded_noise, 0.1, 0.3, True, None, out=out)
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(out, x * expanded_noise)
 
     @onlyCPU
     def test_rrelu_bounds_validation(self, device):
