@@ -845,15 +845,19 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
-        # Cache for sources resolved via MRO walk, keyed by id(obj).
-        # When the same descriptor (e.g. property) is reached from multiple
-        # subclasses, we reuse the first source to avoid redundant guards.
+        # Cache for sources resolved via MRO walk, keyed by (id(owning class),
+        # name). When the same descriptor (e.g. property) is reached from
+        # multiple instances or subclasses, we reuse the first source to avoid
+        # redundant guards.
         # We thought of rolling this in variable_tracker_cache but here
         # different sources point to the same object, we also don't want it to
         # go through the side effects cache because even though these objects
         # are same, we don't want OBJECT_ALIASING guards on them. For these
         # objects, we have DICT_CONTAINS absent guards on the mro walk, so there
         # is no need of the OBJECT_ALIASING guards.
+        # Keyed on the owner rather than the descriptor: one descriptor object
+        # can sit in several unrelated classes, and a source through one of
+        # them does not notice the attribute being reassigned on another.
         self.mro_source_cache: dict[tuple[int, str], DictGetItemSource] = {}
         # Tracks (id(klass), attr_name) pairs that already have a
         # DICT_CONTAINS absent guard installed during MRO walks.  When
