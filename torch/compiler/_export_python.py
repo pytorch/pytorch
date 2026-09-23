@@ -17,10 +17,12 @@ responsibility.
 """
 
 import copy
+import errno
 import functools
 import inspect
 import logging
 import os
+import secrets
 import threading
 from collections.abc import Callable, Sequence
 from typing import Any, cast, TypeVar
@@ -34,6 +36,92 @@ log = logging.getLogger(__name__)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+
+
+# os.link failures that mean the filesystem cannot do hard links at all, as opposed to
+# a real I/O problem (a full disk, a bad permission) that must not be swallowed.
+_NO_HARDLINK_ERRNOS = frozenset(
+    getattr(errno, name)
+    for name in ("EPERM", "EOPNOTSUPP", "ENOTSUP", "EXDEV", "EMLINK", "ENOSYS")
+    if hasattr(errno, name)
+)
+
+
+def _atomic_publish(path: str, data: bytes) -> bool:
+    # Publish a fully-written file, never a partial one, and report whether this call
+    # is the writer that published it. A hard link is the no-replace publish: exactly
+    # one concurrent writer wins and every loser loads that winner rather than exec'ing
+    # its own divergent source. Only errnos that mean "this filesystem has no hard
+    # links" fall back to replace (last-writer-wins, still never partial); a full disk
+    # or a permissions problem must surface rather than silently weaken the guarantee.
+    dir_name = os.path.dirname(path) or "."
+    base = os.path.basename(path)
+    tmp = os.path.join(
+        dir_name,
+        f".{base}.{os.getpid()}.{threading.get_ident()}.{secrets.token_hex(8)}.tmp",
+    )
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return False
+        except OSError as e:
+            if e.errno not in _NO_HARDLINK_ERRNOS:
+                raise
+            log.warning(
+                "torch.compiler.export_python: %s has no hard links (%s), so %s is "
+                "published last-writer-wins; concurrent first writers may each run "
+                "their own generated source.",
+                dir_name,
+                e.strerror,
+                path,
+            )
+            os.replace(tmp, path)
+        return True
+    finally:
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+
+
+# Elements below this fraction of the reference's peak are too small for a relative diff
+# to say anything; they are covered by the absolute term instead.
+_REL_REPORT_FLOOR = 1e-6
+
+
+def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
+    """torch.allclose, but tolerant of dtypes that have no comparison kernel.
+
+    float8 reaches allclose and dies inside it on a missing mul (as NotImplementedError,
+    which is a RuntimeError); promote and compare there rather than failing an artifact
+    that is perfectly honest.
+    """
+    try:
+        return bool(torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True))
+    except RuntimeError:
+        return bool(
+            torch.allclose(a.double(), b.double(), rtol=rtol, atol=atol, equal_nan=True)
+        )
+
+
+def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
+    """Where ``t`` is finite, or None for a dtype that cannot answer.
+
+    float8 is is_floating_point() but has no isfinite kernel, so asking crashes the
+    check on an artifact that is perfectly honest.
+    """
+    if not t.is_floating_point():
+        return None
+    try:
+        return torch.isfinite(t)
+    except RuntimeError:
+        return None
 
 
 def _precompile_error(msg: str) -> Exception:
@@ -80,7 +168,7 @@ class ExportedPythonArtifact:
         # marker left by a thread it did not inherit.
         self._materializing: tuple[int, int] | None = None
 
-    def _precompile_and_save(self, args: tuple[Any, ...]) -> str:
+    def _precompile_and_save(self, args: tuple[Any, ...]) -> tuple[str, bool]:
         example = self._example_inputs
         if example is None:
             # Capture runs fn once on the example inputs (real-mode make_fx), which
@@ -114,9 +202,16 @@ class ExportedPythonArtifact:
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
-            f.write(code)
-        return code
+        if _atomic_publish(self._path, code.encode("utf-8")):
+            return code, False
+        # Lost the publish race; the winner's file is complete and already linked.
+        winner = self._load_from_disk()
+        if winner is None:
+            raise _precompile_error(
+                f"torch.compiler.export_python: another writer published {self._path} "
+                "and it was deleted before this call could load it. Retry."
+            )
+        return winner, True
 
     def _load_from_disk(self) -> str | None:
         # None means "not there after all" -- the presence gate raced a peer deleting
@@ -185,7 +280,7 @@ class ExportedPythonArtifact:
         code = self._load_from_disk() if os.path.exists(self._path) else None
         from_disk = code is not None
         if code is None:
-            code = self._precompile_and_save(args)
+            code, from_disk = self._precompile_and_save(args)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
         self._decompositions = None

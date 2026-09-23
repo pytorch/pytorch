@@ -38,6 +38,69 @@ from torch.testing._internal.common_utils import (
 )
 
 
+class _MisreportedDevice(torch.Tensor):
+    """A wrapper subclass reporting a device that differs from the one holding its bytes.
+
+    torch.load builds exactly this from stock inputs: map_location="cuda" gives a bare
+    "cuda" over a "cuda:0" payload, and map_location={"cuda:0": "cpu"} gives a "cuda:0"
+    wrapper over a "cpu" payload. Both axes have to be decided on the leaf.
+    """
+
+    @staticmethod
+    def __new__(cls, payload, reported):
+        return torch.Tensor._make_wrapper_subclass(
+            cls, payload.shape, dtype=payload.dtype, device=reported
+        )
+
+    def __init__(self, payload, reported):
+        self.payload = payload
+
+    def __tensor_flatten__(self):
+        return ["payload"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner, ctx, outer_size, outer_stride):
+        payload = inner["payload"]
+        return _MisreportedDevice(payload, payload.device)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        raise NotImplementedError
+
+
+@contextlib.contextmanager
+def _default_dtype(dtype):
+    previous = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(previous)
+
+
+@contextlib.contextmanager
+def _deterministic(enabled):
+    previous = torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(enabled)
+    try:
+        yield
+    finally:
+        torch.use_deterministic_algorithms(previous)
+
+
+def _lying_device(device):
+    """A device label differing from `device` in INDEX only."""
+    real = torch.device(device)
+    if real.index is not None:
+        return torch.device(real.type)
+    return torch.device(real.type, 0)
+
+
+def _type_lying_device(device):
+    """A device label differing from `device` in TYPE. Requires no such hardware."""
+    return torch.device("cpu" if torch.device(device).type == "cuda" else "cuda", 0)
+
+
 # A module-level (global) model + a function referencing it, to exercise the
 # constant-tensor guard against a baked global.
 _GLOBAL_TENSOR = torch.randn(3)
@@ -4371,6 +4434,19 @@ class TestPrecompileNumerics(TestCase):
 instantiate_device_type_tests(TestPrecompileNumerics, globals())
 
 
+def _artifact_of(wrapped):
+    # The decorator deliberately hands back a plain function with no handle on the
+    # artifact, so reach it through the wrapper's closure. Only tests need this; it is
+    # what lets them assert on load-time decisions like whether the lean entry bound.
+    from torch.compiler._export_python import ExportedPythonArtifact
+
+    return next(
+        cell.cell_contents
+        for cell in wrapped.__closure__
+        if isinstance(cell.cell_contents, ExportedPythonArtifact)
+    )
+
+
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestExportPython(TestCase):
     # torch.compiler.export_python is the disk-cached decorator over
@@ -5001,6 +5077,100 @@ class TestExportPython(TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_same_path_concurrent_publish_has_one_winner(self, device):
+        # Two PROCESSES racing a fresh path is the real scenario (in one process,
+        # materialization is serialized by the capture lock, so the second caller just
+        # finds the file). Both must end up running the winner's artifact, never their
+        # own divergent source, and no temp file may be left beside it.
+        code = textwrap.dedent(
+            f"""
+            import os, sys, torch
+            path, marker, barrier_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+
+            real = torch.compiler.precompile
+            def fake(fn, *args, **kwargs):
+                return "def forward(x):\\n    return x + " + marker + "\\n", b""
+            torch.compiler.precompile = fake
+
+            @torch.compiler.export_python(path=path, backend="eager")
+            def run(inp):
+                return inp
+
+            # Rendezvous so both processes are inside the presence gate together.
+            open(os.path.join(barrier_dir, marker), "w").close()
+            while len(os.listdir(barrier_dir)) < 2:
+                pass
+            print(int(run(torch.zeros(1, device={device!r})).item()))
+            """
+        )
+        path = self._tmp_path("publish.py")
+        barrier_dir = os.path.join(os.path.dirname(path), "barrier")
+        os.makedirs(barrier_dir, exist_ok=True)
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", code, path, marker, barrier_dir],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for marker in ("1", "2")
+        ]
+        outs = []
+        for proc in procs:
+            stdout, stderr = proc.communicate(timeout=180)
+            self.assertEqual(proc.returncode, 0, stderr)
+            outs.append(stdout.strip().splitlines()[-1])
+        # Same answer in both, and it is one of the two candidate artifacts.
+        self.assertEqual(outs[0], outs[1])
+        self.assertIn(outs[0], ("1", "2"))
+        self.assertEqual(
+            sorted(os.listdir(os.path.dirname(path))),
+            sorted(["barrier", os.path.basename(path)]),
+        )
+
+        # A third, later reader gets that same winner off disk.
+        @torch.compiler.export_python(path=path, backend="eager")
+        def fresh(inp):
+            return inp
+
+        self.assertEqual(int(fresh(torch.zeros(1, device=device)).item()), int(outs[0]))
+
+    def test_publish_falls_back_when_filesystem_has_no_hard_links(self, device):
+        from torch.compiler._export_python import _atomic_publish
+
+        path = self._tmp_path("nolink.py")
+        real_link = os.link
+
+        def no_link(src, dst):
+            raise OSError(errno.EPERM, "operation not permitted")
+
+        with mock.patch.object(os, "link", no_link):
+            with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
+                self.assertTrue(_atomic_publish(path, b"payload"))
+        # Assert on wording only the implementation supplies: the mock's strerror is
+        # interpolated into the same message and would satisfy a looser match.
+        self.assertTrue(any("last-writer-wins" in m for m in logs.output))
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"payload")
+        self.assertEqual(os.listdir(os.path.dirname(path)), [os.path.basename(path)])
+        self.assertIs(os.link, real_link)
+
+    def test_publish_does_not_swallow_real_io_errors(self, device):
+        # Only "this filesystem has no hard links" degrades to last-writer-wins; a full
+        # disk must surface rather than silently weaken first-publisher-wins.
+        from torch.compiler._export_python import _atomic_publish
+
+        path = self._tmp_path("enospc.py")
+
+        def full_disk(src, dst):
+            raise OSError(errno.ENOSPC, "no space left on device")
+
+        with mock.patch.object(os, "link", full_disk):
+            with self.assertRaises(OSError):
+                _atomic_publish(path, b"payload")
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(os.listdir(os.path.dirname(path)), [])
+
     def test_clobbered_non_artifact_source_raises_clean_error(self, device):
         # A clobbered non-artifact source degrades to a clean PrecompileError
         # referencing the path, not a raw KeyError/SyntaxError, so a stale hand-edit
@@ -5273,6 +5443,16 @@ class TestExportPython(TestCase):
         error, concurrent = self._capture_racing_a_concurrent_draw(run, x)
         self.assertIsNone(error)
         self.assertNotEqual(torch.rand(8), concurrent)
+
+    def _rope_artifact(self, device, **kwargs):
+        # Two outputs, both plain allocated buffers: the shape out= is designed for.
+        path = self._tmp_path("out_rope.py")
+
+        @torch.compiler.export_python(path=path, **kwargs)
+        def run(a, b, c, *, out=None):
+            return a * c + b, b * c - a
+
+        return run
 
     def test_untagged_drawing_op_still_restores(self, device):
         # An opaque custom op can draw inside its own kernel with nothing in the graph
