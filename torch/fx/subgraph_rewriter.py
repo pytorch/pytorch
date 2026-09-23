@@ -409,7 +409,7 @@ def _replace_pattern(
             v for v in val_map.values() if v not in match.placeholder_nodes
         ]
 
-        # Hook the output Node of the replacement subgraph in to the
+        # Hook the output Node of the replacement subgraph into the
         # original Graph at the correct location
         if len(match.returning_nodes) != len(copied_returning_nodes):  # type: ignore[arg-type]
             raise AssertionError(
