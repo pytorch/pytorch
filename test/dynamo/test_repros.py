@@ -9838,6 +9838,48 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, torch.tensor([43.0]))
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_mro_source_cache_shared_across_instances(self):
+        # Two instances reaching the same class attribute share one source for
+        # it, rather than aliasing two sources with an OBJECT_ALIASING guard.
+        class Cfg:
+            scale = 2
+
+        class Layer:
+            cfg = Cfg()
+
+        a, b = Layer(), Layer()
+
+        def fn(x):
+            return x * a.cfg.scale + x * b.cfg.scale
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+        entries = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("OBJECT_ALIASING", str(entries[0].guard_manager))
+
+    def test_mro_source_cache_descriptor_shared_by_classes(self):
+        # One descriptor object in two unrelated classes: the source through A
+        # does not see B's attribute being reassigned, so B needs its own.
+        p = property(lambda self: 1.0)
+
+        class A:
+            val = p
+
+        class B:
+            val = p
+
+        a, b = A(), B()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x + a.val + b.val
+
+        x = torch.zeros(1)
+        self.assertEqual(fn(x), torch.tensor([2.0]))
+        B.val = property(lambda self: 100.0)
+        self.assertEqual(fn(x), torch.tensor([101.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_pytree_tree_is_leaf_with_namedtuple(self):
         # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
         from collections import namedtuple
