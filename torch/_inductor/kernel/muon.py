@@ -153,7 +153,7 @@ def match_muon_foreach(
                 ):
                     return None
             current = (
-                result.kwargs["beta"],
+                result.kwargs.get("beta", 1.0),
                 gram_update.kwargs.get("beta", 1.0),
                 gram_update.kwargs.get("alpha", 1.0),
             )
@@ -218,7 +218,13 @@ def _supports(
     shapes: list[tuple[int, int]],
     steps: int,
 ) -> bool:
-    if device.type != "cuda" or dtype is not torch.bfloat16 or steps == 0:
+    if (
+        device.type != "cuda"
+        or torch.version.hip is not None
+        or dtype is not torch.bfloat16
+        or steps == 0
+        or any(m <= 0 or k <= 0 or m % 8 or k % 8 for m, k in shapes)
+    ):
         return False
     from torch._inductor.utils import ensure_cute_available
 
@@ -324,7 +330,11 @@ _PLAN_LOCK = threading.Lock()
 _MAX_CACHED_PLANS = 32
 
 
-@torch.library.custom_op("inductor::grouped_muon", mutates_args=())
+@torch.library.custom_op(
+    "inductor::grouped_muon",
+    mutates_args=(),
+    tags=(torch._C.Tag.cudagraph_unsafe,),
+)
 def grouped_muon(
     inputs: list[torch.Tensor], a: float, b: float, c: float, steps: int, eps: float
 ) -> list[torch.Tensor]:
