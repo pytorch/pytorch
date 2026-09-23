@@ -57,6 +57,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     skipIf,
 )
+from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -93,18 +94,7 @@ def get_profiler_activities(device_type):
 
 
 def setUpModule():
-    if (
-        kineto_available()
-        and torch.cuda.is_available()
-        and ProfilerActivity.CUDA in supported_activities()
-    ):
-        # Kineto's process-global profiler cannot currently upgrade from a
-        # CPU-only first initialization to CUDA-capable profiling. Prime it with
-        # CUDA so CPU-only tests do not poison later CUDA profiler tests.
-        x = torch.ones(1, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]):
-            x + x
-            torch.cuda.synchronize()
+    initialize_kineto_with_cuda()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -2447,8 +2437,8 @@ class TestProfilerDevice(TestCase):
             self.skipTest("Kineto is required")
         device_type = device.split(":")[0]
 
-        with _profile(use_kineto=use_kineto) as prof:
-            t1, t2 = torch.ones(1), torch.ones(1)
+        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
+            t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
             torch.add(t1, t2)
 
         with TemporaryFileName(mode="w+") as fname:
@@ -2459,7 +2449,7 @@ class TestProfilerDevice(TestCase):
                 json.load(f)
 
         # test empty trace
-        with _profile(use_kineto=use_kineto) as prof:
+        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
             pass
         # saving an empty trace
         with TemporaryFileName(mode="w+") as fname:
@@ -2475,20 +2465,6 @@ class TestProfilerDevice(TestCase):
                             if "No Valid Trace Events" in warning:
                                 found_empty_warning = True
                         self.assertTrue(found_empty_warning)
-
-        # Same test but for an accelerator.
-        if device_type == "cpu":
-            return
-
-        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
-            t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
-            torch.add(t1, t2)
-
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            # Now validate the json
-            with open(fname) as f:
-                json.load(f)
 
     def test_memory_profiler(self, device):
         device_type = device.split(":")[0]
