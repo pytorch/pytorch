@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FakeTensor.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
@@ -271,7 +272,7 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   auto input = at::empty({4}, at::device(at::kMeta));
   auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
   auto* input_impl = input.unsafeGetTensorImpl();
-  input_impl->set_and_normalize_fake_device(c10::Device(c10::kCPU));
+  at::set_and_normalize_fake_device(input_impl, c10::Device(c10::kCPU));
   input_impl->set_fake_tensor_mode(mode);
 
   auto result = at::native::as_strided_tensorimpl(input, {2, 2}, {2, 1}, 0);
