@@ -1015,11 +1015,7 @@ class GemmLocalReduceAnalysis:
             value, torch.fx.Node
         ):
             return None
-        normalized = self.graph.normalized_nodes.get(grouped_source)
-        if not isinstance(normalized, NormalizedView):
-            return None
-        source_node = normalized.source
-        layout = grouped_tensor_layout(normalized.shape, tensor_meta_shape(source_node))
+        layout = self.grouped_tensors.get(grouped_source)
         if layout is None:
             return None
         if layout.axis != 0:
@@ -1028,9 +1024,12 @@ class GemmLocalReduceAnalysis:
             if layout.group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
                 return self.match_feed_value(value, grouped_source, layout)
             raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR)
+        normalized = self.graph.normalized_nodes.get(grouped_source)
+        if not isinstance(normalized, NormalizedView):
+            return None
         if layout.group > LOCAL_REDUCE_FRAGMENT_WIDTH:
             raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR)
-        source_meta = source_node.meta.get("val")
+        source_meta = normalized.source.meta.get("val")
         if (
             output_meta is not None
             and source_meta is not None

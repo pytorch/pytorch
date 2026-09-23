@@ -358,7 +358,7 @@ def flex_gemm_epimod(
                     finalize=finalize,
                 )
                 ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-            else:
+            elif local_reduce.stores:
                 reduce_op = grouped_reduce.GroupedLocalReduce(
                     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
                     axis=local_reduce.axis,
