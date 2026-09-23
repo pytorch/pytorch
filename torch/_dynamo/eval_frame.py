@@ -1482,10 +1482,16 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self, msg: str | None = None, wrapping: bool = True) -> None:
+    def __init__(
+        self,
+        msg: str | None = None,
+        wrapping: bool = True,
+        runtime_module_refs: tuple[weakref.ReferenceType[torch.nn.Module], ...] = (),
+    ) -> None:
         super().__init__(callback=None)
         self.msg = msg
         self.wrapping = wrapping
+        self.runtime_module_refs = runtime_module_refs
 
     def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
         # Earlier this code was in the base class _TorchDynamoContext. But we
@@ -1524,31 +1530,32 @@ class DisableContext(_TorchDynamoContext):
             # Hot path (e.g. around custom operators); keep it minimal.
             prior = set_eval_frame(None)
             try:
-                # disable => self.callback is None; _callback_from_stance(None) is
-                # None ("off") for most stances but False (run-only) for
-                # eager_on_recompile. Install only when non-None (skips the
-                # justknob-guarded _maybe_set_eval_frame on the common path).
-                callback = _callback_from_stance(self.callback)
-                if callback is not None:
-                    _maybe_set_eval_frame(callback)
-                try:
-                    # Only export needs the annotation work.
-                    if torch.compiler.is_exporting():
-                        fn_name = getattr(fn, "__name__", type(fn).__name__)
-                        # Skip annotation for __torch_dispatch__ (internal detail).
-                        if fn_name != "__torch_dispatch__":
-                            with fx_traceback.annotate(
-                                {
-                                    "_torchdynamo_disable": True,
-                                    "_torchdynamo_disable_recursive": True,
-                                    "_torchdynamo_disable_method": fn_name,
-                                }
-                            ):
-                                return fn(*args, **kwargs)
-                    return fn(*args, **kwargs)
-                finally:
+                with utils.dynamo_runtime_modules(self.runtime_module_refs):
+                    # disable => self.callback is None; _callback_from_stance(None) is
+                    # None ("off") for most stances but False (run-only) for
+                    # eager_on_recompile. Install only when non-None (skips the
+                    # justknob-guarded _maybe_set_eval_frame on the common path).
+                    callback = _callback_from_stance(self.callback)
                     if callback is not None:
-                        set_eval_frame(None)
+                        _maybe_set_eval_frame(callback)
+                    try:
+                        # Only export needs the annotation work.
+                        if torch.compiler.is_exporting():
+                            fn_name = getattr(fn, "__name__", type(fn).__name__)
+                            # Skip annotation for __torch_dispatch__ (internal detail).
+                            if fn_name != "__torch_dispatch__":
+                                with fx_traceback.annotate(
+                                    {
+                                        "_torchdynamo_disable": True,
+                                        "_torchdynamo_disable_recursive": True,
+                                        "_torchdynamo_disable_method": fn_name,
+                                    }
+                                ):
+                                    return fn(*args, **kwargs)
+                        return fn(*args, **kwargs)
+                    finally:
+                        if callback is not None:
+                            set_eval_frame(None)
             finally:
                 # Restore via _maybe_set_eval_frame so re-installing honors the
                 # enable_compiler_set_eval_frame killswitch; skip when prior None.

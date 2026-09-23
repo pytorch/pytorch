@@ -36,7 +36,10 @@ from torch._dynamo.external_utils import (
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
     counters,
+    dynamo_runtime_modules,
+    DynamoRuntimeModuleRef,
     get_chromium_event_logger,
+    get_dynamo_runtime_module_refs,
     lazy_format_graph_code,
     set_locals_to_steal,
 )
@@ -1233,6 +1236,10 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
+        graph_runtime_module_refs = get_dynamo_runtime_module_refs(graph)
+        runtime_module_refs: tuple[DynamoRuntimeModuleRef, ...] = (
+            graph_runtime_module_refs
+        )
 
         def runtime_wrapper(
             compiled_fn: Callable[..., Any],
@@ -1262,13 +1269,14 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                with _disable(), make_compile_context(self.id):
-                    out = compiled_fn(
-                        inputs, filtered_sizes, scalars, hooks, packed_inputs
-                    )
-                    if self.nan_checker:
-                        self.nan_checker.check(out)
-                    return out
+                with dynamo_runtime_modules(runtime_module_refs):
+                    with _disable(), make_compile_context(self.id):
+                        out = compiled_fn(
+                            inputs, filtered_sizes, scalars, hooks, packed_inputs
+                        )
+                        if self.nan_checker:
+                            self.nan_checker.check(out)
+                        return out
             finally:
                 in_compiled_autograd_region = False
 
@@ -1280,7 +1288,12 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
-        return runtime_wrapper, self.compiler_fn(graph)
+        with dynamo_runtime_modules(graph_runtime_module_refs):
+            compiled_fn = self.compiler_fn(graph)
+        runtime_module_refs = (
+            graph_runtime_module_refs + get_dynamo_runtime_module_refs(compiled_fn)
+        )
+        return runtime_wrapper, compiled_fn
 
     @staticmethod
     def get_all_nodes(args: Sequence[Argument]) -> list[torch.fx.Node]:
