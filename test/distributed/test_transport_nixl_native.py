@@ -64,6 +64,25 @@ def _native_worker(rank, connection, progress_thread):
         connection.send("finished")
         if _receive(connection) != "finished":
             raise AssertionError("unexpected control-plane message")
+        for memory in (source_memory, target_memory, other_memory):
+            transport.unregister_memory(memory)
+        source.add_(10)
+        target.zero_()
+        source_memory = transport.register_memory(source)
+        target_memory = transport.register_memory(target)
+        if source_memory.reused_registration() or target_memory.reused_registration():
+            raise AssertionError("unregistered allocation was reused")
+        connection.send(target_memory.to_remote_buffer())
+        remote_target = _receive(connection)
+        transport.write(source_memory.to_view(), remote_target)
+        connection.send("rewritten")
+        if _receive(connection) != "rewritten":
+            raise AssertionError("unexpected control-plane message")
+        torch.testing.assert_close(
+            target, torch.arange(1024, dtype=torch.float32) + 11 - rank
+        )
+        transport.unregister_memory(source_memory)
+        transport.unregister_memory(target_memory)
         asyncio.run(transport.close_async(timeout=5))
     connection.close()
 
