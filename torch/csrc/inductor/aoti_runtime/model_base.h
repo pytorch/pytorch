@@ -257,8 +257,22 @@ void* mmap(
   return pData;
 }
 
+// length is ignored: this shim only supports unmapping a whole view.
 int munmap(void* addr, size_t length) {
-  if (!UnmapViewOfFile(addr)) {
+  // mmap rounds the file offset down to dwAllocationGranularity and returns
+  // lpMapAddress + iViewDelta, so addr can point into the middle of the view
+  // while UnmapViewOfFile requires the allocation base. VirtualQuery also
+  // succeeds for freed and heap addresses, so check that this really is a
+  // mapped view before unmapping it. Validation failures report EFAULT and an
+  // unmap failure reports EINVAL, so that the caller's strerror() output
+  // distinguishes a bad pointer from a genuine unmap error.
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (VirtualQuery(addr, &mbi, sizeof(mbi)) == 0 || mbi.State == MEM_FREE ||
+      mbi.Type != MEM_MAPPED) {
+    errno = EFAULT;
+    return -1;
+  }
+  if (!UnmapViewOfFile(mbi.AllocationBase)) {
     errno = EINVAL;
     return -1;
   }
@@ -276,8 +290,10 @@ int munmap(void* addr, size_t length) {
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -697,9 +713,8 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
   void* data_ptr = std::malloc(num_bytes);
-  if (!data_ptr) {
-    throw std::bad_alloc();
-  }
+  AOTI_RUNTIME_CHECK(
+      data_ptr, "Failed to allocate " + std::to_string(num_bytes) + " bytes");
   auto deleter = [](void* ptr) { std::free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
@@ -751,8 +766,7 @@ inline size_t pinnedAsyncConstantsCopyStageBufferBytes() {
       std::memory_order_relaxed);
 }
 
-using ConstantMap =
-    std::unordered_map<std::string, MaybeOwningAtenTensorHandle>;
+using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
 // Update the list here if more devices are supported in the future
@@ -886,6 +900,14 @@ class AOTInductorModelBase {
 
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
+#ifdef USE_MMAP_SELF
+    if (self_mmap) {
+      if (munmap(self_mmap, self_mmap_size) != 0) {
+        std::cerr << "Failed to unmap AOTInductor model constants: "
+                  << std::strerror(errno) << '\n';
+      }
+    }
+#endif // USE_MMAP_SELF
 #ifdef USE_CUDA
     if (run_finished_) {
       auto code = cudaEventDestroy(*run_finished_);
@@ -1412,8 +1434,8 @@ class AOTInductorModelBase {
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
     return weights_size;
 #else
-    throw std::runtime_error{
-        "constant blob size is only available for mmap'd weights"};
+    AOTI_RUNTIME_CHECK(
+        false, "constant blob size is only available for mmap'd weights");
 #endif
   }
 
@@ -1422,10 +1444,9 @@ class AOTInductorModelBase {
   }
 
   void update_constants_array_from_map() {
-    if (!constants_map_) {
-      throw std::runtime_error{
-          "constants_map_ was not ready when constants_ is trying to be constructed from it!"};
-    }
+    AOTI_RUNTIME_CHECK(
+        constants_map_,
+        "constants_map_ was not ready when constants_ is trying to be constructed from it!");
     if (!constants_) {
       constants_ =
           std::make_shared<std::vector<ConstantHandle>>(constants_info_.size());
@@ -1461,9 +1482,7 @@ class AOTInductorModelBase {
   /// Returns true if the model is complete.
   bool is_finished() {
 #ifdef USE_CUDA
-    if (!run_finished_) {
-      throw std::runtime_error{"Model CUDA event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model CUDA event was not initialized");
 
     auto event_status = cudaEventQuery(*run_finished_);
     if (event_status == cudaSuccess) {
@@ -1472,13 +1491,12 @@ class AOTInductorModelBase {
       return false;
     }
 
-    throw std::runtime_error(
+    AOTI_RUNTIME_CHECK(
+        false,
         std::string("The model did not finish successfully. Error: ") +
-        cudaGetErrorString(cudaGetLastError()));
+            cudaGetErrorString(cudaGetLastError()));
 #elif defined(USE_XPU)
-    if (!run_finished_) {
-      throw std::runtime_error{"Model XPU event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model XPU event was not initialized");
     using namespace sycl::info;
     return (*run_finished_)->get_info<event::command_execution_status>() ==
         event_command_status::complete;
@@ -1491,16 +1509,12 @@ class AOTInductorModelBase {
   /// Synchronizes completion event.
   void wait_for_completion() {
 #ifdef USE_CUDA
-    if (!run_finished_) {
-      throw std::runtime_error{"Model event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model event was not initialized");
 
     AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
 #endif // USE_CUDA
 #ifdef USE_XPU
-    if (!run_finished_) {
-      throw std::runtime_error{"Model event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model event was not initialized");
     (*run_finished_)->wait_and_throw();
 #endif
   }
@@ -1508,10 +1522,9 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #if defined(USE_MMAP_EXTERNAL)
-    if (!user_managed_mmap) {
-      throw std::runtime_error{
-          "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first."};
-    }
+    AOTI_RUNTIME_CHECK(
+        user_managed_mmap,
+        "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first.");
     // Mapped memory for weights
     return user_managed_mmap;
 #endif
@@ -1558,6 +1571,7 @@ class AOTInductorModelBase {
     close(fd);
     AOTI_RUNTIME_CHECK(ptr != MAP_FAILED, "mmap() failed");
     self_mmap = static_cast<uint8_t*>(ptr);
+    self_mmap_size = static_cast<size_t>(weights_size);
     AOTI_RUNTIME_CHECK(
         reinterpret_cast<uint64_t*>(
             self_mmap + weights_size - sizeof(uint64_t))[0] == magic_number,
@@ -1603,6 +1617,8 @@ class AOTInductorModelBase {
 #if defined(USE_MMAP_SELF)
   // Mapped memory for weights
   uint8_t* self_mmap = NULL;
+  // Length passed to mmap, so the destructor unmaps exactly what was mapped.
+  size_t self_mmap_size = 0;
 #endif
 
 #if defined(USE_MMAP_EXTERNAL)

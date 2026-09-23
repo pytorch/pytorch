@@ -210,7 +210,7 @@ log = logging.getLogger(__name__)
 #
 # The first instantiated test calls the original test_car() with the OpInfo
 #   for torch.add as its "op" argument, the string 'cpu' for its "device" argument,
-#   and the dtype torch.float32 for is "dtype" argument. The second instantiated
+#   and the dtype torch.float32 for its "dtype" argument. The second instantiated
 #   test calls the test_car() with the OpInfo for torch.sub, a CUDA device string
 #   like 'cuda:0' or 'cuda:1' for its "device" argument, and the dtype
 #   torch.int64 for its "dtype argument."
@@ -1038,6 +1038,21 @@ def get_device_type_test_bases():
 device_type_test_bases = get_device_type_test_bases()
 
 
+def _get_device_type_normalizer() -> Callable[[str], str]:
+    """Returns a function that normalizes a device type name for test filtering.
+
+    Replaces your privateuse1 backend name with 'privateuse1'. This handles the case
+    where PrivateUse1TestBase.device_type has been changed from "privateuse1" to the
+    actual backend name (e.g., "openreg") by setUpClass being called during previous
+    instantiate_device_type_tests calls.
+    """
+    if not _is_privateuse1_backend_available():
+        return lambda x: x
+
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    return lambda x: x.replace(privateuse1_backend_name, "privateuse1")
+
+
 def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
     # device type cannot appear in both except_for and only_for
     intersect = set(except_for if except_for else []) & set(
@@ -1048,30 +1063,18 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
             f"device ({intersect}) appeared in both except_for and only_for"
         )
 
-    # Replace your privateuse1 backend name with 'privateuse1'
-    # This handles the case where PrivateUse1TestBase.device_type has been
-    # changed from "privateuse1" to the actual backend name (e.g., "openreg")
-    # by setUpClass being called during previous instantiate_device_type_tests calls
-    if _is_privateuse1_backend_available():
-        privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    func_replace = _get_device_type_normalizer()
 
-        def func_replace(x: str) -> str:
-            return x.replace(privateuse1_backend_name, "privateuse1")
-
-        except_for = (
-            ([func_replace(x) for x in except_for] if except_for is not None else None)
-            if not isinstance(except_for, str)
-            else func_replace(except_for)
-        )
-        only_for = (
-            ([func_replace(x) for x in only_for] if only_for is not None else None)
-            if not isinstance(only_for, str)
-            else func_replace(only_for)
-        )
-    else:
-
-        def func_replace(x: str) -> str:
-            return x
+    except_for = (
+        ([func_replace(x) for x in except_for] if except_for is not None else None)
+        if not isinstance(except_for, str)
+        else func_replace(except_for)
+    )
+    only_for = (
+        ([func_replace(x) for x in only_for] if only_for is not None else None)
+        if not isinstance(only_for, str)
+        else func_replace(only_for)
+    )
 
     if except_for:
         device_type_test_bases = filter(
@@ -1158,8 +1161,14 @@ def get_desired_device_type_test_bases(
         os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, "")
     )
     if env_custom_only_for:
+        # Replace privateuse1 backend name with 'privateuse1' to ensure
+        # consistent device type filtering
+        func_replace = _get_device_type_normalizer()
+
+        normalized_custom = [func_replace(x) for x in env_custom_only_for]
         desired_device_type_test_bases += filter(
-            lambda x: x.device_type in env_custom_only_for, test_bases
+            lambda x: func_replace(x.device_type) in normalized_custom,
+            test_bases,
         )
         desired_device_type_test_bases = list(set(desired_device_type_test_bases))
 
@@ -2251,6 +2260,17 @@ def expectedFailureMPS(fn):
 
 def expectedFailureMPSComplex(fn):
     return expectedFailure("mps", torch.complex64)(fn)
+
+
+def expectedFailureMPSPre27(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 27.0:
+        return expectedFailure("mps")(fn)
+    return fn
 
 
 def expectedFailureMPSPre15(fn):
