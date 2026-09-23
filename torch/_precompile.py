@@ -659,9 +659,9 @@ def _aliased_input(node: torch.fx.Node) -> object:
     if node.target is operator.getitem:
         return node.args[0]
     schema = getattr(node.target, "_schema", None)
-    ret = (
-        schema.returns[0].alias_info if schema is not None and schema.returns else None
-    )
+    if schema is None or not schema.returns:
+        return None
+    ret = schema.returns[0].alias_info
     if ret is None:
         return None
     for i, arg in enumerate(schema.arguments):
