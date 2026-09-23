@@ -518,9 +518,7 @@ test_python_smoke_b200() {
     --pytest-xdist-workers 32
 
   # The CuTeDSL linear_cross_entropy OpInfo variants exist only where the
-  # CuTeDSL runtime does, so they are collected nowhere else. The override's own
-  # test files are not named here: the discovery block below already collects
-  # every test/python_native/test_*.py, and naming them would run them twice.
+  # CuTeDSL runtime does, so they are collected nowhere else.
   time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # The variants' expectations live outside test_ops too: two xfails in
   # test_ops_gradients.py and nine TestOperators entries in the shared skip
