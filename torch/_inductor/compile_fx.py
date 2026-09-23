@@ -131,6 +131,7 @@ from .fx_passes.post_grad import (
     view_to_reshape,
 )
 from .fx_passes.pre_grad import pre_grad_passes
+from .fx_utils import get_node_storage
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .triton_bundler import TritonBundler
@@ -432,6 +433,54 @@ def record_original_output_strides(gm: GraphModule) -> None:
             # pyrefly: ignore [bad-argument-type]
             output_strides.append(None)
     output_node.meta["original_output_strides"] = output_strides
+
+
+def record_original_output_aliases(
+    gm: GraphModule,
+    user_visible_output_idxs: Sequence[int],
+) -> None:
+    output = output_node(gm)
+    if "original_output_aliases" in output.meta:
+        return
+
+    inputs = list(gm.graph.find_nodes(op="placeholder"))
+    outputs = pytree.arg_tree_leaves(*output.args)
+    visible_output_idxs = tuple(user_visible_output_idxs)
+
+    input_storages = [get_node_storage(node) for node in inputs]
+    output_storages = [
+        get_node_storage(node) if isinstance(node, torch.fx.Node) else None
+        for node in outputs
+    ]
+
+    input_output_aliases: list[tuple[int, int]] = []
+    output_output_aliases: list[tuple[int, int]] = []
+
+    for position, output_idx in enumerate(visible_output_idxs):
+        if not 0 <= output_idx < len(outputs):
+            raise AssertionError(
+                f"Output index {output_idx} is out of range for {len(outputs)} outputs"
+            )
+
+        storage = output_storages[output_idx]
+        if storage is None:
+            continue
+
+        input_output_aliases.extend(
+            (input_idx, output_idx)
+            for input_idx, input_storage in enumerate(input_storages)
+            if input_storage == storage
+        )
+        output_output_aliases.extend(
+            (other_output_idx, output_idx)
+            for other_output_idx in visible_output_idxs[:position]
+            if output_storages[other_output_idx] == storage
+        )
+
+    output.meta["original_output_aliases"] = {
+        "input_output": tuple(input_output_aliases),
+        "output_output": tuple(output_output_aliases),
+    }
 
 
 def _recursive_record_original_output_strides(gm: GraphModule) -> None:
