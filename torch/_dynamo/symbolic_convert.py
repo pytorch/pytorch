@@ -6631,22 +6631,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     ),
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
-            side_effects = self.output.side_effects
-            mutation_kind = side_effects.global_store_mutation_kind(
-                fglobals_vt, name, value
-            )
-            if mutation_kind is AttrMutationKind.GLOBAL_REINSERT:
-                # This store re-adds a name the trace deleted. Eager appends it
-                # at the end of the module __dict__, but overwriting the
-                # recorded delete in place would replay the store in the slot
-                # the delete left behind -- ahead of names stored after the
-                # delete, since replay follows the store_attr_mutations
-                # insertion order. Drop the entry so the store takes a fresh
-                # slot. The kind is computed first because it reads that entry.
-                del side_effects.store_attr_mutations[fglobals_vt][name]
-                del side_effects.attr_mutation_kinds[fglobals_vt][name]
-                del side_effects.mutated_sources_by_attr[(fglobals_vt, name)]
-            side_effects.store_attr(fglobals_vt, name, value, mutation_kind)
+            self.output.side_effects.store_global_in_module(fglobals_vt, name, value)
 
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
         if self.output.global_scope is self.f_globals:
