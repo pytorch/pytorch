@@ -585,10 +585,10 @@ def foreach_reduce(
     reduce_dtype: torch.dtype | None,  # Raw mp_policy.reduce_dtype; no default applied.
     device: torch.device,
     gradient_divide_factor: float | None,
-    all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
+    all_reduce_group: dist.ProcessGroup | None,  # HSDP or replication
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
-    partial_reduce_output: torch.Tensor | None,  # only used for HSDP
+    partial_reduce_output: torch.Tensor | None,  # Gradients awaiting all-reduce
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
     *,

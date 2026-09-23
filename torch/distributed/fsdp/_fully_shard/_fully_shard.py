@@ -986,6 +986,7 @@ class FSDPModule:
         for module in modules:
             if isinstance(module, FSDPModule):
                 for group in module._get_fsdp_state()._fsdp_param_groups:
+                    pending_all_reduce = group._pending_all_reduce_state
                     for param in group.fsdp_params:
                         if param not in checked_params and (
                             param._module_info.module in modules
@@ -994,7 +995,11 @@ class FSDPModule:
                             )
                         ):
                             param.check_gradient_conversion(
-                                converted_dtype, converted_device
+                                converted_dtype,
+                                converted_device,
+                                grad_pending_all_reduce=pending_all_reduce.get_grad(
+                                    param
+                                ),
                             )
                             checked_params.add(param)
         # Reshard to ensure that sharded parameters are registered

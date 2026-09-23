@@ -198,7 +198,6 @@ class FSDPParam:
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: torch.Tensor | None  # 1D
     _sharded_post_forward_param: nn.Parameter | None  # ND
-    _unsharded_param: nn.Parameter  # ND
     _sharding_spec: DTensorSpec
     _unsharded_dtensor_spec: (
         DTensorSpec | None
@@ -209,6 +208,9 @@ class FSDPParam:
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
+    # Unset and an explicit grad_dtype matching the parameter dtype have the
+    # same value, but only unset follows dtype conversions. None is an explicit
+    # unrestricted policy, so the override flag cannot be inferred from the dtype.
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
 
@@ -232,7 +234,7 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        self._partial_grad: torch.Tensor | None = None
+        self._unsharded_param: nn.Parameter | None = None  # ND
         self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
@@ -884,7 +886,7 @@ class FSDPParam:
         ]
 
     def init_unsharded_param(self):
-        if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
+        if self._unsharded_param is not None:  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
@@ -929,7 +931,9 @@ class FSDPParam:
         if self.is_spmd_types:
             pass  # keep as plain tensor; spmd_types restored before module compute
         elif self._unsharded_dtensor_spec is not None:
-            unsharded_dtensor_spec = self._get_unsharded_dtensor_spec(unsharded_param)
+            unsharded_dtensor_spec = _get_dtensor_spec_with_dtype(
+                self._unsharded_dtensor_spec, unsharded_param.dtype
+            )
             unsharded_param = _from_local_no_grad(
                 unsharded_param, unsharded_dtensor_spec
             )
@@ -942,21 +946,6 @@ class FSDPParam:
     def _release_all_gather_outputs_if_needed(self) -> None:
         if self._release_all_gather_outputs_after_post_all_gather:
             self.free_all_gather_outputs()
-
-    def _get_unsharded_dtensor_spec(self, unsharded_param: torch.Tensor) -> DTensorSpec:
-        if self._unsharded_dtensor_spec is None:
-            raise AssertionError("Expected _unsharded_dtensor_spec for DTensor param")
-        tensor_meta = self._unsharded_dtensor_spec.tensor_meta
-        if tensor_meta is None or tensor_meta.dtype == unsharded_param.dtype:
-            return self._unsharded_dtensor_spec
-        return replace(
-            self._unsharded_dtensor_spec,
-            tensor_meta=TensorMeta(
-                tensor_meta.shape,
-                tensor_meta.stride,
-                unsharded_param.dtype,
-            ),
-        )
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
         return tuple(
@@ -1013,8 +1002,9 @@ class FSDPParam:
 
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
-        set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
-        self._setattr_on_modules(self._unsharded_param)
+        unsharded_param = self.unsharded_param
+        set_requires_grad_if_needed(self.sharded_param, unsharded_param)
+        self._setattr_on_modules(unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
             # reshard and must be kept alive for the next all-gather copy-in.
@@ -1042,18 +1032,8 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
-        spec = self._sharding_spec
-        if spec.tensor_meta is not None and spec.tensor_meta.dtype != tensor.dtype:
-            spec = replace(
-                spec,
-                tensor_meta=TensorMeta(
-                    spec.tensor_meta.shape, spec.tensor_meta.stride, tensor.dtype
-                ),
-            )
-        return _from_local_no_grad(
-            tensor,
-            spec,
-        )
+        spec = _get_dtensor_spec_with_dtype(self._sharding_spec, tensor.dtype)
+        return _from_local_no_grad(tensor, spec)
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
         if tensor.shape != self.sharded_post_forward_size:
@@ -1167,7 +1147,7 @@ class FSDPParam:
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
-        return self._unsharded_param
+        return cast(nn.Parameter, self._unsharded_param)
 
     @property
     def unsharded_grad_dtype(self) -> torch.dtype | None:
@@ -1175,8 +1155,7 @@ class FSDPParam:
             return self.reduce_dtype
         if self._has_sharded_grad_dtype_override:
             return self.sharded_grad_dtype
-        # Match init_dtype_attrs()'s snapshot even if conversion or loading
-        # has already changed sharded_grad_dtype.
+        # Use the original parameter dtype captured during FSDP initialization.
         return self.orig_dtype
 
     @property
@@ -1190,16 +1169,10 @@ class FSDPParam:
     def unsharded_accumulated_grad(self) -> torch.Tensor | None:
         # The autograd leaf owns accumulation even while its parameter data is
         # resharded. Never fold reduced history into this native-dtype buffer.
-        param = getattr(self, "_unsharded_param", None)
+        param = self._unsharded_param
         return param.grad if param is not None else None
 
-    @property
-    def unsharded_zero_grad_data(self) -> torch.Tensor:
-        dtype = (
-            self._partial_grad.dtype
-            if self._partial_grad is not None
-            else self.unsharded_grad_dtype
-        )
+    def get_unsharded_zero_grad_data(self, dtype: torch.dtype) -> torch.Tensor:
         return self._get_grad_inner_tensor(
             torch.zeros_like(self.unsharded_param, dtype=dtype)
         )
@@ -1286,13 +1259,15 @@ class FSDPParam:
         self,
         converted_dtype: Callable[[torch.Tensor], torch.dtype],
         converted_device: Callable[[torch.Tensor], torch.device] | None = None,
+        *,
+        grad_pending_all_reduce: torch.Tensor | None = None,
     ) -> None:
         param = self.sharded_param
         has_override = self._has_sharded_grad_dtype_override
         grad_dtype = self.sharded_grad_dtype
         if (
             self.unsharded_accumulated_grad is not None
-            or self._partial_grad is not None
+            or grad_pending_all_reduce is not None
         ) and (
             converted_dtype(param) != param.dtype
             or (
@@ -1396,6 +1371,16 @@ class FSDPParam:
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
+
+
+def _get_dtensor_spec_with_dtype(spec: DTensorSpec, dtype: torch.dtype) -> DTensorSpec:
+    tensor_meta = spec.tensor_meta
+    if tensor_meta is None or tensor_meta.dtype == dtype:
+        return spec
+    return replace(
+        spec,
+        tensor_meta=TensorMeta(tensor_meta.shape, tensor_meta.stride, dtype),
+    )
 
 
 def alloc_storage(tensor: torch.Tensor) -> None:

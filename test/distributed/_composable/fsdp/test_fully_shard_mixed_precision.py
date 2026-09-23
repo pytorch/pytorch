@@ -1231,6 +1231,132 @@ class TestFullyShardGradDtypePacking(FSDPTest):
         return 4
 
     @skip_if_lt_x_gpu(4)
+    @parametrize("unrestricted", [False, True])
+    @parametrize("shard_dim", [0, 1])
+    def test_grad_pending_all_reduce_buffer(self, device, unrestricted, shard_dim):
+        device = torch.device(device).type
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = nn.ParameterList(
+                    [
+                        nn.Parameter(
+                            torch.ones(
+                                2 * i + 3, 8, device=device, dtype=torch.bfloat16
+                            )
+                        )
+                        for i in range(4)
+                    ]
+                )
+
+            def forward(self, inp, active):
+                return sum((self.params[i] * inp).sum() * (i + 1) for i in active)
+
+        model = Model()
+        grad_dtypes = (
+            (None,) * 4
+            if unrestricted
+            else (torch.float32, torch.float16, None, torch.float32)
+        )
+        for param, grad_dtype in zip(model.params, grad_dtypes):
+            param.grad_dtype = grad_dtype
+        ref_model = copy.deepcopy(model)
+        reduce_dtype = None if unrestricted else torch.float32
+        for param in ref_model.params:
+            param.grad_dtype = reduce_dtype
+        mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("replicate", "shard"))
+        fully_shard(
+            model,
+            mesh=mesh,
+            shard_placement_fn=lambda _: Shard(shard_dim),
+            reshard_after_forward=False,
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
+        )
+        group = model._get_fsdp_state()._fsdp_param_groups[0]
+        pending_all_reduce = group._pending_all_reduce_state
+        # Reuse a layout, insert a parameter before the pending entries, omit
+        # fresh gradients for a pending parameter, then change dtype and layout.
+        active_sets = ((1,), (1,), (0, 1), (1,), (0, 1), (2,), (3,))
+        expected_grads = {}
+        for step, active in enumerate(active_sets):
+            inp_dtype = torch.bfloat16 if step < 4 else torch.float32
+            inp = torch.arange(8, device=device, dtype=inp_dtype) / 32
+            inp += self.rank / 32 + step / 16
+            ref_model.zero_grad(set_to_none=True)
+            ref_model(inp, active).backward()
+            for i in active:
+                grad = ref_model.params[i].grad.float()
+                expected_grads[i] = (
+                    expected_grads[i] + grad if i in expected_grads else grad
+                )
+
+            sync = step == len(active_sets) - 1
+            model.set_requires_all_reduce(sync)
+            previous_output = pending_all_reduce.buffer
+            with (
+                patch.object(
+                    dist, "all_gather_single", wraps=dist.all_gather_single
+                ) as all_gather,
+                patch.object(
+                    dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
+                ) as reduce_scatter,
+                patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
+            ):
+                model(inp, active).backward()
+                all_gather.assert_called_once()
+                reduce_scatter.assert_called_once()
+                self.assertEqual(all_reduce.call_count, int(sync))
+            self.assertIs(group._pending_all_reduce_state, pending_all_reduce)
+            output = pending_all_reduce.buffer
+            if sync:
+                self.assertIsNone(output)
+                self.assertEqual(len(pending_all_reduce.layout), len(model.params))
+                continue
+            self.assertIsNotNone(output)
+            self.assertEqual(output.dtype, reduce_dtype or inp_dtype)
+            if step in (1, 3) or (step == 4 and not unrestricted):
+                self.assertIs(output, previous_output)
+            else:
+                self.assertIsNot(output, previous_output)
+            for param in model.params:
+                self.assertIsNone(param.grad)
+            if step == 1:
+                model.bfloat16()  # A no-op conversion preserves pending reductions.
+                self.assertIs(pending_all_reduce.buffer, output)
+                with self.assertRaisesRegex(RuntimeError, "pending gradient"):
+                    model.float()
+                with self.assertRaisesRegex(RuntimeError, "pending gradients"):
+                    model.set_gradient_divide_factor(2.0)
+
+        for i, param in enumerate(model.params):
+            expected = expected_grads[i]
+            dist.all_reduce(expected)
+            expected /= self.world_size
+            expected_dtype = grad_dtypes[i] or torch.float32
+            self.assertEqual(param.grad.dtype, expected_dtype)
+            self.assertEqual(param.grad.full_tensor(), expected.to(expected_dtype))
+
+        # Reset also discards the group's pending buffer and cached layout.
+        model.zero_grad(set_to_none=True)
+        model.set_requires_all_reduce(False)
+        inp = torch.ones(8, device=device, dtype=torch.bfloat16)
+        model(inp, (2,)).backward()
+        self.assertIsNotNone(pending_all_reduce.buffer)
+        model.reset_iter_state()
+        self.assertIs(group._pending_all_reduce_state, pending_all_reduce)
+        self.assertIsNone(pending_all_reduce.buffer)
+        self.assertEqual(pending_all_reduce.layout, {})
+        model.set_requires_all_reduce(True)
+        model(inp, (3,)).backward()
+        for param in model.params[:3]:
+            self.assertIsNone(param.grad)
+        self.assertEqual(
+            model.params[3].grad.full_tensor(),
+            torch.full_like(ref_model.params[3], 4, dtype=model.params[3].grad.dtype),
+        )
+
+    @skip_if_lt_x_gpu(4)
     @parametrize("use_hsdp", [False, True])
     @parametrize("shard_dim", [0, 1])
     def test_packed_grad_dtypes(self, device, use_hsdp, shard_dim):
