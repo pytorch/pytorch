@@ -1057,6 +1057,63 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, "aot_eager", x, y)
 
     @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_non_strict(self, device):
+        # Non-strict tracing never goes through dynamo, so torch.utils.checkpoint
+        # itself lowers the region to an invoke_subgraph HOP when a proxy mode is
+        # active. The result must match what strict produces: the region survives
+        # as a HOP carrying _checkpoint_region, and the backward recomputes it
+        # (the forward's mm/sigmoid appear again) rather than saving it.
+        from torch._functorch.aot_autograd import aot_export_joint_simple
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return (torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False),)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        joint = aot_export_joint_simple(fn, (x, y), trace_joint=True)
+
+        hop = torch._higher_order_ops.invoke_subgraph
+        hops = [n for n in joint.graph.nodes if n.target is hop]
+        # One call in the forward, one for the backward's recompute.
+        self.assertEqual(len(hops), 2)
+        self.assertTrue(hops[0].meta.get("custom", {}).get("_checkpoint_region"))
+
+        def count(name):
+            return sum(
+                1
+                for m in joint.modules()
+                if isinstance(m, torch.fx.GraphModule)
+                for n in m.graph.nodes
+                if name in str(n.target)
+            )
+
+        # Recomputed, so the region's ops appear in both halves of the joint.
+        self.assertGreater(count("sigmoid"), 1)
+        self.assertGreater(count("mm"), 1)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_eager_unaffected(self, device):
+        # The non-strict front door keys off an active proxy mode, so plain eager
+        # checkpoint (no tracing) must be untouched even with the flag enabled.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        xr = x.detach().clone().requires_grad_()
+        yr = y.detach().clone().requires_grad_()
+
+        torch.utils.checkpoint.checkpoint(
+            gn, x, y, use_reentrant=False
+        ).sum().backward()
+        gn(xr, yr).sum().backward()
+        self.assertEqual(x.grad, xr.grad)
+        self.assertEqual(y.grad, yr.grad)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
     @torch._dynamo.config.patch(inline_invoke_subgraph=True)
     def test_checkpoint_via_invoke_subgraph_rejects_full_inline(self, device):
         # Full invoke_subgraph inlining would flatten the region and erase the
