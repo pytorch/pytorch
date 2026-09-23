@@ -13,9 +13,11 @@ if not dist.is_available():
 from c10d_backend_common import (
     C10D_BACKENDS,
     C10dBackendTest,
+    C10dBackendTestContinuous,
     instantiate_backend_tests,
 )
 
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -39,7 +41,7 @@ INTEGER_REDUCE_OPS = (
 )
 
 
-class AbstractCollectivesTest(C10dBackendTest):
+class CollectivesTestMixin:
     def _value(self, rank, dtype):
         if dtype == torch.bool:
             return bool(rank % 2)
@@ -218,31 +220,17 @@ class AbstractCollectivesTest(C10dBackendTest):
                     with self.subTest(count=count, dtype=dtype, async_op=async_op):
                         test(count, dtype, async_op)
 
-    def test_collective_preserves_current_device(self):
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} does not use CUDA")
-        self._init_pg()
-        tensor = torch.ones(4, device=self.device)
-        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
-        torch.cuda.set_device(other_device)
 
-        dist.all_reduce(tensor)
-
-        self.assertEqual(torch.cuda.current_device(), other_device.index)
-        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
-
+class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
     def test_broadcast(self):
-        self._init_pg()
         self._test_transport_matrix(self._test_broadcast)
 
     def test_all_gather(self):
-        self._init_pg()
         self._test_transport_matrix(self._test_all_gather)
 
     def test_all_gather_uneven(self):
         if not self.supports_uneven_all_gather:
             self.skipTest(f"{self.backend_name} does not support uneven all-gather")
-        self._init_pg()
         sizes = [rank + 1 for rank in range(self.world_size)]
         for async_op in ASYNC_OPS:
             with self.subTest(async_op=async_op):
@@ -256,58 +244,15 @@ class AbstractCollectivesTest(C10dBackendTest):
                         torch.full_like(output, self._value(rank, output.dtype)),
                     )
 
-    def test_all_gather_mixed_devices(self):
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} does not use CUDA")
-        self._init_pg()
-        tensor = self._tensor(4, torch.float32)
-        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
-        outputs = [torch.empty_like(tensor) for _ in range(self.world_size)]
-        outputs[-1] = torch.empty(4, device=other_device)
-        torch.cuda.set_device(other_device)
-
-        work = dist.all_gather(outputs, tensor, async_op=True)
-
-        self.assertEqual(torch.cuda.current_device(), other_device.index)
-        work.wait()
-        self.assertEqual(torch.cuda.current_device(), other_device.index)
-        torch.cuda.synchronize(self.device)
-        torch.cuda.synchronize(other_device)
-        for rank, output in enumerate(outputs):
-            self.assertEqual(
-                output,
-                torch.full_like(output, self._value(rank, output.dtype)),
-            )
-
     def test_all_gather_single(self):
-        self._init_pg()
         self._test_transport_matrix(self._test_all_gather_single)
 
     def test_gather(self):
-        self._init_pg()
         self._test_transport_matrix(self._test_gather)
-
-    def test_gather_single(self):
-        self._init_pg()
-        if not self.supports_gather_single:
-            with self.assertRaisesRegex(RuntimeError, "does not support gather_single"):
-                self._test_gather_single(4, torch.float32, False)
-            return
-        self._test_transport_matrix(self._test_gather_single)
-
-        # Only the destination rank validates the output size, so only it calls
-        # into the (failing) collective; the size check happens before any
-        # communication is issued.
-        if self.rank == 0:
-            input = torch.ones(4, device=self.device)
-            output = torch.empty(input.numel(), device=self.device)
-            with self.assertRaises((RuntimeError, ValueError)):
-                dist.gather_single(input, output, dst=0)
 
     def test_gather_into_tensor(self):
         if not self.supports_gather_single:
             self.skipTest(f"{self.backend_name} does not support gather_single")
-        self._init_pg()
         tensor = self._tensor(4, torch.float32)
         output = (
             torch.empty(self.world_size * 4, device=self.device)
@@ -325,36 +270,15 @@ class AbstractCollectivesTest(C10dBackendTest):
             self.assertEqual(output, expected)
 
     def test_scatter(self):
-        self._init_pg()
         self._test_transport_matrix(self._test_scatter)
 
     def test_all_to_all(self):
-        self._init_pg()
         self._test_transport_matrix(self._test_all_to_all)
 
-    def test_all_to_all_rejects_mixed_devices(self):
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} does not use CUDA")
-        self._init_pg()
-        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
-        inputs = [
-            torch.full((1,), float(self.rank), device=self.device)
-            for _ in range(self.world_size)
-        ]
-        inputs[-1] = torch.full((1,), float(self.rank), device=other_device)
-        outputs = [torch.empty(1, device=self.device) for _ in range(self.world_size)]
-
-        with self.assertRaisesRegex(
-            (RuntimeError, ValueError), "same device|Expected tensor on"
-        ):
-            dist.all_to_all(outputs, inputs)
-
     def test_all_to_all_single(self):
-        self._init_pg()
         self._test_transport_matrix(self._test_all_to_all_single)
 
     def test_all_to_all_single_split_sizes(self):
-        self._init_pg()
         for async_op in ASYNC_OPS:
             input_splits = [
                 self.rank + destination + 1 for destination in range(self.world_size)
@@ -393,8 +317,6 @@ class AbstractCollectivesTest(C10dBackendTest):
             self.assertEqual(output, expected)
 
     def test_all_to_all_single_independent_empty_split_sizes(self):
-        self._init_pg()
-
         input_count = self.rank + 1
         input = torch.full(
             (self.world_size * input_count,),
@@ -445,6 +367,332 @@ class AbstractCollectivesTest(C10dBackendTest):
         )
         self.assertEqual(output, expected)
 
+    def test_all_reduce(self):
+        for count in COUNTS:
+            for dtype in self.dtypes:
+                for op in self._reduce_ops(dtype):
+                    for async_op in ASYNC_OPS:
+                        with self.subTest(
+                            count=count, dtype=dtype, op=op, async_op=async_op
+                        ):
+                            tensor = self._tensor(count, dtype)
+                            work = dist.all_reduce(tensor, op=op, async_op=async_op)
+                            self._wait(work, async_op)
+                            self.assertEqual(
+                                tensor, self._expected_reduce(count, dtype, op)
+                            )
+
+    def test_reduce(self):
+        for count in COUNTS:
+            for dtype in self.dtypes:
+                for op in self._reduce_ops(dtype):
+                    for async_op in ASYNC_OPS:
+                        with self.subTest(
+                            count=count, dtype=dtype, op=op, async_op=async_op
+                        ):
+                            tensor = self._tensor(count, dtype)
+                            work = dist.reduce(tensor, dst=0, op=op, async_op=async_op)
+                            self._wait(work, async_op)
+                            if self.rank == 0:
+                                self.assertEqual(
+                                    tensor, self._expected_reduce(count, dtype, op)
+                                )
+
+    def test_reduce_scatter(self):
+        for count in COUNTS:
+            for dtype in self.dtypes:
+                for op in self._reduce_ops(dtype):
+                    for async_op in ASYNC_OPS:
+                        with self.subTest(
+                            count=count, dtype=dtype, op=op, async_op=async_op
+                        ):
+                            inputs = [
+                                self._tensor(count, dtype)
+                                for _ in range(self.world_size)
+                            ]
+                            output = torch.empty_like(inputs[0])
+                            work = dist.reduce_scatter(
+                                output, inputs, op=op, async_op=async_op
+                            )
+                            self._wait(work, async_op)
+                            self.assertEqual(
+                                output, self._expected_reduce(count, dtype, op)
+                            )
+
+    def test_reduce_scatter_uneven(self):
+        sizes = [rank + 1 for rank in range(self.world_size)]
+        for async_op in ASYNC_OPS:
+            with self.subTest(async_op=async_op):
+                inputs = [self._tensor(size, torch.float32) for size in sizes]
+                output = torch.empty(
+                    sizes[self.rank], dtype=torch.float32, device=self.device
+                )
+                work = dist.reduce_scatter(
+                    output,
+                    inputs,
+                    op=dist.ReduceOp.SUM,
+                    async_op=async_op,
+                )
+                self._wait(work, async_op)
+                self.assertEqual(
+                    output,
+                    self._expected_reduce(
+                        sizes[self.rank], torch.float32, dist.ReduceOp.SUM
+                    ),
+                )
+
+    def test_reduce_scatter_single(self):
+        for count in COUNTS:
+            for dtype in self.dtypes:
+                for op in self._reduce_ops(dtype):
+                    for async_op in ASYNC_OPS:
+                        with self.subTest(
+                            count=count, dtype=dtype, op=op, async_op=async_op
+                        ):
+                            inputs = torch.cat(
+                                [
+                                    self._tensor(count, dtype)
+                                    for _ in range(self.world_size)
+                                ]
+                            )
+                            output = torch.empty(count, dtype=dtype, device=self.device)
+                            work = dist.reduce_scatter_single(
+                                output, inputs, op=op, async_op=async_op
+                            )
+                            self._wait(work, async_op)
+                            self.assertEqual(
+                                output, self._expected_reduce(count, dtype, op)
+                            )
+
+    def test_premul_sum(self):
+        if not self.premul_sum_dtypes:
+            self.skipTest(f"{self.backend_name} does not support PREMUL_SUM")
+        expected = sum(range(1, self.world_size + 1)) * 0.5
+        for dtype in self.premul_sum_dtypes:
+            for factor in (
+                0.5,
+                torch.tensor(0.5, dtype=dtype, device=self.device),
+            ):
+                with self.subTest(dtype=dtype, factor_type=type(factor).__name__):
+                    tensor = torch.full(
+                        (4,), float(self.rank + 1), dtype=dtype, device=self.device
+                    )
+                    dist.all_reduce(tensor, op=dist.ReduceOp.PREMUL_SUM(factor))
+                    self.assertEqual(tensor, torch.full_like(tensor, expected))
+
+    def test_barrier(self):
+        for async_op in ASYNC_OPS:
+            work = dist.barrier(async_op=async_op)
+            self._wait(work, async_op)
+
+    def test_all_reduce_coalesced(self):
+        for dtype in self.dtypes:
+            for async_op in ASYNC_OPS:
+                with self.subTest(dtype=dtype, async_op=async_op):
+                    tensors = [self._tensor(i + 1, dtype) for i in range(3)]
+                    work = dist.all_reduce_coalesced(tensors, async_op=async_op)
+                    self._wait(work, async_op)
+                    for tensor in tensors:
+                        self.assertEqual(
+                            tensor,
+                            self._expected_reduce(
+                                tensor.numel(), dtype, dist.ReduceOp.SUM
+                            ),
+                        )
+
+    def test_coalescing_manager(self):
+        if not self.supports_coalescing:
+            self.skipTest(f"{self.backend_name} does not support coalescing")
+
+        for async_ops in ASYNC_OPS:
+            tensors = [
+                torch.full((i + 1,), float(self.rank + i), device=self.device)
+                for i in range(3)
+            ]
+            with dist._coalescing_manager(
+                device=self.device, async_ops=async_ops
+            ) as cm:
+                for tensor in tensors:
+                    dist.all_reduce(tensor)
+            self.assertEqual(len(cm.works), 1 if async_ops else 0)
+            cm.wait()
+            rank_sum = self.world_size * (self.world_size - 1) // 2
+            for i, tensor in enumerate(tensors):
+                expected_value = rank_sum + i * self.world_size
+                self.assertEqual(tensor, torch.full_like(tensor, expected_value))
+
+        inputs = [
+            torch.full((i + 1,), float(self.rank + i), device=self.device)
+            for i in range(3)
+        ]
+        for async_ops in ASYNC_OPS:
+            gathered = [
+                torch.empty(input.numel() * self.world_size, device=self.device)
+                for input in inputs
+            ]
+            with dist._coalescing_manager(
+                device=self.device, async_ops=async_ops
+            ) as cm:
+                for output, input in zip(gathered, inputs):
+                    dist.all_gather_single(output, input)
+            self.assertEqual(len(cm.works), 1 if async_ops else 0)
+            cm.wait()
+            for i, output in enumerate(gathered):
+                expected = torch.arange(
+                    i, self.world_size + i, dtype=output.dtype, device=self.device
+                ).repeat_interleave(i + 1)
+                self.assertEqual(output, expected)
+
+        inputs = [
+            torch.full(
+                (self.world_size * (i + 1),),
+                float(self.rank + i),
+                device=self.device,
+            )
+            for i in range(3)
+        ]
+        for async_ops in ASYNC_OPS:
+            outputs = [torch.empty(i + 1, device=self.device) for i in range(3)]
+            with dist._coalescing_manager(
+                device=self.device, async_ops=async_ops
+            ) as cm:
+                for output, input in zip(outputs, inputs):
+                    dist.reduce_scatter_single(output, input)
+            self.assertEqual(len(cm.works), 1 if async_ops else 0)
+            cm.wait()
+            rank_sum = self.world_size * (self.world_size - 1) // 2
+            for i, output in enumerate(outputs):
+                expected_value = rank_sum + i * self.world_size
+                self.assertEqual(output, torch.full_like(output, expected_value))
+
+    def test_float8_transport(self):
+        if not self.float8_dtypes:
+            self.skipTest(f"{self.backend_name} does not support Float8")
+        if torch.cuda.get_device_capability(self.device) < (9, 0):
+            self.skipTest("Float8 collectives require sm90 or newer")
+        tests = (
+            self._test_broadcast,
+            self._test_all_gather,
+            self._test_all_gather_single,
+            self._test_gather,
+            self._test_scatter,
+            self._test_all_to_all,
+            self._test_all_to_all_single,
+        )
+        for test in tests:
+            for dtype in self.float8_dtypes:
+                for async_op in ASYNC_OPS:
+                    with self.subTest(
+                        collective=test.__name__,
+                        dtype=dtype,
+                        async_op=async_op,
+                    ):
+                        test(4, dtype, async_op)
+
+    def test_complex_collectives(self):
+        for dtype in self.complex_dtypes:
+            for async_op in ASYNC_OPS:
+                with self.subTest(
+                    collective="broadcast", dtype=dtype, async_op=async_op
+                ):
+                    tensor = self._tensor(4, dtype)
+                    work = dist.broadcast(tensor, src=0, async_op=async_op)
+                    self._wait(work, async_op)
+                    self.assertEqual(tensor, self._expected_tensor(4, dtype, rank=0))
+            for op in (dist.ReduceOp.SUM, dist.ReduceOp.AVG):
+                for async_op in ASYNC_OPS:
+                    for collective in (dist.all_reduce, dist.reduce):
+                        with self.subTest(
+                            collective=collective.__name__,
+                            dtype=dtype,
+                            op=op,
+                            async_op=async_op,
+                        ):
+                            tensor = self._tensor(4, dtype)
+                            kwargs = {"dst": 0} if collective is dist.reduce else {}
+                            work = collective(
+                                tensor, op=op, async_op=async_op, **kwargs
+                            )
+                            self._wait(work, async_op)
+                            if collective is dist.all_reduce or self.rank == 0:
+                                self.assertEqual(
+                                    tensor, self._expected_reduce(4, dtype, op)
+                                )
+
+
+class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
+    """Tests that need fresh rank processes (errors, device or group state)."""
+
+    def test_collective_preserves_current_device(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        tensor = torch.ones(4, device=self.device)
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        torch.cuda.set_device(other_device)
+
+        dist.all_reduce(tensor)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    def test_all_gather_mixed_devices(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        tensor = self._tensor(4, torch.float32)
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        outputs = [torch.empty_like(tensor) for _ in range(self.world_size)]
+        outputs[-1] = torch.empty(4, device=other_device)
+        torch.cuda.set_device(other_device)
+
+        work = dist.all_gather(outputs, tensor, async_op=True)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        work.wait()
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        torch.cuda.synchronize(self.device)
+        torch.cuda.synchronize(other_device)
+        for rank, output in enumerate(outputs):
+            self.assertEqual(
+                output,
+                torch.full_like(output, self._value(rank, output.dtype)),
+            )
+
+    def test_gather_single(self):
+        self._init_pg()
+        if not self.supports_gather_single:
+            with self.assertRaisesRegex(RuntimeError, "does not support gather_single"):
+                self._test_gather_single(4, torch.float32, False)
+            return
+        self._test_transport_matrix(self._test_gather_single)
+
+        # Only the destination rank validates the output size, so only it calls
+        # into the (failing) collective; the size check happens before any
+        # communication is issued.
+        if self.rank == 0:
+            input = torch.ones(4, device=self.device)
+            output = torch.empty(input.numel(), device=self.device)
+            with self.assertRaises((RuntimeError, ValueError)):
+                dist.gather_single(input, output, dst=0)
+
+    def test_all_to_all_rejects_mixed_devices(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        inputs = [
+            torch.full((1,), float(self.rank), device=self.device)
+            for _ in range(self.world_size)
+        ]
+        inputs[-1] = torch.full((1,), float(self.rank), device=other_device)
+        outputs = [torch.empty(1, device=self.device) for _ in range(self.world_size)]
+
+        with self.assertRaisesRegex(
+            (RuntimeError, ValueError), "same device|Expected tensor on"
+        ):
+            dist.all_to_all(outputs, inputs)
+
     def test_all_to_all_single_invalid_split_sizes(self):
         self._init_pg()
         valid_splits = [2] * self.world_size
@@ -493,131 +741,6 @@ class AbstractCollectivesTest(C10dBackendTest):
                 output_split_sizes=[],
                 input_split_sizes=[],
             )
-
-    def test_all_reduce(self):
-        self._init_pg()
-        for count in COUNTS:
-            for dtype in self.dtypes:
-                for op in self._reduce_ops(dtype):
-                    for async_op in ASYNC_OPS:
-                        with self.subTest(
-                            count=count, dtype=dtype, op=op, async_op=async_op
-                        ):
-                            tensor = self._tensor(count, dtype)
-                            work = dist.all_reduce(tensor, op=op, async_op=async_op)
-                            self._wait(work, async_op)
-                            self.assertEqual(
-                                tensor, self._expected_reduce(count, dtype, op)
-                            )
-
-    def test_reduce(self):
-        self._init_pg()
-        for count in COUNTS:
-            for dtype in self.dtypes:
-                for op in self._reduce_ops(dtype):
-                    for async_op in ASYNC_OPS:
-                        with self.subTest(
-                            count=count, dtype=dtype, op=op, async_op=async_op
-                        ):
-                            tensor = self._tensor(count, dtype)
-                            work = dist.reduce(tensor, dst=0, op=op, async_op=async_op)
-                            self._wait(work, async_op)
-                            if self.rank == 0:
-                                self.assertEqual(
-                                    tensor, self._expected_reduce(count, dtype, op)
-                                )
-
-    def test_reduce_scatter(self):
-        self._init_pg()
-        for count in COUNTS:
-            for dtype in self.dtypes:
-                for op in self._reduce_ops(dtype):
-                    for async_op in ASYNC_OPS:
-                        with self.subTest(
-                            count=count, dtype=dtype, op=op, async_op=async_op
-                        ):
-                            inputs = [
-                                self._tensor(count, dtype)
-                                for _ in range(self.world_size)
-                            ]
-                            output = torch.empty_like(inputs[0])
-                            work = dist.reduce_scatter(
-                                output, inputs, op=op, async_op=async_op
-                            )
-                            self._wait(work, async_op)
-                            self.assertEqual(
-                                output, self._expected_reduce(count, dtype, op)
-                            )
-
-    def test_reduce_scatter_uneven(self):
-        self._init_pg()
-        sizes = [rank + 1 for rank in range(self.world_size)]
-        for async_op in ASYNC_OPS:
-            with self.subTest(async_op=async_op):
-                inputs = [self._tensor(size, torch.float32) for size in sizes]
-                output = torch.empty(
-                    sizes[self.rank], dtype=torch.float32, device=self.device
-                )
-                work = dist.reduce_scatter(
-                    output,
-                    inputs,
-                    op=dist.ReduceOp.SUM,
-                    async_op=async_op,
-                )
-                self._wait(work, async_op)
-                self.assertEqual(
-                    output,
-                    self._expected_reduce(
-                        sizes[self.rank], torch.float32, dist.ReduceOp.SUM
-                    ),
-                )
-
-    def test_reduce_scatter_single(self):
-        self._init_pg()
-        for count in COUNTS:
-            for dtype in self.dtypes:
-                for op in self._reduce_ops(dtype):
-                    for async_op in ASYNC_OPS:
-                        with self.subTest(
-                            count=count, dtype=dtype, op=op, async_op=async_op
-                        ):
-                            inputs = torch.cat(
-                                [
-                                    self._tensor(count, dtype)
-                                    for _ in range(self.world_size)
-                                ]
-                            )
-                            output = torch.empty(count, dtype=dtype, device=self.device)
-                            work = dist.reduce_scatter_single(
-                                output, inputs, op=op, async_op=async_op
-                            )
-                            self._wait(work, async_op)
-                            self.assertEqual(
-                                output, self._expected_reduce(count, dtype, op)
-                            )
-
-    def test_premul_sum(self):
-        if not self.premul_sum_dtypes:
-            self.skipTest(f"{self.backend_name} does not support PREMUL_SUM")
-        self._init_pg()
-        expected = sum(range(1, self.world_size + 1)) * 0.5
-        for dtype in self.premul_sum_dtypes:
-            for factor in (
-                0.5,
-                torch.tensor(0.5, dtype=dtype, device=self.device),
-            ):
-                with self.subTest(dtype=dtype, factor_type=type(factor).__name__):
-                    tensor = torch.full(
-                        (4,), float(self.rank + 1), dtype=dtype, device=self.device
-                    )
-                    dist.all_reduce(tensor, op=dist.ReduceOp.PREMUL_SUM(factor))
-                    self.assertEqual(tensor, torch.full_like(tensor, expected))
-
-    def test_barrier(self):
-        self._init_pg()
-        for async_op in ASYNC_OPS:
-            work = dist.barrier(async_op=async_op)
-            self._wait(work, async_op)
 
     def test_sync_barrier_blocks_host_on_stream(self):
         # A synchronous barrier must host-block the CPU thread until prior work
@@ -706,144 +829,6 @@ class AbstractCollectivesTest(C10dBackendTest):
         self.assertEqual(tensor, torch.full_like(tensor, expected))
         dist.barrier()
 
-    def test_all_reduce_coalesced(self):
-        self._init_pg()
-        for dtype in self.dtypes:
-            for async_op in ASYNC_OPS:
-                with self.subTest(dtype=dtype, async_op=async_op):
-                    tensors = [self._tensor(i + 1, dtype) for i in range(3)]
-                    work = dist.all_reduce_coalesced(tensors, async_op=async_op)
-                    self._wait(work, async_op)
-                    for tensor in tensors:
-                        self.assertEqual(
-                            tensor,
-                            self._expected_reduce(
-                                tensor.numel(), dtype, dist.ReduceOp.SUM
-                            ),
-                        )
-
-    def test_coalescing_manager(self):
-        if not self.supports_coalescing:
-            self.skipTest(f"{self.backend_name} does not support coalescing")
-        self._init_pg()
-
-        for async_ops in ASYNC_OPS:
-            tensors = [
-                torch.full((i + 1,), float(self.rank + i), device=self.device)
-                for i in range(3)
-            ]
-            with dist._coalescing_manager(
-                device=self.device, async_ops=async_ops
-            ) as cm:
-                for tensor in tensors:
-                    dist.all_reduce(tensor)
-            self.assertEqual(len(cm.works), 1 if async_ops else 0)
-            cm.wait()
-            rank_sum = self.world_size * (self.world_size - 1) // 2
-            for i, tensor in enumerate(tensors):
-                expected_value = rank_sum + i * self.world_size
-                self.assertEqual(tensor, torch.full_like(tensor, expected_value))
-
-        inputs = [
-            torch.full((i + 1,), float(self.rank + i), device=self.device)
-            for i in range(3)
-        ]
-        for async_ops in ASYNC_OPS:
-            gathered = [
-                torch.empty(input.numel() * self.world_size, device=self.device)
-                for input in inputs
-            ]
-            with dist._coalescing_manager(
-                device=self.device, async_ops=async_ops
-            ) as cm:
-                for output, input in zip(gathered, inputs):
-                    dist.all_gather_single(output, input)
-            self.assertEqual(len(cm.works), 1 if async_ops else 0)
-            cm.wait()
-            for i, output in enumerate(gathered):
-                expected = torch.arange(
-                    i, self.world_size + i, dtype=output.dtype, device=self.device
-                ).repeat_interleave(i + 1)
-                self.assertEqual(output, expected)
-
-        inputs = [
-            torch.full(
-                (self.world_size * (i + 1),),
-                float(self.rank + i),
-                device=self.device,
-            )
-            for i in range(3)
-        ]
-        for async_ops in ASYNC_OPS:
-            outputs = [torch.empty(i + 1, device=self.device) for i in range(3)]
-            with dist._coalescing_manager(
-                device=self.device, async_ops=async_ops
-            ) as cm:
-                for output, input in zip(outputs, inputs):
-                    dist.reduce_scatter_single(output, input)
-            self.assertEqual(len(cm.works), 1 if async_ops else 0)
-            cm.wait()
-            rank_sum = self.world_size * (self.world_size - 1) // 2
-            for i, output in enumerate(outputs):
-                expected_value = rank_sum + i * self.world_size
-                self.assertEqual(output, torch.full_like(output, expected_value))
-
-    def test_float8_transport(self):
-        if not self.float8_dtypes:
-            self.skipTest(f"{self.backend_name} does not support Float8")
-        if torch.cuda.get_device_capability(self.device) < (9, 0):
-            self.skipTest("Float8 collectives require sm90 or newer")
-        self._init_pg()
-        tests = (
-            self._test_broadcast,
-            self._test_all_gather,
-            self._test_all_gather_single,
-            self._test_gather,
-            self._test_scatter,
-            self._test_all_to_all,
-            self._test_all_to_all_single,
-        )
-        for test in tests:
-            for dtype in self.float8_dtypes:
-                for async_op in ASYNC_OPS:
-                    with self.subTest(
-                        collective=test.__name__,
-                        dtype=dtype,
-                        async_op=async_op,
-                    ):
-                        test(4, dtype, async_op)
-
-    def test_complex_collectives(self):
-        self._init_pg()
-        for dtype in self.complex_dtypes:
-            for async_op in ASYNC_OPS:
-                with self.subTest(
-                    collective="broadcast", dtype=dtype, async_op=async_op
-                ):
-                    tensor = self._tensor(4, dtype)
-                    work = dist.broadcast(tensor, src=0, async_op=async_op)
-                    self._wait(work, async_op)
-                    self.assertEqual(tensor, self._expected_tensor(4, dtype, rank=0))
-            for op in (dist.ReduceOp.SUM, dist.ReduceOp.AVG):
-                for async_op in ASYNC_OPS:
-                    for collective in (dist.all_reduce, dist.reduce):
-                        with self.subTest(
-                            collective=collective.__name__,
-                            dtype=dtype,
-                            op=op,
-                            async_op=async_op,
-                        ):
-                            tensor = self._tensor(4, dtype)
-                            kwargs = {"dst": 0} if collective is dist.reduce else {}
-                            work = collective(
-                                tensor, op=op, async_op=async_op, **kwargs
-                            )
-                            self._wait(work, async_op)
-                            if collective is dist.all_reduce or self.rank == 0:
-                                self.assertEqual(
-                                    tensor, self._expected_reduce(4, dtype, op)
-                                )
-
     def test_noncontiguous_all_to_all_error(self):
         self._init_pg()
         input = torch.ones(self.world_size, self.world_size, device=self.device).t()
@@ -868,7 +853,14 @@ class AbstractCollectivesTest(C10dBackendTest):
 
 
 instantiate_backend_tests(
-    globals(), "Collectives", AbstractCollectivesTest, C10D_BACKENDS
+    globals(),
+    "Collectives",
+    AbstractCollectivesTest,
+    C10D_BACKENDS,
+    harness=MultiProcContinuousTest,
+)
+instantiate_backend_tests(
+    globals(), "IsolatedCollectives", AbstractIsolatedCollectivesTest, C10D_BACKENDS
 )
 
 
