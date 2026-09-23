@@ -12,8 +12,13 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import has_triton
 
 
 aten = torch.ops.aten
@@ -339,47 +344,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
 
-    # XPU doesn't support cudagrah
-    @requires_cuda
-    def test_cudagraph_bisect_max(self):
-        """Test that cudagraph bisector can limit number of cudagraphed graphs."""
-        import os
-        from unittest.mock import patch
-
-        from torch._dynamo.utils import counters
-        from torch._inductor.compiler_bisector import get_env_val
-
-        def foo(x):
-            return x + 1
-
-        def bar(x):
-            return x * 2
-
-        env = {
-            "TORCH_BISECT_BACKEND": "inductor",
-            "TORCH_BISECT_SUBSYSTEM": "cudagraphs",
-            "TORCH_BISECT_MAX": "0",
-        }
-
-        with patch.dict(os.environ, env):
-            get_env_val.cache_clear()
-            CompilerBisector.reset_counters()
-            torch._dynamo.reset()
-            counters.clear()
-            CompilerBisector.bisection_enabled = True
-            try:
-                foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-                bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(10, device=GPU_TYPE)
-                foo_c(x)
-                bar_c(x)
-
-                # With max=0, all graphs should be skipped
-                self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
-            finally:
-                CompilerBisector.bisection_enabled = False
-                get_env_val.cache_clear()
-
     def test_bisect_run_debuginfo(self):
         import os
         import subprocess
@@ -411,6 +375,56 @@ class TestCompilerBisector(TestCase):
             "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
         )
         self.assertIn(expected_result, output.stdout)
+
+
+class TestCompilerBisectorDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    @skipXPUIf(True, "XPU doesn't support cudagraphs")
+    def test_cudagraph_bisect_max(self, device):
+        """Test that cudagraph bisector can limit number of cudagraphed graphs."""
+        import os
+        from unittest.mock import patch
+
+        from torch._dynamo.utils import counters
+        from torch._inductor.compiler_bisector import get_env_val
+
+        def foo(x):
+            return x + 1
+
+        def bar(x):
+            return x * 2
+
+        env = {
+            "TORCH_BISECT_BACKEND": "inductor",
+            "TORCH_BISECT_SUBSYSTEM": "cudagraphs",
+            "TORCH_BISECT_MAX": "0",
+        }
+
+        with patch.dict(os.environ, env):
+            get_env_val.cache_clear()
+            CompilerBisector.reset_counters()
+            torch._dynamo.reset()
+            counters.clear()
+            CompilerBisector.bisection_enabled = True
+            try:
+                foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+                bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+                x = torch.randn(10, device=device)
+                foo_c(x)
+                bar_c(x)
+
+                # With max=0, all graphs should be skipped
+                self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+            finally:
+                CompilerBisector.bisection_enabled = False
+                get_env_val.cache_clear()
+
+
+instantiate_device_type_tests(
+    TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
