@@ -4371,6 +4371,7 @@ exit(2)
         # With TORCH_CUBLAS_WORKSPACE_CACHE=1 the first shape faults on SM90 and
         # gfx90a, and on gfx950 corrupts the canary through the backward's weight
         # gradient (K=32768). The second shape does so in the forward on gfx950.
+        # On gfx942 (MI308X) both shapes corrupt the canary.
         shapes = [(32768, 640, 640)]
         if TEST_WITH_ROCM:
             shapes.append((32, 65536, 2048))
@@ -4428,9 +4429,9 @@ exit(2)
         if torch.cuda.get_device_capability()[0] != 9:
             self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
         # On ROCm this has not been shown to catch the cached-workspace hazard:
-        # it passes with TORCH_CUBLAS_WORKSPACE_CACHE=1 on gfx950. There it checks
-        # that a worker whose handles were created before the capture can run a
-        # GEMM on the capture stream while another thread captures.
+        # it passes with TORCH_CUBLAS_WORKSPACE_CACHE=1 on gfx950 and gfx942. There
+        # it checks that a worker whose handles were created before the capture
+        # can run a GEMM on the capture stream while another thread captures.
 
         torch._C._cuda_clearCublasWorkspaces()
         x = torch.randn(32, 10944, device="cuda", dtype=torch.bfloat16)
