@@ -688,6 +688,45 @@ REGISTER_UNARY_OP(bitwise_not, char, char);
 REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
+// Population count of |x| as uchar, matching np.bitwise_count. Negative values
+// are negated in the unsigned domain so the minimum signed value is safe.
+struct bitwise_count_functor {
+  template <typename T>
+  inline enable_if_t<
+      !is_same_v<T, bool> && is_scalar_integral_v<T> &&
+          !::metal::is_signed_v<T>,
+      uchar>
+  operator()(const T x) {
+    return static_cast<uchar>(::metal::popcount(x));
+  }
+
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>&& ::metal::is_signed_v<T>, uchar>
+  operator()(const T x) {
+    using U = ::metal::make_unsigned_t<T>;
+    U u = static_cast<U>(x);
+    if (x < 0) {
+      u = ~u + U(1);
+    }
+    return static_cast<uchar>(::metal::popcount(u));
+  }
+
+  template <typename T>
+  inline enable_if_t<is_same_v<T, bool>, uchar> operator()(const T x) {
+    return x ? 1 : 0;
+  }
+};
+
+REGISTER_UNARY_OP(bitwise_count, bool, uchar);
+REGISTER_UNARY_OP(bitwise_count, uchar, uchar);
+REGISTER_UNARY_OP(bitwise_count, char, uchar);
+REGISTER_UNARY_OP(bitwise_count, short, uchar);
+REGISTER_UNARY_OP(bitwise_count, ushort, uchar);
+REGISTER_UNARY_OP(bitwise_count, int, uchar);
+REGISTER_UNARY_OP(bitwise_count, uint, uchar);
+REGISTER_UNARY_OP(bitwise_count, long, uchar);
+REGISTER_UNARY_OP(bitwise_count, ulong, uchar);
+
 struct logical_not_functor {
   template <typename T>
   inline bool operator()(const T x) {

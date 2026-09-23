@@ -1904,6 +1904,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.binomial",
         "torch.bitwise_and",
         "torch.bitwise_left_shift",
+        "torch.bitwise_count",
         "torch.bitwise_not",
         "torch.bitwise_or",
         "torch.bitwise_right_shift",
