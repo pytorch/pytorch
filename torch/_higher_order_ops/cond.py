@@ -30,7 +30,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -481,9 +481,9 @@ def _merge_output(
     if type(a) is int and type(b) is int:
         return _merge_ints_to_symint([a, b], mode)
 
-    if not (type(a) is FakeTensor and type(b) is FakeTensor):
+    if not (is_fake_tensor(a) and is_fake_tensor(b)):
         raise AssertionError(
-            f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
+            f"expected both a and b to be fake tensors, got a={type(a)}, b={type(b)}"
         )
 
     # Note: we don't check size, stride because
