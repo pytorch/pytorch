@@ -8,11 +8,18 @@ from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch.export import export
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPassInfra(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_export_pass_base(self) -> None:
         class Foo(torch.nn.Module):
             def forward(self, x):

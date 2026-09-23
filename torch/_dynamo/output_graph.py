@@ -102,7 +102,7 @@ from .bytecode_transformation import (
     create_swap,
     Instruction,
     make_compiled_fn_name,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .code_context import code_context
 from .codegen import PyCodegen
@@ -2635,7 +2635,7 @@ class OutputGraph(OutputGraphCommon):
                 **kwargs,
             },
         )
-        self.package.bypass_current_entry()
+        self.package.bypass_current_compile()
         self.package = None
 
     def get_graph_sizes_structured(self) -> dict[str, list[int | str]]:
@@ -3671,8 +3671,7 @@ class OutputGraph(OutputGraphCommon):
 
         Returns the name of the newly installed global.
         """
-        # NB: unique_id is unique, even across torch.compile instances
-        name = unique_id(prefix)
+        name = unique_id_unbound_in(prefix, self.global_scope)
         self.install_global_unsafe(name, value)
         return name
 
@@ -3785,6 +3784,12 @@ class DynamoTracerOutput:
     def _cleanup_output_graph(self) -> None:
         output_graph = self.output_graph_for_cleanup
         if output_graph:
+            # Failed tracing attempts never transfer these hooks to
+            # CleanupManager, so run them here to remove installed globals.
+            for cleanup in reversed(output_graph.cleanups):
+                cleanup()
+            output_graph.cleanups.clear()
+
             # Lazy import to avoid a circular import (convert_frame imports
             # output_graph at module load time).
             from .convert_frame import _clear_fake_mode_weakrefs

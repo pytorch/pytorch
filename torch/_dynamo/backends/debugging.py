@@ -50,6 +50,7 @@ from .registry import CompiledFn, CompilerFn, register_debug_backend as register
 
 
 if TYPE_CHECKING:
+    from torch._inductor.triton_bundler import TritonBundle
     from torch.fx.node import Target
 
 
@@ -335,7 +336,7 @@ class AOTEagerOutputCode(OutputCode):
         if self.gm is not None:
             self._runtime_module_refs = get_dynamo_runtime_module_refs(self.gm)
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: "TritonBundle") -> None:
         pass
 
 
