@@ -5,6 +5,7 @@ import copy
 import functools
 import math
 import threading
+import weakref
 from typing import Any
 
 import torch
@@ -14,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -415,6 +417,147 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_input_layouts(self):
+        self.run_subtests(
+            {
+                "shard_world_size": [1, 2],
+                "release_outputs": [False, True],
+            },
+            self._test_all_gather_input_layouts,
+        )
+
+    def _test_all_gather_input_layouts(
+        self, shard_world_size: int, release_outputs: bool
+    ):
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size // shard_world_size, shard_world_size),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        expected_weight = torch.arange(64, device=device_type).float().view(8, 8) / 64
+        tags = torch.arange(6, dtype=torch.bfloat16, device=device_type).view(2, 3)
+        post_out_ids: list[int | None] = []
+        payload_refs: list[weakref.ReferenceType[torch.Tensor]] = []
+        storage_observations: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+
+        def fsdp_pre_all_gather(
+            local_tensor,
+            mesh: DeviceMesh,
+            outer_size: torch.Size,
+            outer_stride: tuple[int, ...],
+            module: nn.Module,
+            mp_policy: MixedPrecisionPolicy,
+        ) -> tuple[tuple[AllGatherInput, ...], Any]:
+            del outer_stride, module, mp_policy
+            rank = mesh.get_local_rank()
+            payload_tags = tags + rank * 8
+            rank_tag = torch.tensor(rank, dtype=torch.int64, device=local_tensor.device)
+            payload_refs.extend((weakref.ref(payload_tags), weakref.ref(rank_tag)))
+            return (
+                AllGatherInput(local_tensor, dim=-1, output_size=torch.Size((2, 4, 8))),
+                AllGatherInput(payload_tags),
+                AllGatherInput(rank_tag),
+            ), (outer_size, mesh.size())
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor,
+            all_gather_outputs: tuple[torch.Tensor, ...],
+            metadata: Any,
+            param_dtype: torch.dtype,
+            *,
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+            del local_tensor
+            weight, gathered_tags, ranks = all_gather_outputs
+            self.assertEqual(metadata, (torch.Size((8, 8)), shard_world_size))
+            self.assertEqual(weight.shape, (2, 4, 8))
+            self.assertEqual(weight.dtype, param_dtype)
+            self.assertEqual(weight, expected_weight.view(2, 4, 8))
+            self.assertEqual(gathered_tags.shape, (2 * shard_world_size, 3))
+            self.assertEqual(gathered_tags.dtype, torch.bfloat16)
+            self.assertEqual(
+                gathered_tags,
+                torch.cat([tags + rank * 8 for rank in range(shard_world_size)]),
+            )
+            self.assertEqual(ranks.shape, (shard_world_size,))
+            self.assertEqual(ranks.dtype, torch.int64)
+            self.assertEqual(ranks, torch.arange(shard_world_size, device=device_type))
+            post_out_ids.append(None if out is None else id(out))
+            weight = weight.view(8, 8)
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(weight)
+                return None
+            transformed = weight.clone()
+            return transformed, (transformed,)
+
+        def fsdp_should_release_all_gather_outputs_after_post_all_gather(
+            local_tensor,
+        ) -> bool:
+            del local_tensor
+            return release_outputs
+
+        class InspectLinear(nn.Linear):
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                param_group = fully_shard.state(self)._fsdp_param_group
+                if param_group is None:
+                    raise AssertionError("Expected an FSDP parameter group")
+                (param,) = param_group.fsdp_params
+                raw = param.all_gather_outputs
+                inner = param._unsharded_inner_tensors
+                storage_observations.append(
+                    (
+                        tuple(t.untyped_storage().size() for t in raw),
+                        tuple(t.untyped_storage().size() for t in inner),
+                    )
+                )
+                return super().forward(input)
+
+        model = InspectLinear(8, 8, bias=False, device=device_type)
+        ref_model = nn.Linear(8, 8, bias=False, device=device_type)
+        with torch.no_grad():
+            model.weight.copy_(expected_weight)
+            ref_model.weight.copy_(expected_weight)
+        fully_shard(
+            model,
+            mesh=mesh,
+            shard_placement_fn=lambda _: Shard(1),
+            reshard_after_forward=True,
+        )
+        local_weight = model.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
+        local_weight.fsdp_should_release_all_gather_outputs_after_post_all_gather = (
+            fsdp_should_release_all_gather_outputs_after_post_all_gather.__get__(
+                local_weight
+            )
+        )
+
+        inp = torch.arange(16, device=device_type).float().view(2, 8) / 16
+        for _ in range(2):
+            model.zero_grad(set_to_none=True)
+            ref_model.zero_grad(set_to_none=True)
+            output = model(inp)
+            ref_output = ref_model(inp)
+            self.assertEqual(output, ref_output)
+            raw_sizes, inner_sizes = storage_observations[-1]
+            self.assertEqual(len(raw_sizes), 3)
+            if release_outputs:
+                self.assertEqual(raw_sizes, (0, 0, 0))
+            else:
+                self.assertTrue(all(size > 0 for size in raw_sizes))
+            self.assertTrue(all(size > 0 for size in inner_sizes))
+            output.sum().backward()
+            ref_output.sum().backward()
+            check_sharded_parity(self, ref_model, model)
+
+        self.assertEqual(len(post_out_ids), 4)
+        self.assertIsNotNone(post_out_ids[1])
+        self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
+        self.assertTrue(all(ref() is None for ref in payload_refs))
 
 
 class TestFullyShardAllGatherExtensionsMultiThread(
