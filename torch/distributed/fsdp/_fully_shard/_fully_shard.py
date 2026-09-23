@@ -707,8 +707,9 @@ class FSDPModule:
         reduce-scatter collectives. Similar to DDP's
         ``find_unused_parameters``.
 
-        Explicit ``grad_dtype=None`` requires a non-``None`` ``reduce_dtype``
-        so zero gradients have the same dtype on every rank.
+        Parameters requiring gradients with explicit ``grad_dtype=None``
+        require a non-``None`` ``reduce_dtype`` so zero gradients have the
+        same dtype on every rank; otherwise, backward raises an error.
 
         Args:
             reduce_scatter_unused_params (bool): Whether to include zero
@@ -718,25 +719,13 @@ class FSDPModule:
         """
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
-        groups = [
-            group
-            for module in modules
-            if isinstance(module, FSDPModule)
-            for group in module._get_fsdp_state()._fsdp_param_groups
-        ]
-        if reduce_scatter_unused_params:
-            for group in groups:
-                if group.mp_policy.reduce_dtype is None and any(
-                    param._has_sharded_grad_dtype_override
-                    and param.sharded_grad_dtype is None
-                    for param in group.fsdp_params
-                ):
-                    raise ValueError(
-                        "Reducing unused parameters with grad_dtype=None requires "
-                        "an explicit MixedPrecisionPolicy.reduce_dtype"
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.reduce_scatter_unused_params = (
+                        reduce_scatter_unused_params
                     )
-        for group in groups:
-            group.reduce_scatter_unused_params = reduce_scatter_unused_params
 
     def set_reduce_scatter_max_input_buffers(
         self, max_input_buffers: int, *, recurse: bool = True

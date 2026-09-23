@@ -442,11 +442,13 @@ class TestFullyShardConversion(TestCase):
             mesh=self.mesh,
             mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
         )
+        model.set_reduce_scatter_unused_params(True)
+        loss = model(torch.ones(1, 2, device=device)).sum()
         if reduce_dtype is None:
             with self.assertRaisesRegex(ValueError, "grad_dtype=None.*reduce_dtype"):
-                model.set_reduce_scatter_unused_params(True)
+                loss.backward()
         else:
-            model.set_reduce_scatter_unused_params(True)
+            loss.backward()
 
     @parametrize("grad_dtype", ["default", torch.float32, None])
     @parametrize("assign", [False, True])

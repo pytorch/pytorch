@@ -650,6 +650,7 @@ class FSDPParamGroup:
                     if self.reshard_after_backward:
                         self.reshard()
                     return
+                self._validate_unused_param_grad_dtypes()
                 # Save the autograd-computed gradients before resharding to only
                 # access the unsharded parameters when their data is present
                 fsdp_params_with_grad: list[FSDPParam] = []
@@ -835,6 +836,23 @@ class FSDPParamGroup:
         return output.narrow(0, offset, param.sharded_size.numel()).view(
             param.sharded_size
         )
+
+    def _validate_unused_param_grad_dtypes(self) -> None:
+        # Check configuration rather than gradient presence so every rank raises
+        # together; a rank-local error would leave peers hanging in reduction.
+        if not self.reduce_scatter_unused_params:
+            return
+        for fsdp_param in self.fsdp_params:
+            if (
+                fsdp_param.sharded_param.requires_grad
+                and fsdp_param.unsharded_grad_dtype is None
+            ):
+                raise ValueError(
+                    "Reducing unused parameters with grad_dtype=None requires an "
+                    "explicit MixedPrecisionPolicy.reduce_dtype so every rank can "
+                    f"build zero gradients of the same dtype: {fsdp_param._param_fqn}. "
+                    "Set reduce_dtype to the dtype its gradients already have."
+                )
 
     def _get_unsharded_grad_to_reduce(self, param: FSDPParam) -> torch.Tensor | None:
         """Returns the unsharded gradient to reduce-scatter, or ``None`` to skip."""

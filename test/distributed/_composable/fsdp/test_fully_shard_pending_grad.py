@@ -75,6 +75,36 @@ class TestFullyShardPendingGrad(FSDPTest):
                 self.assertEqual(actual, torch.full_like(actual, expected))
 
     @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_none_unused_parameters(self, device):
+        class Model(TwoLinear):
+            def __init__(self, device):
+                super().__init__(device, in_features=1, out_features=2)
+                self.third = nn.Linear(1, 2, bias=False, device=device)
+
+            def forward(self, inp, use_second):
+                branch = self.second if use_second else self.third
+                return self.first(inp) + branch(inp)
+
+        device = torch.device(device).type
+        model = Model(device)
+        model.first.weight.grad_dtype = None
+        model.first.weight.requires_grad_(False)
+        fully_shard(model, mesh=init_device_mesh(device, (self.world_size,)))
+        model.set_reduce_scatter_unused_params(True)
+        inp = torch.ones((1, 1), device=device)
+        # Frozen parameters never need zero gradients, so no reduce_dtype is needed.
+        model(inp, use_second=self.rank == 0).sum().backward()
+        self.assertIsNone(model.first.weight.grad)
+        self.assertIsNotNone(model.second.weight.grad)
+        self.assertIsNotNone(model.third.weight.grad)
+        # Unfreezing after enabling unused-parameter reduction is still caught
+        # on every rank instead of hanging the collective.
+        model.zero_grad(set_to_none=True)
+        model.first.weight.requires_grad_(True)
+        with self.assertRaisesRegex(ValueError, "grad_dtype=None requires"):
+            model(inp, use_second=self.rank == 0).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("cpu_offload", [False, True])
     def test_native_accumulation_dtypes(self, device, cpu_offload):
         device = torch.device(device).type
