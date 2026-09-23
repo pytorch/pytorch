@@ -155,12 +155,13 @@ class TestFullyShardConversion(TestCase):
             nn.Linear(4, 4, device=device), nn.Linear(4, 4, device=device)
         )
         model[1].weight.grad_dtype = torch.float32
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=torch.float32)
         if grouped:
-            fully_shard(list(model), mesh=self.mesh)
+            fully_shard(list(model), mesh=self.mesh, mp_policy=mp_policy)
         else:
             for layer in model:
-                fully_shard(layer, mesh=self.mesh)
-        fully_shard(model, mesh=self.mesh)
+                fully_shard(layer, mesh=self.mesh, mp_policy=mp_policy)
+        fully_shard(model, mesh=self.mesh, mp_policy=mp_policy)
         model[1].weight.grad = torch.ones_like(model[1].weight)
         self._assert_conversion_requires_clear(model, torch.bfloat16)
 

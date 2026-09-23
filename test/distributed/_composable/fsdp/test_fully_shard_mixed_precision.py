@@ -703,6 +703,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         fully_shard(
             model,
             mesh=mesh,
+            reshard_after_forward=False,
             mp_policy=MixedPrecisionPolicy(
                 param_dtype=torch.bfloat16, reduce_dtype=reduce_dtype
             ),
@@ -710,18 +711,49 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         if sum_reduction:
             model.set_gradient_divide_factor(1.0)
 
+        inp = torch.arange(16, device=device_type, dtype=torch.bfloat16).reshape(2, 8)
+        inp = inp / 16 + self.rank / 8
+        if reduce_dtype is None:
+            with (
+                patch.object(
+                    dist, "all_gather_single", wraps=dist.all_gather_single
+                ) as all_gather,
+                patch.object(
+                    dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
+                ) as reduce_scatter,
+                patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
+            ):
+                with self.assertRaisesRegex(
+                    AssertionError, "uniform unsharded gradient dtype"
+                ):
+                    model(inp)
+                all_gather.assert_not_called()
+                reduce_scatter.assert_not_called()
+                all_reduce.assert_not_called()
+            return
+
         def check_unsharded_grad_dtype(module: nn.Module, _inputs):
             for param, grad_dtype in zip(module.parameters(), grad_dtypes):
                 self.assertEqual(param.grad_dtype, reduce_dtype or grad_dtype)
 
         model.register_forward_pre_hook(check_unsharded_grad_dtype)
-        inp = torch.arange(16, device=device_type, dtype=torch.bfloat16).reshape(2, 8)
-        inp = inp / 16 + self.rank / 8
         for microbatch_idx in range(3):
             sync = microbatch_idx == 2
             model.set_requires_gradient_sync(sync)
             microbatch_inp = inp + microbatch_idx / 16
-            model(microbatch_inp).sum().backward()
+            with (
+                patch.object(
+                    dist, "all_gather_single", wraps=dist.all_gather_single
+                ) as all_gather,
+                patch.object(
+                    dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
+                ) as reduce_scatter,
+                patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
+            ):
+                model(microbatch_inp).sum().backward()
+                all_gather.assert_called_once()
+                self.assertEqual(reduce_scatter.call_count, int(sync))
+                self.assertEqual(all_reduce.call_count, int(sync and use_hsdp))
             ref_model(microbatch_inp).sum().backward()
             if not sync:
                 for param, grad_dtype in zip(model.parameters(), grad_dtypes):
@@ -752,6 +784,78 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     self.assertEqual(param.grad, ref_param.grad)
             if not sync:
                 model.reshard()
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_hsdp", [False, True])
+    @parametrize("sync_in_backward", [False, True])
+    @parametrize("reduce_dtype", [None, torch.float32])
+    def test_grad_dtype_none_requires_uniform_gradients(
+        self, use_hsdp: bool, sync_in_backward: bool, reduce_dtype: torch.dtype | None
+    ):
+        if use_hsdp and self.world_size != 4:
+            self.skipTest("HSDP requires four devices")
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2) if use_hsdp else (self.world_size,),
+            mesh_dim_names=("replicate", "shard") if use_hsdp else ("shard",),
+        )
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.first = nn.Parameter(
+                    torch.ones(8, device=device_type, dtype=torch.bfloat16)
+                )
+                self.second = nn.Parameter(torch.ones_like(self.first))
+                self.register_buffer("first_scale", torch.ones(8, device=device_type))
+                self.register_buffer("second_scale", self.first_scale.bfloat16())
+                self.first.grad_dtype = self.second.grad_dtype = None
+
+            def forward(self):
+                return (self.first * self.first_scale).sum() + (
+                    self.second * self.second_scale
+                ).sum()
+
+        model = Model()
+        fully_shard(
+            model,
+            mesh=mesh,
+            reshard_after_forward=False,
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
+        )
+        model.set_requires_gradient_sync(sync_in_backward)
+        model.set_reshard_after_backward(False)
+        with (
+            patch.object(
+                dist, "all_gather_single", wraps=dist.all_gather_single
+            ) as all_gather,
+            patch.object(
+                dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
+            ) as reduce_scatter,
+            patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
+        ):
+            loss = model()
+            if reduce_dtype is None:
+                if not sync_in_backward:
+                    loss.backward()
+                with self.assertRaisesRegex(AssertionError, "uniform gradient dtype"):
+                    if sync_in_backward:
+                        loss.backward()
+                    else:
+                        model.synchronize_gradients()
+                self.assertEqual(model.first.grad.dtype, torch.float32)
+                self.assertEqual(model.second.grad.dtype, torch.bfloat16)
+                reduce_scatter.assert_not_called()
+                all_reduce.assert_not_called()
+            else:
+                loss.backward()
+                if not sync_in_backward:
+                    reduce_scatter.assert_not_called()
+                    all_reduce.assert_not_called()
+                    model.synchronize_gradients()
+                reduce_scatter.assert_called_once()
+                self.assertEqual(all_reduce.call_count, int(use_hsdp))
+            all_gather.assert_called_once()
 
     @skip_if_lt_x_gpu(2)
     def test_grad_dtype_unused_last_microbatch(self):

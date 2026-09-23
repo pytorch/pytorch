@@ -707,7 +707,7 @@ def foreach_reduce(
                     op=all_reduce_op,
                 )
                 # Keep refs to the reduce-dtype AR buffer + completion
-                # event so FSDPParamGroup._all_reduce_states can hold them
+                # event so FSDPParamGroup._all_reduce_state can hold them
                 # across layers. This keeps the buffer off the caching
                 # allocator's free list; otherwise the next layer's
                 # reduce-scatter can reuse the same physical block while
@@ -736,7 +736,7 @@ def foreach_reduce(
         # lands on the caching allocator's free list and the next layer's
         # RS on RS stream can reuse it without waiting for this layer's
         # AR to finish. The reduce-dtype buffer is held across layers by
-        # FSDPParamGroup._all_reduce_states (captured above) to prevent
+        # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
         sharded_grad_dtypes = {p.sharded_grad_dtype for p in fsdp_params}
         if len(sharded_grad_dtypes) == 1:

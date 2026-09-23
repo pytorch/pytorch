@@ -56,7 +56,11 @@ class TestFullyShardPendingGrad(FSDPTest):
         model = Model(device, in_features=1, out_features=3).to(torch.bfloat16)
         model.first.weight.grad_dtype = torch.float32
         model.second.weight.grad_dtype = torch.bfloat16
-        fully_shard(model, mesh=init_device_mesh(device, (self.world_size,)))
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device, (self.world_size,)),
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
+        )
         model.set_reduce_scatter_unused_params(True)
         inp = torch.full((1, 1), self.rank + 1, device=device, dtype=torch.bfloat16)
         for first_rank in (0, 1):
@@ -386,7 +390,7 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
 
     @skip_if_lt_x_gpu(4)
     @parametrize("cpu_offload", [False, True])
-    @parametrize("reduce_dtype", [None, torch.float32])
+    @parametrize("reduce_dtype", [torch.bfloat16, torch.float32])
     def test_grad_dtype_pending_reductions(self, device, cpu_offload, reduce_dtype):
         device = torch.device(device).type
         model = TwoLinear(device, in_features=1, out_features=5).to(torch.bfloat16)
@@ -408,9 +412,8 @@ class TestFullyShardPendingGradHSDP(FSDPTest):
                 torch.full((1, 1), value, device=device, dtype=torch.bfloat16)
             ).sum().backward()
         model.synchronize_gradients()
-        for param, expected in zip(
-            model.parameters(), (1, 0 if reduce_dtype is None else 1)
-        ):
+        expected = 0 if reduce_dtype == torch.bfloat16 else 1
+        for param in model.parameters():
             self.assertEqual(param.grad.dtype, param.grad_dtype)
             actual = param.grad.to(device).full_tensor()
             self.assertEqual(actual, torch.full_like(actual, expected))

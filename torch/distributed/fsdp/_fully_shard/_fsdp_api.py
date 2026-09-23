@@ -40,7 +40,10 @@ class MixedPrecisionPolicy:
             including ``None`` to allow any incoming gradient dtype. Parameters
             without an explicit gradient policy use the original parameter
             dtype, independently of ``param_dtype``.
-            Gradients with different dtypes are reduced separately. Reduced
+            Each communication group must have a uniform unsharded gradient
+            dtype. FSDP raises an error for nonuniform policies or actual
+            gradient dtypes instead of issuing additional collectives. Set an
+            explicit ``reduce_dtype`` to give the group a common dtype. Reduced
             sharded gradients use each parameter's ``grad_dtype`` as specified before calling
             :func:`fully_shard`. Changing this policy afterward is unsupported,
             including before the first forward. (Default: ``None``)
