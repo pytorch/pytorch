@@ -56,6 +56,24 @@ def _user_op(x):
     return x + 1
 
 
+def _act(x):
+    return x.relu()
+
+
+_relu = _act
+
+
+def _act(x):
+    return x.sigmoid()
+
+
+_sigmoid = _act
+
+
+def _through_act(x):
+    return _act(x) + 1
+
+
 def _stack(*filenames):
     """A guard's user_stack, outermost frame first."""
     return traceback.StackSummary.from_list([(f, 1, "forward", "") for f in filenames])
@@ -2411,6 +2429,25 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             precompile_package.precompile_capture(model)
         with self.assertRaisesRegex(PackageError, "bound method"):
             precompile_package.precompile_capture(model.forward)
+
+    def test_a_dropped_guard_that_tells_variants_apart_is_risky(self):
+        # The default filter drops the CLOSURE_MATCH on _act, a global bound to
+        # a def of that name in this file. The static shapes recompile either
+        # way; a dropped slot that held a different def in each variant cannot
+        # pick between them at serve time.
+        def risky(acts):
+            session = precompile_package.precompile_capture(
+                _through_act, backend="eager", dynamic=False
+            )
+            with session as call:
+                for n, act in enumerate(acts):
+                    with mock.patch.object(sys.modules[__name__], "_act", act):
+                        call(torch.ones(2 + n))
+            return session.summary().risky_dropped_guards
+
+        slot = ("CLOSURE_MATCH", "G['_act']")
+        self.assertNotIn(slot, risky([_relu, _relu]))
+        self.assertIn(slot, risky([_relu, _sigmoid]))
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
