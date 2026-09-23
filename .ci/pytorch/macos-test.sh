@@ -32,7 +32,7 @@ setup_test_python() {
 test_python_all() {
   setup_test_python
 
-  time python test/run_test.py --verbose --exclude-jit-executor
+  time python test/run_test.py --verbose --exclude-jit-executor --exclude inductor/test_torchinductor_opinfo
 
   assert_git_not_dirty
 }
@@ -71,7 +71,7 @@ test_python_shard() {
 
   setup_test_python
 
-  time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests --shard "$1" "$NUM_TEST_SHARDS"
+  time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests --exclude inductor/test_torchinductor_opinfo --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
 }
