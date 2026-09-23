@@ -149,8 +149,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
              "mkldnn_batch_norm: currently mkldnn only support affine model");
 
   ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor w = itensor_from_tensor(weight);
-  ideep::tensor b = itensor_from_tensor(bias);
+  ideep::tensor w = itensor_from_const_tensor(weight);
+  ideep::tensor b = itensor_from_const_tensor(bias);
   bool use_running_stat = (running_mean.defined() && running_var.defined());
 
   ideep::tensor y;
@@ -185,8 +185,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
         "mkldnn_batch_norm: currently mkldnn inference only support 2d and 3d batchnorm");
     if (use_running_stat) {
-      ideep::tensor m = itensor_from_tensor(running_mean);
-      ideep::tensor v = itensor_from_tensor(running_var);
+      ideep::tensor m = itensor_from_const_tensor(running_mean);
+      ideep::tensor v = itensor_from_const_tensor(running_var);
       ideep::batch_normalization_forward_inference::compute(
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           x, m, v, w, b, y, eps);
@@ -256,7 +256,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
   ideep::tensor& grady = itensor_from_mkldnn(grad_output);
   ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor w = itensor_from_tensor(weight);
+  ideep::tensor w = itensor_from_const_tensor(weight);
   ideep::tensor& m = itensor_from_mkldnn(save_mean);
   ideep::tensor& v = itensor_from_mkldnn(save_invstd);
 
