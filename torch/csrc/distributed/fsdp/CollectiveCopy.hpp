@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <vector>
 
 namespace c10d::fsdp {
 
@@ -19,6 +20,13 @@ TORCH_API void check_reduce_scatter_copy_in_inputs(
     int64_t num_chunks);
 
 TORCH_API void all_gather_copy_out(
+    at::TensorList out,
+    const at::Tensor& input,
+    at::IntArrayRef split_sizes,
+    at::IntArrayRef outer_sizes,
+    int64_t num_chunks);
+
+TORCH_API std::vector<at::Tensor> split_all_gather_output_with_resize(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,

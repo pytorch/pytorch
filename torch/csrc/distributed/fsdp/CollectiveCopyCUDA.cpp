@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAContextLight.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Resize.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
@@ -10,6 +11,7 @@
 #include <torch/library.h>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -43,7 +45,57 @@ void all_gather_copy_out_cuda(
   const bool needs_resize = check_all_gather_copy_out_inputs(
       out, input, split_sizes, outer_sizes, num_chunks);
   if (needs_resize) {
-    all_gather_copy_out(out, input, split_sizes, outer_sizes, num_chunks);
+    if (std::all_of(
+            outer_sizes.begin(), outer_sizes.end(), [](int64_t outer_size) {
+              return outer_size == 1;
+            })) {
+      all_gather_copy_out(out, input, split_sizes, outer_sizes, num_chunks);
+      return;
+    }
+    std::vector<std::pair<uintptr_t, uintptr_t>> output_ranges;
+    output_ranges.reserve(out.size());
+    bool use_generic = false;
+    for (const auto& tensor : out) {
+      use_generic |= tensor.is_conj() || tensor.is_neg();
+      if (tensor.numel() != 0) {
+        const auto begin = reinterpret_cast<uintptr_t>(tensor.const_data_ptr());
+        output_ranges.emplace_back(begin, begin + tensor.nbytes());
+      }
+    }
+    std::sort(output_ranges.begin(), output_ranges.end());
+    for (const auto i : c10::irange(1, output_ranges.size())) {
+      use_generic |= output_ranges[i].first < output_ranges[i - 1].second;
+    }
+    if (use_generic) {
+      all_gather_copy_out(out, input, split_sizes, outer_sizes, num_chunks);
+      return;
+    }
+    const c10::cuda::CUDAGuard device_guard(input.device());
+    auto buffers = split_all_gather_output_with_resize(
+        out, input, split_sizes, outer_sizes, num_chunks);
+    std::vector<detail::AllGatherReassembly> copies;
+    copies.reserve(out.size());
+    bool use32 = true;
+    for (const auto i : c10::irange(out.size())) {
+      if (outer_sizes[i] == 1 || split_sizes[i] == 0 || out[i].numel() == 0) {
+        continue;
+      }
+      const auto rank_size = static_cast<int64_t>(out[i].nbytes() / num_chunks);
+      copies.push_back(
+          {buffers[i].const_data_ptr(),
+           out[i].mutable_data_ptr(),
+           rank_size,
+           outer_sizes[i]});
+      use32 &= out[i].nbytes() <= std::numeric_limits<int32_t>::max() &&
+          at::native::canUse32BitIndexMath(out[i]) &&
+          at::native::canUse32BitIndexMath(buffers[i]);
+    }
+    detail::launch_all_gather_reassembly(copies, num_chunks, use32);
+    for (const auto& tensor : out) {
+      if (!tensor.is_inference()) {
+        torch::autograd::impl::bump_version(tensor);
+      }
+    }
     return;
   }
   const c10::cuda::CUDAGuard device_guard(input.device());

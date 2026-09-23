@@ -11,6 +11,18 @@ namespace c10d::fsdp::detail {
 inline constexpr int64_t kCopyThreadsPerBlock = 128;
 inline constexpr int64_t kChunkCatBytesPerBlock = kCopyThreadsPerBlock * 16;
 
+struct AllGatherReassembly {
+  const void* src;
+  void* dst;
+  int64_t rank_size; // Cached bytes per rank.
+  int64_t outer_size;
+};
+
+TORCH_CUDA_CU_API void launch_all_gather_reassembly(
+    at::ArrayRef<AllGatherReassembly> copies,
+    int64_t num_chunks,
+    bool use32);
+
 TORCH_CUDA_CU_API std::pair<at::Tensor, std::vector<int64_t*>> pack_vecs(
     std::vector<const std::vector<int64_t>*> vecs,
     const at::Device& device);
