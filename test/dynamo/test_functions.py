@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
+import cmath
 import collections
 import collections.abc
 import contextlib
@@ -30,6 +31,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    expectedFailureDynamic,
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, same
@@ -151,6 +153,67 @@ def inline_lru_cache_fn_with_default_args(x, y, _=None):
 @torch.jit.script_if_tracing
 def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
+
+
+class WithLengthHint:
+    def __init__(self, value):
+        self.value = value
+
+    def __length_hint__(self):
+        if type(self.value) is type:
+            raise self.value
+        return self.value
+
+
+class NoHint:
+    pass
+
+
+class LenRaisesTypeError:
+    def __len__(self):
+        raise TypeError
+
+    def __length_hint__(self):
+        return 7
+
+
+class LenRaisesTypeErrorNoHint:
+    def __len__(self):
+        raise TypeError
+
+
+class WithIndex:
+    def __index__(self):
+        return 5
+
+
+class BadIndex:
+    def __index__(self):
+        raise RuntimeError("index failed")
+
+
+def unbound_length_hint(obj):
+    return type(obj).__length_hint__(obj)
+
+
+def deque_length_hints():
+    # (clean, unbound, after-mutation) hints for iter(deque) and
+    # reversed(deque): a deque iterator reports 0 once it raised for a mutated
+    # deque, and `type(it).__length_hint__(it)` must resolve for both types.
+    hints = []
+    for make_iter in (iter, reversed):
+        d = collections.deque([1, 2, 3])
+        it = make_iter(d)
+        hints.append(operator.length_hint(it))
+        hints.append(unbound_length_hint(it))
+        next(it)
+        d.append(4)
+        try:
+            next(it)
+        except RuntimeError:
+            pass
+        hints.append(operator.length_hint(it))
+    return tuple(hints)
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
@@ -3114,6 +3177,236 @@ partial_fn = functools.partial(fn, scale=2)
             case {"b": param}:
                 return x / param
 
+    @parametrize("name, expected", (("ceil", 42), ("floor", 7), ("trunc", 3)))
+    def test_math_ceil_floor_trunc_custom_object(self, name, expected):
+        class C:
+            def __ceil__(self):
+                return 42
+
+            def __floor__(self):
+                return 7
+
+            def __trunc__(self):
+                return 3
+
+        fn = getattr(math, name)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + fn(C())
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + expected)
+
+    @parametrize("name", ("ceil", "floor", "trunc"))
+    def test_math_ceil_floor_trunc_special_lookup(self, name):
+        class C:
+            def __ceil__(self):
+                return 42
+
+            __floor__ = __trunc__ = __ceil__
+
+        obj = C()
+        obj.__ceil__ = obj.__floor__ = obj.__trunc__ = lambda: 99
+        fn = getattr(math, name)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + fn(obj)
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + 42)
+
+    def test_math_ceil_floor_float_fallback(self):
+        class FloatLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + math.ceil(FloatLike(42.5)) + math.floor(FloatLike(41.9))
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + 43 + 41)
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize("value", (42, 2**53 + 1))
+    def test_math_ceil_floor_index_fallback(self, name, value):
+        class IndexLike:
+            def __index__(self):
+                return value
+
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(IndexLike())
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize("base", (int, float))
+    def test_math_ceil_floor_conversion_subclass(self, name, base):
+        class Number(base):
+            def __float__(self):
+                return 99.5
+
+            def __ceil__(self):
+                return 99
+
+            __floor__ = __ceil__
+
+        value = Number(42.5 if base is float else 42)
+
+        class FloatLike:
+            def __float__(self):
+                return value
+
+        class IndexLike:
+            def __index__(self):
+                return value
+
+        obj = FloatLike() if base is float else IndexLike()
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(obj)
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertWarns(DeprecationWarning):
+            expected = func(x)
+        self.assertEqual(opt(x), expected)
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize("protocol", ("float", "index"))
+    def test_math_ceil_floor_symbolic_fallback(self, name, protocol):
+        class FloatLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value / 2
+
+        class IndexLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        cls = FloatLike if protocol == "float" else IndexLike
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(cls(x.shape[0]))
+
+        x = torch.rand(7)
+        opt = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize(
+        "protocol,value,error",
+        (
+            ("float", 1, TypeError),
+            ("float", float("inf"), OverflowError),
+            ("float", float("nan"), ValueError),
+            ("index", 1.5, TypeError),
+            ("index", 10**400, OverflowError),
+        ),
+    )
+    # Unspecialized, 10**400 hits sym_float: RuntimeError, not OverflowError.
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_math_ceil_floor_invalid_conversion(self, name, protocol, value, error):
+        class FloatLike:
+            def __float__(self):
+                return value
+
+        class IndexLike:
+            def __index__(self):
+                return value
+
+        obj = FloatLike() if protocol == "float" else IndexLike()
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                fn(obj)
+            except error as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize("base", (object, str))
+    def test_math_ceil_floor_non_numeric(self, name, base):
+        class C(base):
+            pass
+
+        obj = C("2.5") if base is str else C()
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                fn(obj)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("ceil", "floor", "trunc"))
+    @parametrize("call", ("extra", "keyword", "both"))
+    def test_math_ceil_floor_trunc_invalid_arguments(self, name, call):
+        class C:
+            def __ceil__(self):
+                raise AssertionError("special method must not be called")
+
+            __floor__ = __trunc__ = __ceil__
+
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                if call == "keyword":
+                    fn(x=C())
+                elif call == "both":
+                    fn(C(), 0, x=C())
+                else:
+                    fn(C(), 0)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    def test_math_ceil_floor_trunc_unchanged(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def constant(x):
+            return x + math.ceil(2.3) + math.floor(-2.3) + math.trunc(-2.3)
+
+        x = torch.rand(10)
+        self.assertEqual(constant(x), x + 3 - 3 - 2)
+
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def symbolic(t):
+            return t.new_zeros(math.ceil(t.shape[0] / 2))
+
+        self.assertEqual(symbolic(torch.ones(7)).shape[0], 4)
+        self.assertEqual(symbolic(torch.ones(9)).shape[0], 5)
+
     def test_math_radians(self):
         def func(x, a):
             return x + math.radians(a)
@@ -3161,6 +3454,74 @@ partial_fn = functools.partial(fn, scale=2)
         torch.testing.assert_close(output_tensors, expected_tensors)
         if cnt2.frame_count != 1:
             raise AssertionError(f"Expected frame_count 1, got {cnt2.frame_count}")
+
+    @parametrize(
+        "name",
+        (
+            "acos",
+            "acosh",
+            "asin",
+            "asinh",
+            "atan",
+            "atanh",
+            "cos",
+            "cosh",
+            "exp",
+            "isclose",
+            "isfinite",
+            "isinf",
+            "isnan",
+            "log",
+            "log10",
+            "phase",
+            "polar",
+            "rect",
+            "sin",
+            "sinh",
+            "sqrt",
+            "tan",
+            "tanh",
+        ),
+        name_fn=lambda name: name,
+    )
+    def test_cmath_constant_fold(self, name):
+        args = {
+            "acos": (0.3 + 0.4j,),
+            "acosh": (0.3 + 0.4j,),
+            "asin": (0.3 + 0.4j,),
+            "asinh": (0.3 + 0.4j,),
+            "atan": (0.3 + 0.4j,),
+            "atanh": (0.3 + 0.4j,),
+            "cos": (0.3 + 0.4j,),
+            "cosh": (0.3 + 0.4j,),
+            "exp": (0.3 + 0.4j,),
+            "isclose": (0.3 + 0.4j, 0.3 + 0.4j),
+            "isfinite": (0.3 + 0.4j,),
+            "isinf": (0.3 + 0.4j,),
+            "isnan": (0.3 + 0.4j,),
+            "log": (0.3 + 0.4j,),
+            "log10": (0.3 + 0.4j,),
+            "phase": (0.3 + 0.4j,),
+            "polar": (0.3 + 0.4j,),
+            "rect": (1.0, 0.5),
+            "sin": (0.3 + 0.4j,),
+            "sinh": (0.3 + 0.4j,),
+            "sqrt": (0.3 + 0.4j,),
+            "tan": (0.3 + 0.4j,),
+            "tanh": (0.3 + 0.4j,),
+        }[name]
+        fn = getattr(cmath, name)
+
+        def call():
+            return fn(*args)
+
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_call = torch._dynamo.optimize_assert(cnt)(call)
+        expected = fn(*args)
+        actual = opt_call()
+        self.assertEqual(actual, expected)
+        self.assertEqual(cnt.frame_count, 0)
 
     @make_test
     def test_numpy_meshgrid(x, y):
@@ -4278,6 +4639,144 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
                 self.assertEqual(opt_fn(), fn())
 
+    @parametrize(
+        "name,call",
+        (
+            ("len", lambda: operator.length_hint([], 2)),
+            ("iterator", lambda: operator.length_hint(iter([1, 2, 3]))),
+            ("hint", lambda: operator.length_hint(WithLengthHint(2))),
+            (
+                "not_implemented_falls_back_to_default",
+                lambda: operator.length_hint(WithLengthHint(NotImplemented), 4),
+            ),
+            (
+                "type_error_falls_back_to_default",
+                lambda: operator.length_hint(WithLengthHint(TypeError), 12),
+            ),
+            ("non_int_hint", lambda: operator.length_hint(WithLengthHint("abc"))),
+            ("negative_hint", lambda: operator.length_hint(WithLengthHint(-2))),
+            (
+                "other_hint_error_propagates",
+                lambda: operator.length_hint(WithLengthHint(LookupError)),
+            ),
+            ("bad_default", lambda: operator.length_hint(WithLengthHint(2), "abc")),
+            (
+                "overflowing_default",
+                lambda: operator.length_hint(WithLengthHint(2), 2**200),
+            ),
+            (
+                "index_default",
+                lambda: operator.length_hint(WithLengthHint(2), WithIndex()),
+            ),
+            ("bad_index_default", lambda: operator.length_hint(NoHint(), BadIndex())),
+            ("overflowing_hint", lambda: operator.length_hint(WithLengthHint(2**200))),
+            ("no_hint", lambda: operator.length_hint(NoHint(), 10)),
+            (
+                "len_type_error_falls_back",
+                lambda: operator.length_hint(LenRaisesTypeError()),
+            ),
+            (
+                "len_type_error_no_hint_uses_default",
+                lambda: operator.length_hint(LenRaisesTypeErrorNoHint(), 10),
+            ),
+            ("iterator_bound_hint", lambda: iter([1, 2, 3]).__length_hint__()),
+            ("iterator_unbound_hint", lambda: unbound_length_hint(iter([1, 2, 3]))),
+            (
+                "range_iterator_unbound_hint",
+                lambda: unbound_length_hint(iter(range(5))),
+            ),
+            ("deque_iterator_hints", deque_length_hints),
+            ("too_many_args", lambda: operator.length_hint([], 1, 2)),
+            ("keyword_default", lambda: operator.length_hint([], default=3)),
+        ),
+        name_fn=lambda name, call: name,
+    )
+    def test_operator_length_hint(self, name, call):
+        def fn(x):
+            try:
+                return ("ok", call()), x + 1
+            except Exception as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(2)), fn(torch.ones(2)), msg=name)
+
+    def test_operator_length_hint_type_error_subclass(self):
+        # CPython's PyErr_ExceptionMatches catches TypeError subclasses when
+        # deciding whether to fall back to the default, but Dynamo only tracks
+        # ObservedTypeError for TypeError itself. Subclasses therefore propagate
+        # instead of selecting the default; revisit if this shows up in practice.
+        class MyTypeError(TypeError):
+            pass
+
+        class HintRaisesSubclass:
+            def __length_hint__(self):
+                raise MyTypeError("boom")
+
+        def fn(x):
+            try:
+                return ("ok", operator.length_hint(HintRaisesSubclass(), 42)), x + 1
+            except MyTypeError as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
+
+        self.assertEqual(operator.length_hint(HintRaisesSubclass(), 42), 42)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(2))[0], ("raise", "MyTypeError", "boom"))
+
+    def test_operator_length_hint_bool(self):
+        # _operator.length_hint is declared -> Py_ssize_t and ends in
+        # PyLong_FromSsize_t, so a bool from __length_hint__ arrives as an int.
+        # assertEqual cannot show this: RelaxedBooleanPair treats 1 and True as
+        # equal, so the type of the compiled result is what has to be checked.
+        def fn(x):
+            hint = operator.length_hint
+            hints = tuple(hint(WithLengthHint(b)) for b in (True, False))
+            return hints, x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        hints = opt_fn(torch.ones(2))[0]
+        self.assertIs(type(hints), tuple)
+        self.assertEqual(hints, fn(torch.ones(2))[0])
+        for hint in hints:
+            self.assertIs(type(hint), int)
+
+    @parametrize("offset", (1, -5))
+    def test_operator_length_hint_symbolic(self, offset):
+        # A symbolic hint and a symbolic default are both specialized, so the
+        # type and range checks run at trace time instead of at runtime.
+        def fn(x):
+            try:
+                hint = operator.length_hint(WithLengthHint(x.shape[0] + offset))
+                default = operator.length_hint(NoHint(), x.shape[0] + offset)
+                return ("ok", hint, default), x + 1
+            except Exception as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(3)), fn(torch.ones(3)))
+
+    def test_operator_length_hint_non_constant(self):
+        # id() of an object created while tracing is a compile-time-only int
+        # that is not a python constant, so neither the hint nor the default
+        # (which PyObject_LengthHint converts to an ssize_t up front) can be
+        # validated here; the default is converted even when it is unused.
+        def hint_fn(x):
+            return operator.length_hint(WithLengthHint(id([1, 2]))), x + 1
+
+        def default_fn(x):
+            return operator.length_hint(NoHint(), id([1, 2])), x + 1
+
+        for fn, gb_type in (
+            (hint_fn, "length_hint with a non-constant result"),
+            (default_fn, "length_hint with a non-constant default"),
+        ):
+            with self.subTest(gb_type=gb_type):
+                opt_fn = torch.compile(
+                    fn, backend="eager", dynamic=True, fullgraph=True
+                )
+                with self.assertRaisesRegex(Unsupported, gb_type):
+                    opt_fn(torch.ones(3))
+
     def test_operator_concat(self):
         for seq_type in (list, tuple):
             with self.subTest(seq_type=seq_type):
@@ -5348,6 +5847,222 @@ class GraphModule(torch.nn.Module):
             return isinstance(A.x, types.MemberDescriptorType)
 
         self.assertTrue(fn())
+
+    def test_method_vt_not_a_function_vt(self):
+        """Methods must not subclass UserFunctionVariable (CPython parity).
+
+        In CPython, MethodType is not a subclass of FunctionType, and
+        PyMethodObject composes im_func/im_self rather than extending the
+        function type. The VTs mirror that.
+        """
+        from torch._dynamo.variables.functions import (
+            BaseUserFunctionVariable,
+            UserFunctionVariable,
+            UserMethodVariable,
+        )
+
+        self.assertFalse(issubclass(types.MethodType, types.FunctionType))
+        self.assertFalse(issubclass(UserMethodVariable, UserFunctionVariable))
+        self.assertTrue(issubclass(UserMethodVariable, BaseUserFunctionVariable))
+        self.assertTrue(issubclass(UserFunctionVariable, BaseUserFunctionVariable))
+
+    def test_method_vt_composes_im_func_im_self(self):
+        """UserMethodVariable holds im_func/im_self, mirroring PyMethodObject."""
+        from torch._dynamo.variables.functions import (
+            UserFunctionVariable,
+            UserMethodVariable,
+        )
+
+        def f(self, x):
+            return x
+
+        im_self = ConstantVariable.create(1)
+        im_func = UserFunctionVariable(f)
+        method = UserMethodVariable(im_func, im_self)
+
+        self.assertIs(method.im_func, im_func)
+        self.assertIs(method.im_self, im_self)
+        self.assertIs(method.get_function(), f)
+        self.assertIs(method.get_code(), f.__code__)
+        self.assertEqual(method.self_args(), [im_self])
+        # the function VT carries the source, so the method needs no source_fn
+        self.assertFalse(hasattr(method, "source_fn"))
+        self.assertIs(method.get_source(), im_func.get_source())
+
+    # generate_pycode cannot reconstruct a TensorPropertySource, which is what
+    # a symbolic size input is sourced by; the dynamic_shapes variant therefore
+    # cannot run this, with or without a method involved.
+    @expectedFailureDynamic
+    def test_method_vt_reconstruct_pycode(self):
+        """A bound method live across a graph break must be codegen-able."""
+
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                return x + self.bias
+
+        obj = Counter(10)
+
+        def fn(x):
+            bound = obj.m
+            torch._dynamo.graph_break()
+            return bound(x)
+
+        x = torch.randn(3)
+        with torch._dynamo.config.patch(generate_pycode=True):
+            res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(res, fn(x))
+
+    def test_method_vt_identity_and_dunder_dict(self):
+        """A bound method is not its function, but proxies __dict__ to it."""
+
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+        obj = Counter()
+
+        def fn(x):
+            return (obj.m is Counter.m), (obj.m.__dict__ == Counter.m.__dict__), x + 1
+
+        x = torch.randn(3)
+        is_same, dict_eq, _ = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertFalse(is_same)
+        self.assertTrue(dict_eq)
+
+    def test_method_vt_richcompare(self):
+        """method_richcompare: == on func+receiver, ordering is a TypeError."""
+
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+            def n(self, x):
+                return x + 2
+
+        a, b = Counter(), Counter()
+
+        def fn(x):
+            return (
+                a.m == a.m,  # same func, same receiver
+                a.m is a.m,  # distinct objects every access
+                a.m == b.m,  # same func, different receiver
+                a.m == a.n,  # different func, same receiver
+                a.m != a.m,
+                x + 1,
+            )
+
+        x = torch.randn(3)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(got[:5], fn(x)[:5])
+        self.assertEqual(got[:5], (True, False, False, False, False))
+
+    def test_method_vt_richcompare_ordering_is_type_error(self):
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+        c = Counter()
+
+        def fn(x):
+            return c.m < c.m
+
+        with self.assertRaises(TypeError):
+            fn(torch.randn(3))
+        # Ordering is NotImplemented on both operands, so Python raises. Dynamo
+        # surfaces it as an observed exception, which becomes a TypeError again
+        # once the graph break lets the comparison run in eager.
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_fn(torch.randn(3))
+
+    def test_method_vt_dunder_get_matches_eager(self):
+        """method.__get__ follows the running interpreter and wrap_descr_get.
+
+        3.10 and 3.13+ have method.__get__, which returns the method unchanged;
+        3.11 and 3.12 do not, so the attribute forwards to __func__ and re-binds.
+        Either way the arguments are checked as wrap_descr_get checks them.
+        """
+
+        class A:
+            def m(self):
+                return type(self).__name__
+
+        class B:
+            pass
+
+        a, b = A(), B()
+
+        def outcome(thunk):
+            try:
+                return thunk()
+            except TypeError:
+                return "TypeError"
+
+        def fn(x):
+            return (
+                outcome(lambda: a.m.__get__(b)()),
+                outcome(lambda: a.m.__get__(b, B)()),
+                outcome(lambda: a.m.__get__(b).__self__ is a),
+                outcome(lambda: a.m.__get__(None, B) is A.m),
+                outcome(lambda: A.m.__get__(None, B) is A.m),
+                outcome(lambda: a.m.__get__()),
+                outcome(lambda: a.m.__get__(None)),
+                outcome(lambda: a.m.__get__(None, None)),
+                outcome(lambda: a.m.__get__(b, B, 3)),
+                outcome(lambda: a.m.__get__(obj=b)),
+                x + 1,
+            )
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_method_still_inlines_after_vt_split(self):
+        """Method calls, attribute access and reconstruction survive the split."""
+
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def add(self, x):
+                return x + self.bias
+
+        obj = Counter(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            m = obj.add
+            return m(x), m.__name__, isinstance(m, types.MethodType)
+
+        x = torch.ones(3)
+        out, name, is_method = fn(x)
+        self.assertEqual(out, x + 3)
+        self.assertEqual(name, "add")
+        self.assertTrue(is_method)
+
+    def test_disable_on_method_still_graph_breaks(self):
+        """`torch.compiler.disable` on a method must keep skipping inlining.
+
+        This reached its gate in symbolic_convert only because UserMethodVariable
+        used to be a UserFunctionVariable subclass.
+        """
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class M(torch.nn.Module):
+            @torch.compiler.disable
+            def helper(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return self.helper(x) + 1
+
+        m = M()
+        x = torch.ones(3)
+        self.assertEqual(torch.compile(m, backend=cnt)(x), m(x))
+        with self.assertRaises(Unsupported):
+            torch.compile(m, backend="eager", fullgraph=True)(x)
 
 
 def udf_mul(x, y):

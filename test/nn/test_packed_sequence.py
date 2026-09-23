@@ -6,14 +6,18 @@ import unittest
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
 
-class PackedSequenceTest(TestCase):
+class _PackedSequenceTestMixin:
+    batch_size = 5
+    max_length = 6
     _type_by_name = {
         "torch.DoubleTensor": (torch.DoubleTensor, "double"),
         "torch.FloatTensor": (torch.FloatTensor, "float"),
@@ -26,11 +30,6 @@ class PackedSequenceTest(TestCase):
         "torch.CharTensor": (torch.CharTensor, "char"),
         "torch.ByteTensor": (torch.ByteTensor, "byte"),
     }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.batch_size = 5
-        self.max_length = 6
 
     def _ordered_sequence(self, tensor_type):
         """Create ordered list of random sequences"""
@@ -51,6 +50,10 @@ class PackedSequenceTest(TestCase):
         lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
+
+
+class PackedSequenceTest(_PackedSequenceTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
@@ -142,36 +145,6 @@ class PackedSequenceTest(TestCase):
                     )
                     ref_output = torch.cat([no_extra_pad, extra_pad], 0)
                 self.assertEqual(unpacked, ref_output)
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
-        "Frame Handling Difference between Python versions",
-    )
-    def test_to(self):
-        for enforce_sorted in (True, False):
-            padded, lengths = self._padded_sequence(torch.IntTensor)
-            a = rnn_utils.pack_padded_sequence(
-                padded, lengths, enforce_sorted=enforce_sorted
-            ).cpu()
-
-            self.assertIs(a, a.to("cpu"))
-            self.assertIs(a, a.cpu())
-            self.assertIs(a, a.to("cpu", dtype=torch.int32))
-            self.assertEqual(a.long(), a.to(torch.int64))
-
-            if torch.cuda.is_available():
-                for cuda in [
-                    "cuda",
-                    "cuda:0" if torch.cuda.device_count() == 1 else "cuda:1",
-                ]:
-                    b = a.cuda(device=cuda)
-                    self.assertIs(b, b.to(cuda))
-                    self.assertIs(b, b.cuda())
-                    self.assertEqual(a, b.to("cpu"))
-                    self.assertEqual(b, a.to(cuda))
-                    self.assertEqual(a, b.to("cpu", dtype=torch.int32))
-                    self.assertIs(b, b.to(dtype=torch.int32))
-                    self.assertEqual(b.long(), b.to(dtype=torch.int64))
 
     def test_to_memory_format(self):
         m = torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, bias=True)
@@ -538,6 +511,50 @@ class PackedSequenceTest(TestCase):
         # Should not crash - either return empty list or raise informative error
         with self.assertRaises(RuntimeError):
             rnn_utils.unpack_sequence(packed)
+
+
+class PackedSequenceTestDevice(_PackedSequenceTestMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
+        "Frame Handling Difference between Python versions",
+    )
+    def test_to(self, device):
+        for enforce_sorted in (True, False):
+            padded, lengths = self._padded_sequence(torch.IntTensor)
+            a = rnn_utils.pack_padded_sequence(
+                padded, lengths, enforce_sorted=enforce_sorted
+            ).cpu()
+
+            self.assertIs(a, a.to("cpu"))
+            self.assertIs(a, a.cpu())
+            self.assertIs(a, a.to("cpu", dtype=torch.int32))
+            self.assertEqual(a.long(), a.to(torch.int64))
+
+            if torch.accelerator.is_available():
+                d = torch.device(device)
+                devs = [d.type]
+                # CPU tensors carry no device index, so `.to("cpu:N")` copies
+                # instead of aliasing; the indexed form only applies to
+                # accelerators.
+                if d.type != "cpu":
+                    devs.append(
+                        f"{d.type}:1"
+                        if torch.accelerator.device_count() > 1
+                        else f"{d.type}:0"
+                    )
+                for dev in devs:
+                    b = a.to(dev)
+                    self.assertIs(b, b.to(dev))
+                    self.assertEqual(a, b.to("cpu"))
+                    self.assertEqual(b, a.to(dev))
+                    self.assertEqual(a, b.to("cpu", dtype=torch.int32))
+                    self.assertIs(b, b.to(dtype=torch.int32))
+                    self.assertEqual(b.long(), b.to(dtype=torch.int64))
+
+
+instantiate_device_type_tests(PackedSequenceTestDevice, globals())
 
 
 if __name__ == "__main__":

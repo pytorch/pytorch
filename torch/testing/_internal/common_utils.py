@@ -1917,7 +1917,23 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 TEST_CUDA_CUDSS = TEST_CUDA and torch.version.cuda is not None
 TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and torch.version.cuda is not None
 
-TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and torch.version.cuda is not None
+def _cuda_python_bindings_usable() -> bool:
+    if not _check_module_exists("cuda.bindings"):
+        return False
+    if torch.version.cuda is not None:
+        return True
+    if torch.version.hip is not None:
+        # NVIDIA's cuda-bindings installs and imports fine on a ROCm box but
+        # fails at the first call. hip-python's interop package (PyPI:
+        # hip-python-interop) provides a HIP-backed cuda.bindings and marks
+        # itself with HIP_PYTHON = True; only that flavor is usable here.
+        import cuda.bindings.runtime  # type: ignore[import]
+
+        return bool(getattr(cuda.bindings.runtime, "HIP_PYTHON", False))
+    return False
+
+
+TEST_CUDA_PYTHON_BINDINGS = _cuda_python_bindings_usable()
 TEST_NVMATH = _check_module_exists("nvmath.bindings") and torch.version.cuda is not None
 skipIfNoNvmath = unittest.skipIf(not TEST_NVMATH, "nvmath-python not available")
 
@@ -2577,10 +2593,9 @@ def skipIfHpu_BUGGY(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def getRocmVersion() -> tuple[int, int]:
+def getRocmVersion() -> tuple[int, ...]:
     from torch.testing._internal.common_cuda import _get_torch_rocm_version
-    rocm_version = _get_torch_rocm_version()
-    return (rocm_version[0], rocm_version[1])
+    return _get_torch_rocm_version()
 
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
@@ -2610,6 +2625,15 @@ def skipIfRocmVersionAtLeast(version=None):
             and rocm_version_tuple >= tuple(version)
         )
     return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
+
+# Skips a test on ROCm when the version is in [first_bad, first_good), for a
+# regression introduced in one release and fixed in a later one. The window
+# lives only here, so the skip reason cannot drift from the version check.
+def skipIfRocmVersionInRange(first_bad, first_good, reason):
+    def _should_skip():
+        return TEST_WITH_ROCM and tuple(first_bad) <= getRocmVersion() < tuple(first_good)
+    window = f"ROCm >= {'.'.join(map(str, first_bad))}, < {'.'.join(map(str, first_good))}"
+    return lazy_skip_if(_should_skip, f"{reason} ({window})")
 
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(
@@ -2895,12 +2919,46 @@ def skipIfCachingAllocatorDisabled(fn):
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
 
+def requires_multigpu(fn):
+    """Marks a test that needs more than one GPU.
+
+    Attaches the pytest marker the distributed CI configs partition on, so the
+    test lands in the multi-GPU run rather than the single-GPU one where it
+    could only ever skip, and skips it wherever fewer than two GPUs are visible.
+
+    The marker is attached only when pytest is importable: files using this also
+    run under an internal test runner that has no pytest, where the skip alone
+    is the whole behaviour.
+    """
+    reason = "requires >= 2 GPUs"
+    skip = torch.cuda.device_count() < 2
+
+    if isinstance(fn, type):
+        if has_pytest:
+            fn = pytest.mark.multigpu(fn)
+        return unittest.skipIf(skip, reason)(fn)
+
+    # Isolate decorator metadata when parameter variants share the original
+    # test function.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    if has_pytest:
+        wrapper = pytest.mark.multigpu(wrapper)
+
+    return unittest.skipIf(skip, reason)(wrapper)
+
+
 def periodic(fn):
-    """Marks a test to run only when periodic test mode is enabled.
+    """Marks a test that CI runs only in periodic test mode.
 
     The periodic test configuration selects the corresponding pytest marker
     and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run.
+    Python test sweep (e.g. distributed or quantization) never run in CI.
+
+    Gated only in CI and on Sandcastle (which has no periodic config);
+    elsewhere the marker is attached and the test runs normally.
 
     Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
     slow gating (static or dynamic) does not block @periodic tests there,
@@ -2908,11 +2966,12 @@ def periodic(fn):
     it runs only in periodic-strict.
     """
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
+    skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
 
     if isinstance(fn, type):
         if has_pytest:
             fn = pytest.mark.periodic(fn)
-        return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(fn)
+        return unittest.skipIf(skip, reason)(fn)
 
     # Isolate decorator metadata when parameter variants share the original
     # test function.
@@ -2923,7 +2982,7 @@ def periodic(fn):
     if has_pytest:
         wrapper = pytest.mark.periodic(wrapper)
 
-    return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(wrapper)
+    return unittest.skipIf(skip, reason)(wrapper)
 
 
 def slowTest(fn):
@@ -4147,7 +4206,7 @@ class TestCase(expecttest.TestCase):
                 f"changed from {self._prev_torch_function_state} to {tf_state}"
             )
 
-        # Detect leaked mutations to the six fp32 precision flags. Tests that
+        # Detect leaked mutations to the fp32 precision flags. Tests that
         # legitimately mutate these globals must restore them themselves (e.g.
         # via recover_orig_fp32_precision or setUpClass/tearDownClass).
         # Escape hatch: PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK=1 disables
@@ -6596,11 +6655,36 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
+# The legacy getter cross-checks the Float32MatmulPrecision enum against the
+# new backend-specific values and raises when they disagree, so a snapshot
+# taken while a test has them out of sync would throw from setUp/tearDown
+# instead of reporting the leak. Report a sentinel instead; restoring the
+# backend-specific values is what puts the pair back in sync.
+_INCONSISTENT_MATMUL_PRECISION = "<inconsistent legacy/new matmul precision>"
+
+
+def _get_legacy_float32_matmul_precision():
+    try:
+        return torch.get_float32_matmul_precision()
+    except RuntimeError:
+        return _INCONSISTENT_MATMUL_PRECISION
+
+
+def _set_legacy_float32_matmul_precision(value):
+    if value != _INCONSISTENT_MATMUL_PRECISION:
+        torch.set_float32_matmul_precision(value)
+
+
 # Single source of truth for which globals count as "fp32 precision state".
 # Add a new flag here and both recover_orig_fp32_precision and the TestCase
 # leak detector pick it up automatically.
 def _fp32_precision_flag_specs():
     return (
+        # Must stay first: set_float32_matmul_precision also writes the cuda
+        # and mkldnn matmul entries, so it has to be restored before them.
+        ("torch.get_float32_matmul_precision()",
+            _get_legacy_float32_matmul_precision,
+            _set_legacy_float32_matmul_precision),
         ("torch.backends.cuda.matmul.fp32_precision",
             lambda: torch.backends.cuda.matmul.fp32_precision,
             lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
