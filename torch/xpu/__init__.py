@@ -128,7 +128,7 @@ def _parse_visible_devices(strict=False) -> list[int]:
 def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     r"""Enumerate visible XPU devices via Level Zero Sysman and cache their info.
 
-    Enumerates devices from the first Level Zero Sysman driver and counts those
+    Enumerates devices from all Level Zero Sysman drivers and counts those
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
     The populated ``_cached_zes_device_infos`` list is indexed by PyTorch
@@ -180,19 +180,24 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     ):
         return -1
 
-    device_count = c_uint32(0)
-    if _zes_check_warn(
-        pyzes.zesDeviceGet(drivers[0], byref(device_count), None),
-        "Can't get Level Zero Sysman device count",
-    ):
-        return -1
-
-    devices = (pyzes.zes_device_handle_t * device_count.value)()
-    if _zes_check_warn(
-        pyzes.zesDeviceGet(drivers[0], byref(device_count), devices),
-        "Can't get Level Zero Sysman device handles",
-    ):
-        return -1
+    # Gather device handles from every Level Zero driver. See Note [Device Management]
+    devices: list[pyzes.zes_device_handle_t] = []
+    for driver in drivers:
+        device_count = c_uint32(0)
+        if _zes_check_warn(
+            pyzes.zesDeviceGet(driver, byref(device_count), None),
+            "Can't get Level Zero Sysman device count",
+        ):
+            return -1
+        if device_count.value == 0:
+            continue
+        driver_devices = (pyzes.zes_device_handle_t * device_count.value)()
+        if _zes_check_warn(
+            pyzes.zesDeviceGet(driver, byref(device_count), driver_devices),
+            "Can't get Level Zero Sysman device handles",
+        ):
+            return -1
+        devices.extend(driver_devices)
 
     # --- Count visible dGPUs and iGPUs ---
     ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
