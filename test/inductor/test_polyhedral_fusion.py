@@ -378,8 +378,6 @@ class PolyhedralMLAFusionTest(TestCase):
                     )
     @parametrize("force_persistent", (True, False))
     def test_looped_and_persistent_translated_fusion(self, force_persistent):
-        # if not force_persistent:
-        #     self.skipTest("non-persistent translated fusion is currently unsupported")
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)
         eager = tuple(shifted_mla_indexer(*inputs))
         with self.subTest(force_persistent=force_persistent):
@@ -408,7 +406,7 @@ class PolyhedralMLAFusionTest(TestCase):
                 rtol=2e-2,
             )
             self.assertEqual(disabled.staged_fusion_count, 0)
-            if force_persistent: 
+            if force_persistent:
                 self.assert_translated_plan(enabled)
             else:
                 self.assertEqual(enabled.staged_fusion_count, 0)

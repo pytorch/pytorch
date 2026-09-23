@@ -61,7 +61,6 @@ parallel_reduction_count = 0
 codegen_mix_order_reduction: int = 0
 rejected_mix_order_reduction_fusion: int = 0
 codegen_nested_reduction: int = 0
-codegen_translated_staged_reduction: int = 0
 
 
 # reset all counters
@@ -79,7 +78,6 @@ def reset() -> None:
     global codegen_mix_order_reduction
     global rejected_mix_order_reduction_fusion
     global codegen_nested_reduction
-    global codegen_translated_staged_reduction
     global num_auto_chunking
 
     generated_kernel_count = 0
@@ -97,7 +95,6 @@ def reset() -> None:
     codegen_mix_order_reduction = 0
     rejected_mix_order_reduction_fusion = 0
     codegen_nested_reduction = 0
-    codegen_translated_staged_reduction = 0
     num_auto_chunking = 0
 
 
