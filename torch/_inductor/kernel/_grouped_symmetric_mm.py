@@ -1,47 +1,52 @@
 # Copyright (c) 2026 PyTorch Contributors
 
 import math
-
-import triton
-import triton.language as tl
+from functools import cache
 
 import torch
 
 
-@triton.jit
-def _mirror_symmetric_pairs(
-    output_ptrs,
-    sizes,
-    c_ptrs,
-    alpha,
-    beta,
-    HAS_C: tl.constexpr,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-):
-    tile = tl.program_id(0)
-    group = tl.program_id(1)
-    m = tl.load(sizes + group)
-    tiles_n = (m + BLOCK_N - 1) // BLOCK_N
-    tiles_m = (m + BLOCK_M - 1) // BLOCK_M
-    tile_m = tile // tiles_n
-    tile_n = tile % tiles_n
-    row = tile_m * BLOCK_M + tl.arange(0, BLOCK_M)[:, None]
-    col = tile_n * BLOCK_N + tl.arange(0, BLOCK_N)[None, :]
-    output = tl.load(output_ptrs + group).to(tl.pointer_type(tl.bfloat16))
-    valid = (tile < tiles_m * tiles_n) & (row < m) & (col < m)
-    if HAS_C:
-        mask = valid & (row >= col)
-        value = tl.load(output + row * m + col, mask=mask)
-        c = tl.load(c_ptrs + group).to(tl.pointer_type(tl.bfloat16))
-        value = alpha * value + beta * tl.load(c + row * m + col, mask=mask)
-        tl.store(output + row * m + col, value, mask=mask)
-        tl.store(output + col * m + row, value, mask=mask)
-    else:
-        mask = valid & (row >= col)
-        value = alpha * tl.load(output + row * m + col, mask=mask)
-        tl.store(output + row * m + col, value, mask=mask)
-        tl.store(output + col * m + row, value, mask=mask)
+@cache
+def _get_mirror_symmetric_pairs():
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def kernel(
+        output_ptrs,
+        sizes,
+        c_ptrs,
+        alpha,
+        beta,
+        HAS_C: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+    ):
+        tile = tl.program_id(0)
+        group = tl.program_id(1)
+        m = tl.load(sizes + group)
+        tiles_n = (m + BLOCK_N - 1) // BLOCK_N
+        tiles_m = (m + BLOCK_M - 1) // BLOCK_M
+        tile_m = tile // tiles_n
+        tile_n = tile % tiles_n
+        row = tile_m * BLOCK_M + tl.arange(0, BLOCK_M)[:, None]
+        col = tile_n * BLOCK_N + tl.arange(0, BLOCK_N)[None, :]
+        output = tl.load(output_ptrs + group).to(tl.pointer_type(tl.bfloat16))
+        valid = (tile < tiles_m * tiles_n) & (row < m) & (col < m)
+        if HAS_C:
+            mask = valid & (row >= col)
+            value = tl.load(output + row * m + col, mask=mask)
+            c = tl.load(c_ptrs + group).to(tl.pointer_type(tl.bfloat16))
+            value = alpha * value + beta * tl.load(c + row * m + col, mask=mask)
+            tl.store(output + row * m + col, value, mask=mask)
+            tl.store(output + col * m + row, value, mask=mask)
+        else:
+            mask = valid & (row >= col)
+            value = alpha * tl.load(output + row * m + col, mask=mask)
+            tl.store(output + row * m + col, value, mask=mask)
+            tl.store(output + col * m + row, value, mask=mask)
+
+    return kernel
 
 
 class GroupedSymmetricPlan:
@@ -264,6 +269,7 @@ class GroupedSymmetricPlan:
 
     def __call__(self) -> list[torch.Tensor]:
         import cutlass.torch as cutlass_torch
+        import triton
 
         with torch.cuda.device(self.inputs[0].device):
             stream = cutlass_torch.current_stream()
@@ -283,7 +289,7 @@ class GroupedSymmetricPlan:
                 triton.cdiv(out.shape[0], block_m) * triton.cdiv(out.shape[0], block_n)
                 for out in self.outputs
             )
-            _mirror_symmetric_pairs[(max_tiles, len(self.outputs))](
+            _get_mirror_symmetric_pairs()[(max_tiles, len(self.outputs))](
                 self.output_ptrs,
                 self.output_sizes,
                 self.c_ptrs,
