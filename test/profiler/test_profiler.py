@@ -3551,6 +3551,8 @@ instantiate_device_type_tests(
 class TestPrivateUse1ProfilerState(TestCase):
     """Tests for PrivateUse1 profiler state selection logic."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_kineto_privateuse1_state_with_use_kineto_true(self):
         """Test that KINETO_PRIVATEUSE1 state is selected when use_kineto=True."""
         from unittest.mock import patch
