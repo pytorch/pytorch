@@ -37,40 +37,35 @@ inline long linear_bin(
 // The implementation here is mostly taken from the CPU's implementation with
 // some modifications. Please see `aten/src/ATen/native/cpu/HistogramKernel.cpp`
 // for more details.
+// Flat index into the histogram for element `tid`, or -1 when the element falls
+// outside the outer edges or is NaN. `hist_strides` is indexed by dimension.
 template <typename T>
-kernel void histogramdd(
-    constant T* input_ [[buffer(0)]],
-    constant T* weight [[buffer(1)]],
-    device T* local_out [[buffer(2)]],
-    constant uint* offsets [[buffer(3)]],
-    constant size_t& num_dims [[buffer(4)]],
-    constant T* bin_seq [[buffer(5)]],
-    constant int64_t* num_bin_edges [[buffer(6)]],
-    constant int64_t* local_out_strides [[buffer(7)]],
-    constant uint8_t& algorithm [[buffer(8)]],
-    constant int64_t& weight_stride [[buffer(9)]],
-    uint tid [[thread_position_in_grid]]) {
-  constexpr auto eps = T(4e-6);
-  bool skip_element = false;
-  int64_t hist_index = 0;
-  int64_t bin_seq_offset = 0;
+inline long histogramdd_index(
+    constant T* input_,
+    constant int64_t* input_strides,
+    size_t num_dims,
+    constant T* bin_seq,
+    constant int64_t* num_bin_edges,
+    constant int64_t* hist_strides,
+    uint8_t algorithm,
+    uint tid) {
+  long hist_index = 0;
+  long bin_seq_offset = 0;
 
   for (size_t dim = 0; dim < num_dims; dim++) {
-    T element = input_[offsets[tid * num_dims + dim]];
+    T element = input_[tid * input_strides[0] + dim * input_strides[1]];
     const T leftmost_edge = bin_seq[bin_seq_offset];
     const T rightmost_edge = bin_seq[bin_seq_offset + num_bin_edges[dim] - 1];
 
-    // Skips elements which fall outside the specified bins and NaN elements
-    // Adding an eps to the edges to eliminate precision issues that cause
-    // elements accidentally skipped, this is likely due to the minuscule
-    // implementation differences between the CPU and MPS's linspace.
-    if (!(element >= (leftmost_edge - eps) &&
-          element <= (rightmost_edge + eps))) {
-      skip_element = true;
-      break;
+    // Skips elements which fall outside the specified bins and NaN elements.
+    // The CPU kernel compares against the edges exactly; widening this test
+    // counts elements that both CPU and numpy drop, and lets the linear paths
+    // derive an index outside the histogram.
+    if (!(element >= leftmost_edge && element <= rightmost_edge)) {
+      return -1;
     }
-    int64_t pos = -1;
 
+    long pos = -1;
     if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
       pos = upper_bound(bin_seq, bin_seq_offset, num_bin_edges[dim], element) -
           bin_seq_offset - 1;
@@ -81,8 +76,8 @@ kernel void histogramdd(
       pos = linear_bin(
           element, num_bin_edges[dim] - 1, leftmost_edge, rightmost_edge);
       if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-        int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
-        int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
+        long pos_min = max(0L, pos - 1);
+        long pos_max = min(pos + 2, num_bin_edges[dim]);
         pos =
             upper_bound(
                 bin_seq, bin_seq_offset + pos_min, pos_max - pos_min, element) -
@@ -90,16 +85,69 @@ kernel void histogramdd(
       }
     }
 
-    if (pos == (num_bin_edges[dim] - 1)) {
-      pos -= 1;
-    }
-    hist_index += local_out_strides[dim + 1] * pos;
+    // The last bin is closed, so an element on the rightmost edge belongs to
+    // the final bin. The linear paths can also land outside for very narrow
+    // ranges, so clamp rather than only folding the top edge down.
+    pos = metal::clamp(pos, 0L, num_bin_edges[dim] - 2);
+    hist_index += hist_strides[dim] * pos;
     bin_seq_offset += num_bin_edges[dim];
   }
-  if (!skip_element) {
+  return hist_index;
+}
+
+template <typename T>
+kernel void histogramdd(
+    constant T* input_ [[buffer(0)]],
+    constant T* weight [[buffer(1)]],
+    device T* local_out [[buffer(2)]],
+    constant int64_t* input_strides [[buffer(3)]],
+    constant size_t& num_dims [[buffer(4)]],
+    constant T* bin_seq [[buffer(5)]],
+    constant int64_t* num_bin_edges [[buffer(6)]],
+    constant int64_t* local_out_strides [[buffer(7)]],
+    constant uint8_t& algorithm [[buffer(8)]],
+    constant int64_t& weight_stride [[buffer(9)]],
+    uint tid [[thread_position_in_grid]]) {
+  const long hist_index = histogramdd_index(
+      input_,
+      input_strides,
+      num_dims,
+      bin_seq,
+      num_bin_edges,
+      local_out_strides + 1,
+      algorithm,
+      tid);
+  if (hist_index >= 0) {
     // In the unweighted case, the default weight is 1
     local_out[local_out_strides[0] * tid + hist_index] +=
         (weight_stride >= 0) ? weight[tid * weight_stride] : 1;
+  }
+}
+
+// Unweighted counts are integers, so every thread can accumulate into one
+// shared histogram with 32-bit atomics instead of owning a [numel, bins] slice.
+template <typename T>
+kernel void histogramdd_atomic(
+    constant T* input_ [[buffer(0)]],
+    device atomic_uint* counts [[buffer(1)]],
+    constant int64_t* input_strides [[buffer(2)]],
+    constant size_t& num_dims [[buffer(3)]],
+    constant T* bin_seq [[buffer(4)]],
+    constant int64_t* num_bin_edges [[buffer(5)]],
+    constant int64_t* hist_strides [[buffer(6)]],
+    constant uint8_t& algorithm [[buffer(7)]],
+    uint tid [[thread_position_in_grid]]) {
+  const long hist_index = histogramdd_index(
+      input_,
+      input_strides,
+      num_dims,
+      bin_seq,
+      num_bin_edges,
+      hist_strides,
+      algorithm,
+      tid);
+  if (hist_index >= 0) {
+    atomic_fetch_add_explicit(&counts[hist_index], 1, memory_order_relaxed);
   }
 }
 
@@ -109,7 +157,7 @@ kernel void histogramdd(
       constant DTYPE * input_ [[buffer(0)]],                   \
       constant DTYPE * weight [[buffer(1)]],                   \
       device DTYPE * local_out [[buffer(2)]],                  \
-      constant uint * offsets [[buffer(3)]],                   \
+      constant int64_t* input_strides [[buffer(3)]],           \
       constant size_t& num_dims [[buffer(4)]],                 \
       constant DTYPE* bin_seq [[buffer(5)]],                   \
       constant int64_t* num_bin_edges [[buffer(6)]],           \
@@ -118,14 +166,26 @@ kernel void histogramdd(
       constant int64_t& weight_stride [[buffer(9)]],           \
       uint tid [[thread_position_in_grid]]);
 
+#define REGISTER_HISTOGRAMDD_ATOMIC_OP(DTYPE)                      \
+  template [[host_name("histogramdd_atomic_" #DTYPE)]] kernel void \
+  histogramdd_atomic<DTYPE>(                                       \
+      constant DTYPE * input_ [[buffer(0)]],                       \
+      device atomic_uint * counts [[buffer(1)]],                   \
+      constant int64_t* input_strides [[buffer(2)]],               \
+      constant size_t& num_dims [[buffer(3)]],                     \
+      constant DTYPE* bin_seq [[buffer(4)]],                       \
+      constant int64_t* num_bin_edges [[buffer(5)]],               \
+      constant int64_t* hist_strides [[buffer(6)]],                \
+      constant uint8_t& bin_selection_algorithm [[buffer(7)]],     \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_HISTOGRAMDD_ATOMIC_OP(float);
+REGISTER_HISTOGRAMDD_ATOMIC_OP(half);
+REGISTER_HISTOGRAMDD_ATOMIC_OP(bfloat);
+
 REGISTER_HISTOGRAMDD_OP(float);
 REGISTER_HISTOGRAMDD_OP(half);
 REGISTER_HISTOGRAMDD_OP(bfloat);
-REGISTER_HISTOGRAMDD_OP(int);
-REGISTER_HISTOGRAMDD_OP(long);
-REGISTER_HISTOGRAMDD_OP(short);
-REGISTER_HISTOGRAMDD_OP(char);
-REGISTER_HISTOGRAMDD_OP(uchar);
 
 template <typename T>
 inline long histc_bin(
@@ -142,11 +202,11 @@ inline long histc_bin(
 
 // The host caps num_elements at UINT32_MAX, so no bin count can overflow uint.
 // counts is written here and converted to the output dtype by the caller.
-template <typename T, bool dense>
+template <typename T>
 kernel void histc_atomic_global(
     constant T* input [[buffer(0)]],
     device atomic_uint* counts [[buffer(1)]],
-    constant uint* offsets [[buffer(2)]],
+    constant long& input_stride [[buffer(2)]],
     constant uint& num_elements [[buffer(3)]],
     constant long& num_bins [[buffer(4)]],
     constant T* bin_edges [[buffer(5)]],
@@ -154,18 +214,18 @@ kernel void histc_atomic_global(
   if (tid >= num_elements) {
     return;
   }
-  T element = input[dense ? tid : offsets[tid]];
+  T element = input[tid * input_stride];
   long bin = histc_bin(element, num_bins, bin_edges[0], bin_edges[num_bins]);
   if (bin >= 0) {
     atomic_fetch_add_explicit(&counts[bin], 1, memory_order_relaxed);
   }
 }
 
-template <typename T, bool dense>
+template <typename T>
 kernel void histc_atomic_threadgroup(
     constant T* input [[buffer(0)]],
     device atomic_uint* counts [[buffer(1)]],
-    constant uint* offsets [[buffer(2)]],
+    constant long& input_stride [[buffer(2)]],
     constant uint& num_elements [[buffer(3)]],
     constant long& num_bins [[buffer(4)]],
     constant T* bin_edges [[buffer(5)]],
@@ -182,7 +242,7 @@ kernel void histc_atomic_threadgroup(
   // The host limits num_elements to UINT32_MAX, so a local bin count fits in
   // uint.
   for (uint index = tid; index < num_elements; index += total_threads) {
-    T element = input[dense ? index : offsets[index]];
+    T element = input[index * input_stride];
     long bin = histc_bin(element, num_bins, bin_edges[0], bin_edges[num_bins]);
     if (bin >= 0) {
       atomic_fetch_add_explicit(&local_counts[bin], 1, memory_order_relaxed);
@@ -198,52 +258,29 @@ kernel void histc_atomic_threadgroup(
   }
 }
 
-#define REGISTER_HISTC_ATOMIC_OP(DTYPE)                                        \
-  template [[host_name("histc_atomic_global_dense_" #DTYPE)]] kernel void      \
-  histc_atomic_global<DTYPE, true>(                                            \
-      constant DTYPE*,                                                         \
-      device atomic_uint*,                                                     \
-      constant uint*,                                                          \
-      constant uint&,                                                          \
-      constant long&,                                                          \
-      constant DTYPE*,                                                         \
-      uint);                                                                   \
-  template [[host_name("histc_atomic_global_strided_" #DTYPE)]] kernel void    \
-  histc_atomic_global<DTYPE, false>(                                           \
-      constant DTYPE*,                                                         \
-      device atomic_uint*,                                                     \
-      constant uint*,                                                          \
-      constant uint&,                                                          \
-      constant long&,                                                          \
-      constant DTYPE*,                                                         \
-      uint);                                                                   \
-  template [[host_name("histc_atomic_threadgroup_dense_" #DTYPE)]] kernel void \
-  histc_atomic_threadgroup<DTYPE, true>(                                       \
-      constant DTYPE*,                                                         \
-      device atomic_uint*,                                                     \
-      constant uint*,                                                          \
-      constant uint&,                                                          \
-      constant long&,                                                          \
-      constant DTYPE*,                                                         \
-      constant uint&,                                                          \
-      threadgroup atomic_uint*,                                                \
-      uint,                                                                    \
-      uint,                                                                    \
-      uint);                                                                   \
-  template                                                                     \
-      [[host_name("histc_atomic_threadgroup_strided_" #DTYPE)]] kernel void    \
-      histc_atomic_threadgroup<DTYPE, false>(                                  \
-          constant DTYPE*,                                                     \
-          device atomic_uint*,                                                 \
-          constant uint*,                                                      \
-          constant uint&,                                                      \
-          constant long&,                                                      \
-          constant DTYPE*,                                                     \
-          constant uint&,                                                      \
-          threadgroup atomic_uint*,                                            \
-          uint,                                                                \
-          uint,                                                                \
-          uint)
+#define REGISTER_HISTC_ATOMIC_OP(DTYPE)                                  \
+  template [[host_name("histc_atomic_global_" #DTYPE)]] kernel void      \
+  histc_atomic_global<DTYPE>(                                            \
+      constant DTYPE*,                                                   \
+      device atomic_uint*,                                               \
+      constant long&,                                                    \
+      constant uint&,                                                    \
+      constant long&,                                                    \
+      constant DTYPE*,                                                   \
+      uint);                                                             \
+  template [[host_name("histc_atomic_threadgroup_" #DTYPE)]] kernel void \
+  histc_atomic_threadgroup<DTYPE>(                                       \
+      constant DTYPE*,                                                   \
+      device atomic_uint*,                                               \
+      constant long&,                                                    \
+      constant uint&,                                                    \
+      constant long&,                                                    \
+      constant DTYPE*,                                                   \
+      constant uint&,                                                    \
+      threadgroup atomic_uint*,                                          \
+      uint,                                                              \
+      uint,                                                              \
+      uint)
 
 REGISTER_HISTC_ATOMIC_OP(float);
 REGISTER_HISTC_ATOMIC_OP(half);
@@ -253,20 +290,3 @@ REGISTER_HISTC_ATOMIC_OP(long);
 REGISTER_HISTC_ATOMIC_OP(short);
 REGISTER_HISTC_ATOMIC_OP(char);
 REGISTER_HISTC_ATOMIC_OP(uchar);
-
-kernel void kernel_index_offset(
-    constant uint* strides [[buffer(0)]],
-    device uint* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  data_offsets[thread_index] = 0;
-  uint32_t idx = thread_index;
-  for (uint32_t dim = 0; dim < num_dimensions; dim++) {
-    uint32_t reversed_dim = num_dimensions - dim - 1;
-    uint32_t remainder = idx % iter_shape[reversed_dim];
-    idx /= iter_shape[reversed_dim];
-
-    data_offsets[thread_index] += remainder * strides[reversed_dim];
-  }
-}
