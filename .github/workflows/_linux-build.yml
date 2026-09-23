@@ -40,6 +40,13 @@ on:
         default: ""
         type: string
         description: Prefix for runner label
+      lf_runners:
+        required: false
+        default: ""
+        type: string
+        description: |
+          Comma-separated LF allowlist, forwarded to map_ec2_to_arc.py's
+          --lf-runners verbatim. Empty means unrestricted. ci-infra#1081.
       runner:
         required: false
         type: string
@@ -162,7 +169,15 @@ jobs:
       actions: read
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
+    # runs-on: resolves before any step runs, so it can't call
+    # map_ec2_to_arc.py; this mirrors its allowlist check inline against the
+    # determinator's lf_runners (ci-infra#1081).
+    runs-on: >-
+      ${{
+        (inputs.runner_prefix == 'lf-' && inputs.lf_runners != '' &&
+         !contains(format(',{0},', inputs.lf_runners), format(',{0},', inputs.runner)))
+        && 'mt-' || inputs.runner_prefix
+      }}${{ inputs.runner }}
     container:
       image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
     timeout-minutes: 480
