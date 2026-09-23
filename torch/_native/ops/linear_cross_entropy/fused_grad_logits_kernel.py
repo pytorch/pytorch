@@ -195,9 +195,9 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
 
 @instrumented_cutedsl_cache(
     "torch_nn::_linear_cross_entropy_batch_chunked",
-    key_fn=lambda logits_torch_dtype, out_torch_dtype, threads, tiles: (
+    key_fn=lambda logits_torch_dtype, out_torch_dtype, threads, tiles, device_index: (
         f"fused_grad_logits logits={logits_torch_dtype} out={out_torch_dtype}"
-        f" threads={threads} tiles={tiles}"
+        f" threads={threads} tiles={tiles} device={device_index}"
     ),
 )
 def _compile_fused_grad_logits(
@@ -205,10 +205,11 @@ def _compile_fused_grad_logits(
     out_torch_dtype: torch.dtype,
     threads: int,
     tiles: int,
+    device_index: int,
 ):
     # V and the row count stay runtime arguments: the kernel loops over the
     # columns and takes the rows from the grid, so one compile per (dtype pair,
-    # block width, staging depth) serves every chunk shape.
+    # block width, staging depth, device) serves every chunk shape.
     launcher = _make_kernel(_TORCH_TO_CUTE[out_torch_dtype], threads, tiles)
 
     def logits_2d():
@@ -285,8 +286,13 @@ def fused_grad_logits_into(
     if tiles < 1:
         raise ValueError(f"tiles_per_stage must be at least 1, got {tiles}")
     num_rows, V = logits.shape
-    compiled = _compile_fused_grad_logits(logits.dtype, g.dtype, threads, tiles)
-    # The Python-native dispatch path sets no CUDA device guard, and the launch
-    # runs on the current device, so make that the one the tensors are on.
-    with torch.accelerator.device_index(logits.device.index):
+    device_index = logits.device.index
+    # The Python-native dispatch path sets no CUDA device guard, and a compiled
+    # executor is bound to the device current at compile (or cache-load) time,
+    # so the compile is keyed per device and both it and the launch run with the
+    # tensors' device current.
+    with torch.accelerator.device_index(device_index):
+        compiled = _compile_fused_grad_logits(
+            logits.dtype, g.dtype, threads, tiles, device_index
+        )
         compiled(logits, row_scale, target, g, term, V, num_rows)
