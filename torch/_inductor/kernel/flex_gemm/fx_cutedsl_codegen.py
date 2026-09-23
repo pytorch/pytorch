@@ -43,6 +43,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
     squeeze_source_node,
+    tensor_meta_shape,
     view_or_reshape_args,
 )
 from torch._inductor.kernel.gemm_epilogue import (
@@ -250,11 +251,7 @@ class FlexGemmEpilogueAnalysis:
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
         validate_output_layout_transforms(local_reduce.graph, outputs)
         reject_unplanned_reductions(local_reduce, outputs)
-        contraction_plan = build_output_contraction_plan(
-            outputs.output_storage or outputs.output,
-            gemm,
-            local_reduce,
-        )
+        contraction_plan = build_output_contraction_plan(outputs, gemm, local_reduce)
         if contraction_plan is None:
             gemm_meta = gemm.meta.get("val")
             output_meta = outputs.output.meta.get("val")
@@ -606,8 +603,6 @@ def epimod_local_reduce_spec(
             "FlexGEMM EpiMod supports one grouped reduction, or exactly two "
             "same-geometry axis-1 reductions in an inner-to-outer chain"
         )
-    if local_reduce.match.physical_span > 1 and spec.sink.finalize == "mean":
-        raise NotImplementedError("nested TensorSSA reductions do not support mean")
     reduction_node = spec.sink.node
     if (
         local_reduce.feeds_main
@@ -704,6 +699,7 @@ class FlexGemmEpilogueEmitter:
         self.output_storage = self.outputs.output_storage
         self.output_storage_nodes = frozenset(self.outputs.output_storage_nodes)
         self.local_reduce_spec: FlexGemmEpiModLocalReduceSpec | None = None
+        self.local_reduce_finalize: str | None = None
         self.local_reduce_prepass: FlexGemmEpiModReductionSpec | None = None
         self.local_reduce_source_nodes: frozenset[torch.fx.Node] = frozenset()
         self.local_reduce_finalize_nodes: frozenset[torch.fx.Node] = frozenset()
@@ -726,6 +722,8 @@ class FlexGemmEpilogueEmitter:
             sink = spec.sink
             match = self.local_reduce.match
             paired = match.physical_span > 1
+            # Complete logical groups are finalized before their physical broadcast.
+            self.local_reduce_finalize = None if paired else sink.finalize
             if paired and swap_ab:
                 raise NotImplementedError(
                     "nested TensorSSA reductions do not support swap_ab=True"
@@ -886,7 +884,7 @@ class FlexGemmEpilogueEmitter:
             else torch.float32
         )
         value = "value"
-        if sink.finalize == "mean":
+        if self.local_reduce_finalize == "mean":
             value = f"(value / {float(local_reduce.match.geometry.group)!r})"
         kernel = GemmEpilogueCuteDSLKernel()
         reduced = self.value(value, dtype)
@@ -1050,7 +1048,11 @@ class FlexGemmEpilogueEmitter:
             f"reduction_profile={layout.reduction_profile})",
             source,
         )
-        if match.physical_span > 1:
+        if match.physical_span > 1 and sink.finalize == "mean":
+            reduced = self.generate_like(
+                f"({reduced} / {float(geometry.group)!r})", reduced
+            )
+        if match.physical_span > 1 and self.local_reduce.store is not None:
             # QuACK collects this sink at physical fragment width; broadcast the
             # logical group value across both paired lanes.
             physical = GroupedTensorSSALayout(
@@ -1062,6 +1064,43 @@ class FlexGemmEpilogueEmitter:
                 reduced,
             )
         return self.broadcast_fragment_partial(reduced, layout, source)
+
+    def scalar_broadcast_env(self, node: torch.fx.Node) -> dict[torch.fx.Node, Any]:
+        """Re-broadcast uniform scalar captures to the current logical fragment."""
+        if self.outputs.output_contraction is None:
+            return self.env
+        graph = self.analysis.local_reduce.graph
+        inputs = tuple(iter_fx_node_inputs((node.args, node.kwargs)))
+        reference = next(
+            (
+                self.env[arg]
+                for arg in inputs
+                if graph.depends_on(arg, self.gemm)
+                and isinstance(self.env.get(arg), CuteDSLCSEVariable)
+            ),
+            None,
+        )
+        if reference is None:
+            return self.env
+        env = self.env
+        for arg in inputs:
+            shape = tensor_meta_shape(arg)
+            value = self.env.get(arg)
+            if (
+                shape is not None
+                and statically_known_shape_equal(shape, (1,) * len(shape))
+                and not graph.depends_on(arg, self.gemm)
+                and isinstance(value, CuteDSLCSEVariable)
+            ):
+                if env is self.env:
+                    env = dict(env)
+                # The donor can be Boolean; preserve the captured value's dtype.
+                env[arg] = self.generate_like(
+                    f"cute.full_like({reference}, {value}[0], {value}.element_type)",
+                    value,
+                    shape_reference=reference,
+                )
+        return env
 
     def lower_graph(self) -> None:
         """Lower FX nodes through Inductor's standard operation-dispatch API."""
@@ -1153,7 +1192,10 @@ class FlexGemmEpilogueEmitter:
                         self.env[node] = source
                     continue
                 self.env[node] = lower_gemm_epilogue_fx_node(
-                    self.kernel, self.env, node, context="FlexGEMM"
+                    self.kernel,
+                    self.scalar_broadcast_env(node),
+                    node,
+                    context="FlexGEMM",
                 )
 
     def render(self) -> FlexGemmEpiModSource:
@@ -1287,11 +1329,9 @@ class FlexGemmEpilogueEmitter:
             ),
             local_reduce_combine=None if sink is None else sink.combine,
             local_reduce_finalize=(
-                None
-                if sink is None
-                else sink.finalize
+                self.local_reduce_finalize
                 if self.local_reduce_prepass is not None
-                else finalize_name or sink.finalize
+                else finalize_name or self.local_reduce_finalize
             ),
             local_reduce_finalize_operands=(
                 () if finalize_name is None else self.local_reduce_finalize_operands
