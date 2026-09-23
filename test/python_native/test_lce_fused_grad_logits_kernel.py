@@ -1,15 +1,17 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Numerics for the CuTeDSL kernel that computes the row statistics and the
-# softmax-gradient transform together, used by the `fused` variant of the
-# chunked linear_cross_entropy overrides. Checked on its own, against a torch
-# expression of the same contract, before anything routes through it.
+# Numerics of the CuTeDSL fused_grad_logits kernel, checked directly against a
+# torch expression of its contract.
 
 import unittest
 
 import torch
 from torch._native import cutedsl_utils as cu
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDA
+from torch.testing._internal.common_cuda import (
+    has_device_side_assert,
+    SM80OrLater,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -29,9 +31,7 @@ def _reference(logits, row_scale, target, out_dtype):
     g = e * (row_scale / row_sum).unsqueeze(1)
     rows = torch.arange(logits.shape[0], device=logits.device)
     g[rows, target] -= row_scale
-    # Both statistics are shifted by the row max, matching the kernel: their
-    # difference is the loss, and the unshifted pair loses it to rounding at a
-    # large offset.
+    # Both statistics shifted by the row max, as in the kernel.
     return (
         g.to(out_dtype),
         row_sum.log(),
@@ -59,11 +59,8 @@ def _inputs(num_rows, V, device="cuda", logits_dtype=torch.float32):
     return logits, row_scale, target
 
 
-# `skipIfNoCuteDSL` and `runtime_available()` only say the package is
-# installed. These tests call the kernel entry points DIRECTLY, with no `cond`
-# in front to decline an unsupported device, so they need the DSL's executable
-# floor -- documented as Ampere and later. (The kernel's own eligibility is a
-# validated-set membership instead, since capability is not an ordering.)
+# These tests call the kernel directly, with no `cond` to decline an
+# unsupported device, so they need the CuTeDSL runtime's floor, sm_80.
 @unittest.skipIf(not TEST_CUDA, "CuTeDSL kernels are CUDA-only")
 @unittest.skipIf(not SM80OrLater, "the CuTeDSL runtime requires sm_80 or later")
 class TestFusedGradLogitsKernel(TestCase):
@@ -91,11 +88,8 @@ class TestFusedGradLogitsKernel(TestCase):
             self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
         else:
             self.assertEqual(g, want_g)
-        # The loss term against TORCH's statistics. This pins the DIFFERENCE
-        # only: the row max cancels out of it, and out of `g` as well, so what
-        # these see of the max is its effect on the row sum, not its value.
-        # Keeping `exp` in range is its other job, pinned separately by
-        # `test_a_lone_high_column_pins_the_row_max`.
+        # The row max cancels out of `term` and `g`, so this sees only its effect
+        # on the row sum; `test_a_lone_high_column_pins_the_row_max` pins the rest.
         self.assertEqual(
             term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
         )
@@ -136,28 +130,12 @@ class TestFusedGradLogitsKernel(TestCase):
         ],
     )
     def test_aliased_g_shares_the_logits_storage(self, dtype, num_rows, V):
-        """`g` written into the logits' own bytes, which is what makes a chunk
-        cost one buffer instead of two. `g[n, j]` occupies `z[n, j // 2]`, so
-        the kernel must order its writes against its reads. An element left
-        unwritten would hold reinterpreted fp32 bytes, so matching the
-        reference everywhere also proves full coverage -- the aliased buffer is
-        its own sentinel.
-
-        The ordering is NOT what this checks, at the shipped knobs. Removing
-        the barrier and re-running leaves `g` within the fp32-to-bf16 rounding
-        floor of the reference -- max deviation 3.8e-6 at `V=4097`, against
-        3.8e-6 with the barrier in place -- so the race does not manifest at
-        `tiles_per_stage=8` and all ten cases pass a barrier-less kernel. It
-        does manifest at shallower staging: 1.3e-3 at 4 tiles and 7.0e-3 at 2,
-        both far above that floor, though never reliably enough to fail an
-        assertion in 20 trials. So the write ordering rests on the argument in
-        the kernel's module docstring, not on this test; a check that could
-        fail deterministically needs `compute-sanitizer --tool racecheck`, too
-        slow to keep in this suite.
-
-        The kernel takes `g`'s layout from the caller and orders its writes
-        either way, so this and the separate-buffer tests above exercise one
-        compiled mode."""
+        """`g` written into the logits' own bytes: `g[n, j]` occupies
+        `z[n, j // 2]`. An element left unwritten would hold reinterpreted fp32
+        bytes, so matching the reference everywhere also proves full coverage.
+        The write ordering is not what this checks: at the default staging
+        depth a barrier-less kernel still passes. `compute-sanitizer --tool
+        racecheck` checks it."""
         logits, row_scale, target = _inputs(num_rows, V)
         source = logits.clone()
         term = torch.empty(num_rows, device="cuda", dtype=torch.float32)
@@ -176,19 +154,10 @@ class TestFusedGradLogitsKernel(TestCase):
 
     @parametrize("num_rows, V", [(4, 4097), (8, 12289)])
     def test_aliased_g_at_the_same_width_as_the_logits(self, num_rows, V):
-        """The fp16 production layout: an fp16 buffer aliased by an fp16 `g`,
-        so `g[n, j]` lands exactly on `z[n, j]` rather than halfway back.
-
-        The aliased test above is always 2:1, because `_inputs` builds an fp32
-        buffer, so `(fp16, fp16)` is a compile key nothing else reaches and the
-        layout production uses at fp16 is exercised nowhere.
-
-        This is NOT the write-ordering test. At 1:1 the byte mapping is the
-        identity, so a thread overwrites only what it read itself and the
-        barrier is not load-bearing -- removing it leaves these cases passing
-        while some of the 2:1 ones fail. What this pins is that the 1:1 key
-        compiles and computes the right values, across several staging
-        groups."""
+        """The fp16 layout: an fp16 buffer aliased by an fp16 `g`, so `g[n, j]`
+        lands exactly on `z[n, j]` -- a compile key of its own. At this width
+        each thread overwrites only what it read, so this pins the values, not
+        the write ordering."""
         logits, row_scale, target = _inputs(num_rows, V, logits_dtype=torch.float16)
         source = logits.clone()
         term = torch.empty(num_rows, device="cuda", dtype=torch.float32)
@@ -236,20 +205,15 @@ class TestFusedGradLogitsKernel(TestCase):
         )
 
     def test_a_lone_high_column_pins_the_row_max(self):
-        """The row max cancels out of both outputs algebraically -- shift it
-        by `d` and `log(l)` moves by `-d` against a target logit that moves the
-        same way -- so its one load-bearing job is keeping `exp` in range.
-        `test_large_magnitudes_do_not_overflow` exercises that with a uniformly
-        large row, where every lane carries a usable maximum. Here it sits
-        alone in the last thread's column, so the range depends on one partial
-        surviving both reduction stages."""
+        """The row max cancels out of both outputs, so its one load-bearing job
+        is keeping `exp` in range. Here it sits alone in the last thread's
+        column, so the range depends on one partial surviving both reduction
+        stages."""
         num_rows, V = 4, 4096
         logits = torch.zeros((num_rows, V), device="cuda", dtype=torch.float32)
-        # The last column of the block's first tile: lane 31 of the last warp.
-        # `block_reduce` publishes only from lane 0, so this value has to cross
-        # the warp's own butterfly before it reaches the cross-warp slot, and
-        # losing it at either stage takes the row out of range --
-        # exp(120) is inf in fp32, exp(0) is not.
+        # Lane 31 of the last warp: `block_reduce` publishes only from lane 0, so
+        # this value must survive the warp butterfly and the cross-warp combine;
+        # exp(120) is inf in fp32.
         high_col = self.kernel._DEFAULT_THREADS_PER_BLOCK - 1
         logits[:, high_col] = 120.0
         _, row_scale, target = _inputs(num_rows, V)
@@ -320,8 +284,7 @@ class TestFusedGradLogitsKernel(TestCase):
 
     def test_every_class_masked_is_nan_like_eager(self):
         """A fully masked row has no valid class: eager's shifted softmax is
-        `-inf - -inf`, so the row is NaN there too. Pinned so the fix for the
-        mixed case above cannot quietly turn this into a number."""
+        `-inf - -inf`, so the row is NaN there, and must be NaN here too."""
         num_rows, V = 4, 512
         logits, row_scale, target = _inputs(num_rows, V)
         logits[1] = float("-inf")
@@ -331,9 +294,8 @@ class TestFusedGradLogitsKernel(TestCase):
         self.assertTrue(torch.isfinite(g[0]).all())
 
     def test_nan_logit_poisons_its_row(self):
-        """NaN must reach the output rather than be skipped: the -inf guard in
-        the online pass tests `!= -inf`, not `> -inf`, precisely so a NaN still
-        takes the accumulate branch."""
+        """NaN must reach the output: the online pass's -inf guard lets a NaN
+        take the accumulate branch."""
         num_rows, V = 4, 512
         logits, row_scale, target = _inputs(num_rows, V)
         logits[2, 7] = float("nan")
@@ -344,28 +306,36 @@ class TestFusedGradLogitsKernel(TestCase):
 
     # `1 << 32` is the one that needs int64 to catch: its low 32 bits are zero,
     # so a check made after narrowing to int32 reads it as class 0 and passes.
-    @parametrize("bad_target", [-1, 1 << 20, 1 << 32, (1 << 32) + 1])
-    def test_out_of_range_target_poisons_its_row(self, bad_target):
-        """Out of range is a caller error. Eager reports it through an index
-        assert; this kernel indexes nothing through the dispatcher, so it
-        clamps the read and returns NaN for the row instead of a gradient that
-        merely lacks its one-hot term. See the note in the LCE docs."""
-        num_rows, V = 6, 256
-        logits, row_scale, target = _inputs(num_rows, V)
-        target[3] = bad_target
-        g, term = self._run(logits, row_scale, target, torch.float32)
-        self.assertTrue(torch.isnan(g[3]).all())
-        self.assertTrue(torch.isnan(term[3]))
-        # Only the offending row: the rest of the chunk is still usable.
-        self.assertTrue(torch.isfinite(g[:3]).all())
-        self.assertTrue(torch.isfinite(g[4:]).all())
-        self.assertTrue(torch.isfinite(term[[0, 1, 2, 4, 5]]).all())
+    @parametrize(
+        "bad_target, message",
+        [
+            (-1, "target < 0"),
+            (1 << 20, "target >= num_classes"),
+            (1 << 32, "target >= num_classes"),
+            ((1 << 32) + 1, "target >= num_classes"),
+        ],
+    )
+    def test_out_of_range_target_traps(self, bad_target, message):
+        """Like eager's index assert. The trap takes the CUDA context with it,
+        so it runs in a child process."""
+        stdout, stderr = self.run_process_no_exception(f"""
+import torch
+from torch._native.ops.linear_cross_entropy import fused_grad_logits_kernel as k
+logits = torch.randn(6, 256, device="cuda")
+target = torch.randint(0, 256, (6,), device="cuda")
+target[3] = {bad_target}
+term = torch.empty(6, device="cuda")
+k.fused_grad_logits_into(
+    torch.empty_like(logits), term, logits, torch.ones(6, device="cuda"), target
+)
+torch.cuda.synchronize()
+""")
+        self.assertTrue(has_device_side_assert(stderr.decode()))
+        self.assertIn(f"linear_cross_entropy: {message}", stdout.decode())
 
     def test_zero_row_scale_gives_a_zero_gradient(self):
         """An ignored row carries scale 0, so its whole gradient row -- target
-        column included -- and its loss contribution must both be exactly zero.
-        The scale multiply is inside the kernel now that it forms the term, so
-        the loss side is kernel arithmetic rather than the caller's."""
+        column included -- and its loss contribution must both be exactly zero."""
         num_rows, V = 6, 300
         logits, row_scale, target = _inputs(num_rows, V)
         row_scale = torch.zeros_like(row_scale)
@@ -387,10 +357,7 @@ class TestFusedGradLogitsKernel(TestCase):
         ],
     )
     def test_shape_knobs_do_not_change_the_result(self, meta):
-        """`threads_per_block` and `tiles_per_stage` pick the block width and how
-        many column tiles pass 2 stages per barrier. They exist for tuning, so
-        every legal combination has to compute the same thing -- including the
-        write ordering, whose safety argument holds for any staging depth."""
+        """Every legal (threads_per_block, tiles_per_stage) gives the same result."""
         logits, row_scale, target = _inputs(24, 4097)
         g, term = _outputs(24, 4097, torch.bfloat16)
         self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target, **meta)
