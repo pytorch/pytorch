@@ -479,6 +479,28 @@
   - Lint
   - pull
 
+- name: Profiler
+  patterns:
+  - test/cpp/profiler/**
+  - test/profiler/**
+  - third_party/kineto
+  - torch/_C/_profiler.pyi
+  - torch/autograd/profiler*
+  - torch/csrc/autograd/profiler*
+  - torch/csrc/profiler/**
+  - torch/profiler/**
+  approved_by:
+  - ryanzhang22
+  - scotts
+  - ngimel
+  - dolpm
+  - sanrise
+  - NicolasHug
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
@@ -517,10 +539,12 @@
   - '**XPU**'
   - '**sycl**'
   - '**SYCL**'
+  - torch/_C/__init__.pyi.in
   approved_by:
   - EikanWang
-  - jgong5
   - gujinghui
+  - guangyey
+  - etaf
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -563,22 +587,29 @@
   - Lint
   - pull
 
+- name: Testing (Temporarily used for test refactoring)
+  patterns:
+  - torch/testing/**
+  - test/**
+  approved_by:
+  - fffrog
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Metamates
   patterns:
   - '*'
   approved_by:
   - aditvenk
   - AmesingFlank
-  - amirafzali
   - angelayi
   - anshul-si
   - aorenste
   - atalman
   - blaine-rister
   - bobrenjc93
-  - BoyuanFeng
-  - choijon5
-  - ColinPeppler
   - d4l3k
   - dcci
   - desertfire
@@ -588,10 +619,8 @@
   - egienvalue
   - fegin
   - frgossen
-  - fxdawnn
   - georgehong
   - han3101
-  - haoyuz
   - htyu
   - huydhn
   - IvanKobzarev
@@ -613,21 +642,20 @@
   - pianpwk
   - ryanzhang22
   - sanketpurandare
+  - sanrise
   - scotts
-  - seemethere
   - sevenEng
   - SherlockNoMad
   - slayton58
   - soulitzer
   - tushar00jain
+  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy
   - williamwen42
-  - xmfan
   - ydwu4
   - yushangdi
-  - zpcore
   mandatory_checks_name:
   - EasyCLA
   - Lint
