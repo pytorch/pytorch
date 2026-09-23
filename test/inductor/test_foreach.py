@@ -963,6 +963,19 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     @requires_gpu
+    def test_foreach_lerp_output_strides_follow_eager(self):
+        def fn(x, end):
+            torch._foreach_lerp_([x], [end], 0.75)
+            return x.view(-1)
+
+        # float32 takes the foreach path of the decomposition, bfloat16 the other one
+        for dtype in (torch.float32, torch.bfloat16):
+            x = torch.rand(4, 16, 16, device=GPU_TYPE, dtype=dtype)
+            end = torch.rand(4, 16, 16, device=GPU_TYPE, dtype=dtype).transpose(-1, -2)
+            torch._dynamo.reset()
+            self.assertEqual(fn(x.clone(), end), torch.compile(fn)(x.clone(), end))
+
+    @requires_gpu
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 1)
     def test_2d_block_no_mixed_sizes_no_mask(self):
         """2D blocking with no mixed sizes constant mask"""

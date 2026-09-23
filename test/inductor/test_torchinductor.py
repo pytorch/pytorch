@@ -8527,6 +8527,25 @@ for dtype in (torch.int32, torch.int64):
         y = torch.randn(20, 1024 * 1024)
         self.common(f, (x, y), atol=1e-3, rtol=1e-3)
 
+    def test_lerp_output_strides_follow_eager(self):
+        # With |weight| >= 0.5 the decompositions start from end; the result
+        # must still have eager's strides, or x.view(-1) after x.lerp_ fails.
+        def f(x, end):
+            x.lerp_(end, 0.75)
+            return x.view(-1)
+
+        def g(x, end, weight):
+            return torch.lerp(x, end, weight).view(-1)
+
+        x = torch.randn(4, 16, 16)
+        end = torch.randn(4, 16, 16).transpose(-1, -2)
+        self.common(f, (x, end))
+        self.common(g, (x, end, torch.tensor(0.75)))
+        # start with gaps: eager's output is dense in start's order
+        x_gaps = torch.randn(4, 16, 32)[..., ::2]
+        self.common(f, (x_gaps, end))
+        self.common(g, (x_gaps, end, torch.tensor(0.75)))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]

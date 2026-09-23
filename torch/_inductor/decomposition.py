@@ -244,6 +244,17 @@ if torch.distributed.is_available():
         return aten.view.default(out, post_view_shape)
 
 
+def _lerp_like_eager(out: torch.Tensor, start: torch.Tensor) -> torch.Tensor:
+    # With |weight| >= 0.5 the dual formula starts from end, and the result takes
+    # end's strides. When start has the output's shape, eager's TensorIterator lays
+    # the output out like start: start's strides, or dense in start's order when
+    # start has gaps, which is what empty_like(start) gives.
+    if start.shape != out.shape:
+        return out
+    like = torch.empty_like(start)
+    return out if out.stride() == like.stride() else aten.copy(like, out)
+
+
 @register_decomposition([aten.lerp.Scalar])
 def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch.Tensor:
     # Decompose into sub + add(alpha=weight) so that the add lowering emits FMA,
@@ -255,7 +266,7 @@ def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch
         end = end.contiguous(memory_format=fmt)
     diff = end - start
     if weight >= 0.5 or weight <= -0.5:
-        return torch.add(end, diff, alpha=-(1.0 - weight))
+        return _lerp_like_eager(torch.add(end, diff, alpha=-(1.0 - weight)), start)
     return torch.add(start, diff, alpha=weight)
 
 
@@ -273,7 +284,7 @@ def _lerp_tensor(
     neg_omw = -(1.0 - weight)
     w = torch.where(mask, neg_omw, weight)
     base = torch.where(mask, end, start)
-    return torch.addcmul(base, w, diff, value=1)
+    return _lerp_like_eager(torch.addcmul(base, w, diff, value=1), start)
 
 
 @register_decomposition([aten.embedding_dense_backward])
@@ -1135,24 +1146,25 @@ def _foreach_lerp_scalar(
         bases = end_tensors if high_weight else start_tensors
         diff = aten._foreach_sub.List(end_tensors, start_tensors)
         scalar = scalar_tensor(dtype, device, high_weight)
-        return aten._foreach_addcmul.Scalar(bases, [scalar] * len(diff), diff)
-
-    return [
-        torch.addcmul(
-            (end if high_weight else t).to(compute_dtype),
-            scalar_tensor(compute_dtype, t.device, high_weight),
-            end.to(compute_dtype) - t.to(compute_dtype),
-        ).to(t.dtype)
-        for t, end, compute_dtype, high_weight in (
-            (
-                t,
-                end,
-                opmath_dtype(t),
-                use_high_formula(opmath_dtype(t)),
+        results = aten._foreach_addcmul.Scalar(bases, [scalar] * len(diff), diff)
+    else:
+        results = [
+            torch.addcmul(
+                (end if high_weight else t).to(compute_dtype),
+                scalar_tensor(compute_dtype, t.device, high_weight),
+                end.to(compute_dtype) - t.to(compute_dtype),
+            ).to(t.dtype)
+            for t, end, compute_dtype, high_weight in (
+                (
+                    t,
+                    end,
+                    opmath_dtype(t),
+                    use_high_formula(opmath_dtype(t)),
+                )
+                for t, end in zip(start_tensors, end_tensors)
             )
-            for t, end in zip(start_tensors, end_tensors)
-        )
-    ]
+        ]
+    return [_lerp_like_eager(r, t) for r, t in zip(results, start_tensors)]
 
 
 @register_decomposition(aten._foreach_lerp.ScalarList)
