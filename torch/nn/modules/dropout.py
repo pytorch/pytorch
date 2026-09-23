@@ -237,7 +237,7 @@ class AlphaDropout(_DropoutNd):
 
     During training, it randomly masks some of the elements of the input
     tensor with probability *p* using samples from a bernoulli distribution.
-    The elements to masked are randomized on every forward call, and scaled
+    The elements to be masked are randomized on every forward call, and scaled
     and shifted to maintain zero mean and unit standard deviation.
 
     During evaluation the module simply computes an identity function.

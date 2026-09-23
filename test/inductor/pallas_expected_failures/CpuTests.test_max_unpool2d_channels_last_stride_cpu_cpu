@@ -1,0 +1,3 @@
+# see https://github.com/pytorch/pytorch/issues/187963
+FAIL
+AssertionError: Tensor-likes are not close!

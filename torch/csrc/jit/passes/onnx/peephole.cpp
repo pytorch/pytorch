@@ -243,7 +243,7 @@ static void fuseTransposeIntoGemm(Block* b) {
 
 // Why this is here:
 //
-//   Pytorch has a "packed" representation of sequences, as well as a
+//   PyTorch has a "packed" representation of sequences, as well as a
 //   "padded" representation. ONNX has only one representation,
 //   corresponding to pytorch's "padded". Therefore, we need to remove
 //   any use of packed sequences before exporting.
@@ -369,7 +369,7 @@ static void pushPackingPastRnn(Block* b) {
 
     // See https://github.com/pytorch/pytorch/issues/9043 for a full
     // description.  Since PackPadded is for now treated in an
-    // unhygenic way, Pytorch ends up propagating an incorrect type.
+    // unhygienic way, PyTorch ends up propagating an incorrect type.
     // Until a long-term cleanup comes around, we can fix this by
     // resetting the size to the correct value.
     TensorTypePtr oldType = rnn->inputs().at(0)->type()->cast<TensorType>();
@@ -378,10 +378,10 @@ static void pushPackingPastRnn(Block* b) {
       new_sizes.push_back(*oldType->sizes()[0]);
       new_sizes.push_back(*oldType->sizes()[1]);
       if (next->kind() == onnx::Reshape) {
-        // bidirection
+        // bidirectional
         new_sizes.push_back(rnn->i(attr::hidden_size) * 2);
       } else {
-        // unidirection
+        // unidirectional
         new_sizes.push_back(rnn->i(attr::hidden_size));
       }
       TensorTypePtr newType = TensorType::createContiguous(
@@ -707,9 +707,11 @@ static void eraseListUnpack(Node* n, int opset_version) {
   if (n->kind() == prim::ListUnpack) {
     if (opset_version < OPSET_VERSION_11) {
       // onnx::SequenceAt was introduced in onnx opset version 11
-      throw std::runtime_error(
-          "Unsupported: ONNX export of prim::ListUnpack in opset " +
-          std::to_string(opset_version) + ". Please try opset version 11.");
+      TORCH_CHECK(
+          false,
+          "Unsupported: ONNX export of prim::ListUnpack in opset ",
+          opset_version,
+          ". Please try opset version 11.");
     }
 
     auto g = n->owningGraph();

@@ -322,6 +322,12 @@ are wrong, you can mark the start of a new iteration with
 [torch.compiler.cudagraph_mark_step_begin()](https://pytorch.org/docs/stable/generated/torch.compiler.cudagraph_mark_step_begin.html), or clone
 tensors of a prior iteration (outside of torch.compile) before you begin the next run.
 
+If a user-visible output must remain live across iterations, you can instead set
+`torch._inductor.config.triton.cudagraph_trees_generation_cloning = "user_visible"`.
+With this opt-in behavior, CUDAGraph Trees clone live user-visible output storages
+out of the CUDAGraph memory pool before starting a new generation. This does not
+apply to gradients, saved activations, or other internal tensors.
+
 ### Comparisons
 
 | Footguns      | Separate CudaGraph                                         | CUDAGraph Trees                                                        |
