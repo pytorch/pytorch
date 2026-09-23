@@ -17517,6 +17517,60 @@ instantiate_parametrized_tests(TestFusedRMSNormOverrideRouting)
 instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 
+class TestDiceLoss(TestCase):
+    # at.Reduction: None=0, Mean=1, Sum=2
+    def _dice(self, pred, target, eps=1e-6, reduction=1):
+        p = pred.reshape(pred.size(0), -1)
+        t = target.reshape(target.size(0), -1)
+        out = 1 - 2 * (p * t).sum(1) / (p.sum(1) + t.sum(1) + eps)
+        if reduction == 1:
+            return out.mean()
+        if reduction == 2:
+            return out.sum()
+        return out
+
+    def test_dice_loss_matches_definition(self):
+        pred = torch.tensor([[0.9, 0.1, 0.8, 0.2], [0.3, 0.6, 0.4, 0.7]])
+        target = torch.tensor([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 1.0, 0.0]])
+        got = torch.ops.aten.dice_loss(pred, target)
+        self.assertEqual(got, self._dice(pred, target))
+        self.assertEqual(got, torch.tensor(0.32500014), atol=1e-6, rtol=0)
+        none = torch.ops.aten.dice_loss(pred, target, 1e-6, 0)
+        self.assertEqual(none, torch.tensor([0.15000015, 0.50000012]), atol=1e-6, rtol=0)
+        total = torch.ops.aten.dice_loss(pred, target, 1e-6, 2)
+        self.assertEqual(total, torch.tensor(0.65000027), atol=1e-6, rtol=0)
+
+    def test_dice_loss_perfect_and_empty(self):
+        pred = torch.tensor([[1.0, 1.0], [0.0, 0.0]])
+        target = torch.tensor([[1.0, 1.0], [0.0, 0.0]])
+        none = torch.ops.aten.dice_loss(pred, target, 1e-6, 0)
+        self.assertEqual(none[0], torch.tensor(0.0), atol=1e-5, rtol=0)
+        self.assertEqual(none[1], torch.tensor(0.0), atol=1e-5, rtol=0)
+
+    def test_dice_loss_rejects_bad_dtypes_and_shapes(self):
+        pred = torch.tensor([[1, 0], [0, 1]])
+        target = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+        with self.assertRaisesRegex(RuntimeError, "floating point"):
+            torch.ops.aten.dice_loss(pred, target)
+        float_pred = torch.tensor([[0.9, 0.1], [0.3, 0.6]])
+        bad_shape = torch.tensor([1.0, 0.0, 1.0])
+        with self.assertRaisesRegex(RuntimeError, "same shape"):
+            torch.ops.aten.dice_loss(float_pred, bad_shape)
+
+    def test_dice_loss_gradcheck(self):
+        pred = torch.tensor(
+            [[0.9, 0.1, 0.8, 0.2], [0.3, 0.6, 0.4, 0.7]],
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        target = torch.tensor([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 1.0, 0.0]])
+        self.assertTrue(
+            torch.autograd.gradcheck(
+                lambda x: torch.ops.aten.dice_loss(x, target), (pred,)
+            )
+        )
+
+
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
