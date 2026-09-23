@@ -3350,7 +3350,7 @@ class TestPrecompile(TestCase):
                 results.append(
                     torch.compiler.precompile(outer, torch.ones(2), backend="eager")
                 )
-            except Exception as e:
+            except BaseException as e:
                 errors.append(e)
 
         thread = threading.Thread(target=target, daemon=True)
@@ -3389,6 +3389,7 @@ class TestPrecompile(TestCase):
             t = threading.Thread(target=holder)
             t.start()
             if not held.wait(60):
+                sys.stderr.write("holder never acquired the lock\\n")
                 sys.exit(3)
             pid = os.fork()
             if pid == 0:
