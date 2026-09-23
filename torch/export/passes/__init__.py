@@ -92,12 +92,14 @@ def move_to_device_pass(
                     else v,
                     node.meta.get("val"),
                 )
-            try:
-                m.recompile()
-            except SyntaxError:
-                # Some exported graphs with in-memory custom objects are
-                # intentionally executable only through torch.fx.Interpreter.
-                pass
+
+    # recompile() already recurses into nested GraphModules.
+    try:
+        ep.graph_module.recompile()
+    except SyntaxError:
+        # Some exported graphs with in-memory custom objects are
+        # intentionally executable only through torch.fx.Interpreter.
+        pass
 
     ep.validate()
     return ep

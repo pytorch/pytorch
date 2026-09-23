@@ -1380,6 +1380,32 @@ def forward(self, arg0_1):
         self.assertEqual(out.device, torch.device("cuda:0"))
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_recompiles_nested_graph_modules(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return x + torch.ones(4)
+
+                def false_fn(x):
+                    return x - torch.ones(4)
+
+                return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        ep = torch.export.export(M(), (torch.zeros(4),))
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        submodules = [
+            m
+            for m in ep.graph_module.modules()
+            if isinstance(m, torch.fx.GraphModule) and m is not ep.graph_module
+        ]
+        self.assertEqual(len(submodules), 2)
+        for submodule in submodules:
+            self.assertIn("cuda:0", submodule.code)
+        (out,) = ep.graph_module(torch.ones(4, device="cuda:0"))
+        self.assertEqual(out, torch.full((4,), 2.0, device="cuda:0"))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass_does_not_mutate_source_module(self):
         class M(torch.nn.Module):
             def __init__(self):
