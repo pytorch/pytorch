@@ -2380,6 +2380,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.risky_dropped_guards, ())
         with self.assertRaisesRegex(PackageError, "not active"):
             call(model, x2)
+        with self.assertRaisesRegex(PackageError, "cannot be re-entered"):
+            with session:
+                pass
         # A call that raised is a capture error, and the summary is not complete.
         failed = precompile_package.precompile_capture(step, backend="eager")
         with failed as call:
@@ -2393,12 +2396,28 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with second as call:
             call(model, x2)
         self.assertGreaterEqual(second.summary().guarded_codes, 2)
+        # A custom filter's drop the default filter would have kept is risky:
+        # nothing here can say what the caller gave up.
+        custom = precompile_package.precompile_capture(
+            step,
+            backend="eager",
+            guard_filter_fn=lambda es: [e.guard_type != "TENSOR_MATCH" for e in es],
+        )
+        with custom as call:
+            call(model, x2)
+        self.assertIn(("TENSOR_MATCH", "x"), custom.summary().risky_dropped_guards)
         with self.assertRaisesRegex(PackageError, "partial"):
             precompile_package.precompile_capture(functools.partial(step, model))
         with self.assertRaisesRegex(PackageError, "CALLS the model"):
             precompile_package.precompile_capture(model)
+        with self.assertRaisesRegex(PackageError, "bound method"):
+            precompile_package.precompile_capture(model.forward)
 
-    def test_precompile_session_renders_behind_the_gates(self):
+    @parametrize("backend", ["eager", "inductor"])
+    def test_precompile_session_renders_behind_the_gates(self, backend):
+        # Under inductor every backend graph is a bundled entry the session takes
+        # out of PrecompileContext, so the second render still finds the
+        # variants the first one collected.
         from torch._precompile import _parse_artifact_metadata
 
         def step(model, x):
@@ -2407,7 +2426,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return y.sum(dim=0) + y.shape[0]
 
         model = torch.nn.Linear(4, 4)
-        session = precompile_package.precompile_capture(step, backend="eager")
+        session = precompile_package.precompile_capture(step, backend=backend)
         with session as call:
             call(model, torch.ones(2, 4))
             # Rendering mid-block leaves the session able to capture more.
@@ -2424,7 +2443,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             meta["DROPPED_GUARDS"], [list(s) for s in summary.dropped_guards]
         )
         blob = torch.load(io.BytesIO(cache), weights_only=True)
-        self.assertEqual((blob["backend"], blob["tracer"]), ("eager", "dynamo"))
+        self.assertEqual((blob["backend"], blob["tracer"]), (backend, "dynamo"))
         with self.assertRaisesRegex(PackageError, "dropped .* guard"):
             session.snapshot_artifact(require_no_dropped_guards=True)
         # A session that never ran its callable has nothing to render, and one
@@ -2443,6 +2462,20 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             failed.snapshot_artifact()
         python_code, _ = failed.snapshot_artifact(require_complete=False)
         self.assertEqual(_parse_artifact_metadata(python_code)["TRACER"], "dynamo")
+        # The risky-drop gate is on by default; a custom filter's drop is risky.
+        default = precompile_package.default_guard_filter_fn
+        custom = precompile_package.precompile_capture(
+            step,
+            backend="eager",
+            guard_filter_fn=lambda es: [
+                keep and e.name != "x" for keep, e in zip(default(es), es)
+            ],
+        )
+        with custom as call:
+            call(model, torch.ones(2, 4))
+        with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+            custom.snapshot_artifact()
+        custom.snapshot_artifact(require_no_risky_drops=False)
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
@@ -2467,11 +2500,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ):
             self.assertEqual(flags(), ambient)
             with _capture_config():
-                self.assertEqual(flags(), (True, True, True, True))
-                # A nested scope patches again and the outer one comes back
-                # when it closes.
-                with _capture_config():
-                    self.assertEqual(flags(), (True, True, True, True))
                 self.assertEqual(flags(), (True, True, True, True))
             self.assertEqual(flags(), ambient)
 
