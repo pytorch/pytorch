@@ -4486,15 +4486,34 @@ class TestPrecompileCapture(TestCase):
         self.assertEqual(model.running_mean, expected.running_mean)
         self.assertEqual(x, expected_x)
 
-    def test_a_capture_refuses_an_in_place_parameter_update(self):
+    @parametrize("through_data", [False, True])
+    def test_a_capture_refuses_an_in_place_parameter_update(self, through_data):
+        # A write through ``.data`` bumps no version counter the parameter shares.
         def step(model, x):
             with torch.no_grad():
-                model.lin.weight.add_(1)
+                w = model.lin.weight
+                (w.data if through_data else w).add_(1)
             return model(x)
 
         with self.assertRaisesRegex(PrecompileError, "updates a parameter in place"):
             with self._capture(step, backend="eager") as cap:
                 cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+
+    def test_a_trace_that_raises_leaves_buffers_and_inputs_as_they_were(self):
+        def step(model, x):
+            model(x)
+            x.add_(1)
+            raise RuntimeError("fn failed after its in-place updates")
+
+        model, x = torch.nn.BatchNorm1d(4).train(), torch.randn(3, 4)
+        running_mean, expected_x = model.running_mean.clone(), x.clone()
+        with self.assertRaisesRegex(RuntimeError, "fn failed after"):
+            with self._capture(step, backend="eager") as cap:
+                cap(model, x)
+        self.assertEqual(model.num_batches_tracked, 0)
+        self.assertEqual(model.running_mean, running_mean)
+        self.assertEqual(x, expected_x)
         self.assertFalse(os.path.exists(self.artifact))
 
 
