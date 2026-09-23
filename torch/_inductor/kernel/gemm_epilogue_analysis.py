@@ -7,8 +7,8 @@ from typing import Any
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FLEX_GEMM_NESTED_TENSORSSA_CAPTURE_ERROR,
-    FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR,
+    FLEX_GEMM_LANE_DOMAIN_MIXED_ERROR,
+    FLEX_GEMM_LANE_DOMAIN_REDUCTION_SPAN_ERROR,
     FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
     FlexGemmOutputContraction,
@@ -26,7 +26,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR,
     LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
-    NESTED_TENSORSSA_PACKED_STORAGE_SPAN,
     NESTED_TENSORSSA_PHYSICAL_SPAN,
     ungrouped_reduction_error,
     unsupported_reduction_op_error,
@@ -39,7 +38,6 @@ from torch._inductor.kernel.flex_gemm.output_layout import (
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     FlexGemmStructuralInt,
-    FlexGemmTensorSSAFact,
     is_shape_preserving_pointwise_node,
     tensor_meta_shape,
 )
@@ -454,6 +452,8 @@ class GemmLocalReduceAnalysis:
         graph: Dependency index used by recursive feed-main matching.
         grouped_tensors: FX nodes whose values carry a grouped TensorSSA layout.
         matches: FX values matched to a supported grouped local reduction.
+        lane_domains: FX values computed from selected lanes of the GEMM columns.
+        output_contraction_uses: Lane selects with their lowering metadata.
     """
 
     graph: GemmEpilogueGraph
@@ -466,7 +466,7 @@ class GemmLocalReduceAnalysis:
     matches: dict[torch.fx.Node, GemmLocalReduceMatch] = dataclasses.field(
         default_factory=dict
     )
-    tensorssa_facts: dict[torch.fx.Node, FlexGemmTensorSSAFact] = dataclasses.field(
+    lane_domains: dict[torch.fx.Node, "FlexGemmLaneDomain"] = dataclasses.field(
         default_factory=dict
     )
     output_contraction_uses: dict[torch.fx.Node, "OutputContractionUse"] = (
@@ -514,11 +514,11 @@ class GemmLocalReduceAnalysis:
         normalized = self.graph.normalized_nodes.get(node)
         if isinstance(normalized, NormalizedView):
             propagated = self.propagate_local_reduce_match(node, normalized.source)
-            fact = self.propagate_tensorssa_view(node, normalized.source)
+            domain = self.propagate_lane_domain_view(node, normalized.source)
             grouped = self.bind_grouped_layout(
                 node, normalized.shape, normalized.source
             )
-            if propagated or fact or grouped:
+            if propagated or domain or grouped:
                 return
         if isinstance(normalized, NormalizedReduction):
             if self.bind_grouped_reduction(node, normalized):
@@ -532,135 +532,90 @@ class GemmLocalReduceAnalysis:
                 raise ungrouped_reduction_error(op_name)
         elif isinstance(normalized, NormalizedUnsupportedReduction):
             raise unsupported_reduction_op_error(normalized.target)
-        if self.propagate_tensorssa_storage_select(node):
+        if self.bind_output_contraction_use(node):
             return
-        lane_fact = self.bind_output_contraction_use_fact(node)
         if isinstance(normalized, NormalizedSqueeze):
             propagated_match = self.propagate_local_reduce_match(
                 node, normalized.source
             )
-            propagated_fact = self.propagate_tensorssa_view(node, normalized.source)
-            if propagated_match or propagated_fact:
+            propagated_domain = self.propagate_lane_domain_view(node, normalized.source)
+            if propagated_match or propagated_domain:
                 return
         elif isinstance(
             normalized, NormalizedGetItem
         ) and self.propagate_local_reduce_match(node, normalized.source):
             return
-        if lane_fact:
-            return
         if is_shape_preserving_pointwise_node(node):
             self.propagate_pointwise_match(node, LOCAL_REDUCE_MIXED_MATCH_ERROR)
-            self.propagate_tensorssa_pointwise(node)
+            self.propagate_lane_domain_pointwise(node)
 
-    def propagate_tensorssa_view(self, node: torch.fx.Node, source: Any) -> bool:
-        """Propagate a logical TensorSSA fact through a numel-preserving view."""
+    def propagate_lane_domain_view(self, node: torch.fx.Node, source: Any) -> bool:
+        """Copy a lane domain through a numel-preserving view.
+
+        Views keep row-major order, so any grouping the value later receives is
+        aligned to the same flat positions; QuACK's problem guards (N divisible
+        by the physical group and contraction) keep those groups inside one row.
+        """
         if not isinstance(source, torch.fx.Node):
             return False
-        fact = self.tensorssa_facts.get(source)
+        domain = self.lane_domains.get(source)
         source_shape = tensor_meta_shape(source)
         output_shape = tensor_meta_shape(node)
-        if fact is None or source_shape is None or output_shape is None:
+        if domain is None or source_shape is None or output_shape is None:
             return False
         if not statically_known_equal(math.prod(source_shape), math.prod(output_shape)):
             return False
-        self.tensorssa_facts[node] = fact
+        self.lane_domains[node] = domain
         return True
 
-    def propagate_tensorssa_storage_select(self, node: torch.fx.Node) -> bool:
-        """Track one logical slot selected for a packed main-output element."""
-        normalized = self.graph.normalized_nodes.get(node)
-        if not isinstance(normalized, NormalizedSelect):
-            return False
-        source = normalized.source
-        fact = self.tensorssa_facts.get(source)
-        source_shape = tensor_meta_shape(source)
-        output_shape = tensor_meta_shape(node)
-        structural_dim = FlexGemmStructuralInt.from_value(normalized.dim)
-        structural_index = FlexGemmStructuralInt.from_value(normalized.index)
-        if (
-            fact is None
-            or not fact.complete
-            or fact.storage_span != 1
-            or source_shape is None
-            or output_shape is None
-            or structural_dim is None
-            or structural_dim.symbolic is not None
-            or structural_index is None
-            or structural_index.symbolic is not None
-            or structural_dim.value % len(source_shape) != len(source_shape) - 1
-        ):
-            return False
-        storage_span = FlexGemmStructuralInt.from_value(source_shape[-1])
-        if (
-            storage_span is None
-            or storage_span.symbolic is not None
-            or storage_span.value != NESTED_TENSORSSA_PACKED_STORAGE_SPAN
-            or fact.physical_span != NESTED_TENSORSSA_PHYSICAL_SPAN
-            or not -storage_span.value <= structural_index.value < storage_span.value
-        ):
-            return False
-        self.tensorssa_facts[node] = dataclasses.replace(
-            fact,
-            storage_span=storage_span.value,
-            storage_offsets=frozenset((structural_index.value % storage_span.value,)),
-        )
-        return True
-
-    def bind_output_contraction_use_fact(self, node: torch.fx.Node) -> bool:
-        """Record one selected physical lane as a logical TensorSSA value."""
+    def bind_output_contraction_use(self, node: torch.fx.Node) -> bool:
+        """Record one selected lane and the lane domain of its value."""
         if self.gemm is None:
             return False
-        match = match_output_contraction_use(node, self.gemm, self)
-        if match is None:
+        use = match_output_contraction_use(node, self.gemm, self)
+        if use is None:
             return False
-        self.output_contraction_uses[node] = match
-        self.tensorssa_facts[node] = FlexGemmTensorSSAFact(
-            canonical_output_contraction_source(match.source, self.gemm, self),
-            match.group,
-            match.chunked,
-            frozenset((match.index % match.group,)),
-        )
+        if self.gemm_shape is None:
+            raise AssertionError("matched lane selection requires GEMM shape metadata")
+        if use.domain.chunked and use.domain.physical_span == use.group:
+            # QuACK's concat layout interleaves two halves of each physical row.
+            source = self.graph.normalized_nodes[use.layout_node].source
+            source_shape = tensor_meta_shape(source)
+            if (
+                use.group != 2
+                or source_shape is None
+                or not statically_known_shape_equal(source_shape, self.gemm_shape)
+            ):
+                raise NotImplementedError(
+                    "FlexGEMM chunked lane selection requires two groups within "
+                    "each physical GEMM row"
+                )
+        self.output_contraction_uses[node] = use
+        self.lane_domains[node] = use.domain
         return True
 
-    def propagate_tensorssa_pointwise(self, node: torch.fx.Node) -> bool:
-        """Merge compatible logical lane facts through one enumerated pointwise op."""
+    def propagate_lane_domain_pointwise(self, node: torch.fx.Node) -> bool:
+        """Carry one lane domain through a pointwise op, rejecting mixed domains."""
         inputs = tuple(iter_fx_node_inputs((node.args, node.kwargs)))
-        facts = [
-            self.tensorssa_facts[input_node]
+        domains = OrderedSet(
+            self.lane_domains[input_node]
             for input_node in inputs
-            if input_node in self.tensorssa_facts
-        ]
-        if not facts:
+            if input_node in self.lane_domains
+        )
+        gemm = self.gemm
+        if not domains or gemm is None:
             return False
-        first = facts[0]
-        if any(
-            fact.root is not first.root
-            or fact.physical_span != first.physical_span
-            or fact.chunked != first.chunked
-            or fact.storage_span != first.storage_span
-            for fact in facts[1:]
-        ):
-            raise NotImplementedError(FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR)
-        external = frozenset(
-            input_node
-            for input_node in inputs
-            if input_node not in self.tensorssa_facts
+        # Captures (GEMM-independent tensors) broadcast into the lane domain;
+        # lowering owns which capture kinds a grouped main output accepts.
+        mixed_inputs = any(
+            input_node not in self.lane_domains
             and tensor_meta_shape(input_node) is not None
+            and self.graph.depends_on(input_node, gemm)
+            for input_node in inputs
         )
-        self.tensorssa_facts[node] = FlexGemmTensorSSAFact(
-            root=first.root,
-            physical_span=first.physical_span,
-            chunked=first.chunked,
-            lane_offsets=frozenset().union(*(fact.lane_offsets for fact in facts)),
-            storage_span=first.storage_span,
-            storage_offsets=frozenset().union(
-                *(fact.storage_offsets for fact in facts)
-            ),
-            reduced=any(fact.reduced for fact in facts),
-            external_tensor_inputs=external.union(
-                *(fact.external_tensor_inputs for fact in facts)
-            ),
-        )
+        if len(domains) > 1 or mixed_inputs:
+            raise NotImplementedError(FLEX_GEMM_LANE_DOMAIN_MIXED_ERROR)
+        self.lane_domains[node] = next(iter(domains))
         return True
 
     def bind_grouped_layout(self, node: torch.fx.Node, shape: Any, source: Any) -> bool:
@@ -709,24 +664,18 @@ class GemmLocalReduceAnalysis:
         self.matches[node] = match
         return True
 
-    def tensorssa_reduction_physical_span(
-        self, source: torch.fx.Node, axis: int
-    ) -> int:
-        """Return the supported physical span for a logical grouped reduction."""
-        fact = self.tensorssa_facts.get(source)
-        if fact is None:
+    def reduction_physical_span(self, source: torch.fx.Node, axis: int) -> int:
+        """Return the physical columns folded into each element a reduction reads."""
+        domain = self.lane_domains.get(source)
+        if domain is None:
             return 1
-        if (
-            not fact.complete
-            or fact.storage_span != 1
-            or fact.physical_span != NESTED_TENSORSSA_PHYSICAL_SPAN
-        ):
-            raise NotImplementedError(FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR)
+        if domain.physical_span != NESTED_TENSORSSA_PHYSICAL_SPAN:
+            raise NotImplementedError(FLEX_GEMM_LANE_DOMAIN_REDUCTION_SPAN_ERROR)
         if axis != 1:
             raise NotImplementedError(
                 "nested TensorSSA physical spans support logical axis N only"
             )
-        return fact.physical_span
+        return domain.physical_span
 
     def bind_grouped_reduction(
         self,
@@ -742,14 +691,12 @@ class GemmLocalReduceAnalysis:
         validate_local_reduce_tensorssa_group_size(layout.axis, layout.group)
         if not layout.matches_reduction_dim(reduction.dim):
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
-        source_fact = self.tensorssa_facts.get(reduction.source)
         self.matches[node] = GemmLocalReduceMatch(
-            node,
-            layout,
-            self.tensorssa_reduction_physical_span(reduction.source, layout.axis),
+            node, layout, self.reduction_physical_span(reduction.source, layout.axis)
         )
-        if source_fact is not None:
-            self.tensorssa_facts[node] = dataclasses.replace(source_fact, reduced=True)
+        domain = self.lane_domains.get(reduction.source)
+        if domain is not None:
+            self.lane_domains[node] = domain
         return True
 
     def has_physical_grouped_input(self, value: torch.fx.node.Argument) -> bool:
@@ -862,7 +809,7 @@ class GemmLocalReduceAnalysis:
             return GemmLocalReduceMatch(
                 value,
                 layout,
-                self.tensorssa_reduction_physical_span(normalized.source, layout.axis),
+                self.reduction_physical_span(normalized.source, layout.axis),
             )
         if not is_shape_preserving_pointwise_node(value):
             return None
@@ -1158,12 +1105,26 @@ class GemmLocalReduceAnalysis:
 
 
 @dataclasses.dataclass(frozen=True)
-class OutputContractionUse:
-    """Describe one grouped-main lane before complete-output validation."""
+class FlexGemmLaneDomain:
+    """Physical GEMM columns backing each column of a lane-derived value.
 
-    source: torch.fx.Node
-    group: int
+    Selecting one lane of an adjacent-N grouping multiplies ``physical_span``;
+    ``chunked`` marks a first-level contiguous split, which QuACK realizes by
+    interleaving B so the chunks become adjacent accumulator lanes. Values
+    combine pointwise only within one domain, so each column keeps a single
+    physical coordinate map no matter which lanes the expression reads.
+    """
+
+    physical_span: int
     chunked: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class OutputContractionUse:
+    """Describe one selected lane and the metadata the emitter lowers it with."""
+
+    domain: FlexGemmLaneDomain
+    group: int
     index: int
     layout_node: torch.fx.Node
     structural_values: tuple[FlexGemmStructuralInt, ...] = ()
@@ -1184,77 +1145,73 @@ class OutputContractionPlan:
             structural.guard()
 
 
-def canonical_output_contraction_source(
-    node: torch.fx.Node,
-    gemm: torch.fx.Node,
-    local_reduce: GemmLocalReduceAnalysis,
-) -> torch.fx.Node:
-    """Strip shape-preserving pointwise wrappers from a grouped lane source."""
-    while node is not gemm and is_shape_preserving_pointwise_node(node):
-        inputs = [
-            arg
-            for arg in iter_fx_node_inputs((node.args, node.kwargs))
-            if local_reduce.graph.depends_on(arg, gemm)
-        ]
-        if len(inputs) != 1:
-            break
-        node = inputs[0]
-    return node
-
-
 def match_output_contraction_use(
     node: torch.fx.Node,
     gemm: torch.fx.Node,
     local_reduce: GemmLocalReduceAnalysis,
 ) -> OutputContractionUse | None:
-    """Match one interleaved select or contiguous split lane."""
+    """Match one interleaved select or contiguous split lane.
+
+    An innermost select on a row-local grouping of the value's logical columns
+    (``(M, N // span)``) nests inside an existing lane domain; contiguous chunks
+    are recognized on physical GEMM columns only, since QuACK interleaves B.
+    """
+    gemm_shape = local_reduce.gemm_shape
+    if gemm_shape is None or len(gemm_shape) != 2:
+        return None
     normalized = local_reduce.graph.normalized_nodes.get(node)
     if isinstance(normalized, NormalizedSelect):
         view = normalized.source
         view_normalized = local_reduce.graph.normalized_nodes.get(view)
         dim = FlexGemmStructuralInt.from_value(normalized.dim)
         index = FlexGemmStructuralInt.from_value(normalized.index)
-        shape = tensor_meta_shape(view)
         if (
             not isinstance(view_normalized, NormalizedView)
-            or shape is None
-            or len(shape) != 3
+            or len(view_normalized.shape) != 3
             or dim is None
             or index is None
             or not local_reduce.graph.depends_on(view_normalized.source, gemm)
         ):
             return None
-        selected_dim = dim.value % len(shape)
-        structural_values = [dim, index]
-        if selected_dim == len(shape) - 1:
-            layout = local_reduce.grouped_tensors.get(view)
-            if layout is None or layout.axis != 1:
-                return None
-            group, chunked = layout.group, False
-        elif selected_dim == 1:
-            structural_group = FlexGemmStructuralInt.from_value(shape[1])
-            source_shape = tensor_meta_shape(view_normalized.source)
+        source_domain = local_reduce.lane_domains.get(view_normalized.source)
+        selected_dim = dim.value % 3
+        if selected_dim == 2:
+            group = FlexGemmStructuralInt.from_value(view_normalized.shape[-1])
+            span = 1 if source_domain is None else source_domain.physical_span
             if (
-                structural_group is None
-                or structural_group.value <= 1
-                or source_shape is None
-                or not statically_known_shape_equal(
-                    (shape[0], structural_group.value * shape[2]), source_shape
+                group is None
+                or group.value <= 1
+                or not _grouped_layout_matches_source_shape(
+                    view_normalized.shape,
+                    (gemm_shape[0], gemm_shape[1] // span),
+                    GemmReductionGeometry(group.value, 1),
                 )
             ):
                 return None
-            group = structural_group.value
-            structural_values.append(structural_group)
-            chunked = True
+            chunked = source_domain is not None and source_domain.chunked
+        elif selected_dim == 1 and source_domain is None:
+            shape = tensor_meta_shape(view)
+            source_shape = tensor_meta_shape(view_normalized.source)
+            if shape is None or source_shape is None:
+                return None
+            group = FlexGemmStructuralInt.from_value(shape[1])
+            if (
+                group is None
+                or group.value <= 1
+                or not statically_known_shape_equal(
+                    (shape[0], group.value * shape[2]), source_shape
+                )
+            ):
+                return None
+            span, chunked = 1, True
         else:
             return None
         return OutputContractionUse(
-            view_normalized.source,
-            group,
-            chunked,
+            FlexGemmLaneDomain(span * group.value, chunked),
+            group.value,
             index.value,
             view,
-            tuple(structural_values),
+            (dim, index, group),
         )
 
     if not isinstance(normalized, NormalizedGetItem):
@@ -1276,6 +1233,7 @@ def match_output_contraction_use(
         or split_size.value <= 0
         or shape[-1] % split_size.value
         or split_normalized.dim not in (-1, 1)
+        or source in local_reduce.lane_domains
         or not local_reduce.graph.depends_on(source, gemm)
     ):
         return None
@@ -1283,165 +1241,37 @@ def match_output_contraction_use(
     if group <= 1:
         return None
     return OutputContractionUse(
-        source,
-        group,
-        True,
-        index.value,
-        split,
-        (index, split_size),
-    )
-
-
-def build_nested_output_contraction_plan(
-    output: torch.fx.Node,
-    gemm: torch.fx.Node,
-    local_reduce: GemmLocalReduceAnalysis,
-) -> OutputContractionPlan | None:
-    """Build a grouped-main match from accepted forward TensorSSA facts."""
-    fact = local_reduce.tensorssa_facts.get(output)
-    if fact is None or fact.physical_span == 1 or not fact.reduced:
-        return None
-    if fact.external_tensor_inputs:
-        raise NotImplementedError(FLEX_GEMM_NESTED_TENSORSSA_CAPTURE_ERROR)
-    if not fact.complete:
-        raise NotImplementedError(FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR)
-    lane_nodes = (
-        output,
-        *local_reduce.graph.dependencies.get(output, ()),
-    )
-    lanes = tuple(
-        (node, local_reduce.output_contraction_uses[node])
-        for node in lane_nodes
-        if node in local_reduce.output_contraction_uses
-    )
-    if not lanes:
-        return None
-    if any(match.group != fact.physical_span for _, match in lanes):
-        raise NotImplementedError(FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR)
-    select_indices = {node: match.index % fact.physical_span for node, match in lanes}
-    layouts = {
-        match.layout_node: GemmReductionGeometry(fact.physical_span, 1)
-        for _, match in lanes
-    }
-    if fact.storage_span > 1:
-        storage_selects = tuple(
-            (node, local_reduce.tensorssa_facts[node])
-            for node in lane_nodes
-            if isinstance(
-                local_reduce.graph.normalized_nodes.get(node), NormalizedSelect
-            )
-            and node in local_reduce.tensorssa_facts
-            and local_reduce.tensorssa_facts[node].storage_span == fact.storage_span
-        )
-        storage_sources = OrderedSet(
-            local_reduce.graph.normalized_nodes[node].source
-            for node, _ in storage_selects
-        )
-        storage_offsets = frozenset(
-            next(iter(selected.storage_offsets))
-            for _, selected in storage_selects
-            if len(selected.storage_offsets) == 1
-        )
-        if (
-            len(storage_sources) != 1
-            or len(storage_offsets) != len(storage_selects)
-            or storage_offsets != frozenset(range(fact.storage_span))
-        ):
-            raise NotImplementedError(FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR)
-        storage_source = next(iter(storage_sources))
-        layouts[storage_source] = GemmReductionGeometry(fact.storage_span, 1)
-        select_indices.update(
-            {
-                node: next(iter(selected.storage_offsets))
-                for node, selected in storage_selects
-            }
-        )
-    gemm_meta = gemm.meta.get("val")
-    output_meta = output.meta.get("val")
-    if not isinstance(gemm_meta, torch.Tensor) or not isinstance(
-        output_meta, torch.Tensor
-    ):
-        return None
-    expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // fact.output_span)
-    if not statically_known_shape_equal(output_meta.shape, expected_shape):
-        raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR)
-    return OutputContractionPlan(
-        FlexGemmOutputContraction(fact.output_span, fact.chunked),
-        select_indices,
-        layouts,
-        tuple(
-            structural for _, match in lanes for structural in match.structural_values
-        ),
+        FlexGemmLaneDomain(group, True), group, index.value, split, (index, split_size)
     )
 
 
 def build_output_contraction_plan(
-    output: torch.fx.Node,
+    outputs: GemmOutputPlan,
     gemm: torch.fx.Node,
     local_reduce: GemmLocalReduceAnalysis,
 ) -> OutputContractionPlan | None:
-    """Recognize a complete adjacent-N grouped main-output expression."""
-    nested = build_nested_output_contraction_plan(output, gemm, local_reduce)
-    if nested is not None:
-        return nested
-    lanes: list[tuple[torch.fx.Node, OutputContractionUse]] = []
-    seen: OrderedSet[torch.fx.Node] = OrderedSet()
-    pending: list[Any] = [output]
-    while pending:
-        node = pending.pop()
-        if not isinstance(node, torch.fx.Node) or node in seen:
-            continue
-        seen.add(node)
-        match = local_reduce.output_contraction_uses.get(node)
-        if match is not None:
-            lanes.append((node, match))
-            continue
-        if node is gemm or (
-            node in local_reduce.grouped_tensors
-            and local_reduce.graph.depends_on(node, gemm)
-        ):
-            return None
-        pending.extend(reversed(tuple(iter_fx_node_inputs((node.args, node.kwargs)))))
-    if not lanes:
+    """Plan a main output computed in one lane domain of the GEMM columns."""
+    output = outputs.output_storage or outputs.output
+    domain = local_reduce.lane_domains.get(output)
+    if domain is None:
         return None
-
-    first = lanes[0][1]
-    canonical_source = canonical_output_contraction_source(
-        first.source, gemm, local_reduce
-    )
-    indices: OrderedSet[int] = OrderedSet()
-    select_indices: dict[torch.fx.Node, int] = {}
-    layouts: dict[torch.fx.Node, GemmReductionGeometry] = {}
-    structural_values: list[FlexGemmStructuralInt] = []
-    for node, match in lanes:
-        if (
-            canonical_output_contraction_source(match.source, gemm, local_reduce)
-            is not canonical_source
-            or match.group != first.group
-            or match.chunked != first.chunked
-            or not -first.group <= match.index < first.group
-        ):
-            return None
-        index = match.index % first.group
-        indices.add(index)
-        select_indices[node] = index
-        layouts[match.layout_node] = GemmReductionGeometry(first.group, 1)
-        structural_values.extend(match.structural_values)
-    if indices != OrderedSet(range(first.group)):
-        return None
-
     gemm_meta = gemm.meta.get("val")
     output_meta = output.meta.get("val")
     if not isinstance(gemm_meta, torch.Tensor) or not isinstance(
         output_meta, torch.Tensor
     ):
         return None
-    expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // first.group)
+    expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // domain.physical_span)
     if not statically_known_shape_equal(output_meta.shape, expected_shape):
         raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR)
+    lanes = [
+        (node, use)
+        for node in (output, *local_reduce.graph.dependencies.get(output, ()))
+        if (use := local_reduce.output_contraction_uses.get(node)) is not None
+    ]
     return OutputContractionPlan(
-        FlexGemmOutputContraction(first.group, first.chunked),
-        select_indices,
-        layouts,
-        tuple(structural_values),
+        FlexGemmOutputContraction(domain.physical_span, domain.chunked),
+        {node: use.index % use.group for node, use in lanes},
+        {use.layout_node: GemmReductionGeometry(use.group, 1) for _, use in lanes},
+        tuple(value for _, use in lanes for value in use.structural_values),
     )
