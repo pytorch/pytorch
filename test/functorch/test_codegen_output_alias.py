@@ -8,55 +8,34 @@ The codegen'd output alias handler inlines each handler type's logic as
 straight-line code. Multi-output input views are regenerated as a group so
 the underlying view op is replayed only once.
 
-Tests verify that an "output_alias_wrapper" artifact is emitted via
-trace_structured.
+Tests inspect the generated "output_alias_wrapper" source section.
 """
 
-import logging
-from contextlib import contextmanager
 from unittest.mock import patch
+
+from common_utils import capture_codegen_source
 
 import torch
 import torch._functorch.config
 from functorch.compile import nop
 from torch._functorch.aot_autograd import aot_function
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
-
-
-trace_log = logging.getLogger("torch.__trace")
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class TestCodegenOutputAlias(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
 
-    @contextmanager
     def _capture_codegen_source(self, artifact_name):
-        """Capture codegen artifacts from the structured trace log."""
-        captured: list[str] = []
-
-        class _ArtifactHandler(logging.Handler):
-            def emit(self, record):
-                metadata = getattr(record, "metadata", {})
-                if (
-                    "artifact" in metadata
-                    and metadata["artifact"].get("name") == artifact_name
-                ):
-                    payload = getattr(record, "payload", None)
-                    if payload is not None:
-                        captured.append(payload)
-
-        handler = _ArtifactHandler()
-        handler.setLevel(logging.DEBUG)
-        old_level = trace_log.level
-        trace_log.setLevel(logging.DEBUG)
-        trace_log.addHandler(handler)
-        try:
-            yield captured
-        finally:
-            trace_log.removeHandler(handler)
-            trace_log.setLevel(old_level)
+        return capture_codegen_source(artifact_name)
 
     def test_output_is_view_of_input(self):
         """
@@ -260,10 +239,7 @@ class TestCodegenOutputAlias(TestCase):
         outputs. Exercises non-differentiable output collection in
         _transform_raw_returns codegen and backward correctness.
         """
-        with (
-            self._capture_codegen_source("compiled_fn_wrapper") as xform_captured,
-            self._capture_codegen_source("output_alias_wrapper") as _alias_captured,
-        ):
+        with self._capture_codegen_source("compiled_fn_wrapper") as xform_captured:
 
             @torch.compile(backend="aot_eager")
             def f(x, y):

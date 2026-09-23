@@ -115,7 +115,12 @@ from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, distributed_autotune, metrics
-from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
+from .codegen.common import (
+    get_compile_option_owner,
+    get_wrapper_codegen_for_device,
+    init_backend_registration,
+    patch_compile_options,
+)
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
@@ -972,10 +977,19 @@ def fake_tensor_prop(
 
 # pass config dict back to user
 def get_patched_config_dict(
-    config_patches: str | dict[str, Any] | None = None,
+    config_patches: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    with config.patch(config_patches):
-        return config.get_config_copy()
+    with patch_compile_options(config_patches):
+        config_copy = config.get_config_copy()
+        for name in config_patches or {}:
+            # core inductor keys take precedence over device namespaces
+            if name.replace("-", "_") in config._config:  # type: ignore[attr-defined]
+                continue
+            route = get_compile_option_owner(name)
+            if route is not None:
+                owner_config, key = route
+                config_copy[name] = getattr(owner_config, key)
+        return config_copy
 
 
 @contextlib.contextmanager
@@ -1053,10 +1067,12 @@ def compile_fx_inner(
             config.triton.use_tensor_descriptor and config.assume_aligned_inputs
         ):
             warnings.warn(
-                "config.triton.enable_host_side_tma has no effect unless both "
+                "config.triton.enable_host_side_tma requires both "
                 "config.triton.use_tensor_descriptor and "
-                "config.assume_aligned_inputs are also enabled; host-side TMA "
-                "will be skipped.",
+                "config.assume_aligned_inputs for pointwise/reduction kernels; "
+                "host-side TMA will be skipped for those. GEMM templates are "
+                "unaffected: their operands are validated by can_use_tma() "
+                "before the template is offered as a choice.",
                 stacklevel=2,
             )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
@@ -1606,7 +1622,12 @@ class _InProcessFxCompile(FxCompile):
             def _fx_graph_runnable_payload() -> str:
                 fd = io.StringIO()
                 torch._dynamo.repro.after_aot.save_graph_repro(
-                    fd, gm, example_inputs, "inductor", save_dir=None
+                    fd,
+                    gm,
+                    example_inputs,
+                    "inductor",
+                    save_dir=None,
+                    is_inference=is_inference,
                 )
                 produced.append(fd.getvalue())
                 return produced[0]
@@ -1621,7 +1642,7 @@ class _InProcessFxCompile(FxCompile):
             )
             runnable_graph_str = produced[0] if produced else ""
 
-            V.debug.fx_graph(gm, example_inputs)
+            V.debug.fx_graph(gm, example_inputs, is_inference=is_inference)
             # TODO: Should we actually dump this?  It should be redundant with the aot
             # structured logs...
             # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
@@ -2224,6 +2245,12 @@ def cudagraphify(
 
     cudagraphify_fn: Callable[..., Any]
     if config.triton.cudagraph_trees:
+        managed_input_rerecord_limit = (
+            config.triton.cudagraph_managed_input_rerecord_limit
+        )
+        managed_input_rerecord_action = (
+            config.triton.cudagraph_managed_input_rerecord_action
+        )
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
@@ -2235,6 +2262,11 @@ def cudagraphify(
             mutated_input_idxs=mutated_input_idxs,
             kernel_free_cudagraph=kernel_free_cudagraph,
             user_visible_output_idxs=user_visible_output_idxs,
+            cudagraph_managed_input_rerecord_limit=managed_input_rerecord_limit,
+            cudagraph_managed_input_rerecord_action=managed_input_rerecord_action,
+            cudagraph_initial_mempool_allocation_gb=(
+                config.triton.cudagraph_initial_mempool_allocation_gb
+            ),
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
@@ -2727,6 +2759,7 @@ class CompilerConfigExtra:
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
+    """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
 
     # Although cudagraphs may have been enabled via config, various
@@ -3098,6 +3131,10 @@ def compile_fx(
     function orchestrates end-to-end compilation for the inductor backend when
     you use :func:`torch.compile`.
 
+    Entries of ``config_patches`` of the form ``"<device>.<key>"`` are
+    patched onto that device's ``device_custom_config`` module instead of
+    ``torch._inductor.config``.
+
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
@@ -3118,12 +3155,12 @@ def compile_fx(
         return model_
 
     if config_patches:
-        with config.patch(config_patches):
+        with patch_compile_options(config_patches):
             return compile_fx(
                 model_,
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),
+                inner_compile=patch_compile_options(config_patches)(inner_compile),
                 decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
                 compile_region_name=compile_region_name,
