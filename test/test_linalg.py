@@ -29,8 +29,8 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
-     skipIfNoNvmath)
+     runOnRocmArch, MI200_ARCH, MI300_ARCH, NAVI_ARCH, TEST_CUDA,
+     skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -47,6 +47,7 @@ from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, 
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
+from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
@@ -65,6 +66,9 @@ if torch.get_default_dtype() is not torch.float32:
 
 if TEST_SCIPY:
     import scipy
+
+def setUpModule():
+    initialize_kineto_with_cuda()
 
 def blaslt_supported_device():
     if torch.cuda.is_available():
@@ -211,15 +215,14 @@ class TestLinalg(TestCase):
 
     def setUp(self):
         super().setUp()
-        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
-        # writing allow_tf32 back can't always reproduce the original
-        # fp32_precision value (e.g. the "none" default).
-        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
+        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+        # backend-specific fp32_precision, so snapshot and restore all of it.
+        self._prev_fp32_state = _snapshot_fp32_precision()
         if torch.cuda.is_available():
             torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
+        _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 
     def _get_other_device(self, dtype=None):
@@ -3010,8 +3013,8 @@ class TestLinalg(TestCase):
     def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
-        if torch.version.hip and isRocmArchAnyOf(MI200_ARCH) and dtype is torch.complex128:
-            self.skipTest("Currently failing on rocm mi200")
+        if torch.version.hip and torch.device(device).type == "cuda" and dtype is torch.complex128:
+            self.skipTest("linalg.svd of the projected complex128 matrix fails to converge on ROCm")
 
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
@@ -9752,14 +9755,13 @@ class TestLinalgCudaOnly(TestCase):
         super().setUp()
         if not torch.cuda.is_available():
             self.skipTest("CUDA required")
-        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
-        # writing allow_tf32 back can't always reproduce the original
-        # fp32_precision value (e.g. the "none" default).
-        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
+        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+        # backend-specific fp32_precision, so snapshot and restore all of it.
+        self._prev_fp32_state = _snapshot_fp32_precision()
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
+        _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 
     def check_single_matmul(self, x, y):
@@ -11707,8 +11709,6 @@ class TestLinalgCudaOnly(TestCase):
     @tf32_on_and_off(0.05)
     @reduced_f32_on_and_off(0.05)
     def test_addmm_relu_tunableop(self, device, dtype):
-        if torch.version.hip and isRocmArchAnyOf(MI350_ARCH) and dtype is torch.double:
-            self.skipTest("Currently failing on rocm mi350, hipblaslt mem fault")
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_iterations(1)
@@ -11792,14 +11792,13 @@ class TestLinalgCudaOnly(TestCase):
 class TestGroupedMM(TestCase):
     def setUp(self):
         super().setUp()
-        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
-        # writing allow_tf32 back can't always reproduce the original
-        # fp32_precision value (e.g. the "none" default).
-        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
+        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+        # backend-specific fp32_precision, so snapshot and restore all of it.
+        self._prev_fp32_state = _snapshot_fp32_precision()
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
+        _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 
     def _make_grouped_mm_matrix(self, shape, row_major, device, dtype, strided=False):

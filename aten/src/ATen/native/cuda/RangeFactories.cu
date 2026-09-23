@@ -44,7 +44,11 @@ C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    index_t idx = block_work_size * blockIdx.x + num_threads() * i + threadIdx.x;
+    // Widen before multiplying: block_work_size * blockIdx.x is otherwise
+    // computed in 32-bit unsigned arithmetic and wraps for N >= 2**32,
+    // leaving the tail of the output unwritten.
+    index_t idx = static_cast<index_t>(block_work_size) * blockIdx.x +
+        num_threads() * i + threadIdx.x;
     if (idx < N) {
       data[idx] = f(idx);
     }
