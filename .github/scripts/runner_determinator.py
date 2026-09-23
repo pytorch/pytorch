@@ -102,7 +102,9 @@ SCALE_CONFIG_VARIANT_EXPERIMENTS = frozenset({"wincanary", "wincanarylf"})
 AMD_SANDBOX_EXPERIMENT = "amd-sandbox"
 AMD_SANDBOX_LABEL_PREFIX = "amd-sandbox-"
 AMD_DPX_EXPERIMENT = "amd-dpx"
-AMD_DPX_LABEL_PREFIX = "amd-dpx-"
+# Family token interpolated as linux.rocm.gpu.{token}.{gpu_count}.
+AMD_DPX_LABEL_DEFAULT = "gfx950"
+AMD_DPX_LABEL_EXPERIMENT = "mi350.dpx"
 
 
 class Experiment(NamedTuple):
@@ -539,7 +541,7 @@ def get_runner_prefix(
 
     lf_enabled = False
     amd_sandbox_prefix = ""
-    amd_dpx_prefix = ""
+    amd_dpx_prefix = AMD_DPX_LABEL_DEFAULT
     scale_config_experiments: list[str] = []
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
@@ -657,9 +659,9 @@ def get_runner_prefix(
                     "amd-sandbox experiment enabled. Exposing 'amd-sandbox-' prefix via the amd-sandbox-label-type output."
                 )
             elif experiment_name == AMD_DPX_EXPERIMENT:
-                amd_dpx_prefix = AMD_DPX_LABEL_PREFIX
+                amd_dpx_prefix = AMD_DPX_LABEL_EXPERIMENT
                 log.info(
-                    "amd-dpx experiment enabled. Exposing 'amd-dpx-' prefix via the amd-dpx-label-type output."
+                    "amd-dpx experiment enabled. Exposing 'mi350.dpx' family via the amd-dpx-label-type output."
                 )
             elif experiment_name == LF_FLEET_EXPERIMENT:
                 lf_enabled = True
@@ -760,7 +762,7 @@ def main() -> None:
 
     runner_label_prefix = META_LABEL_PREFIX
     amd_sandbox_label_prefix = ""
-    amd_dpx_label_prefix = ""
+    amd_dpx_label_prefix = AMD_DPX_LABEL_DEFAULT
     scale_config_label_prefix = ""
 
     # no-runner-experiments means "use Meta, not LF": opt out of the lf

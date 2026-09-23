@@ -810,12 +810,12 @@ class TestRunnerDeterminatorAmdDpxExperiment(TestCase):
 
     def test_amd_dpx_opted_in_returns_prefix(self) -> None:
         result = rd.get_runner_prefix(self.AMD_DPX_SETTINGS, ["User1"], USER_BRANCH)
-        self.assertEqual("amd-dpx-", result.amd_dpx_prefix)
+        self.assertEqual("mi350.dpx", result.amd_dpx_prefix)
         self.assertEqual("mt-", result.prefix)
 
     def test_amd_dpx_not_enabled_returns_default_fleet(self) -> None:
         result = rd.get_runner_prefix(self.AMD_DPX_SETTINGS, ["User2"], USER_BRANCH)
-        self.assertEqual("", result.amd_dpx_prefix)
+        self.assertEqual("gfx950", result.amd_dpx_prefix)
         self.assertEqual("mt-", result.prefix)
 
     def test_amd_dpx_with_lf_keeps_both(self) -> None:
@@ -833,7 +833,7 @@ class TestRunnerDeterminatorAmdDpxExperiment(TestCase):
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("lf-", result.prefix)
-        self.assertEqual("amd-dpx-", result.amd_dpx_prefix)
+        self.assertEqual("mi350.dpx", result.amd_dpx_prefix)
 
 
 class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
