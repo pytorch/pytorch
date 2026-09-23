@@ -297,7 +297,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
               op.schema().operator_name(),
               " appears to be a view operator, ",
               "but it has no implementation for the backend \"",
-              dev_str.str(),
+              std::move(dev_str).str(),
               "\". View operators don't support ",
               "since the tensor's storage cannot be shared across devices.");
         } else {
@@ -307,7 +307,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
               op.schema().operator_name(),
               " appears to be a view operator, ",
               "but it has no implementation for the backend \"",
-              dev_str.str(),
+              std::move(dev_str).str(),
               "\". View operators don't support falling back to run on the CPU, ",
               "since the tensor's storage cannot be shared across devices.");
         }

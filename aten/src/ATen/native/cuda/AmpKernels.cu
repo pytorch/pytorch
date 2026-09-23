@@ -89,7 +89,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
                                                      Tensor& found_inf,
                                                      const Tensor& inv_scale)
 {
-  if (scaled_grads.size() == 0) {
+  if (scaled_grads.empty()) {
     return;
   }
 

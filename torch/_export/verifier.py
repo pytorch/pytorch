@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any, final, TYPE_CHECKING
 
 import torch
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.graph_signature import (
@@ -60,7 +60,7 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
-        elif is_opaque_type(type(val)):
+        elif is_custom_class(type(val)):
             return True
         return False
 
@@ -529,41 +529,44 @@ def _verify_exported_program_signature(exported_program) -> None:
         )
 
     num_tokens = len(gs.output_tokens)
+    buffers_to_mutate = gs.buffers_to_mutate
+    parameters_to_mutate = gs.parameters_to_mutate
+    user_inputs_to_mutate = gs.user_inputs_to_mutate
     end = (
-        len(gs.buffers_to_mutate)
-        + len(gs.parameters_to_mutate)
-        + len(gs.user_inputs_to_mutate)
+        len(buffers_to_mutate)
+        + len(parameters_to_mutate)
+        + len(user_inputs_to_mutate)
         + num_tokens
     )
     mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end : end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:
-        if mutation_node in gs.buffers_to_mutate:
-            if gs.buffers_to_mutate[mutation_node] not in gs.buffers:
+        if mutation_node in buffers_to_mutate:
+            if buffers_to_mutate[mutation_node] not in gs.buffers:
                 raise SpecViolationError(
                     f"Buffer output {mutation_node} does not point to a buffer that exists. \n"
-                    f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
+                    f"Dict of buffers that are mutated, in order: {buffers_to_mutate} \n"
                     f"Buffer nodes available: {gs.buffers} \n"
                 )
-        elif mutation_node in gs.parameters_to_mutate:
-            if gs.parameters_to_mutate[mutation_node] not in gs.parameters:
+        elif mutation_node in parameters_to_mutate:
+            if parameters_to_mutate[mutation_node] not in gs.parameters:
                 raise SpecViolationError(
                     f"Parameter output {mutation_node} does not point to a parameter that exists. \n"
-                    f"Dict of parameters that are mutated, in order: {gs.parameters_to_mutate} \n"
+                    f"Dict of parameters that are mutated, in order: {parameters_to_mutate} \n"
                     f"Parameter nodes available: {gs.parameters} \n"
                 )
-        elif mutation_node in gs.user_inputs_to_mutate:
-            if gs.user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
+        elif mutation_node in user_inputs_to_mutate:
+            if user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
                 raise SpecViolationError(
                     f"User input output {mutation_node} does not point to a user input that exists. \n"
-                    f"Dict of user inputs that are mutated, in order: {gs.user_inputs_to_mutate} \n"
+                    f"Dict of user inputs that are mutated, in order: {user_inputs_to_mutate} \n"
                     f"User input nodes available: {gs.user_inputs} \n"
                 )
         else:
             raise SpecViolationError(
                 f"Mutation node {mutation_node} is neither a buffer nor a user input. "
-                f"Buffers to mutate: {gs.buffers_to_mutate}, User inputs to mutate: {gs.user_inputs_to_mutate}"
+                f"Buffers to mutate: {buffers_to_mutate}, User inputs to mutate: {user_inputs_to_mutate}"
             )
 
     for user_output_node, user_output_name in zip(user_output_nodes, gs.user_outputs):
