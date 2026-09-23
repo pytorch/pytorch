@@ -461,9 +461,12 @@ class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        torch.cuda.is_available()
+        and not torch.version.hip
+        and not PLATFORM_SUPPORTS_FP8,
+        "FP8 reduction is only supported on H100+ and MI300+ devices",
     )
+    @unittest.skipIf(not SM90OrLater, "requires sm90+")
     @unittest.skip(
         "Disabled due to CI failures on B200; see "
         "https://github.com/pytorch/pytorch/issues/190086"
