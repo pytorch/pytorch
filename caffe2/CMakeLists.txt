@@ -1216,6 +1216,7 @@ endif()
 
 if(USE_XPU)
   list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
+  list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/xpu/XPUPluggableAllocator.cpp)
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_xpu.cpp)
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
@@ -1777,13 +1778,13 @@ endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
 if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+  target_compile_definitions(torch_cpu PUBLIC AT_EXPERIMENTAL_SINGLE_THREAD_POOL=1)
 endif()
 
 if(MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
   # to be used externally. Make sure that references match the export.
-  target_compile_options(torch_cpu PRIVATE "-DONNX_BUILD_MAIN_LIB")
+  target_compile_definitions(torch_cpu PRIVATE ONNX_BUILD_MAIN_LIB)
 endif()
 
 caffe2_interface_library(torch_cpu torch_cpu_library)

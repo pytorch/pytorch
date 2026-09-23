@@ -2269,7 +2269,7 @@ Synchronous reads/writes return zero; ``async_op=True`` returns
 :class:`torch.distributed.Work`. Successful completion means the transfer completed,
 not that the remote application consumed or acknowledged the data. Asyncio callers
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
-until close, and tensors must not be resized or have their storage replaced.
+until unregistration or close, and tensors must not be resized or have their storage replaced.
 
 CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
 rank-based bootstrap helpers are outside this initial API.
