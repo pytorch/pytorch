@@ -3000,28 +3000,37 @@ def fx_to_pattern(
                 if elem_type is None or not isinstance(args[i], (list, tuple)):
                     continue
                 if schema_arg.name in ("size", "shape"):
-                    args[i] = self._wildcard_size_list(args[i], node)
+                    args[i] = self._wildcard_size_list(args[i], node.args[i], node)
                 elif schema_arg.name in ("dim", "dims") and elem_type is torch.IntType:
                     # SymInt[] dims (e.g. aten.tile) are counts, not indices
                     args[i] = self._canonical_dims(args[i], node)
             return tuple(args)
 
         def _wildcard_size_list(
-            self, sizes: Sequence[Any], node: torch.fx.Node
+            self, sizes: Sequence[Any], raw_sizes: Any, node: torch.fx.Node
         ) -> Sequence[Any]:
             # Only when the traced output shape is `sizes`, so that
             # expected_meta pins the wildcarded entries (as_strided_scatter's
-            # size, say, describes a window of the output instead).
+            # size, say, describes a window of the output instead).  Symbolic
+            # entries are sym-expr nodes (matmul's reshape to s0*heads, say)
+            # and are wildcarded too: the user graph shares one such node
+            # across all its layers, so its users count cannot be matched.
             val = node.meta.get("val")
             if not isinstance(val, torch.Tensor) or len(sizes) != val.ndim:
                 return sizes
-            for x, s in zip(sizes, val.shape):
-                if type(x) is int and x != -1 and not statically_known_true(x == s):
+            for x, s in zip(raw_sizes, val.shape):
+                if isinstance(x, torch.fx.Node):
+                    x = x.meta.get("val")
+                if type(x) is int and x == -1:
+                    continue
+                if not isinstance(x, (int, torch.SymInt)):
+                    return sizes
+                if not statically_known_true(x == s):
                     return sizes
             return [
-                x
-                if isinstance(x, PatternExpr) or x in inv_scalar_workaround
-                else Ignored()
+                Ignored()
+                if isinstance(x, PatternExpr) or x not in inv_scalar_workaround
+                else x
                 for x in sizes
             ]
 
