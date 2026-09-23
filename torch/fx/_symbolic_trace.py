@@ -1379,7 +1379,9 @@ def wrap(fn_or_name: str | Callable[..., Any]) -> str | Callable[..., Any]:
         if f is None:
             raise AssertionError("currentframe.f_back is None")
         if f.f_code.co_name != "<module>":
-            raise NotImplementedError("wrap must be called at the top level of a module")
+            raise NotImplementedError(
+                "wrap must be called at the top level of a module"
+            )
 
         # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
         # semantics would be slightly different, but would add support `from x import wrapped_function`
