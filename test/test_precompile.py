@@ -4482,6 +4482,18 @@ class TestPrecompileCapture(TestCase):
         self.assertEqual(x, expected_x)
 
     @parametrize("backend", ["eager", "inductor"])
+    def test_a_parameter_passed_as_an_argument_is_updated_once(self, backend):
+        def step(model, w, x):
+            with torch.no_grad():
+                w.add_(1)
+            return model(x)
+
+        expected = self.model.lin.weight + 1
+        with self._capture(step, backend=backend) as cap:
+            cap(self.model, self.model.lin.weight, self.x)
+        self.assertEqual(self.model.lin.weight, expected)
+
+    @parametrize("backend", ["eager", "inductor"])
     @parametrize("write", ["direct", "data", "chunk", "unbind", "foreach"])
     def test_a_capture_refuses_an_in_place_parameter_update(self, backend, write):
         # A write through ``.data`` bumps no version counter the parameter shares.
