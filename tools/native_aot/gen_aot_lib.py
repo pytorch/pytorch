@@ -67,8 +67,8 @@ FILE_TMPL = """\
 // unconditional because preludes commonly need them and there is no
 // per-declaration include hook yet; a body calling another at:: FACTORY needs its
 // op header added here. torch/library.h is emitted only for ops with cpp_covers,
-// its sole consumer being the registration below, and it pulls the whole dispatcher
-// (~110 headers).
+// its sole consumer being the covers registration below, and it pulls the whole
+// dispatcher (~110 headers).
 #include <ATen/core/Tensor.h>
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
@@ -128,6 +128,7 @@ TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
   m.def("{schema}", &::{op}_{key_lc}_covers);
 }}
 """
+
 
 from tools.native_aot import toolchains
 
@@ -194,19 +195,6 @@ def _first_tensor_name(params: str) -> str | None:
         if ctype == "at::Tensor":
             return name
     return None
-
-
-_OPTIONAL_TENSOR_TYPES = {
-    "std::optional<at::Tensor>",
-    "::std::optional<at::Tensor>",
-    "at::OptionalTensorRef",
-}
-_TENSOR_LIST_TYPES = {"at::ITensorListRef"}
-_OPTIONAL_TENSOR_LIST_TYPES = {
-    "at::IOptTensorListRef",
-    "c10::List<std::optional<at::Tensor>>",
-    "c10::List<::std::optional<at::Tensor>>",
-}
 
 
 def _device_match(arch: str) -> str:
@@ -276,7 +264,10 @@ def _by_arch(sidecars: list[dict]) -> dict[str, list[dict]]:
     return {arch: groups[arch] for arch in ordered}
 
 
-# Tensor-shaped C++ types the gate must recognize or refuse.
+# Tensor-shaped C++ types the gate must recognize or refuse: torchgen renders
+# Tensor? as at::OptionalTensorRef and Tensor[] as at::ITensorListRef, and
+# index.Tensor's covers signature carries c10::List<optional<at::Tensor>> --
+# none of which fit the two accessors below.
 _TENSOR_ISH = re.compile(r"\bat::\w*Tensor\w*|\bc10::List<")
 
 # A sidecar prefix must be usable as a C identifier: it is pasted into
@@ -293,8 +284,8 @@ def _int32_size_gate(params: str) -> str:
     aten sizes are int64_t while the exported ABI takes int32 shape slots, so the
     launcher's `static_cast<int32_t>(...)` would truncate a >=2^31 extent into a
     wrong, possibly negative one with no error. Emitted ahead of the prelude and into
-    whichever generated coverage predicate is used, so no declaration hand-writes it
-    and coverage never claims a shape the stub will refuse.
+    cpp_covers, so no declaration hand-writes it and coverage never claims a shape the
+    stub will refuse.
 
     Bounds the named tensors' dims, not numel(), which would decline a large tensor
     whose collapsed extent is tiny. A prelude that DERIVES an extent must bound that
@@ -305,46 +296,38 @@ def _int32_size_gate(params: str) -> str:
     fixed upstream and kernels ported off `t.shape[i]`, which is Int32 whatever the
     symbol; cute.sym_int64() alone is not enough.
     """
-    checks: list[str] = []
+    # The at::Tensor names in scope: the prelude sees plain `const at::Tensor&`,
+    # cpp_covers sees out-variant outputs as `const std::optional<at::Tensor>&`.
+    plain: list[str] = []
+    optional: list[str] = []
     for p in _split_params(params):
         ctype, name = _param_type_and_name(p)
-        if ctype == "at::Tensor":
-            checks.append(
-                f"{name}.sizes().end() != std::find_if({name}.sizes().begin(), "
-                f"{name}.sizes().end(), _naot_dim_too_big)"
-            )
-        elif ctype in _OPTIONAL_TENSOR_TYPES:
-            checks.append(
-                f"({name}.has_value() && {name}->sizes().end() != "
-                f"std::find_if({name}->sizes().begin(), {name}->sizes().end(), "
-                f"_naot_dim_too_big))"
-            )
-        elif ctype in _TENSOR_LIST_TYPES:
-            checks.append(
-                f"([&] {{ for (const auto& _naot_tensor : {name}) {{ "
-                f"if (_naot_tensor.sizes().end() != "
-                f"std::find_if(_naot_tensor.sizes().begin(), "
-                f"_naot_tensor.sizes().end(), _naot_dim_too_big)) return true; "
-                f"}} return false; }}())"
-            )
-        elif ctype in _OPTIONAL_TENSOR_LIST_TYPES:
-            checks.append(
-                f"([&] {{ for (const auto _naot_tensor : {name}) {{ "
-                f"if (_naot_tensor.has_value() && "
-                f"_naot_tensor->sizes().end() != "
-                f"std::find_if(_naot_tensor->sizes().begin(), "
-                f"_naot_tensor->sizes().end(), _naot_dim_too_big)) return true; "
-                f"}} return false; }}())"
-            )
+        if ctype in ("std::optional<at::Tensor>", "::std::optional<at::Tensor>"):
+            optional.append(name)
+        elif ctype == "at::Tensor":
+            plain.append(name)
         elif _TENSOR_ISH.search(ctype):
+            # Each remaining tensor-shaped type needs its own accessor
+            # (OptionalTensorRef has no has_value(); the others are
+            # sequences), so guessing emits an ungated dim or C++ that does
+            # not compile. The next op to use one gets this message.
             raise RuntimeError(
                 f"_int32_size_gate: unhandled tensor-like parameter type "
                 f"{ctype!r} (arg {name!r}). Teach the gate this type -- gating "
                 f"it wrongly would let a >=2^31 dim through the launcher's "
                 f"static_cast<int32_t>, or emit C++ that does not compile."
             )
-    if not checks:
+    if not plain and not optional:
         return ""
+    checks = [
+        f"{n}.sizes().end() != std::find_if({n}.sizes().begin(), {n}.sizes().end(), _naot_dim_too_big)"
+        for n in plain
+    ]
+    checks += [
+        f"({n}.has_value() && {n}->sizes().end() != "
+        f"std::find_if({n}->sizes().begin(), {n}->sizes().end(), _naot_dim_too_big))"
+        for n in optional
+    ]
     return (
         "  // Size gate: the DSL's exported ABI carries int32_t shape slots\n"
         "  // (see _int32_size_gate); a bigger dim would truncate silently.\n"
@@ -559,11 +542,11 @@ def precomputed_args(op: str) -> list[str]:
 
 
 def covers_signature(op: str) -> tuple[str, str]:
-    """(C++ params, torch.library schema) for generated coverage predicates.
-
-    Uses the FUNCTIONAL schema arguments (SymInt degraded to int -- symbolic sizes
-    cannot be covered anyway) plus the out variant's outputs as trailing optionals
-    so calls arriving through the .out overload bind too.
+    """(C++ params, torch.library schema) for the fast coverage
+    predicate: the FUNCTIONAL schema arguments (SymInt degraded to int
+    -- symbolic sizes can't be covered anyway; a failed bind falls back
+    to the Python path) plus the out variant's outputs as trailing
+    optionals so calls arriving through the .out overload bind too.
     """
     from torchgen.api.types import DispatcherSignature
     from torchgen.context import native_function_manager
@@ -586,6 +569,8 @@ def covers_signature(op: str) -> tuple[str, str]:
         params.append(f"const std::optional<at::Tensor>& {a.name}")
         pieces.append(f"Tensor? {a.name}=None")
     schema_args = ", ".join(pieces)
+    # Op name in the registered schema is the decl_id (dots are illegal
+    # in custom-op names); the runtime resolves covers_<decl_id> too.
     return (
         ", ".join(params),
         f"covers_{decl.decl_id_for_op(op)}({schema_args}) -> bool",
@@ -1204,10 +1189,12 @@ def main(argv: list[str] | None = None) -> None:
             _delete_generated(args.artifacts_dir, entry, "no sidecars remain")
             continue
         did, key = decl.decl_id(d), d.DISPATCH_KEY
-        covers_params, covers_schema = covers_signature(d.ATEN_OP)
+        covers = None
         covers_fn = getattr(d, "cpp_covers", None)
         covers_body = (covers_fn() or "") if covers_fn else ""
-        covers = (covers_params, covers_schema, covers_body) if covers_body else None
+        if covers_body:
+            covers_params, covers_schema = covers_signature(d.ATEN_OP)
+            covers = (covers_params, covers_schema, covers_body)
         # Every refusal runs before anything is written, and sources are buffered to
         # the end of the loop: a refusal partway through must not leave earlier
         # declarations' fresh sources paired with the previous run's link set, which

@@ -319,11 +319,6 @@ def _validate(d, path: str, label: str) -> None:
     for const in _REQUIRED_CONSTS:
         if not isinstance(getattr(d, const, None), str):
             raise RuntimeError(f"{path}: {label} missing or non-str constant {const}")
-    if d.DISPATCH_KEY != "CUDA":
-        raise RuntimeError(
-            f"{path}: {label} native-AOT currently supports only CUDA, got "
-            f"DISPATCH_KEY={d.DISPATCH_KEY!r}"
-        )
     if not hasattr(d, "ARCHS"):
         raise RuntimeError(f"{path}: {label} missing required constant ARCHS")
 

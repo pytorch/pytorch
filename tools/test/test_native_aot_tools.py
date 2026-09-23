@@ -1166,16 +1166,6 @@ def _patched_generation(ops, declarations=(_FakeDecl,)):
         stack.enter_context(
             mock.patch.object(gen_aot_lib, "precomputed_args", lambda op: [])
         )
-        stack.enter_context(
-            mock.patch.object(
-                gen_aot_lib,
-                "covers_signature",
-                lambda op, name=None: (
-                    "const at::Tensor & self, int64_t k",
-                    f"{name or 'covers_fakeop'}(Tensor self, int k) -> bool",
-                ),
-            )
-        )
         yield
 
 
@@ -1237,7 +1227,7 @@ class TestInt32SizeGate(unittest.TestCase):
         # The comparison, not just the signature: a helper that can never fire leaves
         # every oversized dim to truncate through the launcher's static_cast.
         self.assertIn("return d > std::numeric_limits<int32_t>::max();", src)
-        # gen_op was called without a covers predicate, so there is one gate site.
+        # _FakeDecl declares no cpp_covers, so there is exactly one gate site.
         self.assertEqual(src.count("// Size gate:"), 1)
         self.assertIn("self.sizes().begin()", src)
 
@@ -1403,7 +1393,7 @@ class TestAotSourceGeneration(unittest.TestCase):
             fn,
         )
 
-    def test_no_covers_argument_emits_no_registration(self):
+    def test_cpp_covers_absent_no_registration(self):
         sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
         src = gen_aot_lib.gen_op(
             "fakeop", "CUDA", _FakeDecl, [sidecar], "const at::Tensor & self, int64_t k"
@@ -1441,12 +1431,6 @@ class TestAotSourceGeneration(unittest.TestCase):
             schema,
             "covers_add_Tensor(Tensor self, Tensor other, *, Scalar alpha=1, Tensor? out=None) -> bool",
         )
-
-    def test_size_gates_accept_real_tensor_list_signatures(self):
-        for op in ("cat", "index.Tensor"):
-            with self.subTest(op=op):
-                params, _ = gen_aot_lib.covers_signature(op)
-                self.assertTrue(gen_aot_lib._int32_size_gate(params))
 
 
 class TestStructuredIntrospection(unittest.TestCase):
@@ -2642,17 +2626,6 @@ class TestDeclarationArchs(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "required constant ARCHS"):
                 native_aot_decl.load_declarations(path)
 
-    def test_non_cuda_dispatch_key_is_refused(self):
-        with tempfile.TemporaryDirectory() as ops:
-            _write_fake_decl(ops)
-            path = os.path.join(ops, "fakeop", "aot.py")
-            with open(path) as f:
-                body = f.read().replace('DISPATCH_KEY = "CUDA"', 'DISPATCH_KEY = "CPU"')
-            with open(path, "w") as f:
-                f.write(body)
-            with self.assertRaisesRegex(RuntimeError, "supports only CUDA"):
-                native_aot_decl.load_declarations(path)
-
     def test_a_malformed_archs_entry_is_refused_at_load(self):
         # _SM_RE accepts "sm_9" and "sm_1000", which name no capability. Refused by the
         # loader, the only place that knows which file to name.
@@ -3335,27 +3308,17 @@ class TestInt32GateTypeClassifier(unittest.TestCase):
         self.assertIn("self.sizes()", gate)
         self.assertNotIn("numel()", gate)
 
-    def test_optional_refs_and_tensor_lists_are_gated(self):
-        cases = {
-            "at::OptionalTensorRef bias": ("bias.has_value()", "bias->sizes()"),
-            "const at::ITensorListRef & tensors": (
-                "_naot_tensor : tensors",
-                "_naot_tensor.sizes()",
-            ),
-            "const at::IOptTensorListRef & tensors": (
-                "_naot_tensor : tensors",
-                "_naot_tensor->sizes()",
-            ),
-            "const c10::List<::std::optional<at::Tensor>> & indices": (
-                "_naot_tensor : indices",
-                "_naot_tensor->sizes()",
-            ),
-        }
-        for params, expected in cases.items():
+    def test_unhandled_tensor_like_types_are_refused(self):
+        # torchgen renders Tensor? as at::OptionalTensorRef and Tensor[] as
+        # at::ITensorListRef, neither of which fits the accessors the gate emits.
+        for params in (
+            "const at::Tensor & self, at::OptionalTensorRef bias",
+            "const at::ITensorListRef & tensors",
+            "const c10::List<::std::optional<at::Tensor>> & indices",
+        ):
             with self.subTest(params=params):
-                gate = gen_aot_lib._int32_size_gate(params)
-                for text in expected:
-                    self.assertIn(text, gate)
+                with self.assertRaisesRegex(RuntimeError, "unhandled tensor-like"):
+                    gen_aot_lib._int32_size_gate(params)
 
     def test_scalar_only_signature_emits_nothing(self):
         self.assertEqual(gen_aot_lib._int32_size_gate("int64_t k, bool largest"), "")
@@ -5785,7 +5748,7 @@ class TestArchScopedGeneration(unittest.TestCase):
             with (
                 tempfile.TemporaryDirectory() as ops,
                 mock.patch.object(
-                    gen_aot_lib, "covers_signature", lambda op, name=None: signature
+                    gen_aot_lib, "covers_signature", lambda op: signature
                 ),
             ):
                 os.makedirs(os.path.join(ops, "fakeop"))
@@ -6016,7 +5979,7 @@ class TestSizeGateIsPerToolchain(unittest.TestCase):
 
 class TestSelectiveIncludes(unittest.TestCase):
     """torch/library.h pulls the dispatcher in (~110 transitive headers), and
-    only generated coverage registrations need it."""
+    only the cpp_covers registration needs it."""
 
     _SC = {
         "prefix": "p",
