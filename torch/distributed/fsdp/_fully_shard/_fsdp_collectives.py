@@ -738,38 +738,9 @@ def foreach_reduce(
         # AR to finish. The reduce-dtype buffer is held across layers by
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
-        # Inputs follow the sharded gradient dtype order cached at lazy init.
-        # Each contiguous region needs at most one flat cast/allocation after
-        # RS/AR; parameter gradients become views. Reduction uses one dtype.
-        # A fused heterogeneous cast kernel could combine per-dtype launches
-        # and fuse accumulation to avoid temporary buffers while preserving
-        # cast-before-add rounding.
-        sharded_grads: list[torch.Tensor] = []
-        flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
-        for grad_dtype, group in groupby(
-            zip(fsdp_params, padded_unsharded_sizes),
-            key=lambda param_and_size: param_and_size[0].sharded_grad_dtype,
-        ):
-            param_group = list(group)
-            group_numel = sum(size.numel() for _, size in param_group) // world_size
-            group_output = reduce_output
-            if group_numel != reduce_scatter_output_numel:
-                group_output = group_output.narrow(0, flat_grad_offset, group_numel)
-            group_output = _to_dtype_if_needed(group_output, grad_dtype)
-            group_offset = group_output.storage_offset()
-            for fsdp_param, padded_unsharded_size in param_group:
-                # Assume even sharding for Shard(i), i > 0; otherwise would
-                # require copy-out for contiguous strides.
-                sharded_grads.append(
-                    torch.as_strided(
-                        group_output,
-                        size=fsdp_param.sharded_size,
-                        stride=fsdp_param.contiguous_sharded_stride,
-                        storage_offset=group_offset,
-                    )
-                )
-                group_offset += padded_unsharded_size.numel() // world_size
-            flat_grad_offset += group_numel
+        sharded_grads = _cast_and_view_sharded_grads(
+            reduce_output, fsdp_params, padded_unsharded_sizes, world_size
+        )
 
         # Accumulate the reduced gradients in each parameter's sharded dtype.
         for fsdp_param, new_sharded_grad in zip(fsdp_params, sharded_grads):
@@ -837,6 +808,48 @@ def foreach_reduce(
         all_reduce_event,
         None,
     )
+
+
+def _cast_and_view_sharded_grads(
+    reduce_output: torch.Tensor,
+    fsdp_params: list[FSDPParam],
+    padded_unsharded_sizes: Sequence[torch.Size],
+    world_size: int,
+) -> list[torch.Tensor]:
+    # Inputs follow the sharded gradient dtype order cached at lazy init.
+    # Each contiguous region needs at most one flat cast/allocation after
+    # RS/AR; parameter gradients become views. Reduction uses one dtype.
+    # A fused heterogeneous cast kernel could combine per-dtype launches
+    # and fuse accumulation to avoid temporary buffers while preserving
+    # cast-before-add rounding.
+    sharded_grads: list[torch.Tensor] = []
+    reduce_output_numel = reduce_output.numel()
+    flat_grad_offset = 0  # [0, reduce_output_numel - 1]
+    for grad_dtype, group in groupby(
+        zip(fsdp_params, padded_unsharded_sizes),
+        key=lambda param_and_size: param_and_size[0].sharded_grad_dtype,
+    ):
+        param_group = list(group)
+        group_numel = sum(size.numel() for _, size in param_group) // world_size
+        group_output = reduce_output
+        if group_numel != reduce_output_numel:
+            group_output = group_output.narrow(0, flat_grad_offset, group_numel)
+        group_output = _to_dtype_if_needed(group_output, grad_dtype)
+        group_offset = group_output.storage_offset()
+        for fsdp_param, padded_unsharded_size in param_group:
+            # Assume even sharding for Shard(i), i > 0; otherwise would
+            # require copy-out for contiguous strides.
+            sharded_grads.append(
+                torch.as_strided(
+                    group_output,
+                    size=fsdp_param.sharded_size,
+                    stride=fsdp_param.contiguous_sharded_stride,
+                    storage_offset=group_offset,
+                )
+            )
+            group_offset += padded_unsharded_size.numel() // world_size
+        flat_grad_offset += group_numel
+    return sharded_grads
 
 
 def foreach_reduce_scatter_copy_in(
