@@ -23,6 +23,7 @@ import functools
 import inspect
 import logging
 import os
+import re
 import secrets
 import threading
 from collections.abc import Callable, Sequence
@@ -43,7 +44,7 @@ _R = TypeVar("_R")
 # by a different torch (see _warn_on_version_skew). It is a comment, so it does not
 # affect exec; a hand-edit that drops it just disables the skew warning, so
 # hill-climbing an artifact never triggers a spurious version warning.
-# All four stamps must stay in the artifact's LEADING comment block: the reader stops
+# All five stamps must stay in the artifact's LEADING comment block: the reader stops
 # at the first line that is not a comment, so inserting code above them turns every
 # check off -- each checked stamp warns per call while it is missing, and the version
 # warning is the only one that goes quiet.
@@ -54,14 +55,16 @@ _VERSION_TAG = "# torch.compiler.export_python torch-version: "
 # the version stamp it is exec-inert, and dropping it in a hand-edit just turns the
 # check off (see _check_module_training).
 _MODULE_TRAINING_TAG = "# torch.compiler.export_python module-training: "
-# Which input tensors overlapped in memory at capture, and which of them were literally
-# the same object. make_fx bakes both into the graph with no runtime guard: aliased
-# inputs change what a mutation means, and one object passed twice is deduped into a
-# single graph slot. Exec-inert like the other stamps, and dropping one turns only its
-# own check off. What no stamp guards is a change in HOW two aliased inputs overlap --
-# capture's relative offsets stay baked in, exactly as they do under torch.compile.
+# Which input tensors overlapped in memory at capture, which of them were literally the
+# same object, and the ambient autocast state. make_fx bakes all three into the graph
+# with no runtime guard: aliased inputs change what a mutation means, one object passed
+# twice is deduped into a single graph slot, and autocast changes the dtypes the kernels
+# were specialized for. Exec-inert like the other stamps, and dropping one turns only
+# its own check off. What no stamp guards is a change in HOW two aliased inputs overlap
+# -- capture's relative offsets stay baked in, exactly as they do under torch.compile.
 _INPUT_OVERLAP_TAG = "# torch.compiler.export_python input-overlap: "
 _INPUT_DUPLICATE_TAG = "# torch.compiler.export_python input-duplicates: "
+_AUTOCAST_TAG = "# torch.compiler.export_python autocast: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
 # a real I/O problem (a full disk, a bad permission) that must not be swallowed.
@@ -407,6 +410,52 @@ def _input_duplicates(
     return pairs
 
 
+def _code_devices(code: str) -> set[str]:
+    """The device types the emitted artifact names, from its own source.
+
+    The stamp and the per-call check have to agree, so this is computed from the source
+    once at capture and once at load rather than from anything ambient.
+    """
+    found = set(re.findall(r"empty_strided_(\w+)\(", code))
+    found.update(re.findall(r"device\(type=[\'\"](\w+)[\'\"]", code))
+    found.update(re.findall(r"\.to\([\'\"](\w+)[\'\"]", code))
+    devices = set()
+    for name in found:
+        # The allocator names are not all device types -- empty_strided_cpu_pinned is a
+        # cpu allocator -- and a hand-edited artifact can contain anything at all.
+        try:
+            devices.add(torch.device(name).type)
+        except (RuntimeError, ValueError):
+            continue
+    return devices
+
+
+def _autocast_state(
+    args: Sequence[Any],
+    tensors: list[torch.Tensor] | None = None,
+    code_devices: set[str] | None = None,
+) -> list[list[Any]]:
+    """Ambient autocast for every device type this artifact can compute on.
+
+    The input devices alone are not enough: a graph whose inputs are all on CPU can still
+    run its matmuls on an accelerator, and keying only on inputs recorded [] for it in
+    both processes, so the check passed while the kernels had been built for autocast
+    dtypes. Widened with the device types the emitted code names. Still not every device
+    type in the process: a CPU helper first called inside a `with torch.autocast("cuda")`
+    training region must not be locked to that region, and its graph never names cuda.
+    """
+    if tensors is None:
+        tensors = _input_tensors(args)
+    devices = {t.device.type for t in tensors}
+    if code_devices is not None:
+        devices.update(code_devices)
+    return [
+        [device, str(torch.get_autocast_dtype(device))]
+        for device in sorted(devices)
+        if torch.amp.is_autocast_available(device) and torch.is_autocast_enabled(device)
+    ]
+
+
 class ExportedPythonArtifact:
     """Materializes and disk-caches a ``torch.compiler.precompile`` artifact.
 
@@ -439,6 +488,8 @@ class ExportedPythonArtifact:
         self._module_training: list[tuple[int, list[tuple[str, bool]]]] | None = None
         self._input_overlaps: list[list[int]] | None = None
         self._input_duplicates: list[list[int]] | None = None
+        self._code_devices: set[str] = set()
+        self._autocast: list[list[Any]] | None = None
         self._loaded: Callable[..., Any] | None = None
         # (pid, tid) currently inside _materialize. There is deliberately no
         # per-artifact lock: capture is already serialized process-wide, so a second
@@ -503,6 +554,8 @@ class ExportedPythonArtifact:
             f"{_MODULE_TRAINING_TAG}{_module_training_state(example)!r}\n"
             f"{_INPUT_OVERLAP_TAG}{_input_overlaps(example, example_tensors)!r}\n"
             f"{_INPUT_DUPLICATE_TAG}{_input_duplicates(example, example_tensors)!r}\n"
+            f"{_AUTOCAST_TAG}"
+            f"{_autocast_state(example, example_tensors, _code_devices(code))!r}\n"
             f"{code}"
         )
         if _atomic_publish(self._path, code.encode("utf-8")):
@@ -565,15 +618,15 @@ class ExportedPythonArtifact:
         return None
 
     def _check_capture_environment(self, args: tuple[Any, ...]) -> None:
-        # Another thing make_fx specialized with no runtime guard. Input ALIASING
+        # Two more things make_fx specialized with no runtime guard. Input ALIASING
         # decides what an in-place mutation means, so an artifact captured with two
         # arguments sharing memory computes the wrong thing (and mutates the wrong
         # thing) when they are distinct at runtime -- torch.compile guards this and
-        # recompiles.
+        # recompiles. Ambient AUTOCAST decides the dtypes the kernels were built for.
         tensors: list[torch.Tensor] | None = None
 
         def input_tensors() -> list[torch.Tensor]:
-            # Walked once and shared by the two checks below. Lazily, so an artifact
+            # Walked once and shared by the three checks below. Lazily, so an artifact
             # whose stamps were all hand-edited away does not pay for a walk no check
             # will read.
             nonlocal tensors
@@ -616,6 +669,23 @@ class ExportedPythonArtifact:
                     "AOTAutograd folds arguments that are one object into a single "
                     "graph slot, so this call would compute against the wrong "
                     "assumption -- byte overlap alone cannot see the difference."
+                )
+        if self._autocast is None:
+            log.warning(
+                "torch.compiler.export_python: the artifact at %s carries no recorded "
+                "autocast stamp, so calling it under a different autocast context than "
+                "capture is unchecked. Delete %s to regenerate it.",
+                self._path,
+                self._path,
+            )
+        else:
+            actual_autocast = _autocast_state(args, input_tensors(), self._code_devices)
+            if actual_autocast != self._autocast:
+                raise _precompile_error(
+                    "torch.compiler.export_python: the runtime autocast state does not "
+                    f"match capture (captured {self._autocast}, got {actual_autocast}). "
+                    "Autocast dtypes are baked into the artifact; capture under the "
+                    "same autocast context you call it in."
                 )
 
     def _check_module_training(self, args: tuple[Any, ...]) -> None:
@@ -725,6 +795,8 @@ class ExportedPythonArtifact:
         self._module_training = self._read_stamp(code, _MODULE_TRAINING_TAG)
         self._input_overlaps = self._read_stamp(code, _INPUT_OVERLAP_TAG)
         self._input_duplicates = self._read_stamp(code, _INPUT_DUPLICATE_TAG)
+        self._autocast = self._read_stamp(code, _AUTOCAST_TAG)
+        self._code_devices = _code_devices(code)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
         self._decompositions = None

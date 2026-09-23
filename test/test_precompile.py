@@ -6045,6 +6045,64 @@ class TestExportPython(TestCase):
 
         self.assertEqual(torch.compiler.export_python(path=path)(fn)(x), fn(x))
 
+    @unittest.skipUnless(TEST_CUDA, "needs a device the inputs do not live on")
+    def test_autocast_stamp_covers_devices_only_the_graph_touches(self, device):
+        # Keying the stamp on the INPUT devices alone recorded [] for a graph whose
+        # inputs are on one device and whose matmuls run on another, so the check passed
+        # in both processes while the kernels had been built for autocast dtypes.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the point is inputs on cpu and compute on the accelerator")
+
+        def fn(inp):
+            return (inp.cuda() @ inp.cuda().t()).cpu()
+
+        path = self._tmp_path("autocast_graph.py")
+        x = make_tensor((8, 8), device="cpu", dtype=torch.float32)
+        run = torch.compiler.export_python(path=path)(fn)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            run(x)
+            run(x)
+        with open(path, encoding="utf-8") as f:
+            stamp = next(l for l in f if "autocast:" in l)
+        self.assertIn("cuda", stamp)
+        with self.assertRaisesRegex(PrecompileError, "autocast"):
+            run(x)  # outside the region the kernels were built for
+
+        # The case the input-only filter existed to protect still works: a pure-CPU
+        # helper first called inside a CUDA autocast region is not locked to it.
+        def cpu_only(inp):
+            return inp.sin() + 1
+
+        helper = torch.compiler.export_python(path=self._tmp_path("cpu_only.py"))(
+            cpu_only
+        )
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            helper(x)
+        self.assertEqual(helper(x), cpu_only(x))
+
+    def test_meta_module_tensor_does_not_crash_the_autocast_stamp(self, device):
+        # autocast does not model every device an input can live on, and a module can
+        # carry a meta tensor it never reads (deferred init). Asking it about one raised
+        # a bare C++ RuntimeError from inside stamp emission, so nothing was ever
+        # published and every call re-paid the whole capture.
+        class DeferredInit(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, device=device)
+                self.register_buffer("proto", torch.empty(4, device="meta"))
+                self.spare = torch.nn.Parameter(torch.empty(4, device="meta"))
+
+            def forward(self, inp):
+                return self.linear(inp)
+
+        mod = DeferredInit()
+        x = make_tensor((2, 4), device=device, dtype=torch.float32)
+        path = self._tmp_path("deferred.py")
+        run = torch.compiler.export_python(path=path)(lambda m, t: m(t))
+        self.assertEqual(run(mod, x), mod(x))
+        self.assertTrue(os.path.exists(path))  # published, so no capture is re-paid
+        self.assertEqual(run(mod, x), mod(x))  # and the loaded artifact runs too
+
     def test_overlap_is_bytes_not_storage_identity(self, device):
         # Two tensors can reach the same bytes through DIFFERENT UntypedStorages --
         # from_numpy on overlapping slices, frombuffer, DLPack, __cuda_array_interface__
@@ -6273,6 +6331,33 @@ class TestExportPython(TestCase):
         # ...and the rejected call left the caller's tensor alone.
         self.assertEqual(independent, torch.zeros(4, device=device))
 
+    def test_dropping_the_aliasing_or_autocast_stamp_warns(self, device):
+        # The docstring promises a warning for each dropped stamp; the module-training
+        # one warned and these two used to fall through in silence.
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        for tag, name in (("input-overlap:", "alias"), ("autocast:", "autocast")):
+            path = self._tmp_path(f"drop_{name}.py")
+
+            def build():
+                @torch.compiler.export_python(path=path, backend="eager")
+                def run(a, b):
+                    return a + b
+
+                return run
+
+            build()(x, x)
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+            kept = [line for line in lines if tag not in line]
+            self.assertEqual(len(kept), len(lines) - 1, f"{tag} stamp not found")
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+            with self.assertLogs("torch.compiler._export_python", "WARNING") as logs:
+                build()(x, x)
+            self.assertTrue(
+                any("carries no recorded" in m for m in logs.output), logs.output
+            )
+
     def test_input_aliasing_is_guarded(self, device):
         # Aliasing decides what an in-place mutation means and is baked into the graph
         # with no runtime guard, so an artifact captured on aliased inputs computes --
@@ -6302,6 +6387,23 @@ class TestExportPython(TestCase):
         c = torch.arange(4.0, device=device)
         with self.assertRaisesRegex(PrecompileError, "do not share memory"):
             distinct(c, c)
+
+    def test_autocast_state_is_guarded(self, device):
+        # Ambient autocast picks the dtypes the kernels were specialized for, and is
+        # invisible to make_fx's guards, so calling under a different autocast context
+        # silently returns the capture-time dtype.
+        @torch.compiler.export_python(
+            path=self._tmp_path("autocast.py"), backend="eager"
+        )
+        def run(a, b):
+            return a @ b
+
+        device_type = torch.device(device).type
+        x = make_tensor((8, 8), device=device, dtype=torch.float32)
+        self.assertEqual(run(x, x).dtype, torch.float32)
+        with self.assertRaisesRegex(PrecompileError, "autocast state does not match"):
+            with torch.autocast(device_type, torch.bfloat16):
+                run(x, x)
 
     def test_loading_an_artifact_leaves_its_directory_alone(self, device):
         # The artifact is documented as self-contained and meant to be committed, but
