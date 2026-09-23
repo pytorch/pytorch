@@ -26,6 +26,14 @@ namespace {
 
 const std::string k_separator = "/";
 
+void validate_stream_affinity_configuration(
+    bool run_single_threaded,
+    bool use_stream_affinity) {
+  TORCH_CHECK(
+      !use_stream_affinity || !run_single_threaded,
+      "use_stream_affinity cannot be enabled when run_single_threaded is true");
+}
+
 bool is_windows_drive_root(const std::string& path) {
   return path.size() == 3 &&
       std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' &&
@@ -726,8 +734,11 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_name,
     const bool run_single_threaded,
     const size_t num_runners,
-    const c10::DeviceIndex device_index)
+    const c10::DeviceIndex device_index,
+    const bool use_stream_affinity)
     : runner_(nullptr), metadata_{} {
+  validate_stream_affinity_configuration(
+      run_single_threaded, use_stream_affinity);
   if (run_single_threaded) {
     TORCH_CHECK(
         num_runners == 1,
@@ -946,6 +957,12 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   if (!weight_blob_filename.empty()) {
     runner_->update_constant_buffer_from_blob(weight_blob_filename);
   }
+
+  // Keep old model packages loadable unless the caller explicitly requests
+  // the optional runtime symbol introduced with stream affinity.
+  if (use_stream_affinity) {
+    runner_->set_use_stream_affinity(true);
+  }
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
@@ -998,14 +1015,17 @@ void AOTIModelPackageLoader::load_constants(
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
   std::unordered_map<std::string, std::string> fqn_to_constant_name;
+  fqn_to_constant_name.reserve(constant_name_to_fqn.size());
   for (const auto& it : constant_name_to_fqn) {
     fqn_to_constant_name.emplace(it.second, it.first);
   }
 
   std::unordered_map<std::string, at::Tensor> updated_constants_map;
+  updated_constants_map.reserve(constants_map.size());
   for (const auto& it : constants_map) {
-    if (fqn_to_constant_name.contains(it.first)) {
-      updated_constants_map.emplace(fqn_to_constant_name[it.first], it.second);
+    if (auto fqn_it = fqn_to_constant_name.find(it.first);
+        fqn_it != fqn_to_constant_name.end()) {
+      updated_constants_map.emplace(fqn_it->second, it.second);
     } else {
       TORCH_CHECK(false, "Constant not found: ", it.first);
     }

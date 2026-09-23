@@ -6,7 +6,9 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import (
+    _get_legacy_float32_matmul_precision, _set_legacy_float32_matmul_precision, LazyVal, TEST_NUMBA, TEST_WITH_ROCM,
+    TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU)
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -46,13 +48,13 @@ def _rocm_major_minor():
 
 ROCM_VERSION = LazyVal(_rocm_major_minor)
 
-# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+# Cuspy needs both the cupti-python bindings and the build-generated
 # _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
     _check_module_exists("cupti")
-    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and _check_module_exists("torch.profiler._cuspy._cupti_stubs")
     and not TEST_WITH_ROCM
 )
 
@@ -60,7 +62,7 @@ def _cupti_version():
     if not TEST_CUPTI:
         return 0
     try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
+        from torch.profiler._cuspy.cupti_python import pylibcupti
         return pylibcupti().get_version()
     except Exception:
         return 0
@@ -92,6 +94,15 @@ SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
+BF16X9_API_SUPPORTED = LazyVal(
+    lambda: TEST_CUDA
+    and not TEST_WITH_ROCM
+    and _get_torch_cuda_version() >= (12, 9)
+)
+BF16X9_SUPPORTED = LazyVal(
+    lambda: BF16X9_API_SUPPORTED
+    and torch.cuda.get_device_capability() in ((10, 0), (10, 3))
+)
 
 IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
@@ -184,7 +195,7 @@ def evaluate_platform_supports_flash_attention():
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
-        return not IS_WINDOWS and SM80OrLater
+        return SM80OrLater
     if TEST_XPU:
         return True
     return False
@@ -396,6 +407,27 @@ _tf32_off_saved_precision = None
 _tf32_off_cudnn_ctx = None
 
 
+# The allow_tf32 setter writes both the legacy Float32MatmulPrecision enum and
+# the backend-specific fp32_precision values. Restoring only one of them leaves
+# the two disagreeing, and every later read of allow_tf32 in the process then
+# raises "mix of the legacy and new APIs".
+def _save_matmul_precision():
+    return (_get_legacy_float32_matmul_precision(),
+            torch.backends.cuda.matmul.fp32_precision,
+            torch.backends.mkldnn.matmul.fp32_precision)
+
+
+def _restore_matmul_precision(saved):
+    legacy, cuda_precision, mkldnn_precision = saved
+    # set_float32_matmul_precision overwrites both backend-specific values, so
+    # it goes first. Restoring those as fp32_precision strings rather than as
+    # allow_tf32 booleans also preserves the "none" default, which allow_tf32
+    # cannot express (it yields "ieee", which the leak detector flags on ROCm).
+    _set_legacy_float32_matmul_precision(legacy)
+    torch.backends.cuda.matmul.fp32_precision = cuda_precision
+    torch.backends.mkldnn.matmul.fp32_precision = mkldnn_precision
+
+
 @contextlib.contextmanager
 def tf32_off():
     # First-in saves state and disables tf32; last-out restores. Multithreaded
@@ -406,10 +438,7 @@ def tf32_off():
     global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
     with _tf32_off_lock:
         if _tf32_off_depth == 0:
-            # Snapshot fp32_precision (a string), not allow_tf32 (a bool):
-            # writing allow_tf32 back can't reproduce the "none" default (it
-            # yields "ieee"), which the leak detector would flag on ROCm.
-            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
+            _tf32_off_saved_precision = _save_matmul_precision()
             torch.backends.cuda.matmul.allow_tf32 = False
             _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
             _tf32_off_cudnn_ctx.__enter__()
@@ -422,13 +451,13 @@ def tf32_off():
             if _tf32_off_depth == 0:
                 _tf32_off_cudnn_ctx.__exit__(None, None, None)
                 _tf32_off_cudnn_ctx = None
-                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
+                _restore_matmul_precision(_tf32_off_saved_precision)
                 _tf32_off_saved_precision = None
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    old_matmul_precision = _save_matmul_precision()
     old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -436,7 +465,7 @@ def tf32_on(self, tf32_precision=1e-5):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        _restore_matmul_precision(old_matmul_precision)
         self.precision = old_precision
 
 
@@ -446,7 +475,7 @@ def tf32_enabled():
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
     """
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    old_matmul_precision = _save_matmul_precision()
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         with torch.backends.cudnn.flags(
@@ -454,7 +483,7 @@ def tf32_enabled():
         ):
             yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        _restore_matmul_precision(old_matmul_precision)
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -547,6 +576,13 @@ def _get_torch_rocm_version():
         return (0, 0)
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
+
+def rocm_mx_swizzle(mat_dtype):
+    """Whether this device takes MX block scales for `mat_dtype` in the swizzled layout."""
+    if not torch.version.hip or not evaluate_gfx_arch_within(["gfx950"]):
+        return False
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    return _get_torch_rocm_version() >= min_version
 
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:

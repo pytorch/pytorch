@@ -2115,6 +2115,7 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
   pg_ = pg;
   heartbeat_ = 1ULL;
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
+  tearDownOnTimeout_ = getCvarBool(TORCH_NCCL_TEARDOWN_ON_TIMEOUT, false);
   propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (pg_->dist_debug_level_ >= DebugLevel::Detail);
@@ -2123,6 +2124,7 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
   if (pg_->getUid() == 0) {
     LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
               << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
+              << ", TORCH_NCCL_TEARDOWN_ON_TIMEOUT: " << tearDownOnTimeout_
               << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
               << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
   }
@@ -2183,8 +2185,9 @@ void ProcessGroupNCCL::Watchdog::run() {
           "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
-      if (C10_LIKELY(rethrowCUDAErrors_) ||
-          std::string(e.what()).find("CUDA Error") != std::string::npos) {
+      // CUDA errors are gated by `rethrowCUDAErrors_` and timeout exceptions
+      // are gated by `rethrowTimeoutException_`.
+      if (rethrowCUDAErrors_ || rethrowTimeoutException_) {
         // TODO(whc) clean up the rethrow - why is it stored in a class var
         // and rethrown?
         watchDogException_ =
@@ -2426,7 +2429,13 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
           // rank
           pg_->abortComms();
         }
-        // Throw exception
+        // The flag tells the try/catch in Watchdog::run() to rethrow a timeout
+        // exception even when rethrowCUDAErrors_ is false. We only set the flag
+        // if handleException() is guaranteed to throw below, so the catch never
+        // sees a stale true. TORCH_NCCL_TEARDOWN_ON_TIMEOUT gates the whole
+        // thing and is off by default while this rolls out.
+        rethrowTimeoutException_ = tearDownOnTimeout_ && timedout &&
+            SHOULD_TEAR_DOWN(pg_->asyncErrorHandling_);
         work.handleException(pg_->asyncErrorHandling_);
       }
 
