@@ -128,7 +128,7 @@ def _get_source_debug_name(source: Source | None) -> str:
             return "<unknown source>"
 
 
-def _esc_str(s: Any, apply_repr: bool = False) -> str:
+def _esc_str(s: object, apply_repr: bool = False) -> str:
     """
     Escapes curly brackets for format strings.
     e.g. "frozenset({0})" becomes "frozenset({{0}})".
@@ -152,7 +152,7 @@ class LocalSource(Source):
 
     # Whether we know this input is dynamic (based on example_inputs)
     # For non tensors, we simply look at the first index of the tuple
-    dynamism: frozenset[str] | None = None
+    dynamism: frozenset[tuple[str, tuple[bool, ...]]] | None = None
 
     # Whether the item at this source is the _content_ of a cell that is
     # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`
@@ -762,7 +762,7 @@ class DefaultsSource(ChainedSource):
 
 @dataclass_with_cached_hash(frozen=True)
 class GetItemSource(ChainedSource):
-    index: Any
+    index: object
     index_is_slice: bool = False
 
     def __post_init__(self) -> None:
@@ -784,6 +784,13 @@ class GetItemSource(ChainedSource):
     def unpack_slice(self) -> slice:
         if not self.index_is_slice:
             raise AssertionError("unpack_slice called but index is not a slice")
+        if not (
+            isinstance(self.index, tuple)
+            and len(self.index) == 2
+            and self.index[0] is slice
+            and isinstance(self.index[1], tuple)
+        ):
+            raise AssertionError(f"Expected an encoded slice, got {self.index!r}")
         slice_class, slice_args = self.index
         return slice_class(*slice_args)
 
@@ -804,7 +811,7 @@ class GetItemSource(ChainedSource):
 
 @dataclass_with_cached_hash(frozen=True)
 class ConstDictKeySource(ChainedSource):
-    index: Any
+    index: int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -878,7 +885,7 @@ class DictGetItemSource(ChainedSource):
     # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
-    index: Any
+    index: object
 
     def __post_init__(self) -> None:
         from .variables import ConstantVariable
@@ -949,7 +956,7 @@ class DictSubclassGetItemSource(ChainedSource):
     # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
-    index: Any
+    index: object
 
     def __post_init__(self) -> None:
         from .variables import ConstantVariable
@@ -1308,7 +1315,7 @@ class CallMethodItemSource(ChainedSource):
 @dataclass_with_cached_hash(frozen=True)
 class ContextVarGetSource(ChainedSource):
     has_default: bool = False
-    default_value: Any = None
+    default_value: object = None
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         def load_get_method():
@@ -1438,6 +1445,15 @@ def is_from_source(source: Source, target: Source) -> bool:
         return True
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
+    return False
+
+
+@functools.lru_cache
+def is_from_attr_proxy_source(source: Source) -> bool:
+    if isinstance(source, AttrProxySource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_attr_proxy_source(source.base)
     return False
 
 
