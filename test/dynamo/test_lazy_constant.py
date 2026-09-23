@@ -621,18 +621,20 @@ class ComputedLazyConstantTests(TestCase):
         self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 5, 0)], expected_frames=1)
 
     @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
-    def test_bitwise_symbolic_operand_realizes(self):
+    def test_symbolic_operand_realizes(self):
         t = torch.ones(3)
         cases = [
             ("and", lambda t, a, b: t * (a & b)),
             ("or", lambda t, a, b: t * (a | b)),
             ("xor", lambda t, a, b: t * (a ^ b)),
+            ("lt", lambda t, a, b: t * (a < b)),
+            ("eq", lambda t, a, b: t * (a == b)),
         ]
         for name, fn in cases:
             with self.subTest(name=name):
                 torch._dynamo.reset()
                 opt_fn = torch.compile(fn, backend="eager")
-                for a, b in ((6, 3), (12, 10)):
+                for a, b in ((6, 3), (12, 12), (10, 20)):
                     self.assertTrue(same(fn(t, a, b), opt_fn(t, a, b)))
 
     def test_operand_type_change_recompiles(self):
