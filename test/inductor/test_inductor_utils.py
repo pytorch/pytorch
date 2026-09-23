@@ -14,6 +14,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
 from torch.autograd import DeviceType
+from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
@@ -229,6 +230,10 @@ class TestStrideOrder(TestCase):
             self.assertEqual(
                 get_stride_order([stride, 1, stride, stride]), [3, 0, 2, 1]
             )
+
+    def test_constant_symint_stride_order_without_shape_env(self):
+        stride = torch.SymInt(ConstantIntNode(3))
+        self.assertEqual(get_stride_order([stride, 1]), [1, 0])
 
 
 if __name__ == "__main__":

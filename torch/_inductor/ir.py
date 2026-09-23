@@ -347,8 +347,11 @@ def _get_shape_env_for_symbolic_stride_order(
     seq: Sequence[int | torch.SymInt | Expr],
 ) -> ShapeEnv | None:
     for s in seq:
+        # ConstantIntNode and other non-ShapeEnv SymNodes have no shape_env.
         if isinstance(s, torch.SymInt):
-            return s.node.shape_env
+            shape_env = getattr(s.node, "shape_env", None)
+            if shape_env is not None:
+                return shape_env
 
     try:
         graph = V.graph
