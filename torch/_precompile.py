@@ -229,11 +229,18 @@ it.
 # so concurrent backend="inductor" captures lower one at a time. The make_fx trace
 # and the backend="eager" path are NOT serialized.
 #
-# tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
-# non-strict trace and is the only tracer implemented today -- everything above (the
-# invariants, the contract) describes its behavior. "dynamo" is planned (a Dynamo-based
-# front-end that analyzes Python rather than specializing to one traced path) and
-# currently raises NotImplementedError.
+# tracer: the capture front-end, orthogonal to backend. MakeFxTracer (the default) is
+# the non-strict trace everything above describes (the invariants, the contract).
+# DynamoTracer analyzes the Python instead of specializing to one traced path: it
+# records every frame Dynamo compiles while the caller's calls run -- the entry, the
+# graph-break continuations, the recompiled variants -- with one guard tree per
+# variant, and the artifact dispatches among them at call time. Its artifact is
+# standalone (it installs nothing) and is locked to the producing Python version and
+# torch build, since it inlines serialized bytecode and pickled guard state.
+# Invariants 1, 2, 3 and 6 above are the make_fx contract; under Dynamo a call outside
+# the captured variants is REFUSED by the guards rather than silently served, and the
+# guards that could not be serialized are listed in the artifact (DROPPED_GUARDS)
+# rather than checked.
 
 from __future__ import annotations
 
@@ -770,6 +777,12 @@ class _DynamoCapture(Capture):
                     self._fresh_cache = None
         if exc[0] is None and error is not None:
             raise error
+
+    def save(self) -> None:
+        raise PrecompileError(
+            "save() is not supported on a DynamoTracer capture yet: its artifact "
+            "is written when the block exits."
+        )
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -2178,7 +2191,6 @@ def _build_multigraph_python_source(
     source form here, so they go into the clearly bannered opaque blobs the
     inlined driver rebuilds from.
     """
-    from torch._dynamo.package import SerializedCode
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
 
     buf = PySourceBuilder()
@@ -2192,7 +2204,6 @@ def _build_multigraph_python_source(
     buf.writeline('TRACER = "dynamo"')
     buf.writeline('SERVING_MODE = "standalone"')
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
-    buf.writeline(f"FN_FIRST_LINENO = {entry.fn_first_lineno!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
     buf.writeline("")
@@ -2202,8 +2213,7 @@ def _build_multigraph_python_source(
     buf.writeline("# serves one specialization; the artifact covers no other.")
     buf.writeline("FRAMES = [")
     for frame in frames:
-        name = SerializedCode.to_code_object(frame["code"]).co_name
-        buf.writeline(f"    ({name!r}, {len(frame['variants'])}),")
+        buf.writeline(f"    ({frame['code'].co_name!r}, {len(frame['variants'])}),")
     buf.writeline("]")
     buf.writeline("")
     buf.writeline(
@@ -2983,8 +2993,9 @@ def _runnable_from_pair(
     # are the inductor save_cache_artifacts bundle, used below to prime the kernel
     # caches. The cache is acceleration only, so an unreadable envelope or a FORMAT /
     # VERSION mismatch degrades to JIT'ing from python_code rather than crashing. A
-    # BACKEND or CODE_HASH mismatch is different -- it signals a wrong (python_code,
-    # cache) pairing -- so it hard-fails rather than running under foreign metadata.
+    # BACKEND, TRACER or CODE_HASH mismatch is different -- it signals a wrong
+    # (python_code, cache) pairing -- so it hard-fails rather than running under
+    # foreign metadata.
     artifact = None
     try:
         blob = torch.load(io.BytesIO(cache), weights_only=True)
