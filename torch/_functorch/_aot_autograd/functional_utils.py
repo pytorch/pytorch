@@ -8,8 +8,10 @@ This file contains utilities related to functionalization in AOTAutograd:
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, TypeGuard
+from typing import Any, cast, TypeGuard
 
 import torch
 from torch import Tensor
@@ -28,6 +30,7 @@ from torch.utils._python_dispatch import (
 
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
+log = logging.getLogger(__name__)
 
 
 def to_fun(t: object) -> Any:
@@ -312,6 +315,107 @@ def has_metadata_mutation(
         return has_metadata_mutation_
 
 
+def _patch_requires_grad(
+    aliased_base_tensor: Tensor, out: Tensor, target_requires_grad: bool
+) -> Tensor:
+    if aliased_base_tensor.requires_grad and not target_requires_grad:
+        out = out.detach()
+    elif not aliased_base_tensor.requires_grad and target_requires_grad:
+        out.requires_grad_(True)
+    return out
+
+
+def _patch_alias_metadata(
+    aliased_base_tensor: Tensor,
+    out: Tensor,
+    target_meta_tensor: Tensor,
+    target_requires_grad: bool,
+    target_is_conj: bool,
+    target_is_neg: bool,
+    target_is_multi_output_view: bool = False,
+    target_multi_output_view_was_invalidated: bool = False,
+) -> Tensor:
+    out = _patch_requires_grad(aliased_base_tensor, out, target_requires_grad)
+    if out.dtype != target_meta_tensor.dtype:
+        out = out.view(target_meta_tensor.dtype)
+    if out.is_conj() != target_is_conj:
+        out = out.conj()
+    if out.is_neg() != target_is_neg:
+        out = torch._neg_view(out)
+    if out._is_view():
+        creation_meta = torch._C._autograd._get_creation_meta(out)
+        if (
+            target_is_multi_output_view
+            and creation_meta == torch._C._autograd.CreationMeta.DEFAULT
+        ):
+            torch._C._autograd._set_creation_meta(
+                out, torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE
+            )
+    if target_multi_output_view_was_invalidated:
+        if not out._is_view() or out.is_inference():
+            raise AssertionError("expected a differentiable multi-output view")
+        torch._C._autograd._unsafe_mark_view_attr_version_stale(out)
+    return out
+
+
+def _reshape_base_for_view_replay(
+    aliased_base_tensor: Tensor, target_meta_tensor: Tensor
+) -> Tensor | None:
+    if target_meta_tensor._base is None:
+        return None
+    target_base = target_meta_tensor._base
+    if aliased_base_tensor is not target_base and (
+        aliased_base_tensor.size() != target_base.size()
+        or aliased_base_tensor.stride() != target_base.stride()
+        or aliased_base_tensor.storage_offset() != target_base.storage_offset()
+    ):
+        return aliased_base_tensor.as_strided(
+            target_base.size(), target_base.stride(), target_base.storage_offset()
+        )
+    return aliased_base_tensor
+
+
+def _apply_view_meta_sequence_with_grad_modes(
+    base: Tensor,
+    sequence: list[_functionalization.ViewMeta],
+    grad_enabled: Sequence[bool | None],
+) -> Tensor:
+    if grad_enabled and len(grad_enabled) != len(sequence):
+        raise AssertionError("ViewMeta and grad-mode sequence lengths must match")
+    if not grad_enabled:
+        return _functionalization.apply_view_meta_sequence(base, sequence)
+
+    out = base
+    for view_meta, mode in zip(sequence, grad_enabled, strict=True):
+        if (
+            mode is None
+            or mode == torch.is_grad_enabled()
+            or torch.is_inference_mode_enabled()
+        ):
+            out = _functionalization.apply_view_meta_sequence(out, [view_meta])
+        else:
+            with torch.set_grad_enabled(mode):
+                out = _functionalization.apply_view_meta_sequence(out, [view_meta])
+    return out
+
+
+def _apply_multi_output_view_meta_with_grad_mode(
+    base: Tensor, view_meta: Any, grad_enabled: bool | None
+) -> list[Tensor]:
+    if (
+        grad_enabled is None
+        or grad_enabled == torch.is_grad_enabled()
+        or torch.is_inference_mode_enabled()
+    ):
+        return _functionalization.apply_multi_output_view_meta_sequence(
+            base, [view_meta]
+        )
+    with torch.set_grad_enabled(grad_enabled):
+        return _functionalization.apply_multi_output_view_meta_sequence(
+            base, [view_meta]
+        )
+
+
 def gen_alias_from_base(
     aliased_base_tensor: Tensor,
     target_meta_tensor: Tensor,
@@ -319,58 +423,176 @@ def gen_alias_from_base(
     target_view_meta_sequence: ViewMetaSequence | None = None,
     *,
     replay_views: bool,
+    target_is_conj: bool | None = None,
+    target_is_neg: bool | None = None,
+    target_is_multi_output_view: bool = False,
+    target_multi_output_view_was_invalidated: bool = False,
+    target_view_meta_grad_enabled: Sequence[bool | None] = (),
+    replay_from_detached_base: bool = False,
+    replay_detached_view_meta_sequence: bool = False,
+    target_is_view: bool = True,
 ) -> Tensor:
-    # Patch the correct requires_grad field of the output tensor, depending on whether:
-    # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
-    # and (ii) the concrete returned output does require grad or not.
-    def patch_requires_grad(out: Tensor) -> Tensor:
-        if aliased_base_tensor.requires_grad and not target_requires_grad:
-            out = out.detach()
-        elif not aliased_base_tensor.requires_grad and target_requires_grad:
-            out.requires_grad_(True)
+    if target_is_conj is None:
+        target_is_conj = target_meta_tensor.is_conj()
+    if target_is_neg is None:
+        target_is_neg = target_meta_tensor.is_neg()
+    if replay_from_detached_base:
+        if target_view_meta_sequence is not None:
+            detach_indices = [
+                i
+                for i, view_meta in enumerate(target_view_meta_sequence.sequence)
+                if type(view_meta).__name__ in ("detach_ViewMeta", "detach__ViewMeta")
+            ]
+            if detach_indices and not any(
+                view_meta.has_symbolic_inputs
+                for view_meta in target_view_meta_sequence.sequence
+            ):
+                # Preserve the detach boundary itself, not just the final
+                # tensor's geometry. A later view exposes this detached tensor
+                # through ._base, so detaching the original input directly can
+                # make mutations affect a larger region than eager execution.
+                detach_index = detach_indices[-1]
+                prefix = target_view_meta_sequence.sequence[:detach_index]
+                prefix_grad_enabled = target_view_meta_grad_enabled[:detach_index]
+                detached_base = (
+                    _apply_view_meta_sequence_with_grad_modes(
+                        aliased_base_tensor, prefix, prefix_grad_enabled
+                    )
+                    if prefix
+                    else aliased_base_tensor
+                ).detach()
+                detached_base.requires_grad_(target_requires_grad)
+                suffix = target_view_meta_sequence.sequence[detach_index + 1 :]
+                suffix_grad_enabled = target_view_meta_grad_enabled[detach_index + 1 :]
+                out = (
+                    _apply_view_meta_sequence_with_grad_modes(
+                        detached_base, suffix, suffix_grad_enabled
+                    )
+                    if suffix
+                    else detached_base
+                )
+                if not target_is_view and out._is_view():
+                    out = out.detach()
+                    out.requires_grad_(target_requires_grad)
+                if out.shape != target_meta_tensor.shape:
+                    raise AssertionError(
+                        "incorrect out shape after detached ViewMeta replay: "
+                        f"{tuple(out.shape)} (actual) vs "
+                        f"{tuple(target_meta_tensor.shape)} (expected)"
+                    )
+                return _patch_alias_metadata(
+                    detached_base,
+                    out,
+                    target_meta_tensor,
+                    target_requires_grad,
+                    target_is_conj,
+                    target_is_neg,
+                    target_is_multi_output_view,
+                    target_multi_output_view_was_invalidated,
+                )
+        detached_base = aliased_base_tensor.detach()
+        if target_is_view:
+            detached_base.requires_grad_(target_requires_grad)
+            return gen_alias_from_base(
+                detached_base,
+                target_meta_tensor,
+                target_requires_grad,
+                (
+                    target_view_meta_sequence
+                    if replay_detached_view_meta_sequence
+                    else None
+                ),
+                replay_views=(
+                    replay_views if replay_detached_view_meta_sequence else False
+                ),
+                target_is_conj=target_is_conj,
+                target_is_neg=target_is_neg,
+                target_is_multi_output_view=replay_detached_view_meta_sequence,
+                target_view_meta_grad_enabled=(target_view_meta_grad_enabled),
+            )
+        out = gen_alias_from_base(
+            detached_base,
+            target_meta_tensor,
+            False,
+            None,
+            replay_views=False,
+            target_is_conj=target_is_conj,
+            target_is_neg=target_is_neg,
+            target_view_meta_grad_enabled=(),
+        ).detach()
+        out.requires_grad_(target_requires_grad)
         return out
-
     # If provided, use the target functional tensor for replaying the views.
     #
     # In summary, we use the fact that FunctionalTensorWrapper saves the view
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
-    if (
-        replay_views
-        and target_view_meta_sequence is not None
-        and not any(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
+    replayable_view_meta_sequence = target_view_meta_sequence is not None and not any(
+        vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence
+    )
+    requires_segmented_grad_replay = len(set(target_view_meta_grad_enabled)) > 1
+    if replayable_view_meta_sequence and (
+        replay_views or requires_segmented_grad_replay
     ):
-        out = _functionalization.apply_view_meta_sequence(
-            aliased_base_tensor, target_view_meta_sequence.sequence
+        out = _apply_view_meta_sequence_with_grad_modes(
+            aliased_base_tensor,
+            target_view_meta_sequence.sequence,
+            target_view_meta_grad_enabled,
         )
         # If re-applying the ViewMeta sequence succeeded, there should be no more
         # problems going forward. We just check we got to the target shape and
-        # patch requires_grad flag.
+        # patch the output metadata that compilation may not preserve.
         if out.shape != target_meta_tensor.shape:
             raise AssertionError(
                 "incorrect out shape after application of ViewMeta sequence: "
                 f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
             )
-        return patch_requires_grad(out)
+        return _patch_alias_metadata(
+            aliased_base_tensor,
+            out,
+            target_meta_tensor,
+            target_requires_grad,
+            target_is_conj,
+            target_is_neg,
+            target_is_multi_output_view,
+            target_multi_output_view_was_invalidated,
+        )
+
+    # If ViewMeta replay is unavailable, run the fused ViewFunc/as_strided
+    # fallback under the final view operation's captured grad mode.
+    target_grad_enabled = (
+        target_view_meta_grad_enabled[-1] if target_view_meta_grad_enabled else None
+    )
+    if (
+        target_grad_enabled is not None
+        and torch.is_grad_enabled() != target_grad_enabled
+        and not torch.is_inference_mode_enabled()
+    ):
+        with torch.set_grad_enabled(target_grad_enabled):
+            return gen_alias_from_base(
+                aliased_base_tensor,
+                target_meta_tensor,
+                target_requires_grad,
+                target_view_meta_sequence,
+                replay_views=replay_views,
+                target_is_conj=target_is_conj,
+                target_is_neg=target_is_neg,
+                target_is_multi_output_view=target_is_multi_output_view,
+                target_multi_output_view_was_invalidated=(
+                    target_multi_output_view_was_invalidated
+                ),
+                target_view_meta_grad_enabled=(),
+                replay_from_detached_base=replay_from_detached_base,
+                replay_detached_view_meta_sequence=(replay_detached_view_meta_sequence),
+                target_is_view=target_is_view,
+            )
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
-    if target_meta_tensor._base is not None:
-        # The base that we want to replay our view off of might have a different shape than the view's original base.
-        b = target_meta_tensor._base
-        abt = aliased_base_tensor
-        # Don't unnecessarily call as_strided if nothing changed; as_strided's
-        # backward is poorly implemented and slow
-        if abt is not b and (
-            abt.size() != b.size()
-            or abt.stride() != b.stride()
-            or abt.storage_offset() != b.storage_offset()
-        ):
-            reshaped_base_tensor = aliased_base_tensor.as_strided(
-                b.size(), b.stride(), b.storage_offset()
-            )
-        else:
-            reshaped_base_tensor = aliased_base_tensor
+    reshaped_base_tensor = _reshape_base_for_view_replay(
+        aliased_base_tensor, target_meta_tensor
+    )
+    if reshaped_base_tensor is not None:
         out = target_meta_tensor._view_func(reshaped_base_tensor)  # type: ignore[attr-defined]
         # This shape mismatch can happen due to a bug in inplace/view handling in autograd.
         # Try putting a breakpoint here and running
@@ -379,7 +601,16 @@ def gen_alias_from_base(
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            return patch_requires_grad(out)
+            return _patch_alias_metadata(
+                aliased_base_tensor,
+                out,
+                target_meta_tensor,
+                target_requires_grad,
+                target_is_conj,
+                target_is_neg,
+                target_is_multi_output_view,
+                target_multi_output_view_was_invalidated,
+            )
 
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
@@ -410,13 +641,335 @@ def gen_alias_from_base(
         )
     else:
         aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
-    # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
-    aliased_out = patch_requires_grad(aliased_out)
-    # For outputs aliasing inputs, we need to check if the dtype has changed.
-    # as_strided() is the "most generic" view, but it does not cover cross-dtype views
-    if aliased_out.dtype != target_meta_tensor.dtype:
-        aliased_out = aliased_out.view(target_meta_tensor.dtype)
-    return aliased_out
+    # For outputs aliasing inputs, restore metadata that compilation may not preserve.
+    return _patch_alias_metadata(
+        aliased_base_tensor,
+        aliased_out,
+        target_meta_tensor,
+        target_requires_grad,
+        target_is_conj,
+        target_is_neg,
+        target_is_multi_output_view,
+        target_multi_output_view_was_invalidated,
+    )
+
+
+def gen_aliases_from_multi_output_view(
+    aliased_base_tensor: Tensor,
+    target_meta_tensors: Sequence[Tensor],
+    target_requires_grads: Sequence[bool],
+    target_is_conjs: Sequence[bool],
+    target_is_negs: Sequence[bool],
+    target_view_meta_grad_enabled: Sequence[Sequence[bool | None]],
+    target_views_were_invalidated: Sequence[bool],
+    target_view_meta_sequences: Sequence[ViewMetaSequence | None],
+    target_output_indices: Sequence[int],
+    target_view_meta_indices: Sequence[int],
+    *,
+    replay_views: bool,
+) -> list[Tensor]:
+    """Replay one multi-output view and select the requested sibling aliases.
+
+    The target sequences are positionally aligned. Output indices refer to the
+    full result of the shared operation, and ViewMeta indices locate that
+    operation within each output's view chain. The shared operation is replayed
+    once, then each output's own suffix views are applied. If batched replay is
+    unavailable, each target is regenerated independently.
+    """
+    expected_len = len(target_meta_tensors)
+    if not (
+        len(target_requires_grads)
+        == len(target_is_conjs)
+        == len(target_is_negs)
+        == len(target_view_meta_grad_enabled)
+        == len(target_views_were_invalidated)
+        == len(target_view_meta_sequences)
+        == len(target_output_indices)
+        == len(target_view_meta_indices)
+        == expected_len
+    ):
+        raise AssertionError("multi-output view metadata lengths must match")
+    if expected_len == 0:
+        return []
+
+    distinct_grad_modes = {
+        mode for modes in target_view_meta_grad_enabled for mode in modes
+    }
+    grad_modes_match = len(distinct_grad_modes) <= 1
+    shared_grad_enabled = next(iter(distinct_grad_modes), None)
+    if (
+        grad_modes_match
+        and shared_grad_enabled is not None
+        and torch.is_grad_enabled() != shared_grad_enabled
+        and not torch.is_inference_mode_enabled()
+    ):
+        with torch.set_grad_enabled(shared_grad_enabled):
+            return gen_aliases_from_multi_output_view(
+                aliased_base_tensor,
+                target_meta_tensors,
+                target_requires_grads,
+                target_is_conjs,
+                target_is_negs,
+                target_view_meta_grad_enabled,
+                target_views_were_invalidated,
+                target_view_meta_sequences,
+                target_output_indices,
+                target_view_meta_indices,
+                replay_views=replay_views,
+            )
+
+    def select_replayed_outputs(
+        replayed_outs: Sequence[Tensor], replay_source: str
+    ) -> list[Tensor] | None:
+        if (
+            not replayed_outs
+            or min(target_output_indices) < 0
+            or max(target_output_indices) >= len(replayed_outs)
+        ):
+            log.debug(
+                "Batched multi-output view replay via %s returned %s outputs "
+                "for requested indices %s",
+                replay_source,
+                len(replayed_outs),
+                tuple(target_output_indices),
+            )
+            return None
+        return [replayed_outs[i] for i in target_output_indices]
+
+    def finish_replayed_outputs(
+        replayed_outs: Sequence[Tensor], replay_source: str
+    ) -> list[Tensor] | None:
+        if not all(
+            out.shape == target.shape
+            for out, target in zip(replayed_outs, target_meta_tensors, strict=True)
+        ):
+            log.debug(
+                "Batched multi-output view replay via %s produced mismatched "
+                "output metadata",
+                replay_source,
+            )
+            return None
+        return [
+            _patch_alias_metadata(
+                aliased_base_tensor,
+                out,
+                target,
+                requires_grad,
+                is_conj,
+                is_neg,
+                target_multi_output_view_was_invalidated=was_invalidated,
+            )
+            for (
+                out,
+                target,
+                requires_grad,
+                is_conj,
+                is_neg,
+                was_invalidated,
+            ) in zip(
+                replayed_outs,
+                target_meta_tensors,
+                target_requires_grads,
+                target_is_conjs,
+                target_is_negs,
+                target_views_were_invalidated,
+                strict=True,
+            )
+        ]
+
+    def replay_with_view_funcs() -> list[Tensor] | None:
+        for replay_source in target_meta_tensors:
+            reshaped_base_tensor = _reshape_base_for_view_replay(
+                aliased_base_tensor, replay_source
+            )
+            if reshaped_base_tensor is None:
+                continue
+            replayed_outs = replay_source._view_func_multi_output(  # type: ignore[attr-defined]
+                reshaped_base_tensor
+            )
+            selected_outs = select_replayed_outputs(replayed_outs, "ViewFunc")
+            if selected_outs is None:
+                continue
+            suffix_replayed_outs = [
+                target._view_func_apply_after_multi_output(out)  # type: ignore[attr-defined]
+                for target, out in zip(target_meta_tensors, selected_outs, strict=True)
+            ]
+            if not all(isinstance(out, Tensor) for out in suffix_replayed_outs):
+                log.debug(
+                    "Batched multi-output ViewFunc replay could not apply an "
+                    "output suffix"
+                )
+                return None
+            finished_outs = finish_replayed_outputs(
+                cast(list[Tensor], suffix_replayed_outs), "ViewFunc"
+            )
+            if finished_outs is not None:
+                return finished_outs
+        log.debug(
+            "Batched multi-output ViewFunc replay is unavailable for all group members"
+        )
+        return None
+
+    def replay_with_view_metas() -> list[Tensor] | None:
+        if any(sequence is None for sequence in target_view_meta_sequences):
+            log.debug(
+                "Batched multi-output ViewMeta replay is unavailable because "
+                "a target has no ViewMeta sequence"
+            )
+            return None
+        view_meta_sequences = cast(
+            Sequence[ViewMetaSequence], target_view_meta_sequences
+        )
+        if any(
+            index < 0 or index >= len(sequence.sequence)
+            for sequence, index in zip(
+                view_meta_sequences, target_view_meta_indices, strict=True
+            )
+        ):
+            log.debug("Batched multi-output ViewMeta replay has an invalid index")
+            return None
+        if any(
+            not sequence.sequence[index].is_multi_output
+            or int(sequence.sequence[index].out_index) != output_index
+            for sequence, index, output_index in zip(
+                view_meta_sequences,
+                target_view_meta_indices,
+                target_output_indices,
+                strict=True,
+            )
+        ):
+            log.debug(
+                "Batched multi-output ViewMeta replay metadata does not match "
+                "the requested output indices"
+            )
+            return None
+        if any(
+            vm.has_symbolic_inputs
+            for sequence in view_meta_sequences
+            for vm in sequence.sequence
+        ):
+            log.debug(
+                "Batched multi-output ViewMeta replay is unavailable for "
+                "symbolic view inputs"
+            )
+            return None
+
+        if any(
+            modes and len(modes) != len(sequence.sequence)
+            for sequence, modes in zip(
+                view_meta_sequences, target_view_meta_grad_enabled, strict=True
+            )
+        ):
+            raise AssertionError("ViewMeta and grad-mode sequence lengths must match")
+
+        first_view_meta_sequence = view_meta_sequences[0]
+        first_view_meta_index = target_view_meta_indices[0]
+        first_grad_enabled = target_view_meta_grad_enabled[0]
+        shared_grad_enabled = first_grad_enabled[: first_view_meta_index + 1]
+        if any(
+            modes[: index + 1] != shared_grad_enabled
+            for modes, index in zip(
+                target_view_meta_grad_enabled,
+                target_view_meta_indices,
+                strict=True,
+            )
+        ):
+            log.debug("Batched multi-output views have different prefix grad modes")
+            return None
+        prefix = first_view_meta_sequence.sequence[:first_view_meta_index]
+        prefix_out = (
+            _apply_view_meta_sequence_with_grad_modes(
+                aliased_base_tensor,
+                prefix,
+                first_grad_enabled[:first_view_meta_index],
+            )
+            if prefix
+            else aliased_base_tensor
+        )
+        multi_output_grad_enabled = (
+            first_grad_enabled[first_view_meta_index] if first_grad_enabled else None
+        )
+        replayed_outs = _apply_multi_output_view_meta_with_grad_mode(
+            prefix_out,
+            first_view_meta_sequence.sequence[first_view_meta_index],
+            multi_output_grad_enabled,
+        )
+        selected_outs = select_replayed_outputs(replayed_outs, "ViewMeta")
+        if selected_outs is None:
+            return None
+        suffix_replayed_outs: list[Tensor] = []
+        for out, sequence, index in zip(
+            selected_outs,
+            view_meta_sequences,
+            target_view_meta_indices,
+            strict=True,
+        ):
+            suffix = sequence.sequence[index + 1 :]
+            suffix_grad_enabled = target_view_meta_grad_enabled[
+                len(suffix_replayed_outs)
+            ][index + 1 :]
+            suffix_replayed_outs.append(
+                _apply_view_meta_sequence_with_grad_modes(
+                    out, suffix, suffix_grad_enabled
+                )
+                if suffix
+                else out
+            )
+        return finish_replayed_outputs(suffix_replayed_outs, "ViewMeta")
+
+    # Match gen_alias_from_base's preference and preserve the hard
+    # replay_views gate used by backends that cannot execute ViewMeta recipes.
+    if replay_views:
+        replay_attempts = (
+            (replay_with_view_metas, replay_with_view_funcs)
+            if grad_modes_match
+            else (replay_with_view_metas,)
+        )
+    else:
+        replay_attempts = (
+            (replay_with_view_funcs,) if grad_modes_match else (replay_with_view_metas,)
+        )
+    for replay in replay_attempts:
+        replayed = replay()
+        if replayed is not None:
+            return replayed
+
+    log.debug(
+        "Falling back to per-output multi-output view replay; this may repeat "
+        "the shared view operation"
+    )
+    return [
+        gen_alias_from_base(
+            aliased_base_tensor,
+            target_meta_tensor,
+            target_requires_grad,
+            target_view_meta_sequence,
+            replay_views=replay_views,
+            target_is_conj=target_is_conj,
+            target_is_neg=target_is_neg,
+            target_is_multi_output_view=True,
+            target_multi_output_view_was_invalidated=was_invalidated,
+            target_view_meta_grad_enabled=grad_enabled,
+        )
+        for (
+            target_meta_tensor,
+            target_requires_grad,
+            target_is_conj,
+            target_is_neg,
+            grad_enabled,
+            was_invalidated,
+            target_view_meta_sequence,
+        ) in zip(
+            target_meta_tensors,
+            target_requires_grads,
+            target_is_conjs,
+            target_is_negs,
+            target_view_meta_grad_enabled,
+            target_views_were_invalidated,
+            target_view_meta_sequences,
+            strict=True,
+        )
+    ]
 
 
 def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:

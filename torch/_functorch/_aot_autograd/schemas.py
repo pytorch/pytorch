@@ -116,6 +116,37 @@ class OutputAliasInfo:
     # under no_grad() that inherit requires_grad from their base without having a
     # grad_fn. Use when constructing tangent lists for torch.autograd.grad().
     requires_grad_for_backward: bool
+    # Lazy conjugate/negative metadata can be erased from compiled placeholder
+    # outputs, so preserve the trace-time values for alias reconstruction.
+    is_conj: bool
+    is_neg: bool
+    is_view: bool
+    # Whether this output is, or descends from, one result of a multi-output
+    # view. Runtime fallback reconstruction must preserve the corresponding
+    # autograd CreationMeta even when no replay group can be recovered (for
+    # example, inference-path compilation has no grad_fn to identify a shared
+    # multi-output node).
+    is_multi_output_view: bool
+    # Grad-mode overrides aligned with the ViewMeta sequence. None means that
+    # the corresponding view inherited the caller's ambient grad mode.
+    view_replay_grad_enabled: tuple[bool | None, ...]
+    # Input that owns the multi-output view lineage. This remains populated for
+    # non-alias outputs when an earlier operation in the lineage must raise.
+    multi_output_view_base_idx: int | None
+    # Reconstruct this input alias from a detached runtime base because a
+    # detach()/requires_grad_() boundary severed its edge to the graph input.
+    replay_from_detached_base: bool
+    # The multi-output operation occurred after the detach boundary, so the
+    # reconstructed output must preserve multi-output CreationMeta. Its
+    # ViewMeta recipe is replayed when safe; explicit-detach recipes fall back
+    # to the final geometry instead.
+    replay_detached_view_meta_sequence: bool
+    # Used transiently by metadata probes to report that a later mutation made
+    # this multi-output view stale.
+    multi_output_view_was_invalidated: bool
+    # Input indices whose later mutations invalidate this view when they share
+    # its base input's exact autograd version counter at runtime.
+    multi_output_view_invalidating_input_indices: tuple[int, ...] = ()
     # Sequence of ViewMeta objects.
     #
     # Provides us the means to re-run view functions on other tensors.
@@ -124,6 +155,12 @@ class OutputAliasInfo:
     # we compare the ViewMeta elements appropriately, i.e. their type and
     # the elements returned by the `as_tuple()` call.
     view_meta_sequence: ViewMetaSequence | None = None
+    # Differentiable input aliases produced by the same multi-output view op
+    # share a group id. The output index identifies the corresponding sibling
+    # returned by that op. Runtime alias regeneration finds the operation in
+    # each ViewMeta chain, replays it once, then applies each output's suffix.
+    multi_output_view_group: int | None = None
+    multi_output_view_index: int | None = None
 
 
 class MutationType(Enum):
@@ -498,6 +535,14 @@ class ViewAndMutationMeta:
     # length = # backward graph inputs
     subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
 
+    # Conditions discovered while tracing descendant views of input-backed
+    # multi-output views. Each pair is (base input index, input indices mutated
+    # before a grad-enabled descendant was constructed). If any pair shares an
+    # exact version counter at runtime, eager execution would have raised.
+    multi_output_view_creation_error_conditions: tuple[
+        tuple[int, tuple[int, ...]], ...
+    ] = ()
+
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
     # At runtime, we don't keep the traced_tangents around since they're not serializable.
@@ -633,6 +678,23 @@ class ViewAndMutationMeta:
             for i, m in enumerate(self.output_info)
             if m.output_type is OutputType.unsafe_view_alias
         ]
+        multi_output_view_groups: dict[int, list[int]] = {}
+        for i, info in enumerate(self.output_info):
+            if (info.multi_output_view_group is None) != (
+                info.multi_output_view_index is None
+            ):
+                raise AssertionError(
+                    "multi-output view group and output index must be set together"
+                )
+            if info.multi_output_view_group is None:
+                continue
+            if info.output_type is not OutputType.alias_of_input:
+                raise AssertionError(
+                    "multi-output view groups are only valid for input aliases"
+                )
+            multi_output_view_groups.setdefault(
+                info.multi_output_view_group, []
+            ).append(i)
 
         # This is pre-computed in post_init for perf.
         # It contains the index of every element
@@ -645,6 +707,9 @@ class ViewAndMutationMeta:
         # of output_info that corresponds to an alias (either of an input or intermediate)
         self.aliased_out_indices = aliased_out_indices
         self.unsafe_view_out_indices = unsafe_view_out_indices
+        self.multi_output_view_groups = {
+            group: tuple(indices) for group, indices in multi_output_view_groups.items()
+        }
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
             [

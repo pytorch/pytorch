@@ -366,6 +366,10 @@ struct C10_API VariableVersion {
     return version_counter_;
   }
 
+  bool is_same_version_counter(const VariableVersion& other) const noexcept {
+    return version_counter_ == other.version_counter_;
+  }
+
   // Note [Inplace update inference tensor]
   // 1. Inplace update to inference tensor is forbidden in normal mode.
   //   For example:
