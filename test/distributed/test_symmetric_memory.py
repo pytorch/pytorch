@@ -2592,7 +2592,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     @skipIfXpu(
         msg="SymmetricMemory MemPool has no XPU backend: https://github.com/intel/torch-xpu-ops/issues/5404"
     )
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
