@@ -1,7 +1,5 @@
-#include <c10/metal/atomic.h>
 #include <metal_stdlib>
 using namespace metal;
-using namespace c10::metal;
 
 enum BIN_SELECTION_ALGORITHM {
   LINEAR_INTERPOLATION,
@@ -142,10 +140,12 @@ inline long histc_bin(
   return metal::clamp(pos, 0L, num_bins - 1);
 }
 
+// The host caps num_elements at UINT32_MAX, so no bin count can overflow uint.
+// counts is written here and converted to the output dtype by the caller.
 template <typename T, bool dense>
 kernel void histc_atomic_global(
     constant T* input [[buffer(0)]],
-    device AtomicType_t<long>* counts [[buffer(1)]],
+    device atomic_uint* counts [[buffer(1)]],
     constant uint* offsets [[buffer(2)]],
     constant uint& num_elements [[buffer(3)]],
     constant long& num_bins [[buffer(4)]],
@@ -157,14 +157,14 @@ kernel void histc_atomic_global(
   T element = input[dense ? tid : offsets[tid]];
   long bin = histc_bin(element, num_bins, bin_edges[0], bin_edges[num_bins]);
   if (bin >= 0) {
-    AtomicType<long>::atomic_add(counts, bin, 1);
+    atomic_fetch_add_explicit(&counts[bin], 1, memory_order_relaxed);
   }
 }
 
 template <typename T, bool dense>
 kernel void histc_atomic_threadgroup(
     constant T* input [[buffer(0)]],
-    device AtomicType_t<long>* counts [[buffer(1)]],
+    device atomic_uint* counts [[buffer(1)]],
     constant uint* offsets [[buffer(2)]],
     constant uint& num_elements [[buffer(3)]],
     constant long& num_bins [[buffer(4)]],
@@ -193,7 +193,7 @@ kernel void histc_atomic_threadgroup(
   for (uint bin = local_tid; bin < num_bins; bin += threads_per_threadgroup) {
     uint value = atomic_load_explicit(&local_counts[bin], memory_order_relaxed);
     if (value != 0) {
-      AtomicType<long>::atomic_add(counts, bin, static_cast<long>(value));
+      atomic_fetch_add_explicit(&counts[bin], value, memory_order_relaxed);
     }
   }
 }
@@ -202,7 +202,7 @@ kernel void histc_atomic_threadgroup(
   template [[host_name("histc_atomic_global_dense_" #DTYPE)]] kernel void      \
   histc_atomic_global<DTYPE, true>(                                            \
       constant DTYPE*,                                                         \
-      device AtomicType_t<long>*,                                              \
+      device atomic_uint*,                                                     \
       constant uint*,                                                          \
       constant uint&,                                                          \
       constant long&,                                                          \
@@ -211,7 +211,7 @@ kernel void histc_atomic_threadgroup(
   template [[host_name("histc_atomic_global_strided_" #DTYPE)]] kernel void    \
   histc_atomic_global<DTYPE, false>(                                           \
       constant DTYPE*,                                                         \
-      device AtomicType_t<long>*,                                              \
+      device atomic_uint*,                                                     \
       constant uint*,                                                          \
       constant uint&,                                                          \
       constant long&,                                                          \
@@ -220,7 +220,7 @@ kernel void histc_atomic_threadgroup(
   template [[host_name("histc_atomic_threadgroup_dense_" #DTYPE)]] kernel void \
   histc_atomic_threadgroup<DTYPE, true>(                                       \
       constant DTYPE*,                                                         \
-      device AtomicType_t<long>*,                                              \
+      device atomic_uint*,                                                     \
       constant uint*,                                                          \
       constant uint&,                                                          \
       constant long&,                                                          \
@@ -234,7 +234,7 @@ kernel void histc_atomic_threadgroup(
       [[host_name("histc_atomic_threadgroup_strided_" #DTYPE)]] kernel void    \
       histc_atomic_threadgroup<DTYPE, false>(                                  \
           constant DTYPE*,                                                     \
-          device AtomicType_t<long>*,                                          \
+          device atomic_uint*,                                                 \
           constant uint*,                                                      \
           constant uint&,                                                      \
           constant long&,                                                      \

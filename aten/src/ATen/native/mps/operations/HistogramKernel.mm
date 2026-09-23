@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ceil_div.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Histogram.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -152,9 +153,10 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 }
 
 static void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_edges, const Tensor& input) {
-  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(input) || isIntegralType(input.scalar_type(), /*includeBool=*/false),
+  const auto input_dtype = input.scalar_type();
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(input) || isIntegralType(input_dtype, /*includeBool=*/false),
                               "\"histc_mps\" not implemented for '",
-                              input.scalar_type(),
+                              input_dtype,
                               "'");
   TORCH_INTERNAL_ASSERT(input.dim() == 2 && input.size(1) == 1);
   TORCH_INTERNAL_ASSERT(bin_edges.size() == 1);
@@ -169,7 +171,7 @@ static void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_
 
   const int64_t num_bins = hist_output.numel();
   const auto num_elements = c10::checked_convert<uint32_t>(input.numel(), "uint32_t");
-  Tensor counts = at::zeros({num_bins}, input.options().dtype(kLong));
+  Tensor counts = at::zeros({num_bins}, input.options().dtype(kUInt32));
   if (num_elements == 0) {
     hist_output.copy_(counts);
     return;
@@ -196,7 +198,7 @@ static void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_
           strides[i] = c10::checked_convert<uint32_t>(input.stride(i), "uint32_t");
         }
         stridedIndicesBuffer = [[device newBufferWithLength:num_elements * sizeof(uint) options:0] autorelease];
-        id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
+        auto stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
         [computeEncoder setComputePipelineState:stridedIndicesPSO];
         mtl_setArgs(computeEncoder, strides, stridedIndicesBuffer, inputShapeData, nDim);
         mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, num_elements);
@@ -210,20 +212,18 @@ static void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_
                                              use_threadgroup ? "threadgroup" : "global",
                                              dense ? "dense" : "strided",
                                              scalarToMetalTypeString(input));
-      id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
+      auto histogramPSO = lib.getPipelineStateForFunc(kernel);
       getMPSProfiler().beginProfileKernel(histogramPSO, "histc", {input, counts}, mpsStream);
       [computeEncoder setComputePipelineState:histogramPSO];
       mtl_setArgs(computeEncoder, input, counts, stridedIndicesBuffer, num_elements, num_bins, bin_edges[0]);
 
       if (use_threadgroup) {
-        const NSUInteger threadgroup_memory_length =
-            (c10::checked_convert<NSUInteger>(num_bins, "NSUInteger") * sizeof(uint) +
-             kMetalThreadgroupMemoryAlignment - 1) &
-            ~(kMetalThreadgroupMemoryAlignment - 1);
+        const NSUInteger threadgroup_memory_length = at::round_up(
+            c10::checked_convert<NSUInteger>(num_bins, "NSUInteger") * sizeof(uint), kMetalThreadgroupMemoryAlignment);
         const NSUInteger threadgroup_size =
             std::min<NSUInteger>(kHistcThreadsPerThreadgroup, [histogramPSO maxTotalThreadsPerThreadgroup]);
         const NSUInteger threadgroups =
-            std::min<NSUInteger>((num_elements + threadgroup_size - 1) / threadgroup_size, kHistcMaxThreadgroups);
+            std::min<NSUInteger>(at::ceil_div(NSUInteger(num_elements), threadgroup_size), kHistcMaxThreadgroups);
         const uint32_t total_threads = threadgroups * threadgroup_size;
         mtl_setArgs<6>(computeEncoder, total_threads);
         [computeEncoder setThreadgroupMemoryLength:threadgroup_memory_length atIndex:0];
