@@ -1588,6 +1588,47 @@ class TestTorchDeviceType(TestCase):
                 input.grad = None
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_deterministic_interpolate_trilinear(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        output_grad = torch.randn(1, 2, 12, 12, 12, device=device)
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=12,
+                    mode='trilinear',
+                    align_corners=False)
+                res.backward(output_grad)
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @onlyCUDA
+    def test_deterministic_interpolate_trilinear_channels_last_3d(self, device):
+        for channels in (8, 3):
+            input = torch.randn(1, channels, 4, 4, 4, device=device).contiguous(
+                memory_format=torch.channels_last_3d).requires_grad_()
+            output_grad = torch.randn(1, channels, 12, 12, 12, device=device)
+            grad = None
+            with DeterministicGuard(True):
+                for _ in range(5):
+                    res = torch.nn.functional.interpolate(
+                        input,
+                        size=12,
+                        mode='trilinear',
+                        align_corners=False)
+                    res.backward(output_grad)
+                    if grad is None:
+                        grad = input.grad
+                    else:
+                        self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                    input.grad = None
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1620,21 +1661,6 @@ class TestTorchDeviceType(TestCase):
                 else:
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
-
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_nondeterministic_alert_interpolate_trilinear(self, device):
-        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
-        res = torch.nn.functional.interpolate(
-            input,
-            size=12,
-            mode='trilinear',
-            align_corners=False)
-        grad = torch.ones_like(res)
-
-        self.check_nondeterministic_alert(
-            lambda: res.backward(grad),
-            'upsample_trilinear3d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
