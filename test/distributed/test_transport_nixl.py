@@ -28,7 +28,7 @@ class _Descriptors:
     entries: list[tuple[int, int, int]]
 
 
-@dataclass
+@dataclass(eq=False)
 class _RegistrationDescriptors:
     tensor: torch.Tensor
     memory_type: str
@@ -186,6 +186,105 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         source = first.register_memory(tensor)
         target = second.register_memory(torch.zeros_like(tensor))
         return first, second, source, target.to_remote_buffer()
+
+    def test_unregister_invalidates_aliases_and_views(self):
+        tensor = torch.ones(8)
+        first, second, memory, remote = self.registered_pair(tensor)
+        alias = first.register_memory(tensor)
+        view = alias.to_view()
+        agent = first._agent
+        with patch.object(
+            agent, "deregister_memory", wraps=agent.deregister_memory
+        ) as deregister:
+            first.unregister_memory(memory)
+            first.unregister_memory(alias)
+            self.assertEqual(deregister.call_count, 1)
+        self.assertFalse(agent.registrations)
+        self.assertFalse(first._registrations)
+        for handle in (memory, alias):
+            with self.assertRaisesRegex(RuntimeError, "unregistered"):
+                handle.to_view()
+            with self.assertRaisesRegex(RuntimeError, "unregistered"):
+                handle.to_mutable_view()
+            with self.assertRaisesRegex(RuntimeError, "unregistered"):
+                handle.to_remote_buffer()
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            first.write(view, remote)
+        fresh = first.register_memory(tensor)
+        self.assertFalse(fresh.reused_registration())
+        first.unregister_memory(memory)
+        self.assertEqual(first.write(fresh.to_view(), remote), 0)
+        first.unregister_memory(fresh)
+        first.close()
+        self.assertFalse(agent.registrations)
+
+    @parametrize("operation", ["read", "write"])
+    def test_unregister_rejects_pending_dma(self, operation):
+        first, second, memory, remote = self.registered_pair()
+        other = first.register_memory(torch.ones(16))
+        view = memory.to_mutable_view() if operation == "read" else memory.to_view()
+        with patch.object(first._agent, "transfer_state", "PROC"):
+            work = getattr(first, operation)(view, remote, async_op=True)
+            first.unregister_memory(other)
+            with self.assertRaisesRegex(RuntimeError, "pending transfers"):
+                first.unregister_memory(memory)
+            self.assertTrue(memory._registration.active)
+            self.assertEqual(len(first._agent.registrations), 1)
+        work.wait()
+        first.unregister_memory(memory)
+        self.assertFalse(first._agent.registrations)
+
+    def test_unregister_failure_can_be_retried(self):
+        first, second, memory, remote = self.registered_pair()
+        with patch.object(
+            first._agent,
+            "deregister_memory",
+            side_effect=RuntimeError("deregister failed"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "deregister failed"):
+                first.unregister_memory(memory)
+        self.assertTrue(memory._registration.active)
+        self.assertEqual(len(first._registrations), 1)
+        self.assertEqual(first.write(memory.to_view(), remote), 0)
+        first.unregister_memory(memory)
+        self.assertFalse(first._registrations)
+
+    def test_unregister_validates_owner(self):
+        first, second, memory, remote = self.registered_pair()
+        for invalid in (None, remote):
+            with self.assertRaisesRegex(TypeError, "not registered"):
+                first.unregister_memory(invalid)
+        with self.assertRaisesRegex(TypeError, "not registered"):
+            second.unregister_memory(memory)
+        with self.assertRaises(ValueError):
+            first.unregister_memory(memory, timeout=-1)
+        first.close()
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            first.unregister_memory(memory)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            memory.to_view()
+
+    def test_unregister_lock_timeout(self):
+        first, second, memory, remote = self.registered_pair()
+        acquired, release = threading.Event(), threading.Event()
+
+        def hold_lock():
+            with first._operation_lock:
+                acquired.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        try:
+            self.assertTrue(acquired.wait(5))
+            with self.assertRaises(TimeoutError):
+                first.unregister_memory(memory, timeout=0.001)
+            self.assertTrue(memory._registration.active)
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+        first.unregister_memory(memory)
 
     def test_supported(self):
         with patch.object(_nixl, "_load_backend", return_value=self.backend()):

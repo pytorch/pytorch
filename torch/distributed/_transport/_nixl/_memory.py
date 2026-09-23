@@ -32,6 +32,11 @@ class _Registration:
     length: int
     device_id: int
     memory_type: str
+    active: bool = True
+
+    def ensure_active(self) -> None:
+        if not self.active:
+            raise RuntimeError("memory has been unregistered")
 
 
 class NIXLMemoryView:
@@ -61,6 +66,7 @@ class NIXLMemory:
         self._reused = reused
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
+        self._registration.ensure_active()
         offset = 0 if offset is None else operator.index(offset)
         if offset < 0 or offset > self._registration.length:
             raise ValueError("offset is outside the registered memory")
