@@ -24,6 +24,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import gc
 import importlib
 import inspect
 import io
@@ -259,6 +260,14 @@ def _try_is_cow_tensor(value: object) -> bool | object:
     if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
         return _COW_TENSOR_UNSUPPORTED
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
+
+
+def _mapping_proxy_wraps_dict(value: object) -> bool:
+    # A mappingproxy's only GC referent is the mapping it wraps.
+    return (
+        type(value) is types.MappingProxyType
+        and type(gc.get_referents(value)[0]) is dict
+    )
 
 
 def _cow_tensor_matches(value: object, expected: object) -> bool:
@@ -899,6 +908,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
             "___cow_tensor_matches": _cow_tensor_matches,
+            "___mapping_proxy_wraps_dict": _mapping_proxy_wraps_dict,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -3415,6 +3425,20 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_mapping_keys_guard(
             value, code, guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: None,
+        eval_fn=lambda value, metadata: _mapping_proxy_wraps_dict(value),
+    )
+    def MAPPING_PROXY_WRAPS_DICT(self, guard: Guard) -> None:
+        """Guard that a types.MappingProxyType object wraps an exact dict"""
+        code = f"___mapping_proxy_wraps_dict({self.arg_ref(guard)})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            _mapping_proxy_wraps_dict,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     @register_guard_check_spec(

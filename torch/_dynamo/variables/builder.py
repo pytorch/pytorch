@@ -26,6 +26,7 @@ import copy
 import dataclasses
 import enum
 import functools
+import gc
 import importlib.machinery
 import inspect
 import itertools
@@ -1071,7 +1072,8 @@ class VariableBuilder:
 
         # Create a dict_vt to be used in the mapping proxy variable
         dict_vt = ConstDictVariable(items, source=None)
-        result = MappingProxyVariable(dict_vt, source=self.source)
+        mapping_type = type(gc.get_referents(value)[0])
+        result = MappingProxyVariable(dict_vt, mapping_type, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
 
     @classmethod
@@ -5612,6 +5614,7 @@ class SourcelessBuilder:
                 {create(tx, k): create(tx, v) for k, v in value.items()},
                 mutation_type=ValueMutationNew(),
             ),
+            type(gc.get_referents(value)[0]),
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)

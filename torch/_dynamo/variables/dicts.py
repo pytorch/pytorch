@@ -41,6 +41,7 @@ from ..source import (
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    TypeDictSource,
 )
 from ..utils import (
     _item_debug_repr,
@@ -1019,12 +1020,26 @@ class MappingProxyVariable(VariableTracker):
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
 
+    _nonvar_fields = {
+        "mapping_type",
+        *VariableTracker._nonvar_fields,
+    }
+
     # proxies to the original dict_vt
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        dv_dict: ConstDictVariable,
+        mapping_type: type | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
+        # Type of the proxied mapping, which dv_dict may only model as a dict.
+        # None means the type is unknown (e.g. dict view .mapping), so repr/str
+        # graph break.
+        self.mapping_type = mapping_type
 
     def python_type(self) -> type:
         return types.MappingProxyType
@@ -1120,14 +1135,26 @@ class MappingProxyVariable(VariableTracker):
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length_impl(tx)
 
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def _check_mapping_repr(self, tx: "InstructionTranslatorBase") -> None:
         self._check_mutation_guard(tx)
+        if self.mapping_type is not self.dv_dict.python_type():
+            unimplemented(
+                gb_type="mapping proxy repr of unmodeled mapping",
+                context=f"mapping type: {self.mapping_type}, modeled as: {self.dv_dict.python_type()}",
+                explanation="Dynamo does not model the repr/str of the mapping behind this mappingproxy.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if self.source and self.mapping_type is not None:
+            install_guard(self.source.make_guard(GuardBuilder.MAPPING_PROXY_WRAPS_DICT))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mapping_repr(tx)
         return VariableTracker.build(
             tx, f"mappingproxy({tracked_repr(tx, self.dv_dict)})"
         )
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        self._check_mutation_guard(tx)
+        self._check_mapping_repr(tx)
         return generic_str(tx, self.dv_dict)
 
     def tp_richcompare_impl(
@@ -1617,13 +1644,16 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # contents explicitly.
 
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
+        dict_source = vt.source and AttrSource(vt.source, "__dict__")
+        if vt.source and issubclass(vt.python_type(), type):
+            # A class __dict__ is a mappingproxy; guard its items through tp_dict.
+            dict_source = TypeDictSource(vt.source)
 
         return {
             key: VariableTracker.build(
                 tx,
                 value,
-                source=vt.source
-                and DictGetItemSource(AttrSource(vt.source, "__dict__"), key),
+                source=dict_source and DictGetItemSource(dict_source, key),
             )
             for key, value in example_value_dict.items()
         }
