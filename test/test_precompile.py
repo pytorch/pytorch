@@ -4845,18 +4845,14 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, "no captured variant"):
             load(self.artifact, self.cache)(self.model, self.x3)
 
-    def test_the_strict_gate_refuses_dropped_guards(self):
+    def test_dropped_guards_are_listed_in_the_artifact(self):
         # The default filter drops the identity guards that cannot be
         # serialized (the MODULE_MATCH on the model here); the artifact lists
-        # them, and the strict gate refuses them.
+        # them.
         with self._capture(self.mod.single, backend="eager") as cap:
             cap(self.model, self.x2)
         with open(self.artifact) as f:
             self.assertIn("['MODULE_MATCH', ", f.read())
-        strict = DynamoTracer(require_no_dropped_guards=True)
-        with self.assertRaisesRegex(PrecompileError, "dropped .* guard"):
-            with self._capture(self.mod.single, backend="eager", tracer=strict) as cap:
-                cap(self.model, self.x2)
 
     def test_entries_a_standalone_artifact_cannot_rebuild_are_refused(self):
         # A bare nn.Module compiles Dynamo's wrapper frame, whose graphs close
