@@ -7,6 +7,7 @@ import sympy
 import torch
 from torch._subclasses import FakeTensorMode
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._collective_utils import pad_tensor, unpad_tensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._ops.utils import is_tensor_shardable
 from torch.distributed.tensor.placement_types import (
@@ -17,6 +18,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
@@ -29,6 +31,66 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 # Basic functionality test for Placement types.
 class PlacementTypesTestCase(TestCase):
+    def test_zero_pad_and_unpad_eager_identity(self):
+        tensor = torch.randn(2, 8)
+
+        self.assertIs(pad_tensor(tensor, 0, 0), tensor)
+        self.assertIs(unpad_tensor(tensor, 0, 0), tensor)
+
+    def test_zero_pad_and_unpad_are_recorded_by_make_fx(self):
+        def pad_and_unpad(tensor):
+            return unpad_tensor(pad_tensor(tensor, 0, 0), 0, 0)
+
+        graph = make_fx(pad_and_unpad)(torch.randn(2, 8)).graph
+        call_targets = [
+            node.target for node in graph.nodes if node.op == "call_function"
+        ]
+
+        self.assertEqual(
+            call_targets,
+            [
+                torch.ops.aten.constant_pad_nd.default,
+                torch.ops.aten.slice.Tensor,
+            ],
+        )
+
+    def test_zero_pad_and_unpad_match_positive_size_torch_compile_graphs(self):
+        def capture_ops(fn):
+            graphs = []
+
+            def backend(graph_module, example_inputs):
+                graphs.append(graph_module)
+                return graph_module.forward
+
+            torch.compile(fn, backend=backend, fullgraph=True)(torch.randn(2, 8))
+            self.assertEqual(len(graphs), 1)
+            return [
+                (node.op, node.target)
+                for node in graphs[0].graph.nodes
+                if node.op not in ("placeholder", "output")
+            ]
+
+        def zero_pad(tensor):
+            return pad_tensor(tensor, 0, 0)
+
+        def positive_pad(tensor):
+            return pad_tensor(tensor, 0, 1)
+
+        def zero_unpad(tensor):
+            return unpad_tensor(tensor, 0, 0)
+
+        def positive_unpad(tensor):
+            return unpad_tensor(tensor, 0, 1)
+
+        pad_ops = capture_ops(zero_pad)
+        unpad_ops = capture_ops(zero_unpad)
+        self.assertEqual(pad_ops, capture_ops(positive_pad))
+        self.assertEqual(unpad_ops, capture_ops(positive_unpad))
+        self.assertEqual(len(pad_ops), 1)
+        self.assertEqual(pad_ops[0][0], "call_function")
+        self.assertEqual(pad_ops[0][1].__name__, "pad")
+        self.assertEqual(unpad_ops, [("call_method", "narrow")])
+
     def test_type_identification(self):
         shard = Shard(3)
         strided_shard = _StridedShard(dim=3, split_factor=7)
@@ -94,6 +156,7 @@ class PlacementTypesTestCase(TestCase):
             (17, 4),  # uneven split, last chunk smaller
             (15, 4),  # uneven split
             (7, 4),  # fewer elements than chunks would like
+            (5, 4),  # non-last rank is already short; last rank empty
             (3, 4),  # very few elements
             (1, 4),  # single element
             (8, 1),  # single chunk
@@ -158,6 +221,68 @@ class PlacementTypesTestCase(TestCase):
                 index=symint_index,
                 with_padding=True,
             )
+
+    def test_select_split_tensor_symint_matches_split_tensor(self):
+        """The narrow/SymInt path must match _split_tensor, including empty trailing shards."""
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.symbolic_shapes import SymNode
+
+        test_cases = [
+            (16, 4),  # even
+            (17, 4),  # only last shard short
+            (5, 4),  # non-last already short, last empty
+            (1, 4),  # single element, several empty ranks
+            (8, 16),  # more chunks than elements
+        ]
+        for dim in [0, 1]:
+            shard = Shard(dim)
+            for dim_size, num_chunks in test_cases:
+                if dim == 0:
+                    tensor = torch.arange(dim_size * 4).reshape(dim_size, 4)
+                else:
+                    tensor = torch.arange(4 * dim_size).reshape(4, dim_size)
+                shards, _ = shard._split_tensor(
+                    tensor, num_chunks, with_padding=False, contiguous=False
+                )
+                shape_env = ShapeEnv()
+                for rank in range(num_chunks):
+                    symbol = shape_env.create_symbol(
+                        rank, source=ConstantSource(f"rank_{dim}_{dim_size}_{rank}")
+                    )
+                    idx = torch.SymInt(SymNode(symbol, shape_env, int, hint=rank))
+                    self.assertIsInstance(idx, torch.SymInt)
+                    selected = shard._select_split_tensor(
+                        tensor,
+                        num_chunks,
+                        idx,
+                        with_padding=False,
+                        contiguous=False,
+                        clone=False,
+                    )
+                    self.assertEqual(
+                        selected,
+                        shards[rank],
+                        msg=lambda msg: f"{msg}\nMismatch for dim={dim}, dim_size={dim_size}, "
+                        f"num_chunks={num_chunks}, rank={rank}",
+                    )
+
+    def test_select_split_tensor_unbacked_symint_uneven_does_not_raise(self):
+        """Unbacked rank + dim_size=5 / 4 chunks used to set last_split=-1 and crash in narrow."""
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
+        with fake_mode:
+            idx = fake_mode.shape_env.create_unbacked_symint()
+            tensor = torch.empty(5, 4)
+            result = Shard(0)._select_split_tensor(
+                tensor,
+                num_chunks=4,
+                index=idx,
+                with_padding=False,
+                clone=False,
+                contiguous=False,
+            )
+        self.assertEqual(result.ndim, 2)
+        self.assertEqual(result.size(1), 4)
+        self.assertIsInstance(result.size(0), torch.SymInt)
 
     def test_hinted_unbacked_even_shard_skips_padding(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
