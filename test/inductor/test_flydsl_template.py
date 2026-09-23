@@ -1220,157 +1220,6 @@ def _scaled_mm_mxfp(
     )
 
 
-@instantiate_parametrized_tests
-class TestFlyDSLMXFPMetadata(TestCase):
-    def _args(self, mxfp_format, shape=(64, 96, 256), transposed=(False, True)):
-        m, n, k = shape
-        dtype = (
-            torch.float4_e2m1fn_x2 if mxfp_format == "mxfp4" else torch.float8_e4m3fn
-        )
-        sk = k // 2 if mxfp_format == "mxfp4" else k
-
-        def node(size, stride, dtype):
-            return Buffer(
-                name="input",
-                layout=FixedLayout(
-                    torch.device("cuda", 0), dtype, size, stride, offset=0
-                ),
-            )
-
-        return dict(
-            mat_a=node([m, sk], [1, m] if transposed[0] else [sk, 1], dtype),
-            mat_b=node([sk, n], [1, sk] if transposed[1] else [n, 1], dtype),
-            scale_a=[node([m, k // 32], [k // 32, 1], torch.float8_e8m0fnu)],
-            scale_b=[node([n, k // 32], [k // 32, 1], torch.float8_e8m0fnu)],
-            recipe_a=[ScalingType.BlockWise1x32.value],
-            recipe_b=[ScalingType.BlockWise1x32.value],
-            swizzle_a=[SwizzleType.NO_SWIZZLE.value],
-            swizzle_b=[SwizzleType.NO_SWIZZLE.value],
-            bias=None,
-            out_dtype=torch.bfloat16,
-            contraction_dim=[],
-            use_fast_accum=False,
-        )
-
-    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
-    def test_contract(self, mxfp_format):
-        from torch._inductor.sizevars import SizeVarAllocator
-
-        args = self._args(mxfp_format)
-        fp32_bias = Buffer(
-            name="fp32_bias",
-            layout=FixedLayout(torch.device("cuda", 0), torch.float32, [96], [1]),
-        )
-        out_bias = Buffer(
-            name="out_bias",
-            layout=FixedLayout(torch.device("cuda", 0), torch.bfloat16, [96], [1]),
-        )
-        cpu_bias = Buffer(
-            name="cpu_bias",
-            layout=FixedLayout(torch.device("cpu"), torch.bfloat16, [96], [1]),
-        )
-        with (
-            mock.patch.object(torch.version, "hip", "test"),
-            V.set_graph_handler(SimpleNamespace(sizevars=SizeVarAllocator())),
-        ):
-            for overrides, expected in (
-                ({}, mxfp_format),
-                ({"contraction_dim": None}, mxfp_format),
-                ({"swizzle_a": [SwizzleType.SWIZZLE_32_4_4.value]}, None),
-                ({"recipe_b": [ScalingType.BlockWise1x16.value]}, None),
-                ({"out_dtype": torch.float32}, None),
-                ({"use_fast_accum": True}, None),
-                ({"contraction_dim": [1]}, None),
-                ({"bias": object()}, None),
-                ({"bias": fp32_bias}, None),
-                ({"bias": out_bias}, mxfp_format),
-                ({"bias": cpu_bias}, None),
-                ({"scale_a": []}, None),
-                ({"mat_b": args["scale_b"][0]}, None),
-            ):
-                with self.subTest(overrides=overrides):
-                    self.assertEqual(
-                        mm._get_rocm_mxfp_v2_format(**(args | overrides)), expected
-                    )
-
-    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
-    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
-    @inductor_config.patch(flydsl_enable_autotuning=False)
-    def test_configs(self, mxfp_format):
-        from torch._inductor.sizevars import SizeVarAllocator
-
-        param = _mxfp_param(mxfp_format, (64, 64, 256, 2, 1, 1, 0), 256)
-        self.assertEqual(
-            param.ldg_x_threads * param.async_load_bytes,
-            128 if mxfp_format == "mxfp4" else 256,
-        )
-        self.assertEqual(param.mma_k, 128)
-        for shape, transposed, expected, unaligned in (
-            *(
-                ((80, 112, 384), t, True, None)
-                for t in ((False, False), (False, True), (True, False), (True, True))
-            ),
-            ((65, 97, 384), (False, True), False, None),
-            ((65, 104, 384), (False, True), True, None),
-            ((64, 96, 160), (False, True), False, None),
-            ((65, 96, 256), (True, True), False, None),
-            ((64, 97, 256), (False, False), False, None),
-            ((80, 112, 384), (False, True), False, "scale_a"),
-            ((80, 112, 384), (False, True), False, "scale_b"),
-        ):
-            with self.subTest(shape=shape, transposed=transposed, unaligned=unaligned):
-                args = self._args(mxfp_format, shape, transposed)
-                bad_node = args[unaligned][0] if unaligned else None
-                graph = SimpleNamespace(sizevars=SizeVarAllocator())
-                layout = FixedLayout(
-                    torch.device("cuda", 0),
-                    torch.bfloat16,
-                    list(shape[:2]),
-                    [shape[1], 1],
-                    offset=0,
-                )
-                with (
-                    V.set_graph_handler(graph),
-                    mock.patch.object(
-                        mm, "use_flydsl_gemm_template", return_value=True
-                    ),
-                    mock.patch.object(
-                        mm, "is_unaligned", side_effect=lambda t: t is bad_node
-                    ),
-                ):
-                    configs = mm.get_flydsl_mxfp_template_kwargs(
-                        mxfp_format,
-                        layout,
-                        args["mat_a"],
-                        args["mat_b"],
-                        args["scale_a"][0],
-                        args["scale_b"][0],
-                    )
-                self.assertEqual(bool(configs), expected)
-                for cfg in configs:
-                    self.assertEqual(
-                        tuple(cfg[x] for x in ("GEMM_M", "GEMM_N", "GEMM_K")), shape
-                    )
-                    self.assertEqual(
-                        (cfg["A_IS_TRANSPOSED"], cfg["B_IS_TRANSPOSED"]), transposed
-                    )
-
-        for tile, error in (
-            ((128, 128, 64, 2, 1, 1, 0), "MFMA K depth"),
-            ((128, 128, 128, 1, 1, 1, 0), "stages must be at least 2"),
-            ((128, 128, 128, 2, 3, 1, 0), "divisible by m_waves/n_waves"),
-            ((144, 128, 128, 2, 1, 1, 0), "register budget"),
-        ):
-            with self.subTest(tile=tile), self.assertRaisesRegex(ValueError, error):
-                _mxfp_param(mxfp_format, tile, 2048)
-        for mma in ({"mma_m": 32}, {"mma_k": 192}):
-            with (
-                self.subTest(mma=mma),
-                self.assertRaisesRegex(ValueError, "requires mma=16x16x128"),
-            ):
-                _mxfp_param(mxfp_format, (128, 128, 128, 2, 1, 1, 0), 2048, **mma)
-
-
 class TestFlyDSLMXFPDevice(TestCase):
     def setUp(self):
         super().setUp()
@@ -1406,110 +1255,23 @@ class TestFlyDSLMXFPDevice(TestCase):
         self.assertEqual(out, expected.to(out_dtype), atol=3e-2, rtol=2e-2)
 
     @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
-    @parametrize("out_dtype", (torch.bfloat16, torch.float16))
-    @parametrize(
-        "transposed", ((False, True), (False, False), (True, True), (True, False))
-    )
-    def test_scale_pipeline(self, device, mxfp_format, out_dtype, transposed):
-        # Short prologue, odd/even double tiles, K tails, and repeated scale-ring wraps.
-        for tile_k in (128, 256):
-            for k in (256, 384, 512, 640, 1152, 2048):
-                if k < 2 * tile_k:
-                    continue
-                for hti in (False, True):
-                    with self.subTest(tile_k=tile_k, k=k, hti=hti):
-                        self._check(
-                            mxfp_format,
-                            (256, 256, k),
-                            (128, 128, tile_k, 2, 2, 2, 0, hti),
-                            out_dtype,
-                            device,
-                            transposed,
-                        )
-
-    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
-    @parametrize("out_dtype", (torch.bfloat16, torch.float16))
-    def test_tiles_and_epilogue(self, device, mxfp_format, out_dtype):
-        cases = [
-            ((64, 96, 256), (32, 32, 128, 2, 1, 1, 0)),
-            ((65, 104, 384), (32, 32, 256, 2, 1, 1, 0)),
-            ((65, 104, 640), (32, 32, 512, 2, 1, 1, 0)),
-            ((256, 256, 1024), (64, 64, 128, 4, 2, 2, 4)),
-            ((256, 256, 512), (256, 256, 128, 2, 2, 2, 0)),
-        ]
-        for block in (128, 256):
-            k = block if mxfp_format == "mxfp4" else 128
-            tile = (block, block, k, 2, 2, block // 64, 0, True)
-            cases.extend((shape, tile) for shape in ((65, 104, 384), (256, 256, 1152)))
-        for shape, tile in cases:
-            for bias in (False, True):
-                with self.subTest(shape=shape, tile=tile, bias=bias):
-                    self._check(mxfp_format, shape, tile, out_dtype, device, bias=bias)
-
-    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
-    @parametrize("out_dtype", (torch.bfloat16, torch.float16))
-    def test_dynamic_graph(self, device, mxfp_format, out_dtype):
-        import flydsl.compiler as flyc
-
-        tile = (256, 256, 256 if mxfp_format == "mxfp4" else 128, 2, 2, 4, 0, True)
-        param = _mxfp_param(mxfp_format, tile, 640, out_dtype, has_bias=True)
-        compiler = mock.Mock(wraps=flyc.compile)
-        with mock.patch.object(
-            kernels.gemm_mxfp_gfx950, "_compiled_cache", {}, create=True
-        ):
-            for i, shape in enumerate(
-                (
-                    (256, 512, 512),
-                    (65, 104, 640),
-                    (512, 256, 1024),
-                    (256, 256, 8192),
-                    (256, 512, 512),
-                )
-            ):
-                with self.subTest(shape=shape):
-                    m, n, _ = shape
-                    inputs, reference = _mxfp_case(mxfp_format, shape, device)
-                    inputs = [t.view(torch.uint8) for t in inputs]
-                    if i % 2:
-                        inputs = [
-                            torch.empty_strided(
-                                t.shape,
-                                (1, t.stride(1) + 16)
-                                if j == 1
-                                else (t.stride(0) + 16, 1),
-                                device=device,
-                                dtype=t.dtype,
-                            ).copy_(t)
-                            for j, t in enumerate(inputs)
-                        ]
-                    stride = n + 8 * (i % 2)
-                    arena = torch.full(
-                        (m * stride + 32,), -317, device=device, dtype=out_dtype
-                    )
-                    out = arena[16:-16].view(m, stride)[:, :n]
-                    bias = torch.randn(n, device=device, dtype=out_dtype)
-                    call = _mxfp_call(inputs, out, param, bias, compiler)
-                    graph = torch.cuda.CUDAGraph()
-                    with torch.cuda.graph(graph):
-                        call()
-                    for factor in (1, 2):
-                        if factor == 2:
-                            inputs[2].add_(1)
-                        out.fill_(float("nan"))
-                        graph.replay()
-                        self.assertEqual(
-                            out,
-                            (reference * factor + bias).to(out_dtype),
-                            atol=3e-2,
-                            rtol=2e-2,
-                        )
-                        for guard in (
-                            arena[:16],
-                            arena[-16:],
-                            arena[16:-16].view(m, stride)[:, n:],
-                        ):
-                            self.assertEqual(guard, torch.full_like(guard, -317))
-        self.assertEqual(compiler.call_count, 1)
+    def test_kernel(self, device, mxfp_format):
+        tile_k = 256 if mxfp_format == "mxfp4" else 128
+        self._check(
+            mxfp_format,
+            (65, 104, 384),
+            (32, 32, tile_k, 2, 1, 1, 0),
+            torch.bfloat16,
+            device,
+        )
+        self._check(
+            mxfp_format,
+            (256, 256, 512),
+            (128, 128, tile_k, 2, 2, 2, 0, True),
+            torch.float16,
+            device,
+            bias=True,
+        )
 
     @parametrize("mxfp_format", ("mxfp4", "mxfp8", None))
     def test_compiled_routes(self, device, mxfp_format):

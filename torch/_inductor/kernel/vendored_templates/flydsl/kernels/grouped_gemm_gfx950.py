@@ -12,11 +12,11 @@ from .gemm_gfx950 import (
     __barrier,
     __waitcnt,
     _operand_fragment_dtype,
-    make_gemm_tiled_mma,
     BlockSwizzle,
     buffer_load_lds_inline,
     GEMM_DTYPE_FP16,
     GemmGfx950Param,
+    make_gemm_tiled_mma,
 )
 from .grouped_gemm_gfx950_config import GFX950_DMA_BYTES, GFX950_WAVE_SIZE
 
@@ -349,7 +349,7 @@ def _grouped_load_a_tile_async(ctx, row_base, bid_m, m, k, k_tile, stage):
     block_m = param.block_m
     block_k = param.block_k
     async_load_bytes = param.async_load_bytes
-    in_data_bytes = (param.in_data_bits // 8)
+    in_data_bytes = param.in_data_bits // 8
     async_load_vec_size = async_load_bytes // in_data_bytes
     ldg_x_threads = param.ldg_x_threads
     block_threads = param.block_threads
@@ -384,7 +384,7 @@ def _grouped_load_b_tile_async(ctx, bid_n, n, k, group_idx, k_tile, stage):
     block_n = param.block_n
     block_k = param.block_k
     async_load_bytes = param.async_load_bytes
-    in_data_bytes = (param.in_data_bits // 8)
+    in_data_bytes = param.in_data_bits // 8
     async_load_vec_size = async_load_bytes // in_data_bytes
     block_threads = param.block_threads
     ldg_b_iters = param.ldg_b_iters
@@ -512,7 +512,7 @@ def gemm_hti_gfx950_grouped_kernel(
     half_block_n = block_n // 2
     has_k_tail = param.has_k_tail
     async_load_bytes = param.async_load_bytes
-    in_data_bytes = (param.in_data_bits // 8)
+    in_data_bytes = param.in_data_bits // 8
     async_load_vec_size = async_load_bytes // in_data_bytes
     ldg_x_threads = param.ldg_x_threads
     block_threads = param.block_threads

@@ -193,28 +193,38 @@ def make_gemm_gfx950_param(
                 2 * min(scale_rows_a, scale_rows_b) * block_k // MXFP_SCALE_BLOCK_K
             )
             scale_chunk_tiles = 2 * (
-                (workgroup_bytes + double_tile_scale_bytes - 1) // double_tile_scale_bytes
+                (workgroup_bytes + double_tile_scale_bytes - 1)
+                // double_tile_scale_bytes
             )
         else:
             scale_chunk_tiles = 1
         scale_block_k = block_k * scale_chunk_tiles
         # Each allocation is one half in one scale slot; HTI has two chunk slots.
-        sa_stage_bytes = mxfp_scale_padded_bytes(scale_rows_a, scale_block_k, block_threads)
-        sb_stage_bytes = mxfp_scale_padded_bytes(scale_rows_b, scale_block_k, block_threads)
+        sa_stage_bytes = mxfp_scale_padded_bytes(
+            scale_rows_a, scale_block_k, block_threads
+        )
+        sb_stage_bytes = mxfp_scale_padded_bytes(
+            scale_rows_b, scale_block_k, block_threads
+        )
         # HTI chunk DMA is fenced separately, so it is not part of per-tile AB waits.
-        ldg_sa_iters = 0 if use_half_tile_interleaved else sa_stage_bytes // workgroup_bytes
-        ldg_sb_iters = 0 if use_half_tile_interleaved else sb_stage_bytes // workgroup_bytes
+        ldg_sa_iters = (
+            0 if use_half_tile_interleaved else sa_stage_bytes // workgroup_bytes
+        )
+        ldg_sb_iters = (
+            0 if use_half_tile_interleaved else sb_stage_bytes // workgroup_bytes
+        )
         scale_row_bytes = scale_block_k // MXFP_SCALE_BLOCK_K
     else:
         sa_stage_bytes = sb_stage_bytes = scale_chunk_tiles = 0
         ldg_sa_iters = ldg_sb_iters = scale_row_bytes = 0
 
     scale_halves = 2 if use_half_tile_interleaved else 1
-    smem_bytes = (
-        stages * (block_m + block_n) * block_k_bytes
-        + stages * scale_halves * (sa_stage_bytes + sb_stage_bytes)
+    smem_bytes = stages * (
+        block_m + block_n
+    ) * block_k_bytes + stages * scale_halves * (sa_stage_bytes + sb_stage_bytes)
+    smem_bytes = max(
+        smem_bytes, block_m * block_n * GEMM_DTYPE_BITS[cshuffle_dtype_id] // 8
     )
-    smem_bytes = max(smem_bytes, block_m * block_n * GEMM_DTYPE_BITS[cshuffle_dtype_id] // 8)
     arch = get_rocm_arch()
     SMEM_CAPACITY_MAP = {
         "gfx942": 65536,
@@ -248,16 +258,26 @@ def make_gemm_gfx950_param(
     ldg_a_iters = (block_m * block_k) // (block_threads * async_load_vec_size)
     ldg_b_iters = (block_n * block_k) // (block_threads * async_load_vec_size)
     if use_half_tile_interleaved:
-        half_ldg_a_iters = ((block_m // 2) * block_k) // (block_threads * async_load_vec_size)
-        half_ldg_b_iters = ((block_n // 2) * block_k) // (block_threads * async_load_vec_size)
-        if half_ldg_a_iters * block_threads * async_load_vec_size != (block_m // 2) * block_k:
+        half_ldg_a_iters = ((block_m // 2) * block_k) // (
+            block_threads * async_load_vec_size
+        )
+        half_ldg_b_iters = ((block_n // 2) * block_k) // (
+            block_threads * async_load_vec_size
+        )
+        if (
+            half_ldg_a_iters * block_threads * async_load_vec_size
+            != (block_m // 2) * block_k
+        ):
             raise ValueError(
                 "Half-tile A async load tile must be exactly covered by whole-thread vector loads: "
                 f"half_block_m={block_m // 2}, block_k={block_k}, "
                 f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
                 f"half_ldg_a_iters={half_ldg_a_iters}"
             )
-        if half_ldg_b_iters * block_threads * async_load_vec_size != (block_n // 2) * block_k:
+        if (
+            half_ldg_b_iters * block_threads * async_load_vec_size
+            != (block_n // 2) * block_k
+        ):
             raise ValueError(
                 "Half-tile B async load tile must be exactly covered by whole-thread vector loads: "
                 f"half_block_n={block_n // 2}, block_k={block_k}, "
@@ -529,7 +549,9 @@ def _operand_fragment_dtype(param: GemmGfx950Param):
     # The actual scaled MMA atom still uses Float4E2M1FN.
     if const_expr(param.in_dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)):
         return fx.Float8E4M3FN
-    return fx.Float16 if const_expr(param.in_dtype_id == GEMM_DTYPE_FP16) else fx.BFloat16
+    return (
+        fx.Float16 if const_expr(param.in_dtype_id == GEMM_DTYPE_FP16) else fx.BFloat16
+    )
 
 
 def make_gemm_ab_load_context(
@@ -540,7 +562,9 @@ def make_gemm_ab_load_context(
     param: GemmGfx950Param,
 ):
     uni_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), operand_fragment_dtype)
-    buffer_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), operand_fragment_dtype)
+    buffer_copy_atom = fx.make_copy_atom(
+        fx.rocdl.BufferCopy128b(), operand_fragment_dtype
+    )
 
     lds_read = (
         fx.rocdl.cdna4.LDSReadTrans8_64b
@@ -654,13 +678,9 @@ def make_mxfp_lds_layout(rows, storage_k, is_transposed):
     # Preserve each packed K row and the low four bits of a 16-byte DMA.
     # S<3,4,4> needs 128-byte row alignment; e.g. FP4 BK384 only has 64.
     if const_expr(storage_k % 128 == 0):
-        return fx.make_composed_layout(
-            fx.static(fx.SwizzleType.get(3, 4, 4)), layout
-        )
+        return fx.make_composed_layout(fx.static(fx.SwizzleType.get(3, 4, 4)), layout)
     if const_expr(storage_k % 64 == 0):
-        return fx.make_composed_layout(
-            fx.static(fx.SwizzleType.get(2, 4, 3)), layout
-        )
+        return fx.make_composed_layout(fx.static(fx.SwizzleType.get(2, 4, 3)), layout)
     return layout
 
 
@@ -672,9 +692,7 @@ def make_gemm_tiled_mma(param: GemmGfx950Param):
     elif const_expr(param.in_dtype_id == GEMM_DTYPE_MXFP4):
         # TiledMma only supplies layouts here.  A byte fragment carries two
         # packed FP4 values; compute itself uses the scaled FP4 atom below.
-        op = rocdl.MFMA(
-            param.mma_m, param.mma_n, param.mma_k // 2, fx.Float8E4M3FN
-        )
+        op = rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k // 2, fx.Float8E4M3FN)
     else:
         dtype = (
             fx.Float16
@@ -709,9 +727,7 @@ def make_mxfp_mma_atom(param: GemmGfx950Param):
         else fx.Float8E4M3FN
     )
     return fx.make_mma_atom(
-        rocdl.cdna4.MFMA_Scale(
-            param.mma_m, param.mma_n, param.mma_k, dtype
-        )
+        rocdl.cdna4.MFMA_Scale(param.mma_m, param.mma_n, param.mma_k, dtype)
     )
 
 
@@ -845,8 +861,12 @@ def gemm_gfx950_kernel(
     scale_b=(),
 ):
     is_mxfp = param.in_dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)
-    block_k_storage = param.block_k // (2 if param.in_dtype_id == GEMM_DTYPE_MXFP4 else 1)
-    cshuffle_dtype = fx.BFloat16 if param.out_dtype_id == GEMM_DTYPE_BF16 else fx.Float16
+    block_k_storage = param.block_k // (
+        2 if param.in_dtype_id == GEMM_DTYPE_MXFP4 else 1
+    )
+    cshuffle_dtype = (
+        fx.BFloat16 if param.out_dtype_id == GEMM_DTYPE_BF16 else fx.Float16
+    )
     block_m = param.block_m
     block_n = param.block_n
     block_k = param.block_k
@@ -855,9 +875,7 @@ def gemm_gfx950_kernel(
     block_threads = param.block_threads
     ldg_a_iters = param.ldg_a_iters
     ldg_b_iters = param.ldg_b_iters
-    ldg_wait_count = (
-        ldg_a_iters + ldg_b_iters + param.ldg_sa_iters + param.ldg_sb_iters
-    )
+    ldg_wait_count = ldg_a_iters + ldg_b_iters + param.ldg_sa_iters + param.ldg_sb_iters
     operand_fragment_dtype = _operand_fragment_dtype(param)
 
     tid = fx.thread_idx.x
@@ -909,7 +927,9 @@ def gemm_gfx950_kernel(
 
     gC = fx.flat_divide(out_buf, (block_m, block_n))[None, None, bid_m, bid_n]
     thr_mma = tiled_mma.thr_slice(tid)
-    ab_load_context = make_gemm_ab_load_context(operand_fragment_dtype, tiled_mma, tid, k, param)
+    ab_load_context = make_gemm_ab_load_context(
+        operand_fragment_dtype, tiled_mma, tid, k, param
+    )
     uni_copy_atom = (
         fx.make_copy_atom(fx.UniversalCopy128b(), cshuffle_dtype)
         if is_mxfp
@@ -1264,7 +1284,9 @@ def gemm_hti_gfx950_kernel(
     else:
         bias_buf = None
 
-    ab_load_context = make_gemm_ab_load_context(operand_fragment_dtype, tiled_mma, tid, k, param)
+    ab_load_context = make_gemm_ab_load_context(
+        operand_fragment_dtype, tiled_mma, tid, k, param
+    )
     a_s2r_copy_atom = ab_load_context.a_s2r_copy_atom
     b_s2r_copy_atom = ab_load_context.b_s2r_copy_atom
     thr_copy_A = ab_load_context.thr_copy_a
@@ -1807,9 +1829,7 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
             # The scaled HTI B-fragment path requires at least two N repeats
             # per wave. A single repeat does not provide the packed operand
             # fragment layout consumed by the scaled MMA atom.
-            mma_n_half_repeat = (
-                result.block_n // 2 // result.n_waves // result.mma_n
-            )
+            mma_n_half_repeat = result.block_n // 2 // result.n_waves // result.mma_n
             if mma_n_half_repeat < 2:
                 return None
     return result
