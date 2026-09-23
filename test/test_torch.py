@@ -17,6 +17,7 @@ import re
 import copy
 import tempfile
 import unittest
+from unittest import mock
 import warnings
 import types
 import pickle
@@ -41,7 +42,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    bytes_to_scalar, parametrize, noncontiguous_like,
+    bytes_to_scalar, parametrize, noncontiguous_like, instantiate_parametrized_tests,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
     IS_MACOS, HardwareClassification,
@@ -7048,6 +7049,47 @@ def disable_gc():
             gc.enable()
     else:
         yield
+
+@instantiate_parametrized_tests
+class TestScaledMMCapability(TestCase):
+    @parametrize("device_type", ["cpu", "cuda", "xpu"])
+    def test_explicit_device(self, device_type):
+        device = torch.device(device_type, 0)
+        module = torch.get_device_module(device_type)
+        for device_form in (str(device), device):
+            with mock.patch.object(module, "_is_scaled_mm_supported", return_value=True) as query:
+                self.assertTrue(torch.is_scaled_mm_supported(device_form))
+                query.assert_called_once_with(device)
+
+    # "cpu" stands for a build without a compiled accelerator.
+    @parametrize("device_type", ["cpu", "cuda", "xpu"])
+    @parametrize("device", [None, 0])
+    def test_default_device(self, device_type, device):
+        accelerator = None if device_type == "cpu" else torch.device(device_type)
+        expected = torch.device(device_type) if device is None else torch.device(device_type, device)
+        module = torch.get_device_module(device_type)
+        with (
+            mock.patch.object(torch.accelerator, "current_accelerator", return_value=accelerator),
+            mock.patch.object(module, "_is_scaled_mm_supported", return_value=True) as query,
+        ):
+            self.assertTrue(torch.is_scaled_mm_supported(device))
+            query.assert_called_once_with(expected)
+
+    @parametrize("device_type", ["cuda", "xpu"])
+    @parametrize("device", [None, 0])
+    def test_unavailable_accelerator(self, device_type, device):
+        with (
+            mock.patch.object(torch.accelerator, "current_accelerator", return_value=torch.device(device_type)),
+            mock.patch.object(torch.get_device_module(device_type), "is_available", return_value=False),
+        ):
+            self.assertFalse(torch.is_scaled_mm_supported(device))
+
+    def test_builtin_backends(self):
+        self.assertTrue(torch.is_scaled_mm_supported("cpu"))
+        self.assertFalse(torch.is_scaled_mm_supported("meta"))
+        with mock.patch.object(torch, "get_device_module", return_value=types.SimpleNamespace()):
+            self.assertFalse(torch.is_scaled_mm_supported("cpu"))
+
 
 class TestTorch(TestCase):
     exact_dtype = True

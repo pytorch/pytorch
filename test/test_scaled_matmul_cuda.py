@@ -37,6 +37,8 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
+    dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCUDA,
@@ -715,32 +717,17 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     return kwargs[format]
 
 
-class TestScaledMMCapability(TestCase):
-    def test_device_routing(self) -> None:
-        self.assertTrue(torch.is_scaled_mm_supported("cpu"))
-        self.assertTrue(torch.is_scaled_mm_supported(torch.device("cpu")))
-        self.assertFalse(torch.is_scaled_mm_supported("meta"))
-
-        current_device = torch.accelerator.current_accelerator() or torch.device("cpu")
-        self.assertEqual(
-            torch.is_scaled_mm_supported(),
-            torch.is_scaled_mm_supported(current_device),
-        )
-        self.assertEqual(
-            torch.is_scaled_mm_supported(0),
-            torch.is_scaled_mm_supported(torch.device(current_device.type, 0)),
-        )
-
-
 class TestFP8Matmul(TestCase):
-    def test_is_scaled_mm_supported(self, device) -> None:
+    @dtypes(e4m3_type, e5m2_type)
+    def test_is_scaled_mm_supported(self, device, dtype) -> None:
         supported = torch.is_scaled_mm_supported(device)
         self.assertIsInstance(supported, bool)
         for device_form in (device, torch.device(device)):
             self.assertEqual(torch.is_scaled_mm_supported(device_form), supported)
 
         size = 16
-        mat_a = torch.eye(size, device=device).to(e4m3_type)
+        mat_a = torch.eye(size, device=device).to(dtype)
+        # cuBLASLt rejects e5m2 x e5m2, so only mat_a varies.
         mat_b = torch.eye(size, device=device).to(e4m3_type).t()
         scale = torch.tensor(1.0, device=device)
 
@@ -755,13 +742,25 @@ class TestFP8Matmul(TestCase):
             )
 
         if supported:
-            self.assertEqual(run_scaled_mm().shape, (size, size))
+            result = run_scaled_mm()
+            self.assertEqual(result, torch.eye(size, device=device, dtype=result.dtype))
         else:
             self.assertRaisesRegex(
                 RuntimeError,
                 "only supported",
                 run_scaled_mm,
             )
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_is_scaled_mm_supported_noncurrent_device(self, devices) -> None:
+        current, target = torch.device(devices[0]), torch.device(devices[1])
+        with torch.cuda.device(target):
+            expected = torch.is_scaled_mm_supported(target)
+        with torch.cuda.device(current):
+            for device_form in (target.index, str(target), target):
+                self.assertEqual(torch.is_scaled_mm_supported(device_form), expected)
+                self.assertEqual(torch.cuda.current_device(), current.index)
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -1907,7 +1906,7 @@ class TestFP8Matmul(TestCase):
         self.assertFalse(torch.is_scaled_mm_supported(device))
         self.assertRaisesRegex(
             RuntimeError,
-            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",
+            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm gfx942",
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
 

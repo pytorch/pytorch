@@ -3490,22 +3490,32 @@ def get_device_module(device: "torch.device | str | None" = None) -> _ModuleType
 
 
 def is_scaled_mm_supported(device: "Device" = None) -> builtins.bool:
-    r"""Return device-level support for :func:`torch.nn.functional.scaled_mm`.
+    r"""Return device- and build-level support for :func:`torch.nn.functional.scaled_mm`.
 
-    This checks device- and build-level availability. It does not validate a
-    particular invocation. Individual dtypes, scaling recipes, layouts,
-    swizzles, and output configurations may have additional restrictions.
+    Returns ``False`` if the backend is unavailable or does not support
+    scaled_mm. A ``True`` result does not validate a particular invocation:
+    dtypes, scaling recipes, layouts, swizzles, and output configurations have
+    additional restrictions.
 
     Args:
         device (:class:`torch.device`, str, int, optional): Device for which to
-            query support. If unspecified, uses the current accelerator, or the
-            CPU when PyTorch was built without an accelerator. An integer
-            selects a device index on the current accelerator.
+            query support. If unspecified, uses
+            :func:`torch.accelerator.current_accelerator`, or CPU when PyTorch
+            was built without an accelerator. An integer selects a device index
+            on that accelerator. Default: ``None``.
+
+    Examples::
+
+        >>> torch.is_scaled_mm_supported("cpu")
+        True
+        >>> torch.is_scaled_mm_supported("meta")
+        False
     """
     if isinstance(device, builtins.int):
-        resolved_device = torch.device(torch._C._get_accelerator().type, device)
+        accelerator = torch.accelerator.current_accelerator() or torch.device("cpu")
+        resolved_device = torch.device(accelerator.type, device)
     elif device is None:
-        resolved_device = torch._C._get_accelerator()
+        resolved_device = torch.accelerator.current_accelerator() or torch.device("cpu")
     else:
         resolved_device = torch.device(device)
 
@@ -3514,6 +3524,8 @@ def is_scaled_mm_supported(device: "Device" = None) -> builtins.bool:
     except RuntimeError:
         return False
 
+    # Optional backend hook: accepts a torch.device (index may be None), returns
+    # bool, and owns availability and index validation. Errors propagate.
     backend_query = getattr(device_module, "_is_scaled_mm_supported", None)
     if backend_query is None:
         return False
