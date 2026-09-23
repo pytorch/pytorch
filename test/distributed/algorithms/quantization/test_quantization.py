@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import (
 # XPU yet.
 _BFP16_XPU_SKIP_MSG = (
     "XPU lacks quantization::_FloatToBfloat16Quantized; "
-    "see https://github.com/intel/torch-xpu-ops/issues"
+    "see https://github.com/intel/torch-xpu-ops/issues/4941"
 )
 
 
@@ -62,7 +62,6 @@ if not dist.is_available():
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
-use_accelerator = device_type != "cpu"
 
 
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
