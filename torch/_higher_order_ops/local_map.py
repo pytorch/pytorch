@@ -6,6 +6,7 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import contextlib
+import copy
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from typing import Any, TypeAlias
@@ -242,6 +243,123 @@ def create_hop_fw_bw(
         keep_inference_input_mutations=False,
     )
 
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+    from torch._prims_common import clone_preserve_strides
+
+    def graph_nodes(graph_module: GraphModule) -> tuple[torch.fx.Node, ...]:
+        return tuple(
+            node
+            for module in graph_module.modules()
+            if isinstance(module, GraphModule)
+            for node in module.graph.nodes
+        )
+
+    def is_mutating_hop(target: Any) -> bool:
+        return isinstance(target, HigherOrderOperator) and target.__name__.endswith(
+            "_mutation"
+        )
+
+    def is_mutating_node(node: torch.fx.Node) -> bool:
+        return node.op == "call_function" and (
+            (
+                isinstance(node.target, torch._ops.OpOverload)
+                and node.target._schema.is_mutable
+            )
+            or is_mutating_hop(node.target)
+        )
+
+    def is_user_python_callable(node: torch.fx.Node) -> bool:
+        if node.op != "call_function" or isinstance(
+            node.target, (torch._ops.OpOverload, HigherOrderOperator)
+        ):
+            return False
+        target_module = getattr(node.target, "__module__", "") or ""
+        return target_module not in ("builtins", "operator", "_operator") and not (
+            target_module == "torch" or target_module.startswith("torch.")
+        )
+
+    run_fw_gm = torch.fx.Interpreter(fw_gm).run
+    run_joint_fw_gm = run_fw_gm
+
+    def copy_with_fresh_invoke_identifiers(
+        graph_module: GraphModule,
+        identifier_prefix: str,
+        *,
+        clone_inputs: bool,
+    ) -> GraphModule:
+        cloned_graph_module = copy.deepcopy(graph_module)
+        for module_name, module in cloned_graph_module.named_modules():
+            if not isinstance(module, GraphModule):
+                continue
+            for node in tuple(module.graph.nodes):
+                if node.op != "call_function" or node.target is not invoke_subgraph:
+                    continue
+
+                def clone_tensor_node(arg: torch.fx.Node) -> torch.fx.Node:
+                    value = arg.meta.get("example_value", arg.meta.get("val"))
+                    if not isinstance(value, torch.Tensor):
+                        return arg
+                    with module.graph.inserting_before(node):
+                        clone = module.graph.call_function(
+                            clone_preserve_strides, (arg,)
+                        )
+                    clone.meta = dict(arg.meta)
+                    return clone
+
+                identifier = node.args[1]
+                if not isinstance(identifier, str):
+                    raise AssertionError(
+                        f"invoke_subgraph identifier must be a string, got {identifier}"
+                    )
+                fresh_identifier = (
+                    f"local_map_{identifier_prefix}_"
+                    f"{module_name.replace('.', '_')}_{identifier}"
+                )
+                operands = (
+                    torch.fx.map_arg(node.args[2:], clone_tensor_node)
+                    if clone_inputs
+                    else node.args[2:]
+                )
+                node.args = (node.args[0], fresh_identifier, *operands)
+            module.graph.lint()
+            module.recompile()
+        return cloned_graph_module
+
+    def prepare_fw_with_masks() -> Callable[..., Any]:
+        def fw_with_masks(*args: Any) -> tuple[tuple[Any], list[bool]]:
+            # The Interpreter here is required to propagate metadata
+            # from the dynamo graph body to the local_map graph body.
+            # This is required for fx_traceback.annotate for work.
+            fw_out = run_joint_fw_gm(*args)
+            if not isinstance(fw_out, tuple):
+                raise AssertionError("Dynamo traced submodule should return tuple")
+            return fw_out, [
+                bool(isinstance(ret, torch.Tensor) and ret.requires_grad)
+                for ret in fw_out
+            ]
+
+        return fw_with_masks
+
+    def joint_f(
+        *primals_and_tangents: list[torch.Tensor],
+    ) -> Any:
+        primals = primals_and_tangents[:num_fw_inputs]
+        tangents = primals_and_tangents[num_fw_inputs:]
+
+        fw_outs, grads = create_joint(
+            prepare_fw_with_masks(), aot_config=dummy_aot_config
+        )(primals, tangents)
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        if has_free_unbacked_symbols((*fw_outs, *grads)):
+            raise AssertionError(
+                "Unbacked symints leaking outside of the joint graph is not yet supported."
+            )
+
+        maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
+        # put grads first to work with existing hop utils
+        return pytree.tree_map(maybe_clone, (*grads, *fw_outs))
+
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             # If someone runs this hop under the default compiler backend ("eager")
@@ -276,7 +394,7 @@ def create_hop_fw_bw(
                 else contextlib.nullcontext
             )
             with ctx():
-                fw_outs = fw_gm(*fw_inputs)
+                fw_outs = run_fw_gm(*fw_inputs)
 
             example_grads = pytree.tree_map(
                 _new_tensor,
@@ -287,45 +405,6 @@ def create_hop_fw_bw(
 
             num_fw_inputs = len(fw_inputs)
             num_fw_outputs = len(example_grads)
-
-        def joint_f(
-            *primals_and_tangents: list[torch.Tensor],
-        ) -> Any:
-            primals = primals_and_tangents[:num_fw_inputs]
-            tangents = primals_and_tangents[num_fw_inputs:]
-
-            def prepare_fw_with_masks(
-                fw_gm: torch.fx.GraphModule,
-            ) -> Callable[..., Any]:
-                def fw_with_masks(*args: Any) -> tuple[tuple[Any], list[bool]]:
-                    # The Interpreter here is required to propagate metadata
-                    # from the dynamo graph body to the local_map graph body.
-                    # This is required for fx_traceback.annotate for work.
-                    fw_out = torch.fx.Interpreter(fw_gm).run(*args)
-                    if not isinstance(fw_out, tuple):
-                        raise AssertionError(
-                            "Dynamo traced submodule should return tuple"
-                        )
-                    return fw_out, [
-                        bool(isinstance(ret, torch.Tensor) and ret.requires_grad)
-                        for ret in fw_out
-                    ]
-
-                return fw_with_masks
-
-            fw_outs, grads = create_joint(
-                prepare_fw_with_masks(fw_gm), aot_config=dummy_aot_config
-            )(primals, tangents)
-            from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
-
-            if has_free_unbacked_symbols((*fw_outs, *grads)):
-                raise AssertionError(
-                    "Unbacked symints leaking outside of the joint graph is not yet supported."
-                )
-
-            maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
-            # put grads first to work with existing hop utils
-            return pytree.tree_map(maybe_clone, (*grads, *fw_outs))
 
         filtered_grads_idx = set()
         for i, example_grad in enumerate(example_grads):
@@ -341,7 +420,181 @@ def create_hop_fw_bw(
             *fw_inputs,
             *[example_grads[i] for i in filtered_grads_idx],
         ]
+
+        def effectful_op(nodes: tuple[torch.fx.Node, ...]) -> Any:
+            from torch._higher_order_ops.effects import has_effects
+
+            return next(
+                (
+                    node.target
+                    for node in nodes
+                    if node.op == "call_function" and has_effects(node.target)
+                ),
+                None,
+            )
+
+        def unsupported_functionalization_hop(
+            nodes: tuple[torch.fx.Node, ...],
+        ) -> Any:
+            return next(
+                (
+                    node.target
+                    for node in nodes
+                    if node.op == "call_function"
+                    and isinstance(node.target, HigherOrderOperator)
+                    and not node.target.has_kernel_for_dispatch_key(
+                        DispatchKey.Functionalize
+                    )
+                ),
+                None,
+            )
+
+        def functionalized_callable(graph_module: GraphModule) -> Callable[..., Any]:
+            from torch._subclasses.functional_tensor import (
+                dispatch_functionalize,
+                FunctionalTensorMode,
+            )
+
+            return dispatch_functionalize(
+                torch.fx.Interpreter(graph_module).run,
+                FunctionalTensorMode(
+                    _keep_input_mutations=False,
+                ),
+            )
+
+        def functionalize_graph(
+            graph_module: GraphModule,
+            args: list[Any],
+            nodes: tuple[torch.fx.Node, ...],
+        ) -> GraphModule:
+            functional = functionalized_callable(graph_module)
+            trace = make_fx(functional)
+            with torch.no_grad():
+                if any(
+                    node.op == "call_function"
+                    and isinstance(node.target, HigherOrderOperator)
+                    for node in nodes
+                ):
+                    # HOP functionalization rules may put tensors inside kwargs;
+                    # keeping the active FakeTensorMode lets fake/proxy rules see
+                    # those nested tensors and preserve output metadata.
+                    with fake_mode:
+                        return trace(*args)
+                return trace(*args)
+
+        def functionalize_forward_graph(
+            graph_module: GraphModule,
+            args: list[Any],
+        ) -> GraphModule:
+            functional = torch.func.functionalize(
+                torch.fx.Interpreter(graph_module).run,
+                remove="mutations",
+            )
+            # Avoid recording an autograd graph for this trace without changing
+            # torch.is_grad_enabled(). The explicit empty decomposition table
+            # preserves detach() for the later AD trace.
+            with torch._C._AutoDispatchBelowAutograd():
+                return make_fx(functional, decomposition_table={})(*args)
+
+        # First materialize a forward-only graph. This exposes mutations hidden
+        # behind Python callables without running backward, so mutations of
+        # values saved for backward cannot fail on a version-counter check.
+        original_fw_nodes = graph_nodes(fw_gm)
+        has_invoke_subgraph = any(
+            node.op == "call_function" and node.target is invoke_subgraph
+            for node in original_fw_nodes
+        )
+        canonical_fw_callable = run_fw_gm
+        if has_invoke_subgraph:
+            # invoke_subgraph caches proxy/autograd metadata by identifier. Use
+            # fresh identifiers for this inspection trace so it cannot poison
+            # the functionalized forward trace below.
+            canonical_fw_callable = torch.fx.Interpreter(
+                copy_with_fresh_invoke_identifiers(
+                    fw_gm,
+                    "mutation_inspection",
+                    clone_inputs=False,
+                )
+            ).run
+        canonical_fw_gm = make_fx(canonical_fw_callable)(*fw_inputs)
+        canonical_fw_nodes = graph_nodes(canonical_fw_gm)
+        has_forward_mutation = any(
+            is_mutating_node(node) for node in canonical_fw_nodes
+        )
+        # A user callable can hide custom_function_call, which make_fx expands
+        # away. Keep those graphs on the AD-aware path so their custom backward
+        # is not replaced by the traced forward implementation.
+        has_opaque_python_callable = any(
+            is_user_python_callable(node) for node in original_fw_nodes
+        )
+        original_unsupported_hop = unsupported_functionalization_hop(original_fw_nodes)
+        canonical_unsupported_hop = unsupported_functionalization_hop(
+            canonical_fw_nodes
+        )
+        if has_forward_mutation:
+            forward_effectful_op = effectful_op(canonical_fw_nodes)
+            if forward_effectful_op is not None:
+                raise RuntimeError(
+                    "deferred local_map cannot functionalize mutations together "
+                    f"with effectful operator {forward_effectful_op}"
+                )
+
+            if has_invoke_subgraph:
+                # invoke_subgraph's Functionalize rule requires Python mode and
+                # its autograd kernel saves operands for lazy backward tracing.
+                # Protect those versions while building the joint, then
+                # functionalize the expanded joint below.
+                run_joint_fw_gm = torch.fx.Interpreter(
+                    copy_with_fresh_invoke_identifiers(
+                        fw_gm,
+                        "joint",
+                        clone_inputs=True,
+                    )
+                ).run
+            elif (
+                not has_opaque_python_callable
+                and original_unsupported_hop is None
+                and canonical_unsupported_hop is None
+            ):
+                # Materializing a functional forward before AD avoids version-
+                # counter failures when a mutation follows an operator that
+                # saved the same tensor for backward. Replaying the resulting
+                # graph under create_joint restores normal AD.
+                functional_fw_gm = functionalize_forward_graph(
+                    fw_gm,
+                    list(fw_inputs),
+                )
+                run_joint_fw_gm = torch.fx.Interpreter(functional_fw_gm).run
+        # Trace the joint before functionalization so custom autograd functions
+        # are expanded while their forward/backward information is available.
+        # Functionalizing fw_gm directly would instead fail on
+        # custom_function_call, which has no Functionalize rule.
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
+        joint_graph_nodes = graph_nodes(joint_hop_gm)
+
+        has_mutation = any(is_mutating_node(node) for node in joint_graph_nodes)
+        if has_mutation:
+            joint_effectful_op = effectful_op(joint_graph_nodes)
+            if joint_effectful_op is not None:
+                raise RuntimeError(
+                    "deferred local_map cannot functionalize mutations together "
+                    f"with effectful operator {joint_effectful_op}"
+                )
+
+            unsupported_hop = unsupported_functionalization_hop(joint_graph_nodes)
+            if unsupported_hop is not None:
+                raise RuntimeError(
+                    "deferred local_map cannot functionalize mutations across "
+                    f"higher-order operator {unsupported_hop} because it has no "
+                    "Functionalize kernel"
+                )
+
+            # Unsupported forward HOPs that disappear during AD tracing (for
+            # example custom_function_call) reach this path. Functionalize the
+            # expanded joint before the partitioner can drop mutations.
+            joint_hop_gm = functionalize_graph(
+                joint_hop_gm, primals_and_tangents, joint_graph_nodes
+            )
         from torch._functorch._aot_autograd.graph_capture import (
             copy_fwd_metadata_to_bw_nodes,
         )
