@@ -4482,7 +4482,7 @@ class TestPrecompileCapture(TestCase):
         self.assertEqual(x, expected_x)
 
     @parametrize("backend", ["eager", "inductor"])
-    @parametrize("write", ["direct", "data", "foreach"])
+    @parametrize("write", ["direct", "data", "chunk", "unbind", "foreach"])
     def test_a_capture_refuses_an_in_place_parameter_update(self, backend, write):
         # A write through ``.data`` bumps no version counter the parameter shares.
         def step(model, x):
@@ -4490,6 +4490,11 @@ class TestPrecompileCapture(TestCase):
                 w = model.lin.weight
                 if write == "foreach":
                     torch._foreach_add_(list(model.parameters()), 1)
+                elif write == "chunk":
+                    w.chunk(2)[0].add_(1)
+                elif write == "unbind":
+                    for row in w.unbind(0):
+                        row.mul_(0.9)
                 else:
                     (w.data if write == "data" else w).add_(1)
             return model(x)
