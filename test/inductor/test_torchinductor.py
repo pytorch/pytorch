@@ -20118,6 +20118,46 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    # https://github.com/pytorch/pytorch/issues/197893
+    @parametrize("requires_grad", (False, True))
+    def test_preserve_output_aliasing_noop_optimization(self, requires_grad):
+        def fn(x):
+            return x + 0, x * 1, torch.sin(x)
+
+        eager_input = torch.randn(8, device=self.device, requires_grad=requires_grad)
+        compiled_input = eager_input.detach().clone().requires_grad_(requires_grad)
+        eager_outputs = fn(eager_input)
+        compiled_outputs = torch.compile(fn, fullgraph=True)(compiled_input)
+
+        self.assertEqual(compiled_outputs, eager_outputs)
+        for inputs, outputs in (
+            ((eager_input,), eager_outputs),
+            ((compiled_input,), compiled_outputs),
+        ):
+            for input_tensor, output in itertools.product(inputs, outputs):
+                self.assertFalse(torch._C._is_alias_of(input_tensor, output))
+            for left, right in itertools.combinations(outputs, 2):
+                self.assertFalse(torch._C._is_alias_of(left, right))
+
+    # https://github.com/pytorch/pytorch/issues/197893
+    def test_preserve_output_aliasing_reinplace(self):
+        def fn(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            return updated
+
+        def run(target):
+            x = torch.tensor([1.0, 2.0], device=self.device)
+            output = target(x, torch.tensor([10.0], device=self.device))
+            self.assertEqual(x, torch.tensor([10.0, 2.0], device=self.device))
+            self.assertEqual(output, x)
+            return x, output
+
+        eager_input, eager_output = run(fn)
+        compiled_input, compiled_output = run(torch.compile(fn, fullgraph=True))
+        self.assertFalse(torch._C._is_alias_of(eager_input, eager_output))
+        self.assertFalse(torch._C._is_alias_of(compiled_input, compiled_output))
+
     # end of class CommonTemplate - add new tests here
 
 

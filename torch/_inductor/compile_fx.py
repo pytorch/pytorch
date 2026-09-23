@@ -467,6 +467,8 @@ def record_original_output_aliases(gm: GraphModule) -> None:
             if output_storages[other_output_idx] == storage
         )
 
+    # For example, input_output=((0, 1),) records that input 0 aliases output 1,
+    # while output_output=((1, 2),) records that outputs 1 and 2 alias.
     output.meta["original_output_aliases"] = {
         "input_output": tuple(input_output_aliases),
         "output_output": tuple(output_output_aliases),
@@ -502,11 +504,12 @@ def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
         subgraph = getattr(gm, node.args[0].target)
 
         for node in subgraph.graph.find_nodes(op="output"):
-            node.meta["user_visible_output_idxs"] = [
+            user_visible_output_idxs = [
                 idx
                 for idx in range(len(node.args[0]))
                 if isinstance(node.args[0][idx], torch.fx.Node)
             ]
+            node.meta["user_visible_output_idxs"] = user_visible_output_idxs
         _recursive_record_user_visible_output_idxs(subgraph)
 
 
@@ -1729,8 +1732,9 @@ class _InProcessFxCompile(FxCompile):
                     fake_mode = fake_tensor_prop(gm, example_inputs)
 
             _recursive_record_original_output_strides(gm)
-            # Capture aliases before post-grad passes when an earlier stage did not.
-            _recursive_record_original_output_aliases(gm)
+            if config.keep_output_aliasing and not is_backward:
+                # Capture aliases before post-grad passes when an earlier stage did not.
+                _recursive_record_original_output_aliases(gm)
 
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
@@ -2597,9 +2601,10 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    model_outputs_node.meta["user_visible_output_idxs"] = [
+    user_visible_output_idxs = [
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
+    model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
 
     static_input_idxs: list[Any] = []
     # constant params will be real tensors, not fake
@@ -2731,9 +2736,12 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
-    # In Training, capture input/output and output/output aliases before joint passes;
-    # partitioning later selects the forward outputs.
-    _recursive_record_original_output_aliases(gm)
+    original_output_aliases = None
+    if config.keep_output_aliasing:
+        # In training, capture aliases before joint passes; partitioning later
+        # selects the forward outputs.
+        _recursive_record_original_output_aliases(gm)
+        original_output_aliases = output_node(gm).meta["original_output_aliases"]
 
     cuda_context = get_cuda_device_context(gm)
     with cuda_context:
@@ -2752,18 +2760,17 @@ def partition_fn(
     )
 
     if partitioner_fn_override is not None:
-        return partitioner_fn_override(
+        partition_result = partitioner_fn_override(
             gm,
             joint_inputs,
             static_lifetime_input_indices=static_lifetime_input_indices,
             **kwargs,
         )
-
-    if config.custom_partitioner_fn is None:
+    elif config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(
             "min_cut_rematerialization_partition", log_pt2_compile_event=True
         ):
-            return min_cut_rematerialization_partition(
+            partition_result = min_cut_rematerialization_partition(
                 gm,
                 joint_inputs,
                 compiler="inductor",
@@ -2781,13 +2788,20 @@ def partition_fn(
             config.custom_partitioner_fn.__class__.__name__,
             log_pt2_compile_event=True,
         ):
-            return config.custom_partitioner_fn(
+            partition_result = config.custom_partitioner_fn(
                 gm,
                 joint_inputs,
                 compiler="inductor",
                 static_lifetime_input_indices=static_lifetime_input_indices,
                 **kwargs,
             )
+
+    fw_module, bw_module = partition_result
+    if original_output_aliases is not None:
+        # Partitioning creates a new forward output node. Preserve the pre-joint
+        # contract so the later recorder does not capture already-rewritten aliases.
+        output_node(fw_module).meta["original_output_aliases"] = original_output_aliases
+    return fw_module, bw_module
 
 
 def get_num_model_outputs(model: GraphModule) -> int:
@@ -2931,9 +2945,9 @@ def compile_fx_forward(
         # pad_mm (run as part of joint_graph_passes) can introduce views with
         # padded strides that would be incorrectly captured as "original".
         _recursive_record_original_output_strides(gm)
-        # Inference skips partition_fn, so capture input/output and output/output
-        # aliases here before joint passes.
-        _recursive_record_original_output_aliases(gm)
+        if config.keep_output_aliasing:
+            # Inference skips partition_fn, so capture aliases here before joint passes.
+            _recursive_record_original_output_aliases(gm)
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
@@ -2957,7 +2971,11 @@ def compile_fx_forward(
     clone_live_user_outputs = _cudagraph_trees_clone_live_user_outputs()
     model_outputs = None
     user_visible_output_idxs: list[int] = []
-    if config.keep_output_stride or clone_live_user_outputs:
+    if (
+        config.keep_output_stride
+        or config.keep_output_aliasing
+        or clone_live_user_outputs
+    ):
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
@@ -3004,7 +3022,11 @@ def compile_fx_forward(
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
 
-    if config.keep_output_stride or clone_live_user_outputs:
+    if (
+        config.keep_output_stride
+        or config.keep_output_aliasing
+        or clone_live_user_outputs
+    ):
         model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
     else:
         model_outputs_node.meta["user_visible_output_idxs"] = []

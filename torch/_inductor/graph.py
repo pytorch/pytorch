@@ -1783,12 +1783,137 @@ class GraphLowering(torch.fx.Interpreter):
                 except ValueError:
                     pass
 
+        if config.keep_output_aliasing:
+            self._preserve_user_visible_output_aliases()
         self.finalize()
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
             self.num_channels_last_conv,
             self.graph_id if self.graph_id is not None else -1,
         )
+
+    def _preserve_user_visible_output_aliases(self) -> None:
+        """Make lowered user-visible outputs match their original alias contract.
+
+        Newly introduced relationships add a pointwise copy to fresh storage;
+        scheduling may fuse it or emit a separate copy kernel. Missing original
+        alias relationships raise because a copy cannot recreate an alias.
+        """
+        module = cast(torch.fx.GraphModule, self.module)
+        output = module.graph.find_nodes(op="output")[0]
+        original_aliases = output.meta.get("original_output_aliases")
+        visible_outputs = tuple(output.meta.get("user_visible_output_idxs", ()))
+        if original_aliases is None or not visible_outputs:
+            return
+
+        # Filter original_output_aliases to user-visible output positions.
+        visible_set = frozenset(visible_outputs)
+        original_input_output = OrderedSet(
+            pair for pair in original_aliases["input_output"] if pair[1] in visible_set
+        )
+        original_output_output = OrderedSet(
+            pair
+            for pair in original_aliases["output_output"]
+            if pair[0] in visible_set and pair[1] in visible_set
+        )
+
+        input_names = [
+            (
+                self.graph_inputs_original[name].get_name()
+                if name in self.graph_inputs_original
+                else None
+            )
+            for name in self.graph_input_names
+        ]
+
+        def current_aliases() -> tuple[
+            OrderedSet[tuple[int, int]], OrderedSet[tuple[int, int]]
+        ]:
+            """Build the alias pairs represented by the current lowered IR.
+
+            For input_names=("arg0",) and
+            output_names=("arg0", "arg0", "buf0"), this returns:
+              input_output=((0, 0), (0, 1))
+              output_output=((0, 1),)
+            """
+
+            def matching_pairs(
+                left_names: Sequence[str | None],
+                right_names: Sequence[str | None],
+                pairs: Iterable[tuple[int, int]],
+            ) -> OrderedSet[tuple[int, int]]:
+                """Keep candidate pairs that resolve to the same lowered IR buffer.
+
+                For example:
+                  left_names=("arg0", "arg1")
+                  right_names=("buf0", "arg0")
+                  pairs=((0, 0), (0, 1), (1, 0), (1, 1))
+                  result=((0, 1),)
+                """
+                return OrderedSet(
+                    (left_idx, right_idx)
+                    for left_idx, right_idx in pairs
+                    if left_names[left_idx] is not None
+                    and left_names[left_idx] == right_names[right_idx]
+                )
+
+            output_names = [
+                value.maybe_get_name() if isinstance(value, ir.IRNode) else None
+                for value in self.graph_outputs
+            ]
+            input_output_candidates = itertools.product(
+                range(len(input_names)), visible_outputs
+            )
+            output_output_candidates = itertools.combinations(visible_outputs, 2)
+            return (
+                matching_pairs(
+                    input_names,
+                    output_names,
+                    input_output_candidates,
+                ),
+                matching_pairs(
+                    output_names,
+                    output_names,
+                    output_output_candidates,
+                ),
+            )
+
+        # Walkthrough for one input and three lowered outputs:
+        #   input_names=("arg0_1",)
+        #   output_names=("arg0_1", "arg0_1", "buf0")
+        #
+        # Let's assume : original alias says there should be no alias.
+        # The first iteration finds input/output ((0, 0), (0, 1)) and
+        # output/output ((0, 1)). Cloning output 0 changes its name to "buf1".
+        # The second iteration sees only remaining input/output ((0, 1),), so it clones
+        # output 1 to "buf2". The third iteration finds no added pairs and exits.
+        # If an original pair is ever absent from the current pairs, cloning
+        # cannot recreate it, so report the lost relationship instead.
+        while True:
+            current_input_output, current_output_output = current_aliases()
+            missing_input_output = original_input_output - current_input_output
+            missing_output_output = original_output_output - current_output_output
+            if missing_input_output or missing_output_output:
+                # A clone can split storage, but it cannot recreate a lost alias.
+                raise AssertionError(
+                    "Inductor removed output alias relationships: "
+                    f"input/output={sorted(missing_input_output)}, "
+                    f"output/output={sorted(missing_output_output)}"
+                )
+
+            added_input_output = current_input_output - original_input_output
+            added_output_output = current_output_output - original_output_output
+            if not added_input_output and not added_output_output:
+                return
+
+            # Clone the output from one current-only relationship, then recompute.
+            _, output_idx = next(iter(added_input_output or added_output_output))
+            value = self.graph_outputs[output_idx]
+            if not isinstance(value, ir.IRNode) or not value.has_tensor_output():
+                raise AssertionError(
+                    f"Expected tensor output at index {output_idx}, got {type(value)}"
+                )
+            self.graph_outputs[output_idx] = ir.ExternKernel.copy_input(value)
 
     def finalize(self) -> None:
         for buf in self.buffers:
