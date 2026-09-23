@@ -940,6 +940,28 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 if shape_env is not None:
                     self.assertEqual(shape_env.guards, [])
 
+    @skipIfNoCuteDSL
+    def test_paired_fragment_main_store_preserves_reduction_configs(self):
+        from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
+            grouped_reduce_supports_config,
+        )
+        from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
+            GroupedMainStore,
+        )
+        from torch._vendor.quack.gemm_config import get_all_configs
+
+        configs = get_all_configs()
+        for contraction, group in itertools.product((2, 4), (4, 8, 16, 32, 64)):
+            main = GroupedMainStore("main", contraction)
+            paired_main = GroupedMainStore("main", contraction, min_fragment_n=group)
+            for config in configs:
+                self.assertEqual(
+                    paired_main.supports_config(config),
+                    main.supports_config(config)
+                    and grouped_reduce_supports_config(config, 1, group),
+                    msg=f"{contraction=}, {group=}, {config=}",
+                )
+
     @parametrize("chunked", (False, True))
     def test_nested_tensorssa_contraction_reduction_analysis(self, chunked):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -7007,7 +7029,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         n = 128
 
         def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
+            x = acc.float().view(m, -1, group).square()
             scale = x.sum(-1, keepdim=True)
             return (x * scale.reciprocal()).view(m, n)
 
@@ -9687,6 +9709,83 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             self.assertMxScaleCode(code)
         else:
             self.assertNvfp4ScaleCode(code)
+
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
+    def test_mm_paired_fragment_rejects_cross_row_group(self, device):
+        def epilogue(acc):
+            pairs = acc.float().view(4, 48, 2)
+            hidden = pairs[..., 0] + pairs[..., 1]
+            # Total numel permits this view, but a group straddles physical rows.
+            grouped = hidden.reshape(2, 96).reshape(2, 3, 32)
+            return (grouped * grouped.sum(-1, keepdim=True)).reshape(4, 48)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK", "config": {"tile_n": 64}},
+            )
+
+        a = self.makeTensor(4, 128, device=device)
+        b = self.makeTensor(128, 96, device=device)
+        with self.assertRaisesRegex(InductorError, "no .*GemmConfig"):
+            torch.compile(fn, fullgraph=True)(a, b)
+
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
+    @parametrize("chunked", (False, True))
+    @parametrize("store_partials", (False, True))
+    def test_mm_paired_fragment_sum_optional_store(
+        self, device, chunked, store_partials
+    ):
+        k, hidden, group = 128, 160, 32
+
+        def epilogue(acc):
+            m = acc.shape[0]
+            if chunked:
+                left, right = acc.chunk(2, dim=-1)
+            else:
+                pairs = acc.reshape(m, hidden, 2)
+                left, right = pairs[..., 0], pairs[..., 1]
+            values = (left + right).reshape(m, -1, group).tanh()
+            # Pointwise work after the view must not require returning the partial.
+            # SUM detects double-folding that an idempotent MAX would hide.
+            partial = values.sum(-1, keepdim=True)
+            main = (values * partial).reshape(m, hidden)
+            return (main, partial.squeeze(-1)) if store_partials else (main,)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue(acc.float()),
+                kernel_options={"backend": "QUACK", "tuned": chunked},
+            )
+
+        weight = self.makeTensor(2 * hidden, k, device=device)
+        b = weight.t() if chunked else weight.t().contiguous()
+        compiled = torch.compile(fn, fullgraph=True)
+        with self.limitEpiModAutotune():
+            for m in (129, 145):
+                a = self.makeTensor(m, k, device=device)
+                torch._dynamo.mark_dynamic(a, 0, min=1, max=256)
+                if m == 129:
+                    actual, (code,) = run_and_get_code(compiled, a, b)
+                    self.assertIn("fragment_reduced=True", code)
+                    self.assertNotIn("extern_kernels.mm", code)
+                    self.assertEqual("stores=True" in code, store_partials)
+                else:
+                    actual = compiled(a, b)
+                expected = epilogue(a.double() @ b.double())
+                eager = epilogue((a @ b).float())
+                for result, reference, eager_result in zip(
+                    actual, expected, eager, strict=True
+                ):
+                    self.assertTrue(result.isfinite().all())
+                    self.assertMatchesLowPrecisionEager(
+                        result, eager_result, reference, k
+                    )
+                    self.assertEqual(result.double(), reference, atol=1e-5, rtol=5e-4)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize(
