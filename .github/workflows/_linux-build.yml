@@ -39,6 +39,8 @@ on:
         required: false
         type: string
         default: ""
+        description: |
+          List of ROCm architectures CI build should target.
       runner_prefix:
         required: false
         default: ""
