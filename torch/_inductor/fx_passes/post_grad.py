@@ -22,7 +22,12 @@ from torch._inductor.custom_graph_pass import (
 )
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
-from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch._prims_common import (
+    is_boolean_dtype,
+    is_expandable_to,
+    is_integer_dtype,
+    make_contiguous_strides_for,
+)
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
@@ -112,7 +117,9 @@ def _is_quack_symmetric_mm(match: Match) -> bool:
         and not config.fx_wrapper
         and ensure_cute_available()
         and x.dtype == torch.bfloat16
-        and x.is_contiguous()
+        and statically_known_true(
+            sym_eq(x.stride(), make_contiguous_strides_for(x.shape))
+        )
         and statically_known_true(x.shape[-2] >= _QUACK_SYMMETRIC_MIN_M)
         and statically_known_true(x.shape[-1] >= x.shape[-2])
         and statically_known_true(x.shape[-2] % _QUACK_SYMMETRIC_ALIGNMENT == 0)
