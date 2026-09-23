@@ -104,7 +104,7 @@ def get_patches():
 @requires_accelerator_dist_backend()
 # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
+class _ComputeCommReorderingBase(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
 
@@ -130,6 +130,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         # works around issue with skipif<2 and workers with unpredictable #s gpu
         return 2
 
+
+class TestComputeCommReorderingMultiProc(_ComputeCommReorderingBase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_patches())
     def test_sink_waits(self):
@@ -622,7 +624,7 @@ def get_bucket_patches(compute_multiplier=1.0):
     }
 
 
-class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
+class TestComputeCommReorderingBucketing(_ComputeCommReorderingBase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_basic_all_gather_bucketing(self):
@@ -1542,7 +1544,7 @@ def run_and_get_manual_aten_graph(
     return out, li[0]
 
 
-class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
+class TestManualOverlapBucketing(_ComputeCommReorderingBase):
     """
     Tests for manual overlap scheduling and subgraph utilities.
     """

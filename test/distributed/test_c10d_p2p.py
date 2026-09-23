@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import run_tests
 COUNTS = (0, 4)
 
 
-class P2PHelpers:
+class P2PTestMixin:
     def _peers(self):
         next_rank = (self.rank + 1) % self.world_size
         previous_rank = (self.rank - 1) % self.world_size
@@ -47,44 +47,8 @@ class P2PHelpers:
             dist.send(send, next_rank)
         self.assertEqual(recv, self._tensor(count, dtype, previous_rank))
 
-    def _test_batch_isend_irecv(self, dtype, recv_first, num_ops):
-        next_rank, previous_rank = self._peers()
-        sends = [self._tensor(1, dtype, self.rank + i * 100) for i in range(num_ops)]
-        recvs = [torch.empty_like(sends[0]) for _ in range(num_ops)]
-        ops = []
-        for send, recv in zip(sends, recvs):
-            pair = [
-                dist.P2POp(dist.isend, send, next_rank),
-                dist.P2POp(dist.irecv, recv, previous_rank),
-            ]
-            ops.extend(reversed(pair) if recv_first else pair)
-        works = dist.batch_isend_irecv(ops)
-        for work in works:
-            work.wait()
-        for i, recv in enumerate(recvs):
-            self.assertEqual(recv, self._tensor(1, dtype, previous_rank + i * 100))
 
-
-class AbstractP2PTest(P2PHelpers, C10dBackendTest):
-    def test_async_work_lifetime(self):
-        if not self.supports_dropped_p2p_work:
-            self.skipTest(f"{self.backend_name} does not retain dropped P2P work")
-        self._init_pg()
-        next_rank, previous_rank = self._peers()
-        send = self._tensor(4, torch.float32, self.rank)
-        recv = torch.empty_like(send)
-        if self.rank % 2 == 0:
-            send_work = dist.isend(send, next_rank)
-            recv_work = dist.irecv(recv, previous_rank)
-        else:
-            recv_work = dist.irecv(recv, previous_rank)
-            send_work = dist.isend(send, next_rank)
-        del send_work
-        recv_work.wait()
-        self.assertEqual(recv, self._tensor(4, torch.float32, previous_rank))
-
-
-class AbstractContinuousP2PTest(P2PHelpers, C10dBackendTestContinuous):
+class AbstractP2PTest(P2PTestMixin, C10dBackendTestContinuous):
     def test_send_recv(self):
         for count in COUNTS:
             for dtype in self.dtypes:
@@ -111,6 +75,23 @@ class AbstractContinuousP2PTest(P2PHelpers, C10dBackendTestContinuous):
                     for work in works:
                         work.wait()
                     self.assertEqual(recv, self._tensor(count, dtype, previous_rank))
+
+    def _test_batch_isend_irecv(self, dtype, recv_first, num_ops):
+        next_rank, previous_rank = self._peers()
+        sends = [self._tensor(1, dtype, self.rank + i * 100) for i in range(num_ops)]
+        recvs = [torch.empty_like(sends[0]) for _ in range(num_ops)]
+        ops = []
+        for send, recv in zip(sends, recvs):
+            pair = [
+                dist.P2POp(dist.isend, send, next_rank),
+                dist.P2POp(dist.irecv, recv, previous_rank),
+            ]
+            ops.extend(reversed(pair) if recv_first else pair)
+        works = dist.batch_isend_irecv(ops)
+        for work in works:
+            work.wait()
+        for i, recv in enumerate(recvs):
+            self.assertEqual(recv, self._tensor(1, dtype, previous_rank + i * 100))
 
     def test_batch_isend_irecv(self):
         for dtype in self.dtypes:
@@ -150,16 +131,34 @@ class AbstractContinuousP2PTest(P2PHelpers, C10dBackendTestContinuous):
             )
 
 
-instantiate_backend_tests(globals(), "P2P", AbstractP2PTest, C10D_BACKENDS)
+class AbstractIsolatedP2PTest(P2PTestMixin, C10dBackendTest):
+    """Dropped-work lifetime test that needs fresh rank processes."""
+
+    def test_async_work_lifetime(self):
+        if not self.supports_dropped_p2p_work:
+            self.skipTest(f"{self.backend_name} does not retain dropped P2P work")
+        self._init_pg()
+        next_rank, previous_rank = self._peers()
+        send = self._tensor(4, torch.float32, self.rank)
+        recv = torch.empty_like(send)
+        if self.rank % 2 == 0:
+            send_work = dist.isend(send, next_rank)
+            recv_work = dist.irecv(recv, previous_rank)
+        else:
+            recv_work = dist.irecv(recv, previous_rank)
+            send_work = dist.isend(send, next_rank)
+        del send_work
+        recv_work.wait()
+        self.assertEqual(recv, self._tensor(4, torch.float32, previous_rank))
 
 
 instantiate_backend_tests(
-    globals(),
-    "ContinuousP2P",
-    AbstractContinuousP2PTest,
-    C10D_BACKENDS,
-    harness=MultiProcContinuousTest,
+    globals(), "P2P", AbstractP2PTest, C10D_BACKENDS, harness=MultiProcContinuousTest
 )
+instantiate_backend_tests(
+    globals(), "IsolatedP2P", AbstractIsolatedP2PTest, C10D_BACKENDS
+)
+
 
 if __name__ == "__main__":
     run_tests()

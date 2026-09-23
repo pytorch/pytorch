@@ -2289,6 +2289,64 @@ class TestMetaKernelConv(TestCase):
 
 @instantiate_parametrized_tests
 class TestMetaKernelRegistrations(TestCase):
+    @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
+    def test_arange_meta_barebones_unsigned(self, dtype):
+        result = torch.arange(256, dtype=dtype, device="meta")
+        self.assertEqual(result.shape, (256,))
+
+    @parametrize("dtype", [torch.int64, torch.float32])
+    def test_arange_symbolic_fake_tensor(self, dtype):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            size = shape_env.create_unbacked_symint()
+            results = (
+                torch.arange(size, dtype=dtype),
+                torch.arange(2, size + 2, dtype=dtype),
+                torch.arange(0, 2 * size, 2, dtype=dtype),
+                torch.arange(size, 0, -1, dtype=dtype),
+            )
+
+        for result in results:
+            self.assertEqual(result.shape, (size,))
+
+    @parametrize("backed", [False, True])
+    def test_arange_symbolic_float_arguments(self, backed):
+        import math
+
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        if backed:
+            source = ConstantSource("size")
+            symbol = shape_env.create_symbol(
+                8,
+                source=source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            size = shape_env.create_symintnode(symbol, hint=8, source=source)
+        else:
+            size = shape_env.create_unbacked_symint()
+
+        with FakeTensorMode(shape_env=shape_env):
+            results = (
+                torch.arange(0.5, size),
+                torch.arange(0, size, 0.5),
+                torch.arange(size * 0.5),
+            )
+
+        expected_sizes = (
+            math.ceil((size - 0.5) / 1.0),
+            math.ceil(size / 0.5),
+            math.ceil((size * 0.5) / 1.0),
+        )
+        for result, expected_size in zip(results, expected_sizes):
+            self.assertEqual(result.shape, (expected_size,))
+
     @parametrize("shift", ["lshift", "rshift"])
     @parametrize("other_kind", ["Scalar", "Tensor"])
     def test_shift_out_symbolic_fake_tensor(self, shift, other_kind):
