@@ -271,22 +271,6 @@ class StaticallyLaunchedTritonKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-    def reload_cubin_from_raw(self, filepath: str) -> str:
-        """
-        If the cubin file triton generated gets deleted under us, we can
-        reload it from the raw cubin file.
-        """
-        if not os.path.exists(filepath):
-            if self.cubin_raw is None:
-                raise MissingTritonKernelError(
-                    f"Triton kernel binary not found at {filepath}"
-                )
-            from torch._inductor.codecache import write_atomic
-
-            write_atomic(filepath, self.cubin_raw, make_dirs=True)
-        self.cubin_path = filepath
-        return self.cubin_path
-
     def retain_cubin_from_path(self) -> None:
         """Retain an existing cache artifact for later device loads."""
         if self.cubin_raw is not None:
