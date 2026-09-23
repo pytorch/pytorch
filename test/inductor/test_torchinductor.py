@@ -11775,6 +11775,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [torch.randn(64, 64)])
 
+    def test_copy_strided_keeps_the_requested_strides(self):
+        # The last two axes of a 3-d tensor transposed: sorting the strides gives
+        # the fill order (1, 2, 0), and the stride order is its inverse (2, 0, 1).
+        def fn(x):
+            y = torch.ops.prims.copy_strided(x * 2.0, x.stride())
+            return (y * y.flip(2)).sum(-1)
+
+        x = torch.rand(4, 5, 6).mT
+        self.common(fn, (x,))
+        if not is_dynamic_shape_enabled():
+            _, code = run_and_get_code(torch.compile(fn), x.to(self.device))
+            FileCheck().check_regex(
+                r"empty_strided_\w+\(\(4, 6, 5\), \(30, 1, 6\)"
+            ).run(code[0])
+
     def test_as_strided(self):
         def fn(x):
             return (

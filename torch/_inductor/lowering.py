@@ -4652,8 +4652,7 @@ def new_empty_strided(
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
     stride = V.graph.sizevars.guarding_hints_or_throw(stride)
-    stride_order = sorted(range(len(stride)), key=stride.__getitem__)
-    return ir.ExternKernel.require_stride_order(x, stride_order)
+    return ir.ExternKernel.require_stride_order(x, ir.get_stride_order(stride))
 
 
 @register_lowering([torch.full, aten.full])
