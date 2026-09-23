@@ -616,24 +616,17 @@ def sample_inputs_linalg_cholesky_inverse(
     test_cases = [torch.linalg.cholesky(a, upper=False) for a in inputs]
     if op_info.name == "cholesky_inverse":
         # Regression sample for https://github.com/pytorch/pytorch/issues/196682.
-        # The default singular values above are tightly clustered around 1, so
-        # M @ M.mH is near identity and its Cholesky factor nearly commutes with
-        # its inverse. This factor makes that noncommutativity visible; uniformly
-        # rescaling an existing factor would not change the relative discrepancy.
+        # Distinct singular values give enough spectral spread to expose the
+        # incorrect matrix order in the forward derivative.
         # Keep it specific to cholesky_inverse: cholesky_solve also reuses this
         # generator, but its factor derivative fails for non-diagonal inputs.
-        nontrivial_factor = torch.tensor(
-            [[2.0, 0.0, 0.0], [0.5, 1.5, 0.0], [-0.25, 0.75, 1.25]],
+        matrix = make_fullrank_matrices_with_distinct_singular_values(
+            S,
+            S,
             dtype=dtype,
             device=device,
         )
-        if dtype.is_complex:
-            nontrivial_factor = nontrivial_factor + 1j * torch.tensor(
-                [[0.0, 0.0, 0.0], [0.25, 0.0, 0.0], [-0.5, 0.125, 0.0]],
-                dtype=dtype,
-                device=device,
-            )
-        test_cases.append(nontrivial_factor)
+        test_cases.append(torch.linalg.cholesky(matrix @ matrix.mH, upper=False))
     for l in test_cases:
         # generated lower-triangular samples
         l.requires_grad = requires_grad
