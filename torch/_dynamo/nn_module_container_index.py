@@ -294,11 +294,12 @@ def make_cache_locator(
                 getitem = dict.__getitem__
             else:
                 return None
+            index: Any = source.index
             try:
-                value = getitem(value, source.index)
+                value = getitem(value, index)
             except (IndexError, KeyError, TypeError):
                 return None
-            accessors.append(GetItemAccessor(container_type, source.index))
+            accessors.append(GetItemAccessor(container_type, index))
             continue
         return None
 
