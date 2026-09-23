@@ -345,6 +345,74 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertEqual(cc.frame_count, 1)
         self.assertTrue(failure_reason is None)
 
+    @torch._functorch.config.patch(view_replay_for_aliased_outputs=True)
+    def test_multi_output_views_of_input_individual_backward(self):
+        def check(fn, x, backend, expected_grad_fn):
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            outs = opt_fn(x)
+            self.assertTrue(
+                all("CompiledFunctionBackward" not in str(out.grad_fn) for out in outs)
+            )
+            self.assertTrue(all(expected_grad_fn in str(out.grad_fn) for out in outs))
+            self.assertTrue(all(out.grad_fn is outs[0].grad_fn for out in outs))
+            for out in outs:
+                out.sum().backward()
+            self.assertEqual(x.grad, torch.ones_like(x))
+
+        def check_suffix(backend):
+            def fn(x):
+                return tuple(out.unsqueeze(i % 2) for i, out in enumerate(x.unbind(0)))
+
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            opt_fn(torch.randn(5, 3, requires_grad=True))
+            x = torch.randn(5, 3, requires_grad=True)
+            outs = opt_fn(x)
+            unbind_nodes = [out.grad_fn.next_functions[0][0] for out in outs]
+            self.assertTrue(all(node is unbind_nodes[0] for node in unbind_nodes))
+            for out in outs:
+                out.sum().backward()
+            self.assertEqual(x.grad, torch.ones_like(x))
+
+        for backend in ("aot_eager", "inductor"):
+            check(
+                lambda x: torch.unbind(x, 0),
+                torch.randn(5, requires_grad=True),
+                backend,
+                "UnbindBackward",
+            )
+            check(
+                lambda x: torch.split(x, 2, 0),
+                torch.randn(6, requires_grad=True),
+                backend,
+                "SplitBackward",
+            )
+            check_suffix(backend)
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    @torch._functorch.config.patch(view_replay_for_aliased_outputs=True)
+    def test_multi_output_view_symbolic_suffix_preserves_lazy_bits(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(x, shape):
+            views = x.unbind(0)
+            neg_views = tuple(torch._neg_view(out.view(shape)) for out in views)
+            conj_views = tuple(out.view(shape).conj() for out in views)
+            return *neg_views, *conj_views
+
+        x = torch.randn(3, 2, 2, dtype=torch.complex64, requires_grad=True)
+        outs = fn(x, (4,))
+        neg_outs, conj_outs = outs[:3], outs[3:]
+
+        self.assertTrue(all(out.is_neg() for out in neg_outs))
+        self.assertTrue(all(out.is_conj() for out in conj_outs))
+        self.assertEqual(neg_outs, tuple(-out.view(4) for out in x.unbind(0)))
+        self.assertEqual(conj_outs, tuple(out.view(4).conj() for out in x.unbind(0)))
+
+        for out in neg_outs:
+            out.real.sum().backward()
+        for out in conj_outs:
+            out.imag.sum().backward()
+        self.assertEqual(x.grad, torch.full_like(x, -1 - 1j))
+
     @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_double_backward_with_compile(self):
         # Remove this test after we get double backward to actually work

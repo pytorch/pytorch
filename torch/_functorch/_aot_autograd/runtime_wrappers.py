@@ -17,7 +17,7 @@ import warnings
 import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import wraps
 from typing import Any
 
@@ -67,7 +67,7 @@ from .descriptors import (
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
-from .functional_utils import gen_alias_from_base
+from .functional_utils import gen_alias_from_base, gen_aliases_from_multi_output_view
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -238,6 +238,36 @@ def _identity(x: Any) -> Any:
     return x
 
 
+def _multi_output_view_was_invalidated(
+    orig_inputs: Any,
+    base_idx: int,
+    invalidating_input_indices: Sequence[int],
+) -> bool:
+    base = orig_inputs[base_idx]
+    return any(
+        torch._C._autograd._is_same_version_counter(base, orig_inputs[idx])
+        for idx in invalidating_input_indices
+    )
+
+
+def _multi_output_views_were_invalidated(
+    orig_inputs: dict[int, Tensor],
+    base_idx: int,
+    invalidating_input_indices: Sequence[Sequence[int]],
+) -> tuple[bool, ...]:
+    return tuple(
+        _multi_output_view_was_invalidated(orig_inputs, base_idx, indices)
+        for indices in invalidating_input_indices
+    )
+
+
+_MULTI_OUTPUT_VIEW_CREATION_ERROR = (
+    "Output of a function that returns multiple views is a view and its base or "
+    "another view of its base has been modified inplace. "
+    "Such functions do not allow the output views to be modified inplace."
+)
+
+
 class AliasOfInputHandler:
     def __init__(
         self,
@@ -250,8 +280,22 @@ class AliasOfInputHandler:
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
+        self.is_conj = info.is_conj
+        self.is_neg = info.is_neg
+        self.is_view = info.is_view
+        self.view_replay_grad_enabled = info.view_replay_grad_enabled
+        self.is_multi_output_view = info.is_multi_output_view
+        self.replay_from_detached_base = info.replay_from_detached_base
+        self.replay_detached_view_meta_sequence = (
+            info.replay_detached_view_meta_sequence
+        )
+        self.multi_output_view_invalidating_input_indices = (
+            info.multi_output_view_invalidating_input_indices
+        )
         self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
+        self.multi_output_view_group = info.multi_output_view_group
+        self.multi_output_view_index = info.multi_output_view_index
 
     def __call__(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
@@ -263,6 +307,28 @@ class AliasOfInputHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
+            target_is_conj=self.is_conj,
+            target_is_neg=self.is_neg,
+            target_is_multi_output_view=(
+                self.is_multi_output_view
+                and (
+                    not self.replay_from_detached_base
+                    or self.replay_detached_view_meta_sequence
+                )
+            ),
+            target_multi_output_view_was_invalidated=(
+                _multi_output_view_was_invalidated(
+                    orig_inputs,
+                    self.base_idx,
+                    self.multi_output_view_invalidating_input_indices,
+                )
+            ),
+            target_view_meta_grad_enabled=self.view_replay_grad_enabled,
+            replay_from_detached_base=self.replay_from_detached_base,
+            replay_detached_view_meta_sequence=(
+                self.replay_detached_view_meta_sequence
+            ),
+            target_is_view=self.is_view,
         )
 
 
@@ -307,6 +373,8 @@ class AliasOfIntermediateHandler:
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
+        self.is_conj = info.is_conj
+        self.is_neg = info.is_neg
         self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
@@ -320,6 +388,8 @@ class AliasOfIntermediateHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
+            target_is_conj=self.is_conj,
+            target_is_neg=self.is_neg,
         )
 
 
@@ -350,6 +420,89 @@ def make_output_handler(
 ):
     handler_type = _HANDLER_MAP[info.output_type]
     return handler_type(info, runtime_metadata, trace_joint)
+
+
+_OutputHandler = (
+    NoopAliasHandler | AliasOfInputHandler | IsInputHandler | AliasOfIntermediateHandler
+)
+
+
+@dataclass(frozen=True)
+class _MultiOutputViewGroupInfo:
+    member_indices: tuple[int, ...]
+    input_handlers: tuple[AliasOfInputHandler, ...]
+    base_idx: int
+    output_indices: tuple[int, ...]
+    view_meta_indices: tuple[int, ...]
+    is_conjs: tuple[bool, ...]
+    is_negs: tuple[bool, ...]
+    view_replay_grad_enabled: tuple[tuple[bool | None, ...], ...]
+    invalidating_input_indices: tuple[tuple[int, ...], ...]
+    replay_views: bool
+    member_positions: dict[int, int]
+
+
+def _multi_output_view_group_info(
+    output_handlers: Sequence[_OutputHandler], member_indices: Sequence[int]
+) -> _MultiOutputViewGroupInfo:
+    member_handlers = [output_handlers[i] for i in member_indices]
+    if not all(isinstance(h, AliasOfInputHandler) for h in member_handlers):
+        raise AssertionError("multi-output view group must contain input aliases")
+    input_handlers = typing.cast(list[AliasOfInputHandler], member_handlers)
+    base_idx = input_handlers[0].base_idx
+    if not all(h.base_idx == base_idx for h in input_handlers):
+        raise AssertionError("multi-output view group must share an input base")
+    output_indices = tuple(h.multi_output_view_index for h in input_handlers)
+    if not all(isinstance(idx, int) for idx in output_indices):
+        raise AssertionError("multi-output view group must have output indices")
+    view_meta_indices = []
+    for handler, output_index in zip(input_handlers, output_indices, strict=True):
+        if handler.view_meta_sequence is None:
+            # make_runtime_safe() drops sequences containing symbolic values.
+            # ViewFunc replay does not need this index; -1 prevents an unsafe
+            # ViewMeta attempt if mixed metadata ever reaches this path.
+            view_meta_indices.append(-1)
+            continue
+        multi_output_indices = [
+            i
+            for i, view_meta in enumerate(handler.view_meta_sequence.sequence)
+            if view_meta.is_multi_output
+        ]
+        if not multi_output_indices:
+            raise AssertionError(
+                "multi-output view group must contain a multi-output ViewMeta"
+            )
+        view_meta_index = multi_output_indices[-1]
+        if (
+            int(handler.view_meta_sequence.sequence[view_meta_index].out_index)
+            != output_index
+        ):
+            raise AssertionError(
+                "multi-output ViewMeta index must match the output index"
+            )
+        view_meta_indices.append(view_meta_index)
+    replay_views = input_handlers[0].replay_views
+    if not all(h.replay_views == replay_views for h in input_handlers):
+        raise AssertionError("multi-output view group must share replay config")
+    return _MultiOutputViewGroupInfo(
+        member_indices=tuple(member_indices),
+        input_handlers=tuple(input_handlers),
+        base_idx=base_idx,
+        output_indices=typing.cast(tuple[int, ...], output_indices),
+        view_meta_indices=tuple(view_meta_indices),
+        is_conjs=tuple(h.is_conj for h in input_handlers),
+        is_negs=tuple(h.is_neg for h in input_handlers),
+        view_replay_grad_enabled=tuple(
+            h.view_replay_grad_enabled for h in input_handlers
+        ),
+        invalidating_input_indices=tuple(
+            h.multi_output_view_invalidating_input_indices for h in input_handlers
+        ),
+        replay_views=replay_views,
+        member_positions={
+            member_idx: position for position, member_idx in enumerate(member_indices)
+        },
+    )
 
 
 # _dynamo_propagated_dynamic_indices: A guardless attribute for cross-graph-break
@@ -642,7 +795,16 @@ class _RuntimeForwardEpilogue:
                         f"expected info.base_idx to be int, got {type(info.base_idx)}"
                     )
                 epilogue_args_idx.append(info.base_idx)
-        self.epilogue_args_idx = tuple(epilogue_args_idx)
+                epilogue_args_idx.extend(
+                    info.multi_output_view_invalidating_input_indices
+                )
+        for (
+            base_idx,
+            invalidating_indices,
+        ) in self.runtime_metadata.multi_output_view_creation_error_conditions:
+            epilogue_args_idx.append(base_idx)
+            epilogue_args_idx.extend(invalidating_indices)
+        self.epilogue_args_idx = tuple(dict.fromkeys(epilogue_args_idx))
 
         if config.unlift_effect_tokens:
             if len(self.runtime_metadata.tokens) != 0:
@@ -663,7 +825,9 @@ class _RuntimeForwardEpilogue:
     # code from _create_runtime_wrapper(). Keep both in sync.
     # See Note [RuntimeWrapper codegen specification methods]
     def capture_orig_inputs(self, args: list[Any]) -> dict[int, Tensor]:
-        return {i: typing.cast(Tensor, args[i]) for i in self.epilogue_args_idx}
+        orig_inputs = {i: typing.cast(Tensor, args[i]) for i in self.epilogue_args_idx}
+        self._check_multi_output_view_creation_errors(orig_inputs)
+        return orig_inputs
 
     # WARNING: this is a reference implementation; the hot path uses codegen'd
     # code from _create_runtime_wrapper(). Keep both in sync.
@@ -694,6 +858,18 @@ class _RuntimeForwardEpilogue:
         if self.runtime_metadata.grad_enabled_mutation is not None:
             torch._C._set_grad_enabled(self.runtime_metadata.grad_enabled_mutation)
         return ret_outs
+
+    def _check_multi_output_view_creation_errors(
+        self, orig_inputs: dict[int, Tensor]
+    ) -> None:
+        for (
+            base_idx,
+            invalidating_indices,
+        ) in self.runtime_metadata.multi_output_view_creation_error_conditions:
+            if _multi_output_view_was_invalidated(
+                orig_inputs, base_idx, invalidating_indices
+            ):
+                raise RuntimeError(_MULTI_OUTPUT_VIEW_CREATION_ERROR)
 
     def _validate_compiled_output_arity(self, all_outs: list[Any]) -> None:
         expected_outs = (
@@ -816,10 +992,52 @@ class _RuntimeForwardEpilogue:
             raise AssertionError(
                 f"expected {expect_num_outputs} fw_outs, got {len(fw_outs)}"
             )
-        return [
-            handler(orig_inputs, fw_outs, out)
-            for out, handler in zip(fw_outs, self.output_handlers)
-        ]
+        replayed_groups: dict[int, dict[int, Tensor]] = {}
+        ret_outs = []
+        for i, (out, handler) in enumerate(zip(fw_outs, self.output_handlers)):
+            if (
+                isinstance(handler, AliasOfInputHandler)
+                and handler.multi_output_view_group is not None
+            ):
+                group = handler.multi_output_view_group
+                if group not in replayed_groups:
+                    member_indices = self.runtime_metadata.multi_output_view_groups[
+                        group
+                    ]
+                    group_info = _multi_output_view_group_info(
+                        self.output_handlers, member_indices
+                    )
+                    replayed = gen_aliases_from_multi_output_view(
+                        orig_inputs[group_info.base_idx],
+                        [
+                            h.unwrap_out(fw_outs[j])
+                            for j, h in zip(
+                                group_info.member_indices,
+                                group_info.input_handlers,
+                                strict=True,
+                            )
+                        ],
+                        [h.requires_grad for h in group_info.input_handlers],
+                        group_info.is_conjs,
+                        group_info.is_negs,
+                        group_info.view_replay_grad_enabled,
+                        _multi_output_views_were_invalidated(
+                            orig_inputs,
+                            group_info.base_idx,
+                            group_info.invalidating_input_indices,
+                        ),
+                        [h.view_meta_sequence for h in group_info.input_handlers],
+                        group_info.output_indices,
+                        group_info.view_meta_indices,
+                        replay_views=group_info.replay_views,
+                    )
+                    replayed_groups[group] = dict(
+                        zip(group_info.member_indices, replayed, strict=True)
+                    )
+                ret_outs.append(replayed_groups[group][i])
+            else:
+                ret_outs.append(handler(orig_inputs, fw_outs, out))
+        return ret_outs
 
 
 def _codegen_capture_orig_inputs(
@@ -1010,16 +1228,71 @@ def _create_runtime_wrapper(
         )
         buf.bind(
             gen_alias_from_base=gen_alias_from_base,
+            gen_aliases_from_multi_output_view=gen_aliases_from_multi_output_view,
+            _multi_output_view_was_invalidated=(_multi_output_view_was_invalidated),
+            _multi_output_views_were_invalidated=(_multi_output_views_were_invalidated),
             _unwrap_tensoralias=_unwrap_tensoralias,
         )
+        multi_output_group_infos = {
+            group: _multi_output_view_group_info(output_handlers, member_indices)
+            for group, member_indices in runtime_metadata.multi_output_view_groups.items()
+        }
         with buf.indent():
             buf.writeline("ret_outs = []")
+            emitted_multi_output_groups: set[int] = set()
             for i, handler in enumerate(output_handlers):
                 if isinstance(handler, NoopAliasHandler):
                     buf.writeline(f"ret_outs.append(fw_outs[{i}])")
                 elif isinstance(handler, IsInputHandler):
                     buf.writeline(f"ret_outs.append(orig_inputs[{handler.base_idx}])")
                 elif isinstance(handler, AliasOfInputHandler):
+                    if handler.multi_output_view_group is not None:
+                        group = handler.multi_output_view_group
+                        group_info = multi_output_group_infos[group]
+                        if group not in emitted_multi_output_groups:
+                            target_exprs = [
+                                (
+                                    f"_unwrap_tensoralias(fw_outs[{j}])"
+                                    if trace_joint
+                                    else f"fw_outs[{j}]"
+                                )
+                                for j in group_info.member_indices
+                            ]
+                            targets_expr = (
+                                f"({', '.join(target_exprs)}"
+                                f"{',' if len(target_exprs) == 1 else ''})"
+                            )
+                            requires_grads = tuple(
+                                h.requires_grad for h in group_info.input_handlers
+                            )
+                            view_meta_sequences = tuple(
+                                h.view_meta_sequence for h in group_info.input_handlers
+                            )
+                            vms_name = buf.bind_value(
+                                "_multi_output_vms", view_meta_sequences
+                            )
+                            buf.writeline(
+                                f"multi_output_view_group_{group} = "
+                                f"gen_aliases_from_multi_output_view("
+                                f"orig_inputs[{group_info.base_idx}], {targets_expr}, "
+                                f"{requires_grads!r}, {group_info.is_conjs!r}, "
+                                f"{group_info.is_negs!r}, "
+                                f"{group_info.view_replay_grad_enabled!r}, "
+                                f"_multi_output_views_were_invalidated("
+                                f"orig_inputs, {group_info.base_idx}, "
+                                f"{group_info.invalidating_input_indices!r}), "
+                                f"{vms_name}, "
+                                f"{group_info.output_indices!r}, "
+                                f"{group_info.view_meta_indices!r}, "
+                                f"replay_views={group_info.replay_views!r})"
+                            )
+                            emitted_multi_output_groups.add(group)
+                        group_output_idx = group_info.member_positions[i]
+                        buf.writeline(
+                            f"ret_outs.append(multi_output_view_group_{group}"
+                            f"[{group_output_idx}])"
+                        )
+                        continue
                     vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
                     out_expr = (
                         f"_unwrap_tensoralias(fw_outs[{i}])"
@@ -1030,7 +1303,21 @@ def _create_runtime_wrapper(
                         f"ret_outs.append(gen_alias_from_base("
                         f"orig_inputs[{handler.base_idx}], {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
+                        f"replay_views={handler.replay_views!r}, "
+                        f"target_is_conj={handler.is_conj!r}, "
+                        f"target_is_neg={handler.is_neg!r}, "
+                        f"target_is_multi_output_view="
+                        f"{(handler.is_multi_output_view and (not handler.replay_from_detached_base or handler.replay_detached_view_meta_sequence))!r}, "
+                        f"target_multi_output_view_was_invalidated="
+                        f"_multi_output_view_was_invalidated("
+                        f"orig_inputs, {handler.base_idx}, "
+                        f"{handler.multi_output_view_invalidating_input_indices!r}), "
+                        f"target_view_meta_grad_enabled="
+                        f"{handler.view_replay_grad_enabled!r}, "
+                        f"replay_from_detached_base={handler.replay_from_detached_base!r}, "
+                        f"replay_detached_view_meta_sequence="
+                        f"{handler.replay_detached_view_meta_sequence!r}, "
+                        f"target_is_view={handler.is_view!r}))"
                     )
                 elif isinstance(handler, AliasOfIntermediateHandler):
                     vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
@@ -1051,7 +1338,9 @@ def _create_runtime_wrapper(
                         f"ret_outs.append(gen_alias_from_base("
                         f"{base_expr}, {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
+                        f"replay_views={handler.replay_views!r}, "
+                        f"target_is_conj={handler.is_conj!r}, "
+                        f"target_is_neg={handler.is_neg!r}))"
                     )
                 else:
                     raise AssertionError(
@@ -1169,6 +1458,24 @@ def _create_runtime_wrapper(
     buf.bind(torch=torch)
 
     _codegen_capture_orig_inputs(buf, epilogue_args_idx)
+    if runtime_metadata.multi_output_view_creation_error_conditions:
+        buf.add_global(
+            "_multi_output_view_was_invalidated",
+            _multi_output_view_was_invalidated,
+        )
+        for (
+            base_idx,
+            invalidating_indices,
+        ) in runtime_metadata.multi_output_view_creation_error_conditions:
+            buf.emit(
+                "if _multi_output_view_was_invalidated("
+                f"orig_inputs, {base_idx}, {invalidating_indices!r}):",
+                indent=1,
+            )
+            buf.emit(
+                f"raise RuntimeError({_MULTI_OUTPUT_VIEW_CREATION_ERROR!r})",
+                indent=2,
+            )
     _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)
     _codegen_compiled_fn_invocation(
         buf, trace_joint, indices_of_inps_to_detach, disable_amp
@@ -1866,6 +2173,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         default_factory=lambda: collections.defaultdict(list)
     )
     other_arg_indices: list[int] = field(default_factory=list)
+    output_invalidation_conditions: tuple[tuple[int, tuple[int, ...]] | None, ...] = ()
+    output_creation_error_conditions: tuple[tuple[int, tuple[int, ...]], ...] = ()
 
     def pre_compile(
         self,
@@ -1876,7 +2185,58 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         *,
         fw_metadata: ViewAndMutationMeta,
     ) -> tuple[Callable[..., Any], list[FxValue], list[AOTInput], ViewAndMutationMeta]:
-        is_inference = not self.trace_joint
+        needs_autograd_view_validation = not torch.is_inference_mode_enabled() and any(
+            info.output_type is OutputType.alias_of_input and info.is_multi_output_view
+            for info in fw_metadata.output_info
+        )
+        # Alias-only outputs do not require a joint graph, but multi-output
+        # views still need the autograd restrictions in merge_view_inputs: a
+        # caller can turn a non-grad output into a grad leaf later. A synthetic
+        # storage base cannot preserve separate version counters or autograd
+        # histories for overlapping inputs with unrelated bases.
+        is_inference = not self.trace_joint and not needs_autograd_view_validation
+        replay_views = config.view_replay_for_aliased_outputs
+
+        def _unpack_synthetic_bases(
+            primals: tuple[Any, ...],
+            calling_convention: list[int | tuple[int, torch.Tensor]],
+        ) -> list[Any]:
+            f_args_inner = []
+            # pyrefly: ignore [not-iterable]
+            for inner_idx_or_tuple in calling_convention:
+                if isinstance(inner_idx_or_tuple, int):
+                    f_args_inner.append(primals[inner_idx_or_tuple])
+                else:
+                    inner_base_idx, view_tensor = inner_idx_or_tuple
+                    base = primals[inner_base_idx]
+                    view_arg = gen_alias_from_base(
+                        base,
+                        view_tensor,
+                        view_tensor.requires_grad,
+                        replay_views=replay_views,
+                    )
+                    f_args_inner.append(view_arg)
+            return f_args_inner
+
+        # The primary metadata pass records which input counters changed after
+        # each multi-output view was created. Preserve those outer-input
+        # conditions here, before synthetic-base remapping replaces the input
+        # indices and version-counter relationships.
+        self.output_invalidation_conditions = tuple(
+            (
+                info.multi_output_view_base_idx,
+                info.multi_output_view_invalidating_input_indices,
+            )
+            if info.output_type is OutputType.alias_of_input
+            and info.multi_output_view_base_idx is not None
+            and info.multi_output_view_invalidating_input_indices
+            else None
+            for info in fw_metadata.output_info
+        )
+        self.output_creation_error_conditions = tuple(
+            fw_metadata.multi_output_view_creation_error_conditions
+        )
+
         (
             flat_args_with_synthetic_bases,
             flat_args_descs_with_synthetic_bases,
@@ -1932,6 +2292,18 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             flat_args_with_synthetic_bases,
             flat_args_descs_with_synthetic_bases,
         )
+        # The inner wrapper sees synthetic inputs, whose version-counter
+        # relationships need not match the original arguments. Defer these
+        # runtime conditions to this outer wrapper instead.
+        fw_metadata_updated.output_info = [
+            replace(
+                info,
+                multi_output_view_was_invalidated=False,
+                multi_output_view_invalidating_input_indices=(),
+            )
+            for info in fw_metadata_updated.output_info
+        ]
+        fw_metadata_updated.multi_output_view_creation_error_conditions = ()
         # Pre-compute base_groups and other_arg_map from
         # synthetic_base_info so the post_compile codegen can emit a
         # wrapper without calling merge_view_inputs at runtime.
@@ -1955,29 +2327,10 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
         )
-        replay_views = config.view_replay_for_aliased_outputs
-
-        def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> list[Any]:
-            f_args_inner = []
-            # pyrefly: ignore [not-iterable]
-            for inner_idx_or_tuple in synthetic_base_info:
-                if isinstance(inner_idx_or_tuple, int):
-                    f_args_inner.append(primals[inner_idx_or_tuple])
-                else:
-                    inner_base_idx, view_tensor = inner_idx_or_tuple
-                    base = primals[inner_base_idx]
-                    view_arg = gen_alias_from_base(
-                        base,
-                        view_tensor,
-                        view_tensor.requires_grad,
-                        replay_views=replay_views,
-                    )
-                    f_args_inner.append(view_arg)
-            return f_args_inner
 
         @simple_wraps(flat_fn)
         def wrapped_flat_fn(*args: Any) -> Any:
-            unpacked_args = _unpack_synthetic_bases(args)
+            unpacked_args = _unpack_synthetic_bases(args, synthetic_base_info)
             # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)
             # is to relieve the downstream logic from having to reason about mutations on inputs that alias
             # each other, by replacing aliased inputs with a synthetic base.
@@ -2019,7 +2372,31 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 flat_args_descs=flat_args_descs_with_synthetic_bases,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
+                capture_multi_output_view_invalidations=True,
             )(*flat_args_with_synthetic_bases)
+            ref_fw_metadata.output_info = [
+                replace(
+                    info,
+                    multi_output_view_was_invalidated=False,
+                    multi_output_view_invalidating_input_indices=(),
+                    # Synthetic-base remapping intentionally drops ViewMeta
+                    # sequences that were relative to an original input. In
+                    # that fallback representation only the final operation's
+                    # grad mode is observable, so ignore the number of view
+                    # operations used to rebuild the synthetic input.
+                    view_replay_grad_enabled=(
+                        info.view_replay_grad_enabled[-1:]
+                        if actual_info.view_meta_sequence is None
+                        else info.view_replay_grad_enabled
+                    ),
+                )
+                for info, actual_info in zip(
+                    ref_fw_metadata.output_info,
+                    fw_metadata_updated.output_info,
+                    strict=True,
+                )
+            ]
+            ref_fw_metadata.multi_output_view_creation_error_conditions = ()
             if ref_fw_metadata != fw_metadata_updated:
                 raise AssertionError(
                     f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
@@ -2056,7 +2433,11 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             args="args",
             artifact_name="synthetic_base_wrapper",
         )
-        buf.bind(torch=torch, _compiled_fn_=compiled_fn)
+        buf.bind(
+            torch=torch,
+            _compiled_fn_=compiled_fn,
+            _multi_output_view_was_invalidated=(_multi_output_view_was_invalidated),
+        )
 
         with buf.indent():
             buf.writeline(f"_bases = [None] * {num_bases}")
@@ -2089,8 +2470,46 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             if num_meta_mut > 0:
                 meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
                 buf.writeline(f"_meta_mut = [{meta_items}]")
+                # Stage the deferred metadata mutation's version bump before
+                # the inner runtime wrapper regenerates outputs. Outputs that
+                # preceded this mutation in the original forward are marked
+                # stale individually from the metadata captured above.
+
+            if any(self.output_invalidation_conditions):
+                invalidation_exprs = [
+                    "False"
+                    if condition is None
+                    else (
+                        "_multi_output_view_was_invalidated("
+                        f"args, {condition[0]}, {condition[1]!r})"
+                    )
+                    for condition in self.output_invalidation_conditions
+                ]
+                buf.writeline(
+                    f"_output_invalidations = ({', '.join(invalidation_exprs)},)"
+                )
+            if any(self.output_creation_error_conditions):
+                creation_error_exprs = [
+                    "_multi_output_view_was_invalidated("
+                    f"args, {condition[0]}, {condition[1]!r})"
+                    for condition in self.output_creation_error_conditions
+                ]
+                buf.writeline(
+                    f"_output_creation_error = any(({', '.join(creation_error_exprs)},))"
+                )
+                buf.writeline("if _output_creation_error:")
+                with buf.indent():
+                    buf.writeline(
+                        f"raise RuntimeError({_MULTI_OUTPUT_VIEW_CREATION_ERROR!r})"
+                    )
 
             buf.writeline("args.clear()")
+            if num_meta_mut > 0:
+                # Keep this conservative bump if the call fails. Once arbitrary
+                # compiled/runtime code has started, shared storage may have
+                # changed through a synthetic base with a distinct version
+                # counter, so restoring an absolute counter would be unsafe.
+                buf.writeline("torch.autograd.graph.increment_version(_meta_mut)")
             buf.writeline("_outs = _compiled_fn_(_new_args)")
 
             if num_meta_mut > 0:
@@ -2104,11 +2523,42 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 buf.writeline(f"_user_outs = _outs[:-{num_meta_mut}]")
                 buf.writeline("for _inp, _mi in zip(_meta_mut, _mut_inps):")
                 with buf.indent():
+                    buf.writeline("if _inp.is_inference():")
+                    with buf.indent():
+                        buf.writeline(
+                            "_inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())"
+                        )
+                    buf.writeline("else:")
+                    with buf.indent():
+                        buf.writeline(
+                            "with torch.autograd._unsafe_preserve_version_counter(_inp):"
+                        )
+                        with buf.indent():
+                            buf.writeline(
+                                "_inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())"
+                            )
+                if any(self.output_invalidation_conditions):
                     buf.writeline(
-                        "_inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())"
+                        "for _out, _invalidate in zip(_user_outs, _output_invalidations):"
                     )
+                    with buf.indent():
+                        buf.writeline("if _invalidate:")
+                        with buf.indent():
+                            buf.writeline(
+                                "torch._C._autograd._unsafe_mark_view_attr_version_stale(_out)"
+                            )
                 buf.writeline("return _user_outs")
             else:
+                if any(self.output_invalidation_conditions):
+                    buf.writeline(
+                        "for _out, _invalidate in zip(_outs, _output_invalidations):"
+                    )
+                    with buf.indent():
+                        buf.writeline("if _invalidate:")
+                        with buf.indent():
+                            buf.writeline(
+                                "torch._C._autograd._unsafe_mark_view_attr_version_stale(_out)"
+                            )
                 buf.writeline("return _outs")
 
         inner_fn = buf.build(wrapped_fn=compiled_fn)
