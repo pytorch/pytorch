@@ -1158,8 +1158,18 @@ def export_python(
     ``nn.Module`` arguments. Python scalar/config arguments are rejected because
     ``make_fx`` specializes their values without emitting runtime guards; close such
     constants over in ``fn`` instead. Other keyword-only parameters are not expressible
-    in the artifact's positional convention and are rejected.
-    Other Python attributes and Python control flow are specialized at capture and must remain compatible with the example.
+    in the artifact's positional convention and are rejected. Each ``nn.Module``
+    argument's per-submodule ``training`` state, which ``make_fx`` resolves without
+    emitting a guard, is recorded as a comment stamp and checked on every call.
+    Where ``torch.compile`` would recompile, an artifact cannot, so treat any
+    ambient change between capture and call as needing a fresh capture unless a stamp
+    covers it. A hand-edit that drops a stamp turns that one check off with a warning.
+    Both stamps (that one and the version stamp) must stay in the artifact's
+    leading comment block: the reader stops at the first non-comment line, so inserting code above them
+    turns every check off -- loudly for the training check, which warns per
+    call while it is missing, and silently for the version warning, which just
+    returns. Other Python attributes and Python
+    control flow are specialized at capture and must remain compatible with the example.
     That includes ``torch.is_grad_enabled()``: capture traces with grad enabled so a
     backward inside ``fn`` is built as graph ops, so a ``fn`` that branches on it always
     captures the grad-enabled branch, whatever the grad mode of the call that triggered
@@ -1182,7 +1192,10 @@ def export_python(
             does changing ``backend``, ``tracer``, ``decompositions``, or
             ``example_inputs``: an existing ``path`` is loaded as-is. A stale artifact
             after a source edit is the expected failure mode; delete ``path`` to force
-            a re-precompile. Loading any
+            a re-precompile. The artifact records the producing torch version in its first
+            line; loading it under a different torch logs a warning (it still runs) so
+            a committed artifact gone stale across a torch upgrade is visible. A
+            hand-edit that drops that line disables the version warning. Loading any
             existing artifact also warns before executing it because ``path`` is trusted
             executable Python and may have been edited or replaced. A CUDA artifact
             additionally embeds inductor's kernel-cache paths, so it is not byte-stable
