@@ -454,6 +454,17 @@ class TORCH_API Context {
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
   void setAllowFP16ReductionCPU(bool /*b*/);
+  // Gates the native-AOT DispatchStubs consulted by generated structured
+  // wrappers (see NativeAotStubs.h). Off means stock kernels even with an
+  // AOT kernel library loaded, e.g. for reference computations.
+  bool allowNativeAot() const;
+  void setAllowNativeAot(bool /*b*/);
+  // Ops whose declaration is UNCONDITIONAL read this instead: their AOT
+  // kernels are the implementation, so allowNativeAot must not mask them.
+  // Default false; torch._native._unconditional_masked() is the only caller
+  // that flips it, so a numerics test can obtain stock aten values.
+  bool maskUnconditionalNativeAot() const;
+  void setMaskUnconditionalNativeAot(bool /*b*/);
 
   // Preserved for BC
   void lazyInitCUDA() {
@@ -552,6 +563,8 @@ class TORCH_API Context {
   std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   std::optional<bool> enable_sparse_tensor_invariant_checks = std::nullopt;
   bool allow_fp16_reduction_cpu = false;
+  bool allow_native_aot = true;
+  bool mask_unconditional_native_aot = false;
 
   using Key = std::pair<Float32Backend, Float32Op>;
   std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {
