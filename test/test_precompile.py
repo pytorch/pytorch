@@ -4353,17 +4353,21 @@ class TestPrecompileCapture(TestCase):
         self.assertEqual(model.running_mean, expected.running_mean)
         self.assertEqual(x, expected_x)
 
-    @parametrize("through_data", [False, True])
-    def test_a_capture_refuses_an_in_place_parameter_update(self, through_data):
+    @parametrize("backend", ["eager", "inductor"])
+    @parametrize("write", ["direct", "data", "foreach"])
+    def test_a_capture_refuses_an_in_place_parameter_update(self, backend, write):
         # A write through ``.data`` bumps no version counter the parameter shares.
         def step(model, x):
             with torch.no_grad():
                 w = model.lin.weight
-                (w.data if through_data else w).add_(1)
+                if write == "foreach":
+                    torch._foreach_add_(list(model.parameters()), 1)
+                else:
+                    (w.data if write == "data" else w).add_(1)
             return model(x)
 
         with self.assertRaisesRegex(PrecompileError, "updates a parameter in place"):
-            with self._capture(step, backend="eager") as cap:
+            with self._capture(step, backend=backend) as cap:
                 cap(self.model, self.x)
         self.assertFalse(os.path.exists(self.artifact))
 
