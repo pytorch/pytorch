@@ -1440,9 +1440,11 @@ def current_blas_handle():
     The handle uses the BLAS library's default workspace unless ATen workspace
     caching is explicitly enabled. When caching is disabled, internal ATen
     operations on CUDA may temporarily bind their own workspace to this handle,
-    but restore the default workspace before releasing it. On ROCm they use a
-    separate handle, so this one keeps the workspace rocBLAS allocated when it
-    was created, outside the caching allocator, and a workspace bound with
+    but restore the default workspace before releasing it. On ROCm they use
+    separate handles, and this function returns a different handle for each
+    stream, because a rocBLAS workspace must not be shared by two streams at
+    once. Each keeps the workspace rocBLAS allocated when it was created,
+    outside the caching allocator, and a workspace bound with
     ``rocblas_set_workspace`` stays bound.
     """
     _lazy_init()

@@ -11,8 +11,10 @@
 #ifdef USE_ROCM
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAGraph.h>
+#include <ATen/cuda/Sleep.h>
 #include <rocblas/rocblas.h>
 
+#include <array>
 #include <exception>
 #endif
 
@@ -131,6 +133,128 @@ TEST(CUDABlasHandlePoolTest, EagerWorkspaceLeavesPublicHandleArena) {
   EXPECT_EQ(at::cuda::getCurrentCUDABlasHandle(), public_handle);
   EXPECT_TRUE(rocblasOwnsWorkspace(public_handle));
   EXPECT_EQ(rocblasWorkspaceSize(public_handle), arena_size);
+}
+
+// A rocBLAS arena must not be used by two streams at once, and
+// rocblas_set_stream does not wait for the old stream, so each stream gets its
+// own public handle.
+TEST(CUDABlasHandlePoolTest, EagerPublicHandleIsPerStream) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
+    GTEST_SKIP() << "requires eager workspaces";
+  }
+
+  at::cuda::CUDAGuard device_guard(0);
+  const auto handle_on = [](c10::cuda::CUDAStream stream) {
+    c10::cuda::CUDAStreamGuard stream_guard(stream);
+    return at::cuda::getCurrentCUDABlasHandle();
+  };
+  const auto first = c10::cuda::getStreamFromPool();
+  const auto second = c10::cuda::getStreamFromPool();
+  const auto first_handle = handle_on(first);
+  EXPECT_NE(handle_on(second), first_handle);
+  EXPECT_EQ(handle_on(first), first_handle);
+}
+
+// The kernel Tensile picks for this shape uses the handle's workspace on gfx942
+// and gfx950, so GEMMs from two streams that share one arena corrupt each
+// other's results. Where the kernel uses no workspace the test cannot fail.
+TEST(CUDABlasHandlePoolTest, EagerPublicHandleStreamsDoNotShareArena) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
+    GTEST_SKIP() << "requires eager workspaces";
+  }
+
+  at::cuda::CUDAGuard device_guard(0);
+  constexpr int64_t m = 32;
+  constexpr int64_t k = 65536;
+  constexpr int64_t n = 2048;
+  constexpr int iterations = 20;
+  const auto options =
+      at::TensorOptions().device(at::kCUDA).dtype(at::kBFloat16);
+  const std::array<at::Tensor, 2> inputs = {
+      at::randn({m, k}, options), at::randn({m, k}, options) * 4};
+  // With one weight shared by both streams the race usually leaves results
+  // intact, so each stream gets its own.
+  const std::array<at::Tensor, 2> weights = {
+      at::randn({n, k}, options), at::randn({n, k}, options)};
+  const std::array<c10::cuda::CUDAStream, 2> streams = {
+      c10::cuda::getStreamFromPool(), c10::cuda::getStreamFromPool()};
+
+  const auto gemm = [&](size_t s, const at::Tensor& out) {
+    const float alpha = 1;
+    const float beta = 0;
+    const auto handle =
+        reinterpret_cast<rocblas_handle>(at::cuda::getCurrentCUDABlasHandle());
+    return rocblas_gemm_ex(
+        handle,
+        rocblas_operation_transpose,
+        rocblas_operation_none,
+        n,
+        m,
+        k,
+        &alpha,
+        weights[s].data_ptr(),
+        rocblas_datatype_bf16_r,
+        k,
+        inputs[s].data_ptr(),
+        rocblas_datatype_bf16_r,
+        k,
+        &beta,
+        out.data_ptr(),
+        rocblas_datatype_bf16_r,
+        n,
+        out.data_ptr(),
+        rocblas_datatype_bf16_r,
+        n,
+        rocblas_datatype_f32_r,
+        rocblas_gemm_algo_standard,
+        0,
+        0);
+  };
+
+  std::array<at::Tensor, 2> expected;
+  for (size_t s = 0; s < streams.size(); ++s) {
+    expected[s] = at::empty({m, n}, options);
+    ASSERT_EQ(gemm(s, expected[s]), rocblas_status_success);
+  }
+  std::vector<std::array<at::Tensor, 2>> outputs(iterations);
+  for (auto& output : outputs) {
+    output = {at::empty({m, n}, options), at::empty({m, n}, options)};
+  }
+  at::cuda::device_synchronize();
+
+  // Stall both streams so the GEMMs queue up behind the stall and then run
+  // concurrently.
+  for (const auto& stream : streams) {
+    c10::cuda::CUDAStreamGuard stream_guard(stream);
+    at::cuda::sleep(50'000'000);
+  }
+  for (const auto& output : outputs) {
+    for (size_t s = 0; s < streams.size(); ++s) {
+      c10::cuda::CUDAStreamGuard stream_guard(streams[s]);
+      ASSERT_EQ(gemm(s, output[s]), rocblas_status_success);
+    }
+  }
+  at::cuda::device_synchronize();
+
+  int wrong = 0;
+  for (const auto& output : outputs) {
+    for (size_t s = 0; s < streams.size(); ++s) {
+      const float scale = expected[s].abs().max().item<float>();
+      const float error =
+          (output[s].to(at::kFloat) - expected[s].to(at::kFloat))
+              .abs()
+              .max()
+              .item<float>();
+      wrong += error > 0.1f * scale;
+    }
+  }
+  EXPECT_EQ(wrong, 0) << "of " << 2 * iterations << " outputs";
 }
 
 TEST(CUDABlasHandlePoolTest, CachedWorkspaceLeavesHandleUserOwned) {

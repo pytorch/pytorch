@@ -157,6 +157,9 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     // stock a spare in the shared pool for it to reserve instead.
     at::cuda::ensureCublasLtHandlesAvailable(1);
   }
+  // The public BLAS handle is per (device, stream) too, and a caller may first
+  // request it on the capture stream inside the capture.
+  at::cuda::ensurePublicCublasHandlesAvailable(1);
 #endif
 
   if (pool.first != 0 || pool.second != 0) {

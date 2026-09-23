@@ -124,16 +124,23 @@ workspace for each hipBLAS handle and HIP stream, which was the default before P
 Persistent workspaces must not be used when capturing multiple HIP graphs on the same stream.
 
 When ATen workspace caching is disabled, ATen operations bind their workspaces to handles that
-``torch.cuda.current_blas_handle()`` never returns. The handle it returns keeps the workspace rocBLAS
-allocates when the handle is created, outside the HIP caching allocator; ``ROCBLAS_DEVICE_MEMORY_SIZE``
-overrides its size. A workspace bound to it with ``rocblas_set_workspace`` stays bound. rocBLAS frees
-its own workspace when one is bound, and grows it when a call needs more than it holds. Neither is
-legal while a stream is capturing, so bind before capture begins.
+``torch.cuda.current_blas_handle()`` never returns. That function returns a separate handle for each
+thread and stream, because a rocBLAS handle's workspace must not be used by two streams at once. Each
+handle keeps the workspace rocBLAS allocates when it is created, outside the HIP caching allocator,
+until its thread exits: 128 MiB per handle on MI355X. ``ROCBLAS_DEVICE_MEMORY_SIZE`` fixes that size,
+and rocBLAS then does not grow it, so GEMMs that need more fall back to kernels that use less. A
+workspace bound with ``rocblas_set_workspace`` stays bound. rocBLAS frees its own workspace when one is
+bound, and grows it when a call needs more than it holds; neither is legal while a stream is
+capturing, so bind before capture begins. If you move a handle to another stream with
+``rocblas_set_stream``, synchronize the old stream first, as rocBLAS requires.
 
-Create the BLAS handle before capture begins, for example with a warmup operation on the capture
-stream. ``hipblasCreate`` initializes hipBLASLt, which allocates device memory that HIP rejects on a
-capturing stream. This is independent of how workspaces are managed, and it also applies to
-TunableOp, whose tuning benchmarks must run outside capture. See
+Call ``torch.cuda.current_blas_handle()`` on each thread before capture begins. It also creates ATen's
+handle for that thread; an ATen warmup operation alone does not create the handle the function
+returns. ``hipblasCreate`` initializes hipBLASLt, which allocates device memory that HIP rejects on a
+capturing stream. Once a device's handle has been requested, graph capture keeps one spare handle
+ready, so the first request on the capture stream inside the capture succeeds, but a second new
+stream in the same capture does not. This also applies to TunableOp, whose tuning benchmarks must run
+outside capture. See
 `ROCm/rocm-libraries#11838 <https://github.com/ROCm/rocm-libraries/issues/11838>`_.
 
 When caching is enabled, a hipBLAS workspace is allocated for each combination of hipBLAS handle and

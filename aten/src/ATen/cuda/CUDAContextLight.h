@@ -85,8 +85,9 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 // The public handle uses the BLAS library's default workspace unless ATen
 // workspace caching is explicitly enabled. On ROCm, ATen binds its
-// per-operation workspaces to a separate handle, so this one keeps the arena
-// rocBLAS allocates at handle creation, outside the caching allocator.
+// per-operation workspaces to separate handles, and each stream gets its own
+// public handle, which keeps the arena rocBLAS allocates at handle creation,
+// outside the caching allocator.
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
 
 // Internal scoped handle for ATen operations. When caching is disabled, it owns
@@ -129,6 +130,10 @@ TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 // while stream capture is active. Pre-stock the shared free list so other
 // threads (e.g. autograd workers) can reserve one mid-capture.
 TORCH_CUDA_CPP_API void ensureCublasLtHandlesAvailable(size_t n);
+// Public BLAS handles are pooled the same way. Once one has been requested on
+// the current device, pre-stock the shared free list so that a stream's first
+// request during capture can reserve one.
+TORCH_CUDA_CPP_API void ensurePublicCublasHandlesAvailable(size_t n);
 #endif
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();

@@ -4475,6 +4475,32 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_blas_handle_new_stream_under_capture(self):
+        # ROCm keeps a BLAS handle per stream, so the capture stream's first
+        # request creates one unless capture_begin stocked a spare. A fresh
+        # process, because handles released by exited threads would otherwise
+        # satisfy the request.
+        script = """
+import torch
+
+torch.cuda.current_blas_handle()
+x = torch.ones(1, device="cuda")
+graph = torch.cuda.CUDAGraph()
+with torch.cuda.graph(graph, stream=torch.cuda.Stream()):
+    torch.cuda.current_blas_handle()
+    x.add_(1)
+graph.replay()
+torch.cuda.synchronize()
+assert x.item() == 2
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @serialTest()
     @blas_library_context("cublas")
     def test_repeat_graph_capture_cublas_workspace_memory(self):

@@ -131,8 +131,8 @@ void destroyCublasHandle(cublasHandle_t handle) {
 
 #ifdef USE_ROCM
 // ATen binds a per-call workspace on its handle, and rocBLAS cannot hand a
-// handle back its managed arena once bound, so public callers get a separate
-// handle whose arena is never touched.
+// handle back its managed arena once bound, so public callers get separate
+// handles, one per (device, stream), whose arenas are never touched.
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createInternalCublasHandle, destroyCublasHandle>;
 using CuBlasPublicPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
 #else
@@ -503,22 +503,26 @@ static void setupCUDABlasHandle(
 }
 
 template <typename PoolType>
-static cublasHandle_t reserveCUDABlasHandle(c10::DeviceIndex device) {
-  // Thread local PoolWindows are lazily-initialized
-  // to avoid initialization issues that caused hangs on Windows.
-  // See: https://github.com/pytorch/pytorch/pull/22405
-  // This thread local unique_ptrs will be destroyed when the thread terminates,
-  // releasing its reserved handles back to the pool.
-
+static std::shared_ptr<PoolType> getCuBlasPool() {
   // Use a leaky singleton for the pool following standard practice around
   // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
   static auto pool = std::shared_ptr<PoolType>(
       new PoolType(), [](PoolType* p) {
         // Leak the memory.
       });
+  return pool;
+}
+
+template <typename PoolType>
+static typename PoolType::PoolWindow& getCuBlasPoolWindow() {
+  // Thread local PoolWindows are lazily-initialized
+  // to avoid initialization issues that caused hangs on Windows.
+  // See: https://github.com/pytorch/pytorch/pull/22405
+  // This thread local unique_ptrs will be destroyed when the thread terminates,
+  // releasing its reserved handles back to the pool.
   thread_local std::unique_ptr<typename PoolType::PoolWindow> myPoolWindow(
-      pool->newPoolWindow());
-  return myPoolWindow->reserve(device);
+      getCuBlasPool<PoolType>()->newPoolWindow());
+  return *myPoolWindow;
 }
 
 static cublasHandle_t getCurrentCUDABlasHandleImpl(
@@ -539,7 +543,7 @@ static cublasHandle_t getCurrentCUDABlasHandleImpl(
   }
 #endif
 
-  cublasHandle_t handle = reserveCUDABlasHandle<CuBlasPoolType>(device);
+  cublasHandle_t handle = getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
 
   if (!setup) {
     return handle;
@@ -564,15 +568,15 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
   // Callers request the public handle to keep handle creation out of stream
   // capture, so create this thread's internal handle too.
-  (void)reserveCUDABlasHandle<CuBlasPoolType>(device);
-  cublasHandle_t handle = reserveCUDABlasHandle<CuBlasPublicPoolType>(device);
+  (void)getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
+  // A rocBLAS arena must not be used by two streams at once, and
+  // rocblas_set_stream does not wait for the old stream, so each stream gets
+  // its own public handle.
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cublasHandle_t handle = getCuBlasPoolWindow<CuBlasPublicPoolType>().reserve(
+      device, static_cast<void*>(static_cast<cudaStream_t>(stream)));
   if (setup) {
-    setupCUDABlasHandle(
-        handle,
-        c10::cuda::getCurrentCUDAStream(),
-        nullptr,
-        0,
-        WorkspaceMode::Default);
+    setupCUDABlasHandle(handle, stream, nullptr, 0, WorkspaceMode::Default);
   }
   return handle;
 #else
@@ -667,6 +671,24 @@ void ensureCublasLtHandlesAvailable(size_t n) {
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
   auto pool = getCuBlasLtPool();
   std::lock_guard<std::mutex> guard(pool->mutex);
+  while (pool->available_handles[device].size() < n) {
+    pool->created_handles[device].emplace_back(true /*create*/);
+    pool->available_handles[device].push_back(
+        pool->created_handles[device].back().handle);
+  }
+}
+
+void ensurePublicCublasHandlesAvailable(size_t n) {
+  // A stream's first public-handle request creates a handle, which is illegal
+  // under capture. Devices whose public handle was never requested are skipped
+  // so that processes which never use it do not pay for an arena.
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  auto pool = getCuBlasPool<CuBlasPublicPoolType>();
+  std::lock_guard<std::mutex> guard(pool->mutex);
+  if (pool->created_handles[device].empty()) {
+    return;
+  }
   while (pool->available_handles[device].size() < n) {
     pool->created_handles[device].emplace_back(true /*create*/);
     pool->available_handles[device].push_back(
