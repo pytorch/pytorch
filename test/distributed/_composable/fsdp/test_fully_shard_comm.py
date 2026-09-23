@@ -348,7 +348,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
 
 
-class TestFullyShardCommunication(FSDPTest):
+class TestFullyShardCommunication(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
