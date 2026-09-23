@@ -18657,6 +18657,7 @@ class TestInputGradBuffers(TestCase):
                 Producer.apply(x).sum().backward(create_graph=True)
 
 
+@skipIfTorchDynamo("input_grad_buffers requires eager autograd engine state")
 class TestInputGradBuffersCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -18845,6 +18846,7 @@ Fanout.apply(getter_output, duplicated, duplicated).backward()
             self.fail(error.output.decode("utf-8"))
 
 
+@skipIfTorchDynamo("input_grad_buffers requires eager autograd engine state")
 class TestInputGradBuffersCpuOnly(TestCase):
     hw_classification = HardwareClassification.CPU
 
