@@ -25,29 +25,6 @@ from torch._precompile import (
 from torch.compiler._precompile_types import PrecompileSummary
 
 
-# These types are defined in torch._precompile / torch.compiler._precompile_types
-# (import layering; and @dataclass dereferences sys.modules[cls.__module__] while
-# decorating, so a class body cannot name a module that is still being imported).
-# Declare this module their home so introspection (pickle, test_public_bindings,
-# Sphinx) resolves them under torch.compiler.precompile, where they are re-exported.
-# Their attributes are documented in the class docstring: Sphinx reads a bare
-# attribute docstring from the source of sys.modules[cls.__module__], now this file.
-# capture and load are re-homed where they are defined: a function's annotations
-# resolve through its own globals, not its __module__.
-for _t in (Capture, DynamoTracer, MakeFxTracer, PrecompiledRunnable, PrecompileSummary):
-    # torch._precompile uses ``from __future__ import annotations``, and
-    # typing.get_type_hints resolves a class's string annotations through its
-    # __module__. Resolving against the DEFINING module before the re-homing keeps
-    # every class-level annotation resolvable (Capture has none, so for it this is
-    # the __module__ assignment alone). The strings a dataclass snapshotted at
-    # decoration (``Field.type``, ``__init__.__annotations__``) are left as they
-    # are: nothing here reads them, and ``__annotations__`` is what get_type_hints
-    # and the public-members test consult.
-    _t.__annotations__ = typing.get_type_hints(_t)
-    _t.__module__ = "torch.compiler.precompile"
-del _t
-del typing  # not part of the public surface
-
 # PrecompileError is intentionally NOT in __all__: its home is torch.compiler
 # (torch.compiler.PrecompileError, for the conventional ``except`` spelling), so
 # its __module__ is "torch.compiler". It is re-exported here only so
@@ -61,3 +38,25 @@ __all__ = [
     "PrecompiledRunnable",
     "PrecompileSummary",
 ]
+
+# These objects are defined in torch._precompile / torch.compiler._precompile_types
+# (import layering; and @dataclass dereferences sys.modules[cls.__module__] while
+# decorating, so a class body cannot name a module that is still being imported).
+# Declare this module their home so introspection (pickle, test_public_bindings,
+# Sphinx, help()) resolves them under torch.compiler.precompile, where they are
+# re-exported. Their attributes are documented in the class docstring: Sphinx reads
+# a bare attribute docstring from the source of sys.modules[cls.__module__], now
+# this file.
+for _obj in [globals()[name] for name in __all__]:
+    # torch._precompile uses ``from __future__ import annotations``, and
+    # typing.get_type_hints resolves a class's string annotations through its
+    # __module__ (a function's through its __globals__). Resolving against the
+    # DEFINING module before the re-homing keeps every annotation resolvable. The
+    # strings a dataclass snapshotted at decoration (``Field.type``,
+    # ``__init__.__annotations__``) are left as they are: nothing here reads them,
+    # and ``__annotations__`` is what get_type_hints and the public-members test
+    # consult.
+    _obj.__annotations__ = typing.get_type_hints(_obj)
+    _obj.__module__ = "torch.compiler.precompile"
+del _obj
+del typing  # not part of the public surface
