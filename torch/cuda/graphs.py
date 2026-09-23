@@ -259,14 +259,13 @@ def register_graph_replay_end_hook(
     return _register_global_hook(_global_replay_end_hooks, fn)
 
 
-# Graph-destroy hooks, each handed the destroyed graph's exec ids (tools_id >> 32) so a
-# consumer can purge its per-graph state. A CUDAGraph arms a single destroy callback (only
-# while a hook is registered, see _graph_destroy_hooks_active) that fans out here.
+# Graph-destroy hooks receive all graph ids owned by the destroyed capture, after
+# its annotation entries have been removed.
 _global_destroy_hooks: OrderedDict[int, Callable[[set[int]], None]] = OrderedDict()
 
 
 def register_graph_destroy_hook(fn: Callable[[set[int]], None]) -> RemovableHandle:
-    """Register ``fn(exec_ids)`` to run when a CUDA graph is destroyed. Returns a handle whose
+    """Register ``fn(graph_ids)`` to run when a CUDA graph is destroyed. Returns a handle whose
     ``remove()`` unregisters it."""
     from torch.utils.hooks import RemovableHandle
 
@@ -275,19 +274,13 @@ def register_graph_destroy_hook(fn: Callable[[set[int]], None]) -> RemovableHand
     return handle
 
 
-def _graph_destroy_hooks_active() -> bool:
-    """True when any graph-destroy hook is registered -- the gate a CUDAGraph checks before
-    arming its destroy callback."""
-    return bool(_global_destroy_hooks)
-
-
-def _run_graph_destroy_hooks(exec_graph_ids: set[int]) -> None:
-    """Invoke every registered hook with the destroyed exec graph ids, swallowing per-hook
+def _run_graph_destroy_hooks(graph_ids: set[int]) -> None:
+    """Invoke every registered hook with the destroyed graph ids, swallowing per-hook
     errors so one failure does not abort the rest (matching the destroy-callback fire
     semantics). The single entry point a graph's destroy callback calls."""
     for fn in list(_global_destroy_hooks.values()):
         try:
-            fn(exec_graph_ids)
+            fn(graph_ids)
         except Exception:
             pass
 
@@ -335,14 +328,9 @@ class CUDAGraph(_CUDAGraph):
     # graph, "source" leaves them on the capture graph for consumers reading CUPTI's
     # sourceGraphNodeId. Stamped from annotation_config at capture_begin.
     _annotation_key_by: str
-    # Nested body graphs (child-graph / conditional bodies) this capture annotated into,
-    # under key_by="source". Their ids are neither the capture nor an exec graph's, so they
-    # are carried here to reach the destroy hooks like the others.
-    _annotated_body_graph_ids: set[int]
-    # Exec graph ids a consumer has recorded per-graph state under (one per
-    # instantiate). Handed to the graph-destroy hooks on destruction so consumers
-    # can purge that state and their maps do not grow across the run.
-    _recorded_exec_ids: set[int]
+    # Capture, body, and executable graph ids whose registry entries and consumer
+    # state must be removed when this capture is reset or destroyed.
+    _owned_graph_ids: set[int]
     _keep_graph: bool
     # User hooks fired by capture_begin / capture_end / instantiate (see register_*_hook).
     _capture_start_hooks: dict[int, Callable[[CUDAGraph], None]]
@@ -371,8 +359,7 @@ class CUDAGraph(_CUDAGraph):
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
         instance._annotation_key_by = "exec"
-        instance._annotated_body_graph_ids = set()
-        instance._recorded_exec_ids = set()
+        instance._owned_graph_ids = set()
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_start_hooks = OrderedDict()
@@ -394,16 +381,18 @@ class CUDAGraph(_CUDAGraph):
         # stream off it without pinning the graph.
         self._retained = _RetainedCallbacks()
         self._retained_finalizer = weakref.finalize(self, self._retained.fire)
-        # When a consumer (e.g. Cuspy) has registered graph-destroy
-        # hooks, arm the per-graph state purge for this capture cycle. The callback
-        # captures the exec-id SET OBJECT (empty now, filled as this graph
-        # records/instantiates) and the module fan-out function, never self and never
-        # a hook: a closure reachable to the graph would pin it past collection so it
-        # never fires. reset() re-arms a fresh holder, so this re-registers per cycle;
-        # a graph that records nothing just fires on an empty set (a no-op).
-        if _graph_destroy_hooks_active():
-            exec_ids = self._recorded_exec_ids
-            self.register_destroy_callback(lambda: _run_graph_destroy_hooks(exec_ids))
+        # Capture the mutable id set, never self: the finalizer must not retain the
+        # graph. Arm even before any consumers register, including for deferred graphs.
+        graph_ids = self._owned_graph_ids
+
+        def cleanup() -> None:
+            if graph_ids:
+                from torch.cuda._graph_annotations import remove_kernel_annotations
+
+                remove_kernel_annotations(graph_ids)
+            _run_graph_destroy_hooks(graph_ids)
+
+        self.register_destroy_callback(cleanup)
 
     def register_capture_start_hook(
         self, hook: Callable[[CUDAGraph], None]
@@ -574,20 +563,16 @@ class CUDAGraph(_CUDAGraph):
             # which is what purges these entries when the graph dies.
             from torch.cuda._graph_annotations import alias_sourceless_to_exec_graph
 
-            self._recorded_exec_ids.add(self._capture_graph_id)
-            self._recorded_exec_ids |= self._annotated_body_graph_ids
             aliased_exec_id = alias_sourceless_to_exec_graph(self)
             if aliased_exec_id is not None:
-                self._recorded_exec_ids.add(aliased_exec_id)
+                self._owned_graph_ids.add(aliased_exec_id)
             return
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
         remap_to_exec_graph(self)
-        # Record the exec id we remapped to so the destroy callback (armed in
-        # capture_end_post) hands it to the graph-destroy hooks for per-graph state
-        # cleanup. A re-instantiate mints a fresh exec id, so the set accumulates each.
+        # Consumers may still have state under earlier executable graph ids.
         if self._remapped_exec_id is not None:
-            self._recorded_exec_ids.add(self._remapped_exec_id)
+            self._owned_graph_ids.add(self._remapped_exec_id)
 
     def _release_python_resources(self) -> None:
         # Single source of truth for GC-critical Python resources released by
@@ -758,13 +743,12 @@ class CUDAGraph(_CUDAGraph):
             self._retained_finalizer.detach()
         # Start a fresh id set BEFORE re-arming: _arm_retained captures it into the
         # next cycle's destroy callback. The just-fired holder dropped the old one.
-        self._recorded_exec_ids = set()
+        self._owned_graph_ids = set()
         self._arm_retained()
         # Reset-only state: scrubbed here because the object is reused after
         # reset(); on death it dies with the object.
         self._capture_graph_id = None
         self._remapped_exec_id = None
-        self._annotated_body_graph_ids = set()
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:
@@ -1445,7 +1429,7 @@ class graph:
             _graph_node_callbacks.disarm()
             if self._enable_annotations:
                 resolve_pending_annotations()
-                self.cuda_graph._annotated_body_graph_ids = take_body_graph_ids()
+                self.cuda_graph._owned_graph_ids |= take_body_graph_ids()
 
             # For keep_graph=False capture_end instantiates, which remaps annotations
             # from the capture id (stamped back at capture_begin) to the exec id. For
@@ -1453,9 +1437,7 @@ class graph:
             try:
                 self.cuda_graph.capture_end()
             except BaseException:
-                # No exec graph, so the resolve above left entries keyed by the capture id
-                # that nothing can reach later. Scoped to capture_end alone: once it
-                # returns the capture is usable and its annotations are worth keeping.
+                # Discard the failed capture's annotations immediately.
                 if self._enable_annotations:
                     discard_capture_annotations(self.cuda_graph)
                 raise
