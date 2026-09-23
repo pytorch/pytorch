@@ -510,8 +510,8 @@ def _build_multigraph_forward():
     # Only names Dynamo minted while tracing are bound into it (every backend id
     # of the artifact, plus that module's import aliases and builtins key),
     # never the artifact's own, so nothing here shadows a user global. A module
-    # is opened only for a frame with variants; a record with none is dead and
-    # never imports its module.
+    # is opened only for a frame the driver serves; a dead record never imports
+    # its module.
     scopes = {}
 
     def _scope(frame):
@@ -536,9 +536,9 @@ def _build_multigraph_forward():
                 f"{list(target.co_freevars)!r}, which a self-contained artifact "
                 f"cannot rebuild. Regenerate it from a module-level function."
             )
-        if not frame["variants"] and frame.get("trivial") and not is_entry:
-            # Dynamo skipped this continuation before tracing (no tensor reached
-            # it), so it ran as plain Python during capture; rebuild it as one.
+        if frame["trivial"] and not is_entry:
+            # Dynamo compiled nothing of this continuation, so it ran as plain
+            # Python during capture; rebuild it as one.
             # Its module is opened for the globals the bytecode reads.
             scope = _scope(frame)
 
