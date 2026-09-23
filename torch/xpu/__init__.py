@@ -228,23 +228,18 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
                 )
             )
 
-    # Sort iGPUs to the end, keep only the visible ordinals
+    # Sort iGPUs to the end, then count only the visible ordinals.
     _cached_zes_device_infos.sort(key=lambda info: info.is_integrated)
     visible = set(visible_mask)
-    _cached_zes_device_infos = [
-        info
-        for logical_index, info in enumerate(_cached_zes_device_infos)
-        if logical_index in visible
-    ]
+    num_igpu = 0
+    num_dgpu = 0
 
-    num_igpu = sum(1 for info in _cached_zes_device_infos if info.is_integrated)
-    num_dgpu = len(_cached_zes_device_infos) - num_igpu
-
-    # dGPUs take priority; strip iGPUs when at least one dGPU is visible.
-    if num_dgpu and num_igpu:
-        _cached_zes_device_infos = [
-            info for info in _cached_zes_device_infos if not info.is_integrated
-        ]
+    for logical_index, info in enumerate(_cached_zes_device_infos):
+        if logical_index in visible:
+            if info.is_integrated:
+                num_igpu += 1
+            else:
+                num_dgpu += 1
     return num_dgpu or num_igpu
 
 
