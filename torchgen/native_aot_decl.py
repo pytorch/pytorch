@@ -177,21 +177,7 @@ def _parse_arch(arch: str) -> tuple[tuple[int, int], str]:
 
 
 def cc_of(arch: str) -> tuple[int, int]:
-    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103f" -> (10, 3).
-
-    Shared, because the exporter (selecting an ARCHS candidate for a supported
-    device) and the generator (routing sidecars by compatible target) must agree
-    what an sm string means.
-
-    Refuses what it cannot parse rather than computing a capability: "sm_9" gives
-    (0, 9) and "sm_1000" (100, 0), each a gate no device satisfies, so the op
-    ships, links and declines every call unreported. Only CUDA's arch-conditional
-    "a" and family-conditional "f" suffixes are accepted.
-
-    _KNOWN_MAJORS would reject "sm_9" and "sm_1000" anyway (as capability 0.9 and
-    100.0), so the digit count in _SM_SPELLING is there for the DIAGNOSTIC: a
-    malformed string should be reported as unreadable, not as hardware that does
-    not exist."""
+    """Return ``(major, minor)`` for a validated sm target."""
     return _parse_arch(arch)[0]
 
 
