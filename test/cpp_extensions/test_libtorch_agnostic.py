@@ -384,6 +384,28 @@ class TestLibtorchAgnostic(TestCase):
         pinned = torch.randn(2, 3, device="cpu", pin_memory=True)
         self.assertTrue(libtorch_agnostic.ops.my_is_pinned(pinned))
 
+    @skipIfTorchVersionLessThan(2, 10)
+    @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
+    def test_my_masked_select(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.randn(3, 8, 5, device=device)
+        mask = t > 0
+        result = libtorch_agnostic.ops.my_masked_select(t, mask)
+        self.assertEqual(result, torch.masked_select(t, mask))
+
+        t_view = t.transpose(0, 2)[:, ::2, :]
+        mask_view = mask.transpose(0, 2)[:, ::2, :]
+        result = libtorch_agnostic.ops.my_masked_select(t_view, mask_view)
+        self.assertEqual(result, torch.masked_select(t_view, mask_view))
+
+        broadcast_mask = torch.tensor([True, False, True], device=device).view(3, 1, 1)
+        result = libtorch_agnostic.ops.my_masked_select(t, broadcast_mask)
+        self.assertEqual(result, torch.masked_select(t, broadcast_mask))
+
+        with self.assertRaisesRegex(RuntimeError, "expected BoolTensor for mask"):
+            libtorch_agnostic.ops.my_masked_select(t, mask.to(torch.int64))
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).

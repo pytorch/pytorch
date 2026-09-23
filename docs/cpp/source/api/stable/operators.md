@@ -171,3 +171,6 @@ auto tensor = torch::stable::empty(
 
 ```{doxygenfunction} torch::stable::floor_divide
 ```
+
+```{doxygenfunction} torch::stable::masked_select
+```

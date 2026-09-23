@@ -788,6 +788,19 @@ def my_is_pinned(self) -> bool:
     return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
 
 
+def my_masked_select(self, mask) -> Tensor:
+    """
+    Selects the elements of the input tensor where the mask is True.
+
+    Args:
+        self: Tensor - input tensor
+        mask: Tensor - boolean tensor broadcastable with self
+
+    Returns: Tensor - a 1-D tensor of the selected elements
+    """
+    return torch.ops.libtorch_agn_2_10.my_masked_select.default(self, mask)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #
