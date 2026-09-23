@@ -224,6 +224,43 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_force_reshard_with_raf_disabled_in_forward(self):
+        device = torch.device(device_type.type, 0)
+        model = nn.Sequential(
+            nn.Linear(8, 8, device=device),
+            nn.Linear(8, 8, device=device),
+        )
+        fully_shard([model[0], model[1]], reshard_after_forward=False)
+        fully_shard(model)
+        param_group = model[0]._get_fsdp_state()._fsdp_param_group
+        self.assertIsNotNone(param_group)
+
+        inp = torch.randn(2, 8, device=device)
+        model(inp)
+        model[0](inp)
+        self.assertTrue(param_group.is_unsharded)
+
+        model[0].reshard()
+        self.assertTrue(param_group.is_unsharded)
+
+        data_ptrs = [
+            fsdp_param.unsharded_param.data_ptr()
+            for fsdp_param in param_group.fsdp_params
+        ]
+        model[0].reshard(free_unsharded=False, force=True)
+        # force=True reshards even though reshard_after_forward=False.
+        self.assertTrue(param_group.is_sharded)
+        model[0].unshard()
+        # The unsharded storage address is stable across reshard and unshard.
+        self.assertEqual(
+            data_ptrs,
+            [
+                fsdp_param.unsharded_param.data_ptr()
+                for fsdp_param in param_group.fsdp_params
+            ],
+        )
+
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device(device_type.type, 0)

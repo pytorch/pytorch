@@ -332,15 +332,25 @@ class FSDPModule:
             self.__init__(*args, **kwargs)
         return self
 
-    def reshard(self) -> None:
+    def reshard(self, *, free_unsharded: bool = True, force: bool = False) -> None:
         """
-        Reshards the module's parameters, freeing the unsharded parameters if
-        they are allocated and registering the sharded parameters to the
-        module. This method is *not* recursive.
+        Reshards the module's parameters and registers the sharded parameters
+        to the module. This method is *not* recursive.
+
+        Args:
+            free_unsharded (bool, optional): Whether to free the unsharded
+                parameter storage. Set this to ``False`` when external users of
+                that storage require its addresses to remain stable across the
+                reshard and subsequent unshard. Defaults to ``True``.
+            force (bool, optional): Whether to always trigger a reshard.
+                Defaults to ``False``.
         """
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
-            fsdp_param_group.reshard()
+            fsdp_param_group.reshard(
+                free_unsharded=free_unsharded,
+                force=force,
+            )
 
     def unshard(self, async_op: bool = False) -> UnshardHandle | None:
         """
