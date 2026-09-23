@@ -16455,8 +16455,8 @@ class TestMultithreadAutograd(TestCase):
         self.assertFalse(torch._C._is_key_in_tls("test_obj"))
 
 
-class TestMultithreadAutogradCudaOnly(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestMultithreadAutogradDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_custom_function_propagates_errors_from_device_thread(self, device):
         class MyFunc(Function):
@@ -19010,7 +19010,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(TestAutogradCudaOnly, globals(), only_for="cuda")
 
 instantiate_device_type_tests(
-    TestMultithreadAutogradCudaOnly, globals(), only_for="cuda"
+    TestMultithreadAutogradDevice, globals(), except_for="cpu"
 )
 
 instantiate_device_type_tests(TestSACAmbientSavedTensorsHooksDeviceType, globals())
