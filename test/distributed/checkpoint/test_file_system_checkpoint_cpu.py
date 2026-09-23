@@ -24,16 +24,13 @@ from torch.distributed.checkpoint import (
 )
 from torch.distributed.checkpoint._extension import ZStandard
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
-)
-from torch.testing._internal.distributed._shard.sharded_tensor import (
-    ShardedTensorTestBase,
-    with_comms,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
     MyShardedModel1,
@@ -77,12 +74,12 @@ def assert_state_dict_equal(
             ):
                 self.assertTrue(
                     torch.equal(local_shard_1.tensor, local_shard_2.tensor),
-                    f"Key {key}'s shard does not match",
+                    lambda msg: f"{msg}\nKey {key}'s shard does not match",
                 )
         elif isinstance(value_1, torch.Tensor):
             self.assertTrue(
                 torch.equal(value_1, value_2),
-                f"Key {key}'s tensor does not match",
+                lambda msg: f"{msg}\nKey {key}'s tensor does not match",
             )
         elif isinstance(value_1, Stateful):
             self.assertEqual(value_1, value_2)
@@ -225,12 +222,13 @@ class TestDistributedStateDictSaveLoadZStandard(TestCase):
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
 
-class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return 2
+class TestDistributedStateDictSaveLoadWithSharedTensor(MultiProcContinuousTest):
+    world_size = 2
 
-    @with_comms(init_rpc=False, backend="gloo")
+    @classmethod
+    def backend_str(cls) -> str:
+        return "gloo"
+
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_shard_tensor(self, thread_count) -> None:
         paths = [tempfile.mkdtemp()]
@@ -278,10 +276,12 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         dist.barrier()
 
 
-class TestDistributedReshardOnLoad(ShardedTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return 2
+class TestDistributedReshardOnLoad(MultiProcContinuousTest):
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "gloo"
 
     def get_file_path(self) -> str:
         paths = [tempfile.mkdtemp()] if dist.get_rank() == 0 else [None]
@@ -293,7 +293,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         tensor.gather(out=res)
         return res
 
-    @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_load_with_different_shard_plan(self, thread_count) -> None:
         path = self.get_file_path()
@@ -401,10 +400,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 if dist.get_rank() == 0:
                     self.assertTrue(
                         torch.allclose(store_tensor, load_tensor),
-                        msg=f"{s0} vs {s1}",
+                        msg=lambda msg: f"{msg}\n{s0} vs {s1}",
                     )
 
-    @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_load_rowwise_to_colwise(self, thread_count) -> None:
         path = self.get_file_path()
@@ -450,7 +448,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         if dist.get_rank() == 0:
             self.assertTrue(torch.allclose(store_tensor, load_tensor))
 
-    @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_save_load_bytes(self, thread_count) -> None:
         path = self.get_file_path()
@@ -468,7 +465,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         self.assertEqual([1], state_dict_to_load["bytes0"])
         self.assertEqual("string", state_dict_to_load["bytes1"])
 
-    @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_switch_between_sharded_tensor_to_tensor(self, thread_count) -> None:
         path = self.get_file_path()
@@ -547,12 +543,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 if dist.get_rank() == 0:
                     self.assertTrue(
                         torch.allclose(save_dict_sharded, load_dict["sharded"]),
-                        f"save-spec {save_spec} load-spec {load_spec}",
+                        lambda msg: f"{msg}\nsave-spec {save_spec} load-spec {load_spec}",
                     )
 
                     self.assertTrue(
                         torch.allclose(save_dict["replicated"], load_dict_replicated),
-                        f"save-spec {save_spec} load-spec {load_spec}",
+                        lambda msg: f"{msg}\nsave-spec {save_spec} load-spec {load_spec}",
                     )
 
 

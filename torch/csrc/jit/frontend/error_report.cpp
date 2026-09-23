@@ -84,7 +84,7 @@ static std::string get_stacked_errors(const std::vector<Call>& error_stack) {
       callee->caller_range.highlight(msg);
     }
   }
-  return msg.str();
+  return std::move(msg).str();
 }
 
 std::string ErrorReport::current_call_stack() {
@@ -103,7 +103,7 @@ const char* ErrorReport::what() const noexcept {
 
   msg << get_stacked_errors(error_stack);
 
-  the_message = msg.str();
+  the_message = std::move(msg).str();
   return the_message.c_str();
 }
 

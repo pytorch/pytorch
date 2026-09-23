@@ -1,7 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/variable.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -9,7 +7,6 @@
 #else
 #include <ATen/ops/_has_same_storage_numel.h>
 #include <ATen/ops/_new_zeros_with_same_feature_meta.h>
-#include <ATen/ops/zeros.h>
 #endif
 
 namespace torch::autograd {
@@ -89,7 +86,7 @@ namespace utils {
 // goals:
 // - When properties of the primal are checked in composite op's to determine
 //   control flow, the code path decided upon is also reasonable for the tangent
-// - Make sure that when the same as_strided is applied to both primal and
+// - Make sure that when the same as_strided is applied to both primal
 //   and tangent, it behaves similarly.
 //
 // We do that by checking:
@@ -242,7 +239,7 @@ void AutogradMeta::set_fw_grad(
             }
 
             new_fw_grad_value.copy_(new_grad);
-            new_grad = new_fw_grad_value;
+            new_grad = std::move(new_fw_grad_value);
           }
 
           base._set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false);
@@ -262,10 +259,10 @@ void AutogradMeta::set_fw_grad(
       res._set_conj(self.is_conj());
       res._set_neg(self.is_neg());
       res.copy_(new_grad);
-      new_grad = res;
+      new_grad = std::move(res);
     }
 
-    fw_grad_->set_value(new_grad, level);
+    fw_grad_->set_value(std::move(new_grad), level);
   }
 }
 
@@ -308,7 +305,7 @@ const Variable& AutogradMeta::fw_grad(
               self.sizes(), self.strides(), self.storage_offset());
         }
 
-        const_view_meta->fw_grad_->set_value(new_val, level);
+        const_view_meta->fw_grad_->set_value(std::move(new_val), level);
         return const_view_meta->fw_grad_->value(level);
       }
     }

@@ -1,14 +1,24 @@
-# mypy: ignore-errors
-
 """Define analogs of numpy dtypes supported by pytorch.
 Define the scalar types and supported dtypes and numpy <--> torch dtype mappings.
 """
 
+from __future__ import annotations
+
 import builtins
+from typing import TYPE_CHECKING, TypeGuard, TypeVar
 
 import torch
 
 from . import _dtypes_impl
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ._ndarray import ndarray
+
+
+_T = TypeVar("_T")
 
 
 # ### Scalar types ###
@@ -16,8 +26,12 @@ from . import _dtypes_impl
 
 class generic:
     name = "generic"
+    # Concrete scalar types below set these; declared here so the dtype machinery
+    # can read them off any scalar type.
+    typecode: str
+    torch_dtype: torch.dtype
 
-    def __new__(cls, value):
+    def __new__(cls, value: object) -> ndarray:
         # NumPy scalars are modelled as 0-D arrays
         # so a call to np.float32(4) produces a 0-D array.
 
@@ -244,7 +258,7 @@ _python_types = {
 }
 
 
-def sctype_from_string(s):
+def sctype_from_string(s: object) -> type[generic]:
     """Normalize a string value: a type 'name' or a typecode or a width alias."""
     if s in _names:
         return _names[s]
@@ -259,21 +273,23 @@ def sctype_from_string(s):
     raise TypeError(f"data type {s!r} not understood")
 
 
-def sctype_from_torch_dtype(torch_dtype):
+def sctype_from_torch_dtype(torch_dtype: torch.dtype) -> type[generic]:
     return _torch_dtypes[torch_dtype]
 
 
 # ### DTypes. ###
 
 
-def dtype(arg):
+def dtype(arg: object) -> DType:
     if arg is None:
         arg = _dtypes_impl.default_dtypes().float_dtype
     return DType(arg)
 
 
 class DType:
-    def __init__(self, arg):
+    _scalar_type: type[generic]
+
+    def __init__(self, arg: object) -> None:
         # a pytorch object?
         if isinstance(arg, torch.dtype):
             sctype = _torch_dtypes[arg]
@@ -293,23 +309,23 @@ class DType:
         self._scalar_type = sctype
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self._scalar_type.name
 
     @property
-    def type(self):
+    def type(self) -> type[generic]:
         return self._scalar_type
 
     @property
-    def kind(self):
+    def kind(self) -> str:
         # https://numpy.org/doc/stable/reference/generated/numpy.dtype.kind.html
         return _torch_dtypes[self.torch_dtype].name[0]
 
     @property
-    def typecode(self):
+    def typecode(self) -> str:
         return self._scalar_type.typecode
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, DType):
             return self._scalar_type == other._scalar_type
         try:
@@ -319,26 +335,26 @@ class DType:
         return self._scalar_type == other_instance._scalar_type
 
     @property
-    def torch_dtype(self):
+    def torch_dtype(self) -> torch.dtype:
         return self._scalar_type.torch_dtype
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self._scalar_type.name)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'dtype("{self.name}")'
 
     __str__ = __repr__
 
     @property
-    def itemsize(self):
+    def itemsize(self) -> int:
         elem = self.type(1)
         return elem.tensor.element_size()
 
-    def __getstate__(self):
+    def __getstate__(self) -> builtins.type[generic]:
         return self._scalar_type
 
-    def __setstate__(self, value):
+    def __setstate__(self, value: builtins.type[generic]) -> None:
         self._scalar_type = value
 
 
@@ -356,7 +372,9 @@ typecodes = {
 # ### Defaults and dtype discovery
 
 
-def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
+def set_default_dtype(
+    fp_dtype: object = "numpy", int_dtype: object = "numpy"
+) -> Callable[[], _dtypes_impl.DefaultDTypes]:
     """Set the (global) defaults for fp, complex, and int dtypes.
 
     The complex dtype is inferred from the float (fp) dtype. It has
@@ -415,23 +433,23 @@ def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
 
     # set the new global state and return the old state
     old_defaults = _dtypes_impl.default_dtypes
+    # pyrefly: ignore[bad-assignment]  # TODO
     _dtypes_impl._default_dtypes = new_defaults
     return old_defaults
 
 
-def issubclass_(arg, klass):
-    try:
-        return issubclass(arg, klass)
-    except TypeError:
-        return False
+def issubclass_(arg: object, klass: type[_T]) -> TypeGuard[type[_T]]:
+    # issubclass() raises TypeError if arg is not a class; guard explicitly so a
+    # non-class arg returns False (and narrows arg to type[_T] on success).
+    return isinstance(arg, type) and issubclass(arg, klass)
 
 
-def issubdtype(arg1, arg2):
+def issubdtype(arg1: object, arg2: object) -> bool:
     # cf https://github.com/numpy/numpy/blob/v1.24.0/numpy/core/numerictypes.py#L356-L420
 
     # We also accept strings even if NumPy doesn't as dtypes are serialized as their
     # string representation in dynamo's graph
-    def str_to_abstract(t):
+    def str_to_abstract(t: object) -> object:
         if isinstance(t, str) and t in _abstract_dtypes:
             return globals()[t]
         return t

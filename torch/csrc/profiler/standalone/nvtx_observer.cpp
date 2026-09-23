@@ -28,7 +28,7 @@ struct NVTXThreadLocalState : ProfilerStateBase {
       c10::Device /*device*/) override {}
 
   static NVTXThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    ProfilerStateBase* tls = ProfilerStateBase::getTLS();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::NVTX);
     return static_cast<NVTXThreadLocalState*>(tls);
@@ -60,7 +60,7 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
   if (tensor.defined()) {
     at::TensorImpl* ten_addr = tensor.unsafeGetTensorImpl();
     // See if Address is in the map already
-    if (producer_tensor_map_.count((void*)ten_addr) > 0) {
+    if (producer_tensor_map_.contains((void*)ten_addr)) {
       producer_op_pair = producer_tensor_map_[(void*)ten_addr];
     }
   }

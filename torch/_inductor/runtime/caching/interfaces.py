@@ -871,7 +871,7 @@ class Memoizer(_BaseMemoizer):
 
                 # Encode the result if encoder is provided
                 if custom_result_encoder is not None:
-                    # Get the encoder function by calling the factory factory:
+                    # Get the encoder function by calling the factory:
                     # 1. First call with fn to get params_to_encoder factory
                     # 2. Second call with params to get the encoder function
                     params_to_encoder = custom_result_encoder(fn)
@@ -981,7 +981,7 @@ class Memoizer(_BaseMemoizer):
 
                     # Decode and return the cached result
                     if custom_result_decoder is not None:
-                        # Get the decoder function by calling the factory factory:
+                        # Get the decoder function by calling the factory:
                         # 1. First call with fn to get params_to_decoder factory
                         # 2. Second call with params to get the decoder function
                         params_to_decoder = custom_result_decoder(fn)
@@ -1166,7 +1166,8 @@ class PersistentMemoizer(_BaseMemoizer):
         """
         # Always read from memory cache - Memoizer's callback has already inserted it
         cached_hit = self._memoizer._cache.get(cache_key)
-        assert cached_hit, "Cache entry must exist in memory cache"
+        if not cached_hit:
+            raise AssertionError("Cache entry must exist in memory cache")
         cache_entry = cached_hit.value
 
         # Store the full CacheEntry in disk cache for easier debugging
@@ -1264,7 +1265,7 @@ class PersistentMemoizer(_BaseMemoizer):
 
                     # Decode and return
                     if custom_result_decoder is not None:
-                        # Get the decoder function by calling the factory factory:
+                        # Get the decoder function by calling the factory:
                         # 1. First call with fn to get params_to_decoder factory
                         # 2. Second call with params to get the decoder function
                         params_to_decoder = custom_result_decoder(fn)

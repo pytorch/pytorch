@@ -1,5 +1,7 @@
 #include <torch/csrc/api/include/torch/types.h>  // @manual=fbcode//caffe2:libtorch
 
+#include <ATen/core/dispatch/Dispatcher.h> // @manual
+
 #include <torch/csrc/inductor/aoti_torch/c/shim.h> // @manual
 #include <torch/csrc/inductor/aoti_torch/utils.h> // @manual
 
@@ -381,6 +383,40 @@ Tensor fn_square_impl(const Tensor& tensor) {
 Tensor fn_square_meta(const Tensor& tensor) {
   return at::empty_like(tensor);
 }
+
+Tensor forward_maybe_weighted_impl(
+    const Tensor& x,
+    const Tensor& weight,
+    c10::SymInt /*n*/) {
+  // weight is undefined in the "unweighted" case, mirroring fbgemm TBE's
+  // indice_weights.  Boxed dispatch must hand us an undefined tensor here, not
+  // None.
+  if (weight.defined()) {
+    return x + weight;
+  }
+  return x.clone();
+}
+
+Tensor forward_maybe_weighted_meta(
+    const Tensor& x,
+    const Tensor& /*weight*/,
+    c10::SymInt /*n*/) {
+  return at::empty_like(x);
+}
+
+Tensor maybe_weighted_impl(
+    const Tensor& x,
+    const std::optional<Tensor>& weight,
+    c10::SymInt n) {
+  // Mirror fbgemm's autograd wrapper: materialize an undefined tensor from the
+  // absent optional via value_or(Tensor()), then dispatch the inner op so it
+  // (and its undefined non-optional Tensor arg) lands in the traced graph.
+  static auto op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("aoti_custom_ops::forward_maybe_weighted", "")
+          .typed<Tensor(const Tensor&, const Tensor&, c10::SymInt)>();
+  return op.call(x, weight.value_or(at::Tensor()), n);
+}
 } // namespace at
 
 
@@ -466,6 +502,8 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
 
   m.def("fn_out_variant_without_return(Tensor x, Tensor(a!) out) -> ()");
   m.def("fn_square(Tensor x) -> Tensor");
+  m.def("forward_maybe_weighted(Tensor x, Tensor weight, SymInt n) -> Tensor");
+  m.def("maybe_weighted(Tensor x, Tensor? weight, SymInt n) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
@@ -482,6 +520,11 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_impl);
   m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_impl);
   m.impl("fn_square", at::fn_square_impl);
+  m.impl("forward_maybe_weighted", at::forward_maybe_weighted_impl);
+}
+
+TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeImplicitAutograd, m) {
+  m.impl("maybe_weighted", at::maybe_weighted_impl);
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
@@ -497,4 +540,5 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_meta);
   m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_meta);
   m.impl("fn_square", at::fn_square_meta);
+  m.impl("forward_maybe_weighted", at::forward_maybe_weighted_meta);
 }

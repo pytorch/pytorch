@@ -587,8 +587,8 @@ TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
 TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
   EXPECT_THAT(
       []() { parseSchema("at::foo(Tensor(!) self) -> Tensor"); },
-      ::testing::Throws<std::runtime_error>(::testing::Property(
-          &std::runtime_error::what,
+      ::testing::Throws<c10::Error>(::testing::Property(
+          &c10::Error::what,
           ::testing::HasSubstr("expected ident but found '!' here"))));
 }
 
@@ -2304,12 +2304,12 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
   ASSERT_NE(add_ss.str().find("line 4"), std::string::npos);
   ASSERT_NE(
       add_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
-  ASSERT_NE(add_ss.str().find("return x + y"), std::string::npos);
+  ASSERT_NE(std::move(add_ss).str().find("return x + y"), std::string::npos);
   ASSERT_NE(mul_ss.str().find("line 3"), std::string::npos);
   ASSERT_NE(mul_ss.str().find("line 6"), std::string::npos);
   ASSERT_NE(
       mul_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
-  ASSERT_NE(mul_ss.str().find("return x * y"), std::string::npos);
+  ASSERT_NE(std::move(mul_ss).str().find("return x * y"), std::string::npos);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

@@ -272,13 +272,25 @@ def reload_activation_bw_async(graph: fx.Graph) -> None:
         insert_point: fx.Node = min(node.users.keys(), key=lambda n: node_to_index[n])
 
         original_device: torch.device = node.meta["original_device"]
+        original_size: tuple[int, ...] = node.meta["original_size"]
+        original_stride: tuple[int, ...] = node.meta["original_stride"]
         with graph.inserting_before(insert_point):
             reload_node: fx.Node = graph.call_function(
                 torch.ops.ao.reload.default,
-                args=(node, original_device),
+                args=(
+                    node,
+                    original_device,
+                    list(original_size),
+                    list(original_stride),
+                ),
                 name=f"async_{str(node.name).replace(CPU_OFFLOAD_PREFIX, GPU_RELOAD_PREFIX)}",
             )
-            reload_node.meta["val"] = node.meta["val"].to(original_device)
+            reload_node.meta["val"] = torch.empty_strided(
+                original_size,
+                original_stride,
+                dtype=node.meta["val"].dtype,
+                device=original_device,
+            )
             reload_node.meta["tensor_meta"] = extract_tensor_metadata(
                 reload_node.meta["val"]
             )
@@ -399,7 +411,6 @@ def choose_offload_sets(
             node, fwd_outputs, model_outputs, static_lifetime_input_nodes
         ):
             node.meta["saved_for_offloading"] = True
-            node.meta["original_device"] = node.meta["val"].device
             should_perform_offloading = True
 
     return should_perform_offloading
@@ -436,6 +447,8 @@ def offload_chosen_sets(
         bwd_offload_node.meta.update(fwd_node.meta)
         bwd_offload_node.meta["saved_for_offloading"] = True
         bwd_offload_node.meta["original_device"] = bwd_node.meta["val"].device
+        bwd_offload_node.meta["original_size"] = tuple(bwd_node.meta["val"].size())
+        bwd_offload_node.meta["original_stride"] = tuple(bwd_node.meta["val"].stride())
         bwd_node.replace_all_uses_with(bwd_offload_node)
         bwd_module.graph.erase_node(bwd_node)
 
@@ -475,6 +488,8 @@ def offload_chosen_sets_async(
         bwd_offload_node.meta.update(fwd_node.meta)
         bwd_offload_node.meta["saved_for_offloading"] = True
         bwd_offload_node.meta["original_device"] = bwd_node.meta["val"].device
+        bwd_offload_node.meta["original_size"] = tuple(bwd_node.meta["val"].size())
+        bwd_offload_node.meta["original_stride"] = tuple(bwd_node.meta["val"].stride())
         bwd_node.replace_all_uses_with(bwd_offload_node)
         bwd_module.graph.erase_node(bwd_node)
 
