@@ -4,17 +4,19 @@ import ast
 import os
 import shutil
 import tempfile
+import unittest
 from pathlib import Path
 
 from spin.tests.testutil import spin
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_S390X, run_tests, TestCase
 
 
 PYTORCH_ROOT = Path(__file__).parent.parent.parent
 
 
 class TestSpin(TestCase):
+    @unittest.skipIf(IS_S390X, "pyrefly doesn't support s390x")
     def test_autotype(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             here = Path(__file__).parent

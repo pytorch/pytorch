@@ -81,10 +81,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
-    skipIfRocm,
     skipIfWindows,
     skipIfXpu,
-    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -3041,7 +3039,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(a)
         self.assertTrue(same(ref, res))
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/184324")
     def test_tokenization(self):
         from collections import UserDict
 
@@ -3577,13 +3574,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager")
         with self.assertRaisesRegex(AssertionError, "tensor"):
             opt_f(args)
-        for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
-            if "assert with non-string message" in gb:
-                self.assertEqual(cnt, 1)
-                break
-        else:
-            # graph break not found
-            self.assertTrue(False)
+        self.assertEqual(torch._dynamo.utils.counters["graph_break"], {})
 
     def test_rewrite_assert_noop(self):
         def f(x):
@@ -4574,6 +4565,37 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(eager, compiled)
             if isinstance(backend, CompileCounter):
                 self.assertEqual(backend.frame_count, 2)  # graph breaks
+
+    def test_grad_attr_does_not_poison_the_interned_none(self):
+        # Reading a tensor's .grad labels the RESULT with an AttrSource, and when
+        # there is a pending `p.grad = None` store that result is the
+        # VariableTracker side_effects is holding -- which for None is a
+        # process-wide interned ConstantVariable. Writing a source onto it left
+        # every LATER compile in the process reconstructing a local from THIS
+        # frame, and dying in create_load with "self missing".
+        class Holder:
+            def __init__(self, model):
+                self.model = model
+
+            def step(self, x, t):
+                for p in self.model.parameters():
+                    p.grad = None
+                torch.nn.functional.mse_loss(self.model(x), t).backward()
+
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+        with torch._dynamo.config.patch(trace_autograd_ops=True):
+            step = Holder(torch.nn.Linear(4, 3)).step
+            torch.compile(step, backend="eager", fullgraph=True)(x, t)
+
+        none_vt = torch._dynamo.variables.ConstantVariable.create(None)
+        self.addCleanup(setattr, none_vt, "source", None)
+        self.assertIsNone(none_vt.source)
+
+        def later(m, xx):
+            return m(xx), None
+
+        opt = torch.compile(later, backend="eager", fullgraph=True)
+        self.assertIsNone(opt(torch.nn.Linear(4, 3), x)[1])
 
     def test_dynamic_shapes_double_not_equal(self):
         # https://github.com/pytorch/pytorch/issues/113393
@@ -6457,7 +6479,10 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         graph_code = backend.graphs[0].print_readable(print_output=False)
         self.assertIn("torch._C._nn.linear", graph_code)
 
+    @torch._dynamo.config.patch(record_runtime_overhead=True)
     def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
+        # Patch record_runtime_overhead on explicitly (rather than relying on the
+        # default) so the prologue profiling marker is emitted deterministically.
         # Names for prologue profiling event
         prologue_name = "AOTDispatcher Runtime Wrapper Prologue"
 
@@ -6493,6 +6518,48 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             # Make sure there is at least one other event (compiled function) that starts
             # after prologue starts
             self.assertLess(prologue_event.time_range.end, last_start_time)
+
+    def test_record_runtime_overhead_gated_on_profiler(self):
+        # The "Pregraph bytecode" marker Dynamo emits into each compiled call is
+        # gated at RUNTIME on the active profiler: with record_runtime_overhead
+        # on, it fires only when a profiler is attached (a non-profiled call pays
+        # nothing); with the flag off it is not emitted at all.
+        def has_pregraph_marker():
+            torch._dynamo.reset()
+            f = torch.compile(lambda x: x + 1, backend="eager")
+            x = torch.randn(4)
+            f(x)  # compile + warm the cache WITHOUT a profiler active
+            with profile(activities=[ProfilerActivity.CPU]) as prof:
+                f(x)
+            return any("Pregraph bytecode" in e.name for e in prof.events())
+
+        # On: the runtime gate lets the marker fire under a profiler even though
+        # the function was compiled without one (no recompile needed).
+        with torch._dynamo.config.patch(record_runtime_overhead=True):
+            self.assertTrue(has_pregraph_marker())
+        # Off: the marker is not emitted at all, so it is absent even under a
+        # profiler.
+        with torch._dynamo.config.patch(record_runtime_overhead=False):
+            self.assertFalse(has_pregraph_marker())
+
+        # The runtime gate must NOT invoke the marker fn when no profiler is
+        # active -- that is the whole point (a non-profiled call pays nothing).
+        # Spy on the marker enter on a single compiled function: it is skipped
+        # without a profiler and invoked with one.
+        with torch._dynamo.config.patch(record_runtime_overhead=True):
+            torch._dynamo.reset()
+            f = torch.compile(lambda x: x + 1, backend="eager")
+            x = torch.randn(4)
+            f(x)  # compile + warm WITHOUT a profiler
+            with mock.patch(
+                "torch._dynamo.utils.record_pregraph_bytecode_enter",
+                wraps=torch._dynamo.utils.record_pregraph_bytecode_enter,
+            ) as enter_spy:
+                f(x)  # no profiler -> gated out
+                self.assertEqual(enter_spy.call_count, 0)
+                with profile(activities=[ProfilerActivity.CPU]):
+                    f(x)  # profiler active -> gate lets it through
+                self.assertGreater(enter_spy.call_count, 0)
 
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -9940,7 +10007,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             self.assertEqual(grad, ref_grad)
 
     @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "flash attention not supported",
     )
     def test_flex_attention_guard_on_constant_func_defaults(self, device):
