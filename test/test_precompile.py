@@ -73,8 +73,7 @@ _PRECOMPILE_PUBLIC_MEMBERS = [
 
 
 def _precompile_pair(fn, *args, **kwargs):
-    """A rendered (python_code, cache) pair, built the way the retired callable
-    ``torch.compiler.precompile(fn, *args, **kwargs)`` built the one it returned."""
+    """Render an in-memory (python_code, cache) pair for ``fn`` traced on ``args``."""
     from torch._precompile import PrecompiledModule
 
     compiled = PrecompiledModule(fn, **kwargs)
@@ -84,8 +83,7 @@ def _precompile_pair(fn, *args, **kwargs):
 
 
 def _load_pair(python_code, cache):
-    """Reconstruct a runnable from an in-memory pair, through the loader core the
-    retired callable API's ``load`` became."""
+    """Reconstruct a runnable from an in-memory (python_code, cache) pair."""
     return torch._precompile._runnable_from_pair(python_code, cache)
 
 
@@ -4275,6 +4273,9 @@ class TestPrecompileLoad(TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
+        # load degrades to JIT with a warning rather than failing; the fresh
+        # process must have served from the cache.
+        self.assertNotIn("Falling back to JIT", out.stderr)
 
     def test_load_pairs_the_cache_on_its_tracer_tag(self):
         # The envelope names the tracer that produced it; a tag that differs from
