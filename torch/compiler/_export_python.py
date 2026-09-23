@@ -132,9 +132,61 @@ def _atomic_publish(path: str, data: bytes) -> bool:
             pass
 
 
+_CHECK_ENV = "COMPILER_EXPORT_PYTHON_CHECK"
+
 # Elements below this fraction of the reference's peak are too small for a relative diff
 # to say anything; they are covered by the absolute term instead.
 _REL_REPORT_FLOOR = 1e-6
+
+
+def _check_enabled() -> bool:
+    return os.environ.get(_CHECK_ENV, "") not in ("", "0")
+
+
+def _check_tolerances(dtype: torch.dtype) -> tuple[float, float, float | None]:
+    """Tolerances for comparing THIS artifact against eager, overridable by env var.
+
+    Returns ``(rtol, atol, atol_frac)``. Deliberately looser than torch.testing's
+    defaults, which are calibrated for eager-vs-eager. Inductor fuses and reassociates
+    reductions, so a correct artifact differs from eager by more than that on the first
+    call -- torch.compile produces the same divergence on the same graph. Using the tight
+    defaults rejected freshly exported, never-edited artifacts, which would make the
+    check useless.
+
+    ``atol_frac`` exists because a fixed absolute tolerance is meaningless without
+    knowing how big the outputs are. A softmax over 4096 columns has every element near
+    2.4e-4, which is FOUR TIMES SMALLER than the fp16 atol of 1e-3 -- so the whole output
+    sat inside the tolerance and no edit to that kernel could ever fail the check. The
+    effective absolute tolerance is therefore capped at ``atol_frac`` of the reference's
+    own magnitude, which can only make the check stricter than a bare ``atol``, never
+    looser.
+    """
+    # Calibrated against freshly exported, never-edited artifacts for softmax,
+    # layernorm+gelu, gemm+bias+gelu, silu(linear) and a fused fp32 reduction. The worst
+    # honest artifact in that set sits at 2.9e-3 relative and 2.3e-3 of its own
+    # magnitude (an fp16 softmax, where the reassociated reduction costs the most), so
+    # these leave roughly 2-4x over the honest floor rather than the 10x the old fp16
+    # numbers implied -- the extra room was not free, it was what let a real edit through.
+    per_dtype = {
+        torch.float64: (1e-7, 1e-9, 1e-7),
+        torch.float32: (1e-3, 1e-4, 1e-4),
+        torch.float16: (6e-3, 1e-3, 8e-3),
+        torch.bfloat16: (2e-2, 5e-3, 5e-3),
+    }
+    rtol, atol, atol_frac = per_dtype.get(dtype, (1e-3, 1e-4, 1e-4))
+    override_rtol = os.environ.get(f"{_CHECK_ENV}_RTOL")
+    override_atol = os.environ.get(f"{_CHECK_ENV}_ATOL")
+    if override_atol:
+        # An explicit absolute tolerance is an escape hatch; take it at face value.
+        # atol_frac None means "do not cap", which is the whole point of the override --
+        # capping it against the reference's magnitude made the escape hatch unusable,
+        # and made it do nothing at all on an all-zero reference.
+        return (
+            float(override_rtol) if override_rtol else rtol,
+            float(override_atol),
+            None,
+        )
+    return (float(override_rtol) if override_rtol else rtol, atol, atol_frac)
 
 
 def _allclose(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float) -> bool:
@@ -164,6 +216,90 @@ def _finite_mask(t: torch.Tensor) -> torch.Tensor | None:
         return torch.isfinite(t)
     except RuntimeError:
         return None
+
+
+def _verify_against_eager(
+    fn: Callable[..., Any],
+    reference_args: tuple[Any, ...],
+    produced: Any,
+    path: str,
+) -> None:
+    """Re-run fn eagerly on a pre-call copy of the inputs and compare the results.
+
+    The artifact is frozen at capture and stays frozen through every hand-edit -- that is
+    the point of it -- so the way to know an edit is still correct is to ask the original
+    function. Under COMPILER_EXPORT_PYTHON_CHECK every call does exactly that.
+    """
+    expected = fn(*reference_args)
+    got_leaves = [
+        t for t in pytree.tree_leaves(produced) if isinstance(t, torch.Tensor)
+    ]
+    want_leaves = [
+        t for t in pytree.tree_leaves(expected) if isinstance(t, torch.Tensor)
+    ]
+    if len(got_leaves) != len(want_leaves):
+        raise _precompile_error(
+            f"{_CHECK_ENV}: the artifact at {path} returned {len(got_leaves)} tensors "
+            f"but {getattr(fn, '__name__', 'fn')} returns {len(want_leaves)}."
+        )
+    for i, (got, want) in enumerate(zip(got_leaves, want_leaves)):
+        rtol, atol, atol_frac = _check_tolerances(got.dtype)
+        if got.shape != want.shape or got.dtype != want.dtype:
+            raise _precompile_error(
+                f"{_CHECK_ENV}: output {i} of the artifact at {path} is "
+                f"{tuple(got.shape)}/{got.dtype} but eager gives "
+                f"{tuple(want.shape)}/{want.dtype}."
+            )
+        want = want.to(got.device)
+        # Where each is finite has to agree before any tolerance is meaningful. An edit
+        # that leaves part of the output unwritten reads back whatever the allocator
+        # held, which is how "max abs diff nan" and "max abs diff 2.8e+38" both showed up
+        # for the same edit; say that plainly instead of reporting it as numeric drift.
+        finite_want, finite_got = _finite_mask(want), _finite_mask(got)
+        if (
+            finite_want is not None
+            and finite_got is not None
+            and not torch.equal(finite_got, finite_want)
+        ):
+            bad = int((finite_got != finite_want).sum())
+            raise _precompile_error(
+                f"{_CHECK_ENV}: output {i} of the artifact at {path} disagrees with "
+                f"{getattr(fn, '__name__', 'fn')} about where the result is finite "
+                f"({bad} of {got.numel()} elements). A kernel that leaves part of its "
+                "output unwritten reads back uninitialized memory, which looks like "
+                "this. If you have hand-edited the artifact, check the store and its "
+                f"bounds; otherwise delete {path} to recapture."
+            )
+        # Cap the absolute tolerance at a fraction of how big the reference actually is,
+        # so a tensor whose every element is smaller than atol is still checked.
+        values = want[finite_want] if finite_want is not None else want.flatten()
+        magnitude = values.double().abs().max().item() if values.numel() else 0.0
+        if atol_frac is not None:
+            atol = min(atol, atol_frac * magnitude)
+        if _allclose(got, want, rtol, atol):
+            continue
+        diff = (got.double() - want.double()).abs()
+        # Report the relative diff only where the reference is big enough for a ratio to
+        # mean anything. Clamping to float64 tiny made every exactly-zero element (gelu
+        # and relu produce them constantly) report a ratio near 1e308 and swamp the stat.
+        # A ratio is only informative where the reference is big enough to divide by.
+        # Deriving this floor from atol_frac meant that with an explicit _ATOL (frac 1.0)
+        # nothing was ever "significant" and the message always claimed the reference was
+        # all near-zero, directly beside the magnitude proving otherwise.
+        floor = _REL_REPORT_FLOOR * magnitude
+        significant = want.double().abs() > floor if floor > 0 else want.double() != 0
+        if significant.any():
+            rel = f"{(diff[significant] / want.double().abs()[significant]).max().item():.3e}"
+        else:
+            rel = "n/a (reference is all near-zero)"
+        raise _precompile_error(
+            f"{_CHECK_ENV}: output {i} of the artifact at {path} does not match "
+            f"{getattr(fn, '__name__', 'fn')} run eagerly on the same inputs "
+            f"(max abs diff {diff.max().item():.3e}, max rel diff {rel}, reference "
+            f"magnitude {magnitude:.3e}, tolerances rtol={rtol} atol={atol:.3e}). "
+            "If you have hand-edited the artifact, the edit changed its numerics; "
+            f"otherwise delete {path} to recapture."
+        )
 
 
 def _precompile_error(msg: str) -> Exception:
@@ -1065,7 +1201,24 @@ class ExportedPythonArtifact:
             loaded = self._materialize_once(args)
         self._check_capture_environment(args)
         self._check_module_training(args)
-        return loaded(*args)
+        if not _check_enabled():
+            return loaded(*args)
+        # Copy BEFORE the call: the graph may mutate its inputs in place, and the eager
+        # reference has to see what the artifact saw rather than what it left behind.
+        try:
+            reference = copy.deepcopy(args)
+        except Exception:
+            log.warning(
+                "%s is set but the arguments to %s could not be deep-copied, so an "
+                "eager comparison would see whatever the artifact mutated. Skipping "
+                "the check for this call.",
+                _CHECK_ENV,
+                self._path,
+            )
+            return loaded(*args)
+        produced = loaded(*args)
+        _verify_against_eager(self._fn, reference, produced, self._path)
+        return produced
 
 
 def export_python(
