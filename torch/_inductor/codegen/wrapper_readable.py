@@ -10,10 +10,11 @@ strings handed to ``AsyncCompile``, and it emits only the preamble lines (includ
 A kernel never autotunes at runtime, because the config a kernel launches with decides
 its numerics (a reduction's block sizes set its summation order) and so has to be fixed
 by the artifact. Triton kernels therefore require ``triton.autotune_at_compile_time``,
-which ``compile_fx_inner`` turns on when it is unset: each hoisted kernel is pinned, through ``triton_heuristics.fixed_config``, to the config
-that tuning chose, and those configs are listed in ``KERNEL_CONFIGS`` at the top of the
-module, where they can be edited. For the same reason ``triton.multi_kernel`` and
-user-defined kernels autotuned over several configs are refused.
+which ``compile_fx`` turns on when it is unset: each hoisted kernel is pinned, through
+``triton_heuristics.fixed_config``, to the config that tuning chose, and those configs
+are listed in ``KERNEL_CONFIGS`` at the top of the module, where they can be edited. For
+the same reason ``triton.multi_kernel`` and user-defined kernels autotuned over several
+configs are refused.
 
 The tradeoff that makes this opt-in: a kernel defined at module level compiles serially,
 in process, on its first launch, instead of fanning out to the compile worker pool.
@@ -126,17 +127,25 @@ def _pin_to_tuned_config(src_code: str, kernel_name: str) -> str | None:
     if decorator.func.attr == "template":
         return None
     kwargs = {kw.arg: kw.value for kw in decorator.keywords}
-    inductor_meta = ast.literal_eval(kwargs["inductor_meta"])
+    meta = kwargs["inductor_meta"]
+    if not isinstance(meta, ast.Dict):
+        raise AssertionError(f"unexpected inductor_meta on {kernel_name}")
     # Sequential combo-kernel tuning would retune the pinned config on first launch,
     # coordinate_descent_tuning would have cached_autotune consult the autotune cache,
     # whose best config for this file would replace the pinned one, and
     # incremental_autotune installs a tuning plugin (get_caching_autotuner_plugins).
-    for key in (
+    # Entries stay source text: values such as AutotuneHint members are not literals.
+    dropped = (
         "combo_tuning_groups",
         "coordinate_descent_tuning",
         "incremental_autotune",
-    ):
-        inductor_meta.pop(key, None)
+    )
+    entries = [
+        f"{ast.get_source_segment(src_code, k)}: {ast.get_source_segment(src_code, v)}"
+        for k, v in zip(meta.keys, meta.values)
+        if not (isinstance(k, ast.Constant) and k.value in dropped)
+    ]
+    inductor_meta = "{" + ", ".join(entries) + "}"
     triton_meta = ast.get_source_segment(src_code, kwargs["triton_meta"])
     lines = src_code.splitlines()
     lines[decorator.lineno - 1 : decorator.end_lineno] = [
@@ -144,7 +153,7 @@ def _pin_to_tuned_config(src_code: str, kernel_name: str) -> str | None:
         f"    config=KERNEL_CONFIGS[{kernel_name!r}],",
         "    filename=__file__,",
         f"    triton_meta={triton_meta},",
-        f"    inductor_meta={inductor_meta!r},",
+        f"    inductor_meta={inductor_meta},",
         ")",
     ]
     return "\n".join(lines)
