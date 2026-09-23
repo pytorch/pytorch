@@ -770,6 +770,16 @@
       ]
     }
   ],
+  "GB5397": [
+    {
+      "Gb_type": "Sourceless read of a mutable container attribute",
+      "Context": "attribute {name} of type {type(value).__name__}",
+      "Explanation": "Dynamo has no source for the object holding this pre-existing container, so it would trace a detached copy and silently drop mutations made through it.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4297": [
     {
       "Gb_type": "Call to `torch._dynamo.skip_frame()`",
