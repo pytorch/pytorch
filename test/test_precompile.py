@@ -6045,6 +6045,108 @@ class TestExportPython(TestCase):
 
         self.assertEqual(torch.compiler.export_python(path=path)(fn)(x), fn(x))
 
+    def test_capture_specializes_is_grad_enabled_to_true(self, device):
+        # Capture traces with grad enabled so a backward inside fn is built as graph ops,
+        # which specializes a fn that READS torch.is_grad_enabled() to the grad-on branch.
+        # That is deliberate and documented. Tracing under the caller's ambient mode was
+        # tried instead and is worse: the baked branch then depends on ambient state no
+        # stamp records, so a no_grad capture returns the wrong branch in every later
+        # process -- and stamping grad mode is not an option either, because capturing at
+        # the default and calling under no_grad is the ordinary inference pattern.
+        seen = []
+
+        def fn(inp):
+            seen.append(torch.is_grad_enabled())
+            return inp * 2
+
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        with torch.no_grad():
+            torch.compiler.export_python(
+                path=self._tmp_path("gradmode.py"), backend="eager"
+            )(fn)(x)
+        self.assertEqual(seen, [True])
+
+        # And the pattern that must keep working: capture at the default, then call for
+        # inference under no_grad.
+        def plain(inp):
+            return inp.sin() + 1
+
+        run = torch.compiler.export_python(path=self._tmp_path("infer.py"))(plain)
+        run(x)
+        with torch.no_grad():
+            self.assertEqual(run(x), plain(x))
+
+    def test_global_state_stamp_survives_the_per_backend_fp32_api(self, device):
+        # torch.get_float32_matmul_precision() RAISES in a process that has used the
+        # per-backend fp32_precision API. Reading it while building the stamp killed
+        # capture outright there -- after a full compile -- and killed every call on an
+        # artifact that already existed.
+        previous = torch.backends.cuda.matmul.fp32_precision
+        try:
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+            with self.assertRaises(RuntimeError):
+                torch.get_float32_matmul_precision()  # the read that used to be in there
+
+            def fn(inp):
+                return inp + torch.ones(4, device=device)
+
+            x = make_tensor((4,), device=device, dtype=torch.float32)
+            run = torch.compiler.export_python(path=self._tmp_path("fp32api.py"))(fn)
+            self.assertEqual(run(x), fn(x))
+            self.assertEqual(run(x), fn(x))
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = previous
+
+    def test_malformed_global_state_stamp_degrades_to_a_warning(self, device):
+        # Every other stamp treats a mangled value as a hand-edit and turns its own check
+        # off. This one unpacks the literal into key/value pairs, so a literal that is not
+        # a list of pairs escaped as a raw TypeError out of the load path.
+        path = self._tmp_path("mangled_state.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        def fn(inp):
+            return inp + 1
+
+        torch.compiler.export_python(path=path)(fn)(x)
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines(True)
+        for i, line in enumerate(lines):
+            if "global-state:" in line:
+                lines[i] = "# torch.compiler.export_python global-state: 42\n"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+        self.assertEqual(torch.compiler.export_python(path=path)(fn)(x), fn(x))
+
+    def test_ambient_global_state_is_stamped_and_checked(self, device):
+        # The generated code resolves these once, at capture, and bakes the answer: a
+        # factory op with no dtype= takes the default dtype then, and inductor picks a
+        # deterministic or an atomic lowering from the determinism flag. Changing one and
+        # replaying must not silently get capture's answer. The artifact
+        # never re-reads either, so without a stamp a process that changes one silently
+        # gets capture's answer.
+        def fn(inp):
+            return inp + torch.ones(4, device=device)
+
+        path = self._tmp_path("globals.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x)
+
+        with self.assertRaisesRegex(PrecompileError, "default_dtype"):
+            with _default_dtype(torch.float64):
+                torch.compiler.export_python(path=path)(fn)(x)
+
+        # Determinism is one-way: capture OFF and call ON means the artifact keeps a
+        # lowering the caller asked not to run, so that raises...
+        with self.assertRaisesRegex(PrecompileError, "deterministic"):
+            with _deterministic(True):
+                torch.compiler.export_python(path=path)(fn)(x)
+
+        # ...while capture ON and call OFF is conservative and must be allowed.
+        strict_path = self._tmp_path("globals_strict.py")
+        with _deterministic(True):
+            torch.compiler.export_python(path=strict_path)(fn)(x)
+        self.assertEqual(torch.compiler.export_python(path=strict_path)(fn)(x), fn(x))
+
     @unittest.skipUnless(TEST_CUDA, "needs a device the inputs do not live on")
     def test_autocast_stamp_covers_devices_only_the_graph_touches(self, device):
         # Keying the stamp on the INPUT devices alone recorded [] for a graph whose
