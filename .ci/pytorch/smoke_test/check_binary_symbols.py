@@ -182,7 +182,12 @@ int main() { return 0; }
 
     base_compile_flags = [
         "g++",
-        "-std=c++17",
+        # The full torch C++ API (torch/all.h, ATen/ATen.h) enforces a C++20
+        # minimum via header guards; compile at C++20 to match. The other
+        # checks below stay at C++17 on purpose -- they exercise the stable /
+        # header-only / C-shim surface, which must remain buildable under the
+        # older standard.
+        "-std=c++20",
         f"-I{include_dir}",
         f"-I{include_dir}/torch/csrc/api/include",
         "-c",  # Compile only, don't link
@@ -323,14 +328,20 @@ def check_headeronly_symbols(install_root: Path) -> None:
     platform_specific_keywords = [
         "cpu/vec",
         "win32-headers.h",
+        "headeronly/cuda",
     ]
+
+    # Headers that #error on direct inclusion and are reached via a parent header
+    non_self_contained_keywords = [
+        "util/complex_utils.h",
+    ]
+
+    skip_keywords = platform_specific_keywords + non_self_contained_keywords
 
     filtered_headers = []
     for header in headeronly_headers:
         rel_path = header.relative_to(include_dir).as_posix()
-        if not any(
-            keyword in rel_path.lower() for keyword in platform_specific_keywords
-        ):
+        if not any(keyword in rel_path.lower() for keyword in skip_keywords):
             filtered_headers.append(header)
 
     includes = []

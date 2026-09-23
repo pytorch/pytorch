@@ -21,6 +21,7 @@ typedef void* MTLBuffer_t;
 #include <c10/core/Scalar.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
@@ -166,7 +167,7 @@ class MetalShaderLibrary {
   // (copy_identity, copy_conj, copy_neg, copy_conj_neg). offsets are in bytes;
   // numel is the element count to process.
   void exec_unary_kernel_raw(
-      const std::string& name,
+      std::string_view name,
       MTLBuffer_t src_buf,
       uint32_t src_offs_bytes,
       c10::ScalarType src_dtype,
@@ -199,7 +200,8 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       T params,
-      const std::string& params_type_name);
+      const std::string& params_type_name,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
   template <typename T>
   void exec_binary_kernel_with_params(
       TensorIteratorBase& iter,
@@ -211,6 +213,11 @@ class MetalShaderLibrary {
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
+  // Guards `library` and every cache below. MPS ops run on whatever thread
+  // called into ATen, so lazy compilation and cache population race. Recursive
+  // because the accessors call each other (hasFunction -> getFunctionNames ->
+  // getLibrary).
+  std::recursive_mutex cache_mutex;
   MTLLibrary_t library = nullptr;
 
  private:

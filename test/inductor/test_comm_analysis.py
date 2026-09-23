@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import sys
+import unittest
 import warnings
 
 import torch
@@ -12,15 +13,13 @@ if not dist.is_available() or not dist.is_nccl_available():
     sys.exit(0)
 
 try:
-    from torch.testing._internal.common_distributed import (
-        requires_nccl,
-        skip_if_lt_x_gpu,
-    )
+    from torch.testing._internal.common_distributed import requires_nccl
 except ImportError:
     print("common_distributed not importable, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -94,7 +93,7 @@ class TestNcclEstimateDeviceResolution(TestCase):
             self._destroy_pg()
 
     @requires_nccl()
-    @skip_if_lt_x_gpu(1)
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_multi_backend_pg_resolves_to_nccl(self):
         """
         Multi-backend PG ("cpu:gloo,cuda:nccl"): We should resolve to the cuda device's backend.
@@ -110,22 +109,22 @@ class TestNcclEstimateDeviceResolution(TestCase):
             self.assertEqual(default_device, torch.device("cpu"))
 
             nccl_backend = pg._get_backend(torch.device("cuda"))
-            self.assertTrue(nccl_backend.supports_time_estimate)
+            self.assertTrue(nccl_backend._supports_time_estimate)
 
             gloo_backend = pg._get_backend(torch.device("cpu"))
-            self.assertFalse(gloo_backend.supports_time_estimate)
+            self.assertFalse(gloo_backend._supports_time_estimate)
         finally:
             self._destroy_pg()
 
     @requires_nccl()
-    @skip_if_lt_x_gpu(1)
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_single_nccl_backend_resolves_correctly(self):
         """Single NCCL backend PG: cuda device resolves to NCCL with time estimation."""
         torch.cuda.set_device(0)
         pg, group_name, group_size = self._init_pg_real_store("nccl")
         try:
             backend = pg._get_backend(torch.device("cuda"))
-            self.assertTrue(backend.supports_time_estimate)
+            self.assertTrue(backend._supports_time_estimate)
         finally:
             self._destroy_pg()
 

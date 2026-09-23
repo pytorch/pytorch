@@ -240,7 +240,8 @@ class ClampOperator(Operator):
 
         # For integer-dtype tensors, emit integer bounds so the fuzzer doesn't
         # generate float-bound + int-tensor mismatches between CPU and MTIA.
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         if output_spec.dtype in FLOAT_DTYPES:
             min_literal, max_literal = "-1.0", "1.0"
         else:

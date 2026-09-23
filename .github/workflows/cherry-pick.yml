@@ -8,7 +8,7 @@ on:
 jobs:
   cherry-pick:
     name: cherry-pick-pr-${{ github.event.client_payload.pr_num }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: cherry-pick-bot
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

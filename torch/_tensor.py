@@ -458,7 +458,7 @@ class Tensor(torch._C.TensorBase):
             and (
                 isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (
-                    not isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                    not torch._subclasses.fake_tensor.is_fake_tensor(self)
                     and self.data_ptr() == 0
                 )
             )
@@ -478,7 +478,7 @@ class Tensor(torch._C.TensorBase):
             type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
             and (
-                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                torch._subclasses.fake_tensor.is_fake_tensor(self)
                 and not (skip_data and materialize_fake_tensors)
             )
         ):
@@ -512,7 +512,7 @@ class Tensor(torch._C.TensorBase):
             # don't have _subclasses
             if (
                 hasattr(torch, "_subclasses")
-                and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and torch._subclasses.fake_tensor.is_fake_tensor(self)
                 and skip_data
             ):
                 storage._fake_device = self.device
@@ -691,6 +691,8 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError(
                 "cannot register a hook on a tensor that doesn't require gradient"
             )
+        # Accessing grad_fn refreshes a stale view before creating its hook dict.
+        _ = self.grad_fn
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
             if self.grad_fn is not None:
@@ -918,6 +920,11 @@ class Tensor(torch._C.TensorBase):
         from torch._linalg_utils import eig
 
         return eig(self, eigenvectors=eigenvectors)
+
+    def qr(self, some=True):
+        from torch._linalg_utils import qr
+
+        return qr(self, some=some)
 
     def symeig(self, eigenvectors=False):
         from torch._linalg_utils import _symeig
@@ -1547,6 +1554,7 @@ class Tensor(torch._C.TensorBase):
         max_version: tuple[int, int] | None = None,
         dl_device: tuple[enum.IntEnum, int] | None = None,
         copy: bool | None = None,
+        read_only: bool = False,
     ):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
@@ -1560,7 +1568,7 @@ class Tensor(torch._C.TensorBase):
             stream (integer or None): An optional Python integer representing a
                 pointer to a CUDA stream. The current stream is synchronized with
                 this stream before the capsule is created, and since the capsule
-                shares its storage with the tensor this make it safe to access from
+                shares its storage with the tensor this makes it safe to access from
                 both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
                 synchronization. This API intentionally slightly deviates from the DLPack
@@ -1578,6 +1586,12 @@ class Tensor(torch._C.TensorBase):
 
             copy (bool or None): An optional boolean indicating whether or not to copy
                 ``self``. If None, PyTorch will copy only if necessary.
+
+            read_only (bool): If True, the exported capsule is marked read-only
+                (``DLPACK_FLAG_BITMASK_READ_ONLY``) and the data is exported
+                through ``const_data_ptr()`` so a copy-on-write tensor is not
+                materialized. The consumer must not mutate the data. Requires
+                the versioned DLPack protocol (``max_version >= (1, 0)``).
         """
         if has_torch_function_unary(self):
             args = (self,)
@@ -1586,6 +1600,7 @@ class Tensor(torch._C.TensorBase):
                 "max_version": max_version,
                 "dl_device": dl_device,
                 "copy": copy,
+                "read_only": read_only,
             }
             return handle_torch_function(Tensor.__dlpack__, (self,), *args, **kwargs)
 
@@ -1603,6 +1618,8 @@ class Tensor(torch._C.TensorBase):
                 "Can't export tensors with layout other than torch.strided"
             )
 
+        # CUDA stream synchronization below uses the current CUDA device,
+        # rather than the device of the tensor being exported.
         if (
             self.device.type == "cuda"
             and self.device.index != torch.cuda.current_device()
@@ -1666,10 +1683,18 @@ class Tensor(torch._C.TensorBase):
             return xla_dlpack.to_dlpack(self)
 
         if max_version is None or max_version[0] < 1:
-            # Fallback to the old, unversioned variant.
+            # Fallback to the old, unversioned variant, which has no flags field
+            # and therefore cannot represent read-only.
+            if read_only:
+                raise BufferError(
+                    "read_only export requires the versioned DLPack protocol; "
+                    "pass max_version=(1, 0) or higher"
+                )
             return _C._to_dlpack(self, dl_device=dl_device, copy=copy)
 
-        return _C._to_dlpack_versioned(self, dl_device=dl_device, copy=copy)
+        return _C._to_dlpack_versioned(
+            self, dl_device=dl_device, copy=copy, read_only=read_only
+        )
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):

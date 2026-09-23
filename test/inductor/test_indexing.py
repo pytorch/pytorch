@@ -9,6 +9,7 @@ import sympy
 
 import torch
 from torch._dynamo.source import ConstantSource
+from torch._inductor import config
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
@@ -21,14 +22,24 @@ from torch._inductor.sizevars import (
     stride_at_vec_range,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import (
+    run_and_get_code,
+    run_and_get_kernels,
+    run_and_get_triton_code,
+)
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+)
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
@@ -46,6 +57,10 @@ from torch.utils._sympy.numbers import int_oo
 # int64_t is long long on MacOS, but long on 64-bit Linux
 LONG_SUFFIX = "LL" if IS_MACOS or IS_WINDOWS else "L"
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+REDUCTION_INVARIANT_X_LOAD = r"tl\.load\([^\n]*\[XBLOCK, 1\]"
+REDUCTION_INVARIANT_YX_LOAD = r"tl\.load\([^\n]*\[YBLOCK, 1, 1\]"
+DENSE_X_INDEX_LOAD = r"tl\.load\([^\n]*tl\.broadcast_to\(x\d+, \[XBLOCK, R0_BLOCK\]\)"
+REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
 
 
 class TestIndexingSimplification(InductorTestCase):
@@ -142,10 +157,10 @@ class TestIndexingSimplification(InductorTestCase):
 
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
-        i2 = sympy.Symbol("i2", integer=True)
-        r3 = sympy.Symbol("r3", integer=True)
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        i1 = sympy.Symbol("i1", integer=True, nonnegative=True)
+        i2 = sympy.Symbol("i2", integer=True, nonnegative=True)
+        r3 = sympy.Symbol("r3", integer=True, nonnegative=True)
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
         expr = (
@@ -214,9 +229,16 @@ class TestIndexingSimplification(InductorTestCase):
         # Nested modular indexing is correctly simplified
         var_ranges = {i1: 13, i2: 121}
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            ModularIndexing(121 * i1 + i2, 1, 28),
+        )
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        expr = ModularIndexing(ModularIndexing(i2, 1, 29), 7, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
+        expr = ModularIndexing(ModularIndexing(i2, -3, 12), -3, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
         var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
         # FloorDiv(ModularIndexing(b, d1, m), d2) simplifies to
@@ -225,6 +247,33 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
+        var_ranges = {i0: 4096, r3: 256}
+        p = r3 + 256 * i0
+        expr = (
+            32768 * FloorDiv(p, 32768)
+            + 4 * FloorDiv(ModularIndexing(p, 1, 32768), 8192)
+            + 16 * ModularIndexing(ModularIndexing(p, 1, 32768), 256, 32)
+            + 512
+            * ModularIndexing(
+                ModularIndexing(ModularIndexing(p, 1, 32768), 1, 8192),
+                4,
+                64,
+            )
+            + ModularIndexing(
+                ModularIndexing(ModularIndexing(p, 1, 32768), 1, 8192),
+                1,
+                4,
+            )
+        )
+        expected = (
+            512 * FloorDiv(r3, 4)
+            + 32768 * FloorDiv(i0, 128)
+            + ModularIndexing(r3, 1, 4)
+            + 16 * ModularIndexing(i0, 1, 32)
+            + 4 * ModularIndexing(i0, 32, 4)
+        )
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
 
     def test_floordiv_modularindexing_simplification(self):
         sizevars = SizeVarAllocator()
@@ -501,6 +550,23 @@ class TestIndexingSimplification(InductorTestCase):
         out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
         out_compiled.sum().backward()
 
+    @unittest.skipUnless(HAS_CPU, "requires CPU")
+    def test_bool_minimum_maximum_index_propagation(self):
+        def foo(x):
+            thresh = torch.nn.functional.threshold(x, 6.08522335982976, -0.05932757)
+            eq = torch.eq(thresh, x)
+            empty = torch.empty_like(eq)
+            return torch.minimum(empty, empty), torch.maximum(empty, empty)
+
+        x = torch.randn([32], dtype=torch.float64)
+        compiled_foo = torch.compile(foo, backend="inductor")
+        with torch.no_grad():
+            out_min, out_max = compiled_foo(x)
+        self.assertEqual(out_min.dtype, torch.bool)
+        self.assertEqual(out_max.dtype, torch.bool)
+        self.assertEqual(out_min.shape, x.shape)
+        self.assertEqual(out_max.shape, x.shape)
+
 
 class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):
@@ -725,8 +791,9 @@ instantiate_parametrized_tests(ExprPrinterTests)
 
 
 class TestIndexConstOverflowInt32(InductorTestCase):
-    """Tests for
-    ``SIMDKernelFeatures.any_index_expr_const_overflows_int32``."""
+    """Tests for the constant-offset check in
+    ``SIMDKernelFeatures.any_index_expr_overflows_int32`` (index evaluated at
+    the origin)."""
 
     def make_feats(self, indices):
         # Bypass __init__ (needs V.graph) and shadow scheduler_nodes().
@@ -736,10 +803,11 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         )
         feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
         feats.scheduler_nodes = lambda: [node]
+        feats.indexing_node_schedule = [node]
         return feats
 
     def check(self, indices):
-        return self.make_feats(indices).any_index_expr_const_overflows_int32()
+        return self.make_feats(indices).any_index_expr_overflows_int32()
 
     def test_production_constant_detected(self):
         x0, x1 = sympy.symbols("x0 x1", integer=True)
@@ -771,6 +839,67 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         good = sympy.Integer(42) + x0
         bad = sympy.Integer(-(2**31) - 1) + x0
         self.assertTrue(self.check([good, bad]))
+
+
+class TestIndexExprUpperBounds(InductorTestCase):
+    """Tests for the variable-scaled bound check in
+    ``SIMDKernelFeatures.any_index_expr_overflows_int32``, which bounds the
+    addressing expression over each loop variable's iteration range (catching
+    fused `V * x0` terms while letting a stride on a size-1 dim drop out)."""
+
+    def make_feats(self, deps):
+        node = types.SimpleNamespace(
+            read_writes=types.SimpleNamespace(reads=deps, writes=[])
+        )
+        feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
+        feats.scheduler_nodes = lambda: [node]
+        feats.indexing_node_schedule = [node]
+        return feats
+
+    def dep(self, index, var_names, sizes):
+        return MemoryDep("buf", index, tuple(var_names), tuple(sizes))
+
+    def check(self, deps):
+        return self.make_feats(deps).any_index_expr_overflows_int32()
+
+    def test_chunked_cross_buffer_overflow_caught(self):
+        # `V * x0 + i`: per-chunk stride V over the fused numel overflows int32
+        # even though no single buffer's storage does.
+        x0, i = sympy.symbols("x0 i", integer=True)
+        dep = self.dep(410_000_000 * x0 + i, [x0, i], [16384, 128])
+        self.assertTrue(self.check([dep]))
+
+    def test_in_range_index_not_flagged(self):
+        # stride 16 over numel 4M stays within int32.
+        x0 = sympy.Symbol("x0", integer=True)
+        dep = self.dep(16 * x0, [x0], [4_000_000])
+        self.assertFalse(self.check([dep]))
+
+    def test_stride_on_size_one_dim_drops_out(self):
+        # Layout shape=(1, 1M), stride=(1M, 1): the large stride multiplies a
+        # size-1 dim and must not force int64 (the Option A false positive).
+        d0, d1 = sympy.symbols("d0 d1", integer=True)
+        dep = self.dep(1_000_000 * d0 + d1, [d0, d1], [1, 1_000_000])
+        self.assertFalse(self.check([dep]))
+
+    def test_symbolic_size_skipped(self):
+        # Dynamic dims are covered by the storage-size check; the precise bound
+        # skips them rather than flagging or crashing on a symbolic size.
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        d0 = sympy.Symbol("d0", integer=True)
+        dep = self.dep(1_000_000_000_000 * d0, [d0], [s0])
+        self.assertFalse(self.check([dep]))
+
+    def test_uses_indexing_schedule(self):
+        x0 = sympy.Symbol("x0", integer=True)
+        regular = self.make_feats([self.dep(x0, [x0], [2])])
+        overflow = types.SimpleNamespace(
+            read_writes=types.SimpleNamespace(
+                reads=[self.dep(2**31 + x0, [x0], [2])], writes=[]
+            )
+        )
+        regular.indexing_node_schedule = [overflow]
+        self.assertTrue(regular.any_index_expr_overflows_int32())
 
 
 class TestEvaluateMinMax(InductorTestCase):
@@ -975,8 +1104,8 @@ class TestWideExpressionThresholds(InductorTestCase):
         self.assertEqual(result, FloorDiv(128 * i1, 8192))
 
     def test_modular_indexing_simplification_small(self):
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        i1 = sympy.Symbol("i1", integer=True, nonnegative=True)
         self.assertEqual(
             ModularIndexing(i0 + i1 * 10, 1, 10),
             ModularIndexing(i0, 1, 10),
@@ -1105,6 +1234,566 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
 
         with unittest.mock.patch.object(sympy.Basic, "subs", fail_subs):
             self.assertEqual(sizevars.optimization_hint(expr, fallback=0), 0)
+
+    def test_hint_respects_symbolic_upper_bound_assert(self):
+        # A reducing slice x[u0:] is sized s0 - u0. The invariant u0 <= s0 lives
+        # only in deferred_runtime_asserts, not var_to_range (which keeps the loose
+        # [0, fallback]). optimization_hint must honor it so u0 is capped at s0's
+        # hint rather than the generic fallback; otherwise s0 - u0 hints negative
+        # (16 - fallback) and overflows downstream allocations such as the AOTI
+        # autotuning example tensors.
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        s0 = shape_env.create_symbol(
+            16,
+            source=ConstantSource("__test_s0"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            constraint_dim=None,
+        )
+        u0 = shape_env.create_unbacked_symint().node.expr
+        shape_env.guard_or_defer_runtime_assert(u0 <= s0, "u0 <= s0")
+
+        self.assertLessEqual(sizevars.optimization_hint(u0, fallback=1024), 16)
+        self.assertGreaterEqual(sizevars.optimization_hint(s0 - u0, fallback=1024), 0)
+
+
+@instantiate_parametrized_tests
+class ReductionInvariantIndexingTests(InductorTestCase):
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("persistent_reductions", [False, True])
+    def test_reduction_invariant_masked_index_load(self, persistent_reductions):
+        def fn(index, source0, source1, value0, value1):
+            gathered0 = torch.index_select(source0, 0, index)
+            gathered1 = torch.index_select(source1, 0, index)
+            values = torch.cat((value0 + gathered0, value1 + gathered1), dim=1)
+            return values.square().sum(dim=-1)
+
+        inputs = (
+            torch.randperm(16, device=GPU_TYPE),
+            torch.randn(16, 2, 64, device=GPU_TYPE),
+            torch.randn(16, 3, 64, device=GPU_TYPE),
+            torch.randn(16, 2, 64, device=GPU_TYPE),
+            torch.randn(16, 3, 64, device=GPU_TYPE),
+        )
+        with config.patch(
+            {
+                "force_disable_caches": True,
+                "triton.persistent_reductions": persistent_reductions,
+            }
+        ):
+            actual, kernels = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+            )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        kernel = kernels[0]
+        FileCheck().check_regex(REDUCTION_INVARIANT_X_LOAD).check_regex(
+            REDUCTION_INVARIANT_X_LOAD
+        ).run(kernel)
+        FileCheck().check_regex(REDUCTION_DEPENDENT_LOAD).check_regex(
+            REDUCTION_DEPENDENT_LOAD
+        ).check_regex(REDUCTION_DEPENDENT_LOAD).check_regex(
+            REDUCTION_DEPENDENT_LOAD
+        ).run(kernel)
+        if persistent_reductions:
+            FileCheck().check("@triton_heuristics.persistent_reduction").check_not(
+                "for r0_offset in tl.range"
+            ).run(kernel)
+        else:
+            FileCheck().check_not("@triton_heuristics.persistent_reduction").check(
+                "for r0_offset in tl.range"
+            ).run(kernel)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("row_dtype", [torch.float32, torch.bfloat16, torch.bool])
+    def test_reduction_invariant_masked_load_dtypes(self, row_dtype):
+        def fn(row, value0, value1):
+            broadcast_row = row[:, None, None]
+            values = torch.cat((value0 + broadcast_row, value1 + broadcast_row), dim=1)
+            return values.square().sum(dim=-1)
+
+        if row_dtype == torch.bool:
+            row = torch.randint(0, 2, (16,), device=GPU_TYPE, dtype=row_dtype)
+        else:
+            row = torch.randn(16, device=GPU_TYPE, dtype=row_dtype)
+        value_dtype = torch.float16 if row_dtype == torch.float32 else torch.float32
+        inputs = (
+            row,
+            torch.randn(16, 2, 64, device=GPU_TYPE, dtype=value_dtype),
+            torch.randn(16, 3, 64, device=GPU_TYPE, dtype=value_dtype),
+        )
+        with config.patch(
+            {
+                "force_disable_caches": True,
+                "triton.persistent_reductions": True,
+            }
+        ):
+            actual, kernels = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+            )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        kernel = kernels[0]
+        FileCheck().check_regex(REDUCTION_INVARIANT_X_LOAD).check_regex(
+            REDUCTION_INVARIANT_X_LOAD
+        ).run(kernel)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(force_disable_caches=True)
+    def test_reduction_invariant_load_direct_reduction(self):
+        def fn(row0, row1):
+            value0 = row0[:, :, None].expand(-1, -1, 65)
+            value1 = row1[:, :, None].expand(-1, -1, 65)
+            return torch.cat((value0, value1), dim=1).sum(dim=-1)
+
+        inputs = (
+            torch.randn(16, 2, device=GPU_TYPE),
+            torch.randn(16, 3, device=GPU_TYPE),
+        )
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+        )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        FileCheck().check_regex(REDUCTION_INVARIANT_X_LOAD).check_regex(
+            REDUCTION_INVARIANT_X_LOAD
+        ).check("tl.broadcast_to").check("[XBLOCK, R0_BLOCK]").check("tl.sum").run(
+            kernels[0]
+        )
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("persistent_reductions", [False, True])
+    def test_reduction_invariant_indirect_load(self, persistent_reductions):
+        def fn(index, source, value0, value1):
+            row = torch.index_select(source, 0, index)
+            values = torch.cat(
+                (value0 + row[:, None, None], value1 + row[:, None, None]), dim=1
+            )
+            return values.square().sum(dim=-1)
+
+        inputs = (
+            torch.randperm(16, device=GPU_TYPE),
+            torch.randn(16, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(16, 2, 64, device=GPU_TYPE),
+            torch.randn(16, 3, 64, device=GPU_TYPE),
+        )
+        with config.patch(
+            {
+                "force_disable_caches": True,
+                "triton.persistent_reductions": persistent_reductions,
+            }
+        ):
+            actual, kernels = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+            )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        kernel = kernels[0]
+        FileCheck().check_regex(REDUCTION_INVARIANT_X_LOAD).check_regex(
+            REDUCTION_INVARIANT_X_LOAD
+        ).check_regex(REDUCTION_INVARIANT_X_LOAD).check_regex(
+            REDUCTION_INVARIANT_X_LOAD
+        ).run(kernel)
+        if persistent_reductions:
+            FileCheck().check("@triton_heuristics.persistent_reduction").run(kernel)
+        else:
+            FileCheck().check("for r0_offset in tl.range").run(kernel)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.persistent_reductions": False,
+        }
+    )
+    def test_loop_epilogue_indirect_load_scope(self):
+        def fn(x, source, index):
+            index = index.unsqueeze(-1)
+            selected = torch.gather(source, -2, index)
+            updated = selected + x.mean(dim=-1, keepdim=True)
+            return x / updated, source.scatter(-2, index, updated)
+
+        x = torch.ones(2, 2, 8, device=GPU_TYPE)
+        source = torch.arange(1, 17, device=GPU_TYPE, dtype=torch.float32).reshape(
+            2, 8, 1
+        )
+        index = torch.arange(2, device=GPU_TYPE).repeat(2, 1)
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True, dynamic=True),
+            x,
+            source,
+            index,
+            remove_quote=True,
+        )
+
+        self.assertEqual(fn(x, source, index), actual)
+        reduction_kernels = [kernel for kernel in kernels if "tl.sum(" in kernel]
+        self.assertEqual(1, len(reduction_kernels))
+        indirect_load = r"tl\.load\([^\n]*\+ \(tmp\d+"
+        FileCheck().check("for r0_offset in tl.range").check_regex(indirect_load).check(
+            "tl.store"
+        ).check_regex(indirect_load).run(reduction_kernels[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.prefer_nd_tiling": True,
+            "triton.tile_reductions": True,
+        }
+    )
+    def test_partially_reduction_invariant_masked_load(self):
+        def fn(value0, value1, row):
+            values = torch.cat((value0 * row[:, None], value1), dim=0)
+            return values.square().sum()
+
+        inputs = (
+            torch.randn(64, 128, device=GPU_TYPE),
+            torch.randn(32, 128, device=GPU_TYPE),
+            torch.randn(64, device=GPU_TYPE, dtype=torch.float16),
+        )
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+        )
+
+        self.assertEqual(fn(*inputs), actual)
+        FileCheck().check_regex(r"tl\.load\([^\n]*R0_BLOCK[^\n]*, 1\]").run(
+            "\n".join(kernels)
+        )
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("persistent_reductions", [False, True])
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.max_tiles": 3,
+            "triton.multi_kernel": 0,
+            "triton.prefer_nd_tiling": True,
+            "triton.tile_reductions": True,
+            "triton.use_block_ptr": False,
+        }
+    )
+    def test_reduction_invariant_pointwise_load(self, persistent_reductions):
+        def fn(row, value):
+            padded = torch.cat(
+                (
+                    row,
+                    torch.zeros(
+                        value.shape[0] - row.shape[0],
+                        device=row.device,
+                        dtype=row.dtype,
+                    ),
+                )
+            )
+            return (value.float() + padded.float()[:, None, None]).square().sum(dim=-1)
+
+        inputs = (
+            torch.randint(-4, 5, (13,), device=GPU_TYPE, dtype=torch.int64),
+            torch.randn(26, 65, 65, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        with config.patch({"triton.persistent_reductions": persistent_reductions}):
+            actual, kernels = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+            )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        FileCheck().check_regex(REDUCTION_INVARIANT_YX_LOAD).run(kernels[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "benchmark_combo_kernel": False,
+            "combo_kernel_allow_mixed_sizes": 2,
+            "combo_kernel_max_distance": -1,
+            "combo_kernel_peak_memory_increase_gb": None,
+            "combo_kernel_peak_memory_pct_threshold": None,
+            "combo_kernel_per_subkernel_blocks": False,
+            "combo_kernels": True,
+            "combo_kernels_autotune": 0,
+            "compile_threads": 1,
+            "force_disable_caches": True,
+            "max_autotune": False,
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": False,
+            "triton.multi_kernel": 0,
+            "triton.persistent_reductions": True,
+            "triton.prefer_nd_tiling": True,
+            "triton.tile_reductions": True,
+            "triton.use_block_ptr": False,
+        }
+    )
+    def test_combo_reduction_invariant_pointwise_load(self):
+        def reduction(target, value):
+            padded = torch.cat(
+                (
+                    target,
+                    torch.zeros(
+                        value.shape[0] - target.shape[0],
+                        device=value.device,
+                        dtype=target.dtype,
+                    ),
+                )
+            )
+            return (value.float() + padded.float()[:, None, None]).square().sum(dim=-1)
+
+        def fn(target0, value0, target1, value1):
+            return reduction(target0, value0), reduction(target1, value1)
+
+        inputs = (
+            torch.randint(-4, 5, (13,), device=GPU_TYPE, dtype=torch.int64),
+            torch.randn(17, 97, 64, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randint(-4, 5, (11,), device=GPU_TYPE, dtype=torch.int64),
+            torch.randn(19, 129, 64, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *inputs)
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(code))
+        FileCheck().check_regex(REDUCTION_INVARIANT_YX_LOAD).check_regex(
+            REDUCTION_INVARIANT_YX_LOAD
+        ).run(code[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @config.patch(
+        {
+            "benchmark_combo_kernel": False,
+            "combo_kernel_allow_mixed_sizes": 2,
+            "combo_kernel_max_distance": -1,
+            "combo_kernel_peak_memory_increase_gb": None,
+            "combo_kernel_peak_memory_pct_threshold": None,
+            "combo_kernel_per_subkernel_blocks": False,
+            "combo_kernels": True,
+            "combo_kernels_autotune": 0,
+            "compile_threads": 1,
+            "force_disable_caches": True,
+            "max_autotune": False,
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": False,
+            "triton.multi_kernel": 0,
+            "triton.persistent_reductions": True,
+            "triton.use_block_ptr": False,
+        }
+    )
+    def test_combo_reduction_invariant_zero_pointwise_extent(self):
+        def reduction(mask, target, value):
+            pointwise_extent = torch.nonzero(mask).numel()
+            value = value[:, :pointwise_extent, :]
+            padded = torch.cat(
+                (
+                    target,
+                    torch.zeros(
+                        value.shape[0] - target.shape[0],
+                        device=value.device,
+                        dtype=target.dtype,
+                    ),
+                )
+            )
+            return (value.float() + padded.float()[:, None, None]).square().sum(dim=-1)
+
+        def fn(mask0, target0, value0, mask1, target1, value1):
+            return reduction(mask0, target0, value0), reduction(mask1, target1, value1)
+
+        inputs = (
+            torch.zeros(16, device=GPU_TYPE, dtype=torch.bool),
+            torch.randint(-4, 5, (13,), device=GPU_TYPE, dtype=torch.int64),
+            torch.randn(17, 16, 64, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.ones(16, device=GPU_TYPE, dtype=torch.bool),
+            torch.randint(-4, 5, (11,), device=GPU_TYPE, dtype=torch.int64),
+            torch.randn(19, 16, 64, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *inputs)
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(0, actual[0].numel())
+        self.assertEqual((19, 16), actual[1].shape)
+        self.assertEqual(1, len(code))
+        FileCheck().check("SequentialComboKernelGrid").check_regex(
+            REDUCTION_INVARIANT_X_LOAD
+        ).check_regex(REDUCTION_INVARIANT_X_LOAD).run(code[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("pointwise_dependency", ["address", "predicate"])
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.max_tiles": 3,
+            "triton.multi_kernel": 0,
+            "triton.persistent_reductions": True,
+            "triton.prefer_nd_tiling": True,
+            "triton.tile_reductions": True,
+            "triton.use_block_ptr": False,
+        }
+    )
+    def test_pointwise_dependent_load_keeps_pointwise_axis(self, pointwise_dependency):
+        if pointwise_dependency == "address":
+
+            def fn(row, value0, value1):
+                values = torch.cat(
+                    (value0.float() + row.float()[:, :, None], value1.float()),
+                    dim=1,
+                )
+                return values.square().sum(dim=-1)
+
+            inputs = (
+                torch.randint(-4, 5, (26, 2), device=GPU_TYPE, dtype=torch.int64),
+                torch.randn(26, 2, 65, device=GPU_TYPE, dtype=torch.bfloat16),
+                torch.randn(26, 3, 65, device=GPU_TYPE, dtype=torch.bfloat16),
+            )
+        else:
+
+            def fn(row, value):
+                padded = torch.cat(
+                    (
+                        row[:, None],
+                        torch.zeros(
+                            (row.shape[0], value.shape[1] - 1),
+                            device=row.device,
+                            dtype=row.dtype,
+                        ),
+                    ),
+                    dim=1,
+                )
+                return (value.float() + padded.float()[:, :, None]).square().sum(dim=-1)
+
+            inputs = (
+                torch.randint(-4, 5, (26,), device=GPU_TYPE, dtype=torch.int64),
+                torch.randn(26, 65, 65, device=GPU_TYPE, dtype=torch.bfloat16),
+            )
+
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+        )
+
+        self.assertEqual(fn(*inputs), actual)
+        reduction_kernels = [kernel for kernel in kernels if "tl.sum(" in kernel]
+        self.assertEqual(1, len(reduction_kernels))
+        FileCheck().check_regex(r"tl\.load\([^\n]*\[YBLOCK, XBLOCK, 1\]").run(
+            reduction_kernels[0]
+        )
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(force_disable_caches=True)
+    def test_reduction_dependent_pointer_keeps_masked_index_load_dense(self):
+        def fn(index, source, left):
+            gathered = torch.index_select(source, 2, index).float()
+            values = torch.cat((left, gathered), dim=1)
+            return values.square().sum(dim=-1)
+
+        inputs = (
+            torch.randperm(64, device=GPU_TYPE)[:32],
+            torch.randn(16, 2, 64, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(16, 1, 32, device=GPU_TYPE),
+        )
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+        )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        FileCheck().check_regex(r"tl\.load\([^\n]*r0_[^\n]*R0_BLOCK").run(kernels[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(force_disable_caches=True)
+    def test_reduction_dependent_mask_keeps_masked_index_load_dense(self):
+        def fn(index, source, value):
+            gathered = torch.index_select(source, 0, index)
+            values = torch.cat((gathered, value), dim=-1)
+            return values.square().sum(dim=-1)
+
+        inputs = (
+            torch.randperm(16, device=GPU_TYPE),
+            torch.randn(16, 2, 32, device=GPU_TYPE),
+            torch.randn(16, 2, 16, device=GPU_TYPE),
+        )
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+        )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.dense_indexing": True,
+        }
+    )
+    def test_explicit_dense_indexing_keeps_masked_index_load_dense(self):
+        def fn(index, source, value):
+            gathered = torch.index_select(source, 0, index)
+            values = torch.cat((gathered, value), dim=1)
+            return values.square().sum(dim=-1)
+
+        inputs = (
+            torch.randperm(16, device=GPU_TYPE),
+            torch.randn(16, 2, 64, device=GPU_TYPE),
+            torch.randn(16, 3, 64, device=GPU_TYPE),
+        )
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+        )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("dense_indexing", [False, True])
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.persistent_reductions": False,
+        }
+    )
+    def test_loop_epilogue_masked_index_load_scope(self, dense_indexing):
+        def fn(index, mask, value):
+            positions = torch.arange(index.numel(), device=index.device)
+            masked_index = torch.ops.aten._unsafe_masked_index(
+                index, mask, [positions], 0
+            )
+            reduced = (value + masked_index[:, None]).sum(dim=-1)
+            return reduced + masked_index
+
+        inputs = (
+            torch.arange(16, device=GPU_TYPE, dtype=torch.int64),
+            torch.tensor([True, False] * 8, device=GPU_TYPE),
+            torch.randn(16, 64, device=GPU_TYPE),
+        )
+        with config.patch("triton.dense_indexing", dense_indexing):
+            actual, kernels = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+            )
+
+        self.assertEqual(fn(*inputs), actual)
+        self.assertEqual(1, len(kernels))
+        kernel = kernels[0]
+        check = FileCheck().check("for r0_offset in tl.range")
+        if dense_indexing:
+            check.check_regex(DENSE_X_INDEX_LOAD)
+        else:
+            check.check_regex(REDUCTION_INVARIANT_X_LOAD)
+        check.check("tl.sum").check_regex(r"tl\.load\(").run(kernel)
 
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):

@@ -8,7 +8,7 @@ import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
-                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo)
+                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
@@ -37,7 +37,8 @@ def float_double_default_dtype(fn):
 
     return wrapped_fn
 
-class TestTypePromotion(TestCase):
+class TestTypePromotionDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # In-place operations don't promote.
     # `int+float -> float` but `int.add_(float)` is rejected as an error.
@@ -407,8 +408,8 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
                 result = op(first, second)
                 expected = op(first.to(common_dtype), second.to(common_dtype))
-                self.assertEqual(result.dtype, expected.dtype, msg=f'{op.__name__} with {dt1}, {dt2}')
-                self.assertEqual(result, expected, msg=f'{op.__name__} with {dt1}, {dt2}')
+                self.assertEqual(result.dtype, expected.dtype, msg=lambda msg: f'{msg}\n{op.__name__} with {dt1}, {dt2}')
+                self.assertEqual(result, expected, msg=lambda msg: f'{msg}\n{op.__name__} with {dt1}, {dt2}')
 
     @float_double_default_dtype
     def test_non_promoting_ops(self, device):
@@ -509,13 +510,13 @@ class TestTypePromotion(TestCase):
                 dtype_res = _get_dtype(result)
                 if a is a_scalar and b is b_scalar and dtype_a == torch.bool and dtype_b == torch.bool:
                     # special case: in Python, True + True is an integer
-                    self.assertEqual(dtype_res, torch.int64, f"a == {a}, b == {b}")
+                    self.assertEqual(dtype_res, torch.int64, lambda msg: f"{msg}\na == {a}, b == {b}")
                 else:
-                    self.assertEqual(dtype_res, torch.result_type(a, b), f"a == {a}, b == {b}")
+                    self.assertEqual(dtype_res, torch.result_type(a, b), lambda msg: f"{msg}\na == {a}, b == {b}")
                 if a is a_scalar and b is b_scalar:  # Python internal type determination is good enough in this case
                     continue
                 if any(a is a0 and b is b0 for a0, b0 in zip(*combo)):  # a and b belong to the same class
-                    self.assertEqual(dtype_res, torch.promote_types(dtype_a, dtype_b), f"a == {a}, b == {b}")
+                    self.assertEqual(dtype_res, torch.promote_types(dtype_a, dtype_b), lambda msg: f"{msg}\na == {a}, b == {b}")
 
     # Spot check some result type for tensor against scalar (including single-element tensor).
     @float_double_default_dtype
@@ -1158,8 +1159,9 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(y, y_promo.to(dtype=dtype))
 
 
-class TestTypePromotionCPU(TestCase):
+class TestTypePromotion(TestCase):
     """Pure dtype-algebra tests that don't require any accelerator."""
+    hw_classification = HardwareClassification.GENERIC
 
     @float_double_default_dtype
     def test_can_cast(self):
@@ -1183,7 +1185,7 @@ class TestTypePromotionCPU(TestCase):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
 
-instantiate_device_type_tests(TestTypePromotion, globals())
+instantiate_device_type_tests(TestTypePromotionDevice, globals())
 
 if __name__ == '__main__':
     run_tests()
