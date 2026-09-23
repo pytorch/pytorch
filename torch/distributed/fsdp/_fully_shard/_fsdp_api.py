@@ -234,6 +234,9 @@ class AllGatherInput:
 class ReduceScatterInput:
     r"""Describe a parameter group's reduce-scatter input layout and copy.
 
+    Returned by callbacks registered with
+    :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`.
+
     Attributes:
         padded_unsharded_sizes (Sequence[torch.Size]): Padded sizes in parameter
             order, used to allocate the collective buffer and unpack its result.

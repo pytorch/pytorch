@@ -15,7 +15,10 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    AllGatherInput,
+)
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -269,7 +272,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
                 self.reorders = 0
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func == torch.ops.fsdp.split_with_sizes_copy.default:
+                if func == torch.ops.fsdp._all_gather_copy_out_.default:
                     self.copies += 1
                 elif func == torch.ops.aten.cat.out:
                     self.reorders += 1
@@ -346,6 +349,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
             shard_placement_fn=lambda _: Shard(shard_dim),
             reshard_after_forward=True,
         )
+        model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
         local_weight = model.weight._local_tensor
         local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
         local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
@@ -365,7 +369,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
             ref_output = ref_model(inp)
             self.assertEqual(output, ref_output, atol=0, rtol=0)
             self.assertEqual(counter.copies, int(shard_world_size > 1))
-            self.assertEqual(counter.reorders, 2 * int(shard_world_size > 1))
+            self.assertEqual(counter.reorders, 0)
             output.sum().backward()
             ref_output.sum().backward()
             check_sharded_parity(self, ref_model, model)
@@ -423,13 +427,14 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
         self.run_subtests(
             {
                 "shard_world_size": [1, 2],
+                "native_copy": [False, True],
                 "release_outputs": [False, True],
             },
             self._test_all_gather_input_layouts,
         )
 
     def _test_all_gather_input_layouts(
-        self, shard_world_size: int, release_outputs: bool
+        self, shard_world_size: int, native_copy: bool, release_outputs: bool
     ):
         mesh = init_device_mesh(
             device_type.type,
@@ -527,6 +532,8 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
             shard_placement_fn=lambda _: Shard(1),
             reshard_after_forward=True,
         )
+        if native_copy:
+            model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
         local_weight = model.weight._local_tensor
         local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
         local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
