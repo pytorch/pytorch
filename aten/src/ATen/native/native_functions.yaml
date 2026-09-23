@@ -2933,6 +2933,13 @@
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
 
+# CE + epsilon * (1 - pt), pt = softmax(self)[target]. Mean reduction.
+# Floating point [N, C] input, int64 [N] target.
+- func: poly1_cross_entropy_loss(Tensor self, Tensor target, float epsilon=1.0, int reduction=Mean) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: poly1_cross_entropy_loss
+
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)

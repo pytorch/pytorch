@@ -500,4 +500,26 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
+
+// Poly-1 cross entropy: CE + epsilon * (1 - pt), pt = softmax(self)[target].
+// reduction is at::Reduction (None, Mean, Sum). self is [N, C] floating
+// point, target is [N] int64. epsilon = 0 recovers cross entropy.
+Tensor poly1_cross_entropy_loss(
+    const Tensor& self,
+    const Tensor& target,
+    double epsilon,
+    int64_t reduction) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      "poly1_cross_entropy_loss is defined on floating point input");
+  TORCH_CHECK(
+      target.scalar_type() == at::ScalarType::Long,
+      "poly1_cross_entropy_loss expects an int64 target");
+  TORCH_CHECK(
+      self.dim() == 2 && target.dim() == 1 && self.size(0) == target.size(0),
+      "poly1_cross_entropy_loss expects self of shape [N, C] and target of shape [N]");
+  auto log_pt = at::log_softmax(self, 1).gather(1, target.unsqueeze(1)).squeeze(1);
+  auto pt = log_pt.exp();
+  return apply_loss_reduction(-log_pt + epsilon * (1 - pt), reduction);
+}
 }  // namespace at::native
