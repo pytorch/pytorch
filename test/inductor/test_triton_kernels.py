@@ -1132,9 +1132,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(torch_result, compiled_result)
 
     @requires_gpu
-    @inductor_config.patch(
-        {"cpu_backend": "cpp", "triton.autotune_pointwise": False}
-    )
     def test_triton_kernel_with_reinplace_scatter_copy_back(self):
         def call_triton_inplace_view(x: torch.Tensor):
             x_slice = x[2:]
@@ -1180,9 +1177,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(len(scatter_buffers), 0)
 
     @requires_gpu
-    @inductor_config.patch(
-        {"cpu_backend": "cpp", "triton.autotune_pointwise": False}
-    )
     def test_triton_kernel_reinplace_scatter_copy_back_with_additional_user(self):
         # Demonstrates that if there are multiple users of the scatter in the
         # scatter copy-back pattern, the pattern is still re-inplaced.
@@ -1308,7 +1302,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(actual_input, expected_input)
 
     @requires_gpu
-    @inductor_config.patch({"cpu_backend": "cpp", "triton.autotune_pointwise": False})
     def test_triton_kernel_reinplaces_scatter_before_later_mutation(self):
         def call_triton_inplace_view(x: torch.Tensor):
             x_slice = x[2:]
@@ -1355,9 +1348,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(len(input_mutation_buffers), 1)
 
     @requires_gpu
-    @inductor_config.patch(
-        {"cpu_backend": "cpp", "triton.autotune_pointwise": False}
-    )
     def test_triton_kernel_does_not_reinplace_before_unrelated_input_overwrite(self):
         def call_triton_then_overwrite(x: torch.Tensor, replacement: torch.Tensor):
             x_slice = x[2:]

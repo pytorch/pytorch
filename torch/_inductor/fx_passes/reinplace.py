@@ -493,6 +493,11 @@ class TritonKernelReinplacementPlan:
 def canonicalized_root(
     node: torch.fx.Node, canonicalized_replacements: dict[torch.fx.Node, torch.fx.Node]
 ) -> torch.fx.Node:
+    """
+    Some view ops have replay nodes that get canonicalized, e.g.
+    slice_scatter -> _generalized_scatter, so using the replacements we
+    recorded, figure out the new node.
+    """
     while node in canonicalized_replacements:
         node = canonicalized_replacements[node]
     return node
@@ -502,6 +507,13 @@ def _match_functionalized_user_defined_triton_kernel(
     triton_kernel: torch.fx.Node,
     canonicalized_replacements: dict[torch.fx.Node, torch.fx.Node],
 ) -> dict[tuple[torch.fx.Node, torch.fx.Node], TritonKernelReinplacementPlan] | None:
+    """
+    Attempts to in-place all triton_kernel_wrapper_functional ops that were
+    emitted during functionalization. Using the metadata we create around the
+    views that the kernel writes to and the ops that get created as a result of
+    the ``ctx.commit_update()``, we can also remove the view replay ops, even
+    if we can't associate them with an epilogue copy.
+    """
     if triton_kernel.target not in inplaceable_triton_ops:
         return None
 
@@ -613,8 +625,7 @@ def reinplace_inplaceable_ops_core(
     # maps (view_arg, inplaceable_op_node) to copy_ nodes that copy a view of
     # the op result back into the graph input that view_arg aliases.
     copy_args_to_copy_nodes_via_views = {}
-    # maps (view_arg, inplaceable_op_node) to ViewMutationUpdate which
-    # describes an update of a view of a graph input.
+    # maps (view_arg, inplaceable_op_node) to a TritonKernelReinplacementPlan
     copy_args_to_triton_kernel_reinplacement_plans: dict[
         tuple[torch.fx.Node, torch.fx.Node], TritonKernelReinplacementPlan
     ] = {}
@@ -812,9 +823,9 @@ def reinplace_inplaceable_ops_core(
                 return False
 
             if plan is not None:
-                # We need to ignore the scatter as it will be considered a user
-                # and the re-inplacement will be rejected, even though we are
-                # preparing to delete it anyway.
+                # We need to ignore the replay ops as they might be considered
+                # users and the re-inplacement will be rejected, even though we
+                # are preparing to delete them anyway.
                 ignored_users = OrderedSet(plan.redundant_ops)
             elif not _is_layout_preserving_view_copy_back(
                 mutated_arg_base, copy_src, mutated_arg, node
