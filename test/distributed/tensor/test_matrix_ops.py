@@ -464,9 +464,12 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
     @with_comms
     @skip_unless_torch_gpu
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        torch.cuda.is_available()
+        and not torch.version.hip
+        and not PLATFORM_SUPPORTS_FP8,
+        "FP8 reduction is only supported on H100+ and MI300+ devices",
     )
+    @unittest.skipIf(not SM90OrLater, "requires sm90+")
     def test_scaled_mm(self):
         device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
