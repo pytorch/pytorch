@@ -178,10 +178,39 @@ def _dense_leaves(t: torch.Tensor) -> list[torch.Tensor] | None:
 
     A wrapper subclass (DTensor, TwoTensor, FunctionalTensor) reports data_ptr() == 0
     with a real device and is_meta False, so comparing its byte span against a plain
-    tensor's would report every pair as disjoint. It is left unlocated here.
+    tensor's would report every pair as disjoint. Decompose it instead.
     """
     if is_traceable_wrapper_subclass(t):
-        return None
+        try:
+            attrs, _ = t.__tensor_flatten__()
+        except Exception:
+            return None
+        leaves: list[torch.Tensor] = []
+        saw_tensor = False
+        for attr in attrs:
+            # __tensor_flatten__ names the attributes that must be transformed, and
+            # not all of them are tensors -- DTensor's list includes its DeviceMesh.
+            component = getattr(t, attr, None)
+            if not isinstance(component, torch.Tensor):
+                continue
+            saw_tensor = True
+            inner = _dense_leaves(component)
+            if inner is None:
+                return None
+            leaves.extend(inner)
+        # An empty list here means every component owns no bytes, which is a real
+        # answer. Only a subclass we could not see INTO is unresolvable -- returning
+        # `leaves` unconditionally would make such a wrapper disjoint from everything
+        # and let a donor be written over a live input.
+        return leaves if saw_tensor else None
+    if t.numel() == 0 or t.is_meta:
+        # Owns no bytes, which is not the same as "bytes we cannot find". Both report
+        # data_ptr 0, so without this one such component (an absent bias, an empty KV
+        # cache, an uneven shard, a meta-initialized slot) would poison its whole
+        # wrapper into "assume it aliases everything" and refuse every donation against
+        # it. This is about a leaf that genuinely IS meta; a wrapper merely presenting
+        # meta over live payloads is still distrusted, in _reports_no_bytes.
+        return []
     try:
         if t.data_ptr() == 0:
             return None
@@ -215,7 +244,7 @@ def _shares_memory(a: torch.Tensor, b: torch.Tensor) -> bool:
     different UntypedStorages (from_numpy on overlapping slices, frombuffer, DLPack,
     __cuda_array_interface__ onto a live arena), and a storage-identity gate reports
     those as disjoint -- a donor would then be written over a live input. data_ptr is a
-    process-global address and differing devices are rejected below, so
+    process-global address and differing devices are rejected at the LEAF below, so
     distinct allocations cannot collide. One allocation visible under two device types
     still can: mapped pinned host memory has the same address as its CUDA view, and
     this reports the pair disjoint. torch._C._overlaps answers that case identically.
@@ -230,13 +259,28 @@ def _shares_memory(a: torch.Tensor, b: torch.Tensor) -> bool:
         return False
     a_leaves, b_leaves = _dense_leaves(a), _dense_leaves(b)
     if a_leaves is None or b_leaves is None:
-        # An addressless tensor (a wrapper subclass, sparse, nested). Its bytes are
-        # unknown, so the only safe answer is "assume it aliases" -- NOT storage
-        # identity, which is the predicate that made byte-disjoint arena slices look
-        # aliased in the first place. Device type is all that can still rule a pair
-        # out, and a wrapper misreporting its type is taken at its word here.
+        # An addressless or undecomposable tensor (a wrapper subclass whose components
+        # we cannot reach, sparse, nested). Its bytes are unknown, so the only safe
+        # answer is "assume it aliases" -- NOT storage identity, which is the predicate
+        # that made byte-disjoint arena slices look aliased in the first place. Device
+        # type is all that can still rule a pair out. Note this reads the OUTER device
+        # of both operands, including one that did resolve, because there is no leaf on
+        # the unresolved side to pair its leaves against; a wrapper misreporting its
+        # type is therefore still taken at its word here.
         return a.device.type == b.device.type
+    if not (
+        len(a_leaves) == 1
+        and a_leaves[0] is a
+        and len(b_leaves) == 1
+        and b_leaves[0] is b
+    ):
+        return any(_shares_memory(x, y) for x in a_leaves for y in b_leaves)
     if a.device != b.device:
+        # Compared here, on the LEAF, and never on the wrapper: a subclass can report a
+        # device that differs from the one holding its bytes in index (torch.load with
+        # map_location="cuda" over a "cuda:0" payload) or in TYPE (map_location=
+        # {"cuda:0": "cpu"}). Gating above reported such a tensor as sharing memory with
+        # nothing -- including with its own payload.
         return False
     try:
         (a_start, a_end), (b_start, b_end) = _byte_span(a), _byte_span(b)
@@ -273,22 +317,72 @@ def _input_tensors(args: Sequence[Any]) -> list[torch.Tensor]:
     return [*user, *module]
 
 
+def _span_atoms(
+    t: torch.Tensor,
+) -> list[tuple[torch.device, int, int]] | None:
+    """t's byte ranges as (leaf device, start, end), or None if they cannot be located.
+
+    Keyed on the LEAF device only, matching _shares_memory: a wrapper subclass can
+    report a device that differs from the one holding its bytes, in index (torch.load
+    with map_location="cuda" over a "cuda:0" payload) or in type (map_location=
+    {"cuda:0": "cpu"}), so the wrapper's own report decides nothing. An empty list means
+    t owns no addressable bytes, so it overlaps nothing.
+    """
+    if _reports_no_bytes(t):
+        return []
+    leaves = _dense_leaves(t)
+    if leaves is None:
+        return None
+    atoms = []
+    for leaf in leaves:
+        if leaf.numel() == 0 or leaf.is_meta:
+            continue
+        try:
+            start, end = _byte_span(leaf)
+        except RuntimeError:
+            return None
+        atoms.append((leaf.device, start, end))
+    return atoms
+
+
 def _input_overlaps(
     args: Sequence[Any], tensors: list[torch.Tensor] | None = None
 ) -> list[list[int]]:
     """Which pairs of input tensors share memory, as sorted [i, j] index pairs.
 
-    Lists (not tuples) so the stamp round-trips through ast.literal_eval to something
-    that compares equal.
+    Runs on every artifact call, so it is a sweep and not the P-choose-2 pairwise scan:
+    a 32-block model has hundreds of parameters, and the quadratic form cost multiples
+    of the forward it guards. Lists (not tuples) so the stamp round-trips through
+    ast.literal_eval to something that compares equal.
     """
     if tensors is None:
         tensors = _input_tensors(args)
-    return [
-        [i, j]
-        for i in range(len(tensors))
-        for j in range(i + 1, len(tensors))
-        if _shares_memory(tensors[i], tensors[j])
-    ]
+    by_device: dict[torch.device, list[tuple[int, int, int]]] = {}
+    unresolved: list[int] = []
+    for i, tensor in enumerate(tensors):
+        atoms = _span_atoms(tensor)
+        if atoms is None:
+            unresolved.append(i)
+            continue
+        for leaf, start, end in atoms:
+            by_device.setdefault(leaf, []).append((start, end, i))
+    pairs: set[tuple[int, int]] = set()
+    for spans in by_device.values():
+        spans.sort()
+        # Spans that started earlier and have not ended: exactly the ones this span can
+        # overlap, since the list is sorted by start.
+        open_spans: list[tuple[int, int]] = []
+        for start, end, i in spans:
+            open_spans = [(e, j) for e, j in open_spans if e > start]
+            for _, j in open_spans:
+                if j != i:
+                    pairs.add((min(i, j), max(i, j)))
+            open_spans.append((end, i))
+    for i in unresolved:
+        for j, other in enumerate(tensors):
+            if j != i and _shares_memory(tensors[i], other):
+                pairs.add((min(i, j), max(i, j)))
+    return [[i, j] for i, j in sorted(pairs)]
 
 
 def _input_duplicates(
