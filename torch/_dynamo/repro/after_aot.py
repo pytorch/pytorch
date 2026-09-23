@@ -86,6 +86,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
+from torch._functorch.fx_minifier import symbolic_meta_leaves
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._library.fake_class_registry import FakeScriptObject
@@ -916,7 +917,7 @@ def save_graph_repro(
         if any(
             has_free_symbols(a) for a in args if not isinstance(a, FakeScriptObject)
         ) or any(
-            has_free_symbols(node.meta.get(meta_name))
+            has_free_symbols(symbolic_meta_leaves(node.meta.get(meta_name)))
             for node in gm.graph.nodes
             for meta_name in ("val", "example_value")
         ):

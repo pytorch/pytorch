@@ -45,6 +45,25 @@ from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
 
 
+def _insert_live_dtype_node(gm):
+    """Route the add through a runtime torch.dtype so the graph keeps a node
+    whose meta["val"] is a dtype rather than a tensor or SymInt."""
+    x_node = next(n for n in gm.graph.nodes if n.op == "placeholder")
+    add_node = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+    with gm.graph.inserting_before(add_node):
+        dtype_node = gm.graph.call_function(
+            torch.ops.aten.result_type.Tensor, (x_node, x_node)
+        )
+        dtype_node.meta["val"] = torch.float32
+        cast_node = gm.graph.call_function(
+            torch.ops.aten._to_copy.default, (x_node,), {"dtype": dtype_node}
+        )
+        cast_node.meta["val"] = x_node.meta["val"]
+    add_node.args = (cast_node, *add_node.args[1:])
+    gm.recompile()
+    return gm
+
+
 def strip_trailing_whitespace(r):
     return "\n".join([l.rstrip() for l in r.split("\n")])
 
@@ -782,6 +801,18 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         derived_expr = reader.symint_exprs.get(1)
         self.assertIsNotNone(derived_expr)
         self.assertIn("//", derived_expr)
+
+    def test_save_graph_repro_ignores_dtype_metadata(self):
+        def f(x):
+            return (x + 1,)
+
+        # A static graph makes the tracing-mode scan visit every node.
+        inp = torch.randn(2)
+        gm = _insert_live_dtype_node(make_fx(f, tracing_mode="fake")(inp))
+
+        buf = io.StringIO()
+        save_graph_repro(buf, gm, [inp], "inductor", command="get_args")
+        self.assertIn("tracing_mode='real'", buf.getvalue())
 
     def test_save_graph_repro_uses_symbolic_placeholder_metadata(self):
         def f(n, x):

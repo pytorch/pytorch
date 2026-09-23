@@ -10,6 +10,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
+import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     is_symbol_binding_fx_node,
@@ -30,6 +31,15 @@ is_tuple = object()
 
 class MinifierSanityCheckFailed(RuntimeError):
     pass
+
+
+def symbolic_meta_leaves(val: Any) -> list[Any]:
+    """Tensor and symbolic leaves of node metadata, skipping dtypes, devices, etc."""
+    return [
+        leaf
+        for leaf in pytree.tree_leaves(val)
+        if isinstance(leaf, (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool))
+    ]
 
 
 @dataclass
@@ -407,7 +417,9 @@ def minifier(
                 continue
             for meta_name in ("val", "example_value"):
                 if meta_name in node.meta:
-                    needed_symbols |= set(free_symbols(node.meta[meta_name]))
+                    needed_symbols |= set(
+                        free_symbols(symbolic_meta_leaves(node.meta[meta_name]))
+                    )
 
         bound_symbols = {
             symbol
