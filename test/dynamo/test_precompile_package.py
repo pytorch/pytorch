@@ -2435,7 +2435,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # a def of that name in this file. The static shapes recompile either
         # way; a dropped slot that held a different def in each variant cannot
         # pick between them at serve time.
-        def risky(acts):
+        def capture(acts):
             session = precompile_package.precompile_capture(
                 _through_act, backend="eager", dynamic=False
             )
@@ -2446,11 +2446,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return session.summary()
 
         slot = ("CLOSURE_MATCH", "G['_act']")
-        same = risky([_relu, _relu])
+        same = capture([_relu, _relu])
         self.assertIn(slot, same.dropped_guards)
         self.assertGreaterEqual(same.guarded_codes, 2)
         self.assertNotIn(slot, same.risky_dropped_guards)
-        self.assertIn(slot, risky([_relu, _sigmoid]).risky_dropped_guards)
+        self.assertIn(slot, capture([_relu, _sigmoid]).risky_dropped_guards)
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
