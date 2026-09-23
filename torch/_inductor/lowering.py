@@ -7740,8 +7740,25 @@ def mutate_to(changed, val, unsafe_alias=False):
     if isinstance(val, TensorBox):
         val = val.data
 
-    if not isinstance(val, ir.StorageBox):
-        # introduce a copy to handle views
+    # Fast path, just swing the data pointer. Not for a realized StorageBox
+    # (inputs and module buffers included): it may already be referenced by
+    # name (views, extern kernel inputs), so its data can't be replaced.
+    # Except an empty buffer nothing has written yet: it holds no data, and
+    # its views only need the new value in the same layout.
+    fast_path = isinstance(changed_data, ir.StorageBox) and (
+        not IRNode.is_realized_node(changed_data.data)
+        or (
+            not unsafe_alias
+            and isinstance(changed_data.data, ir.ComputedBuffer)
+            and changed_data.data.is_no_op()
+            and changed_data.get_name() not in V.graph.mutated_buffers
+        )
+    )
+
+    if not isinstance(val, ir.StorageBox) or (fast_path and not unsafe_alias):
+        # introduce a copy to handle views, and on the fast path so that
+        # changed doesn't share another tensor's buffer (copy_), which a
+        # later mutation of either would then write in place
         node = Pointwise.create(
             device=changed.get_device(),
             dtype=changed.get_dtype(),
@@ -7754,17 +7771,21 @@ def mutate_to(changed, val, unsafe_alias=False):
         if not (isinstance(val, ir.StorageBox)):
             raise AssertionError("expected: isinstance(val, ir.StorageBox)")
 
-    if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer()
-        # In AOTI, module parameters and buffers are not lifted as graph inputs
-        or changed_data.is_module_buffer()
-        or isinstance(changed_data.data, ir.NopKernel)
-    ):
-        # Fast path, just swing the data pointer
+    if fast_path:
         val.realize()
+        if IRNode.is_realized_node(changed_data.data):
+            val.data.layout = changed_data.data.layout
         changed_data.data = val.data
         return changed
 
+    # unsafe_alias computes val straight into changed, which is wrong if val
+    # reads changed at other positions. It is meant for the foreach epilogues
+    # that write back to inputs; a realized intermediate gets the copy.
+    unsafe_alias = unsafe_alias and (
+        not isinstance(changed_data, ir.StorageBox)
+        or changed_data.is_input_buffer()
+        or changed_data.is_module_buffer()
+    )
     ir.MutationLayoutSHOULDREMOVE.realize_into(
         val, changed_data, unsafe_alias=unsafe_alias
     )
