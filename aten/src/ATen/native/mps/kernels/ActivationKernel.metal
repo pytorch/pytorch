@@ -45,23 +45,6 @@ REGISTER_BINARY_ALPHA_OP(shrink_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(shrink_backward, half, half, half);
 REGISTER_BINARY_ALPHA_OP(shrink_backward, bfloat, bfloat, bfloat);
 
-struct relu_functor {
-  template <typename T>
-  inline T operator()(const T x) {
-    return x < T(0) ? T(0) : x;
-  }
-};
-
-REGISTER_UNARY_OP(relu, float, float);
-REGISTER_UNARY_OP(relu, half, half);
-REGISTER_UNARY_OP(relu, bfloat, bfloat);
-REGISTER_UNARY_OP(relu, long, long);
-REGISTER_UNARY_OP(relu, int, int);
-REGISTER_UNARY_OP(relu, short, short);
-REGISTER_UNARY_OP(relu, char, char);
-REGISTER_UNARY_OP(relu, uchar, uchar);
-REGISTER_UNARY_OP(relu, bool, bool);
-
 struct hardsigmoid_functor {
   template <typename T>
   inline T operator()(const T x) {
@@ -171,6 +154,42 @@ REGISTER_ELU_OP(bfloat);
 REGISTER_ELU_BACKWARD_OP(float);
 REGISTER_ELU_BACKWARD_OP(half);
 REGISTER_ELU_BACKWARD_OP(bfloat);
+
+struct softplus_functor {
+  template <typename T>
+  inline T operator()(const T self_, const SoftplusParams params) {
+    using op_T = opmath_t<T>;
+    const auto self = static_cast<op_T>(self_);
+    const auto bx = self * params.beta;
+    return static_cast<T>(
+        bx > params.threshold
+            ? self
+            : ::c10::metal::log1p(::metal::precise::exp(bx)) / params.beta);
+  }
+};
+
+struct softplus_backward_functor {
+  template <typename T>
+  inline T operator()(
+      const T grad_output_,
+      const T self_,
+      const SoftplusParams params) {
+    using op_T = opmath_t<T>;
+    const auto grad_output = static_cast<op_T>(grad_output_);
+    const auto bx = static_cast<op_T>(self_) * params.beta;
+    const auto z = ::metal::precise::exp(bx);
+    return static_cast<T>(
+        bx > params.threshold ? grad_output : grad_output * z / (z + op_T(1)));
+  }
+};
+
+REGISTER_UNARY_ALPHA_OP(softplus, float, SoftplusParams, float);
+REGISTER_UNARY_ALPHA_OP(softplus, half, SoftplusParams, half);
+REGISTER_UNARY_ALPHA_OP(softplus, bfloat, SoftplusParams, bfloat);
+
+REGISTER_BINARY_ALPHA_OP(softplus_backward, float, SoftplusParams, float);
+REGISTER_BINARY_ALPHA_OP(softplus_backward, half, SoftplusParams, half);
+REGISTER_BINARY_ALPHA_OP(softplus_backward, bfloat, SoftplusParams, bfloat);
 
 struct leaky_relu_functor {
   template <typename T>
