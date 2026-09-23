@@ -9,6 +9,7 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
+from . import muon_ops as _muon_ops
 from .standalone_compile import (
     compile_to_python,
     CompiledArtifact,
