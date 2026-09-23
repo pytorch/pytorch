@@ -238,8 +238,6 @@ class SideEffects:
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
-    # The source registered in `mutated_sources` for each (item, name) store.
-    mutated_sources_by_attr: dict[tuple[VariableTracker, str], Source]
     keepalive: list[object]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
@@ -251,8 +249,6 @@ class SideEffects:
         store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
         | None = None,
         attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
-        | None = None,
-        mutated_sources_by_attr: dict[tuple[VariableTracker, str], Source]
         | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
@@ -277,7 +273,6 @@ class SideEffects:
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.attr_mutation_kinds = attr_mutation_kinds or {}
-        self.mutated_sources_by_attr = mutated_sources_by_attr or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
@@ -300,6 +295,11 @@ class SideEffects:
         # Sources mutated during tracing: AttrSource for attribute
         # mutations, var.source for value mutations (list/dict/etc).
         self.mutated_sources: OrderedSet[Source] = OrderedSet()
+        # The source `mutated_sources` holds for each (item, name) store, so
+        # that a discarded mutation can drop exactly that source. Deliberately
+        # not carried over by clone(): the two are rebuilt together on every
+        # construction, and the map never names a source the set does not hold.
+        self.mutated_sources_by_attr: dict[tuple[VariableTracker, str], Source] = {}
 
         # Deferred side-effect checking for nullified attribute mutations.
         # Maps (vt_id, attr_name) → (original_value, current_value).
@@ -447,7 +447,6 @@ class SideEffects:
             attr_mutation_kinds={
                 k: dict(v) for k, v in self.attr_mutation_kinds.items()
             },
-            mutated_sources_by_attr=dict(self.mutated_sources_by_attr),
             mutation_user_stacks=self.mutation_user_stacks,
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
@@ -577,10 +576,9 @@ class SideEffects:
         self._capture_user_stack(item)
         if mutated_source is None:
             item_source = getattr(item, "source", None)
-            # The store is still tracked without one; there is just no source
-            # for readers of this object to intersect with.
             if item_source is None:
-                self.mutated_sources_by_attr.pop((item, name), None)
+                # The store is still tracked; there is just no source for
+                # readers of this object to intersect with.
                 return
             mutated_source = AttrSource(item_source, name)
         self.mutated_sources.add(mutated_source)
@@ -723,6 +721,29 @@ class SideEffects:
             self.global_store_mutation_kind(gvar, name, value),
             mutated_source=GlobalSource(name),
         )
+
+    def store_global_in_module(
+        self, item: VariableTracker, name: str, value: VariableTracker
+    ) -> None:
+        """Record a store to a name in a module's globals dict.
+
+        `module.__dict__` ordering is observable (e.g. `list(vars(module))`), and
+        eager `del g; g = 1` appends the re-added name at the end. When the store
+        replays a delete recorded in this trace, drop that delete's entry first:
+        store_attr_mutations is insertion-ordered, so overwriting it in place
+        would replay the store in the slot the delete left behind, ahead of names
+        stored after the delete. Only STORE_GLOBAL comes through here: a
+        `module.g = 1` traced as a plain attribute store writes that same entry
+        directly, dropping the recorded delete and leaving the name in its old
+        slot.
+        """
+        mutation_kind = self.global_store_mutation_kind(item, name, value)
+        if mutation_kind is AttrMutationKind.GLOBAL_REINSERT:
+            del self.store_attr_mutations[item][name]
+            del self.attr_mutation_kinds[item][name]
+            # Absent for an item store_attr registered no source for.
+            self.mutated_sources_by_attr.pop((item, name), None)
+        self.store_attr(item, name, value, mutation_kind)
 
     def global_store_mutation_kind(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -2086,7 +2107,11 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             elif mutation_kind is AttrMutationKind.GLOBAL_REINSERT:
                 # The delete has to replay before the store, or the name would
                 # keep the slot it had before the delete instead of moving to
-                # the end of the module __dict__ as eager does.
+                # the end of the module __dict__ as eager does. Each name gets
+                # its own var on this path, so this only fixes the position
+                # within one name: suffixes are emitted in reverse, so the
+                # re-stored name still lands ahead of names stored after it
+                # (e.g. `del a; a = 2; b = 1` replays b first, unlike eager).
                 cg(value)
                 ctx.suffixes.append(
                     [
