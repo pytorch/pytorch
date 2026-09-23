@@ -3896,6 +3896,11 @@ class SubgraphTracer(fx.Tracer):
         self.input_name_to_proxy: dict[str, fx.Proxy] = {}
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: dict[fx.Node, torch.Tensor] = {}
+        # [device-as-parameter] the single coor::current_device_index observation
+        # for this tracer, mirroring _current_device_edge's node cache. Per-tracer
+        # rather than per-graph: a HOP gives each subgraph its own tracer, and a
+        # proxy belonging to a sibling cannot be lifted into this one.
+        self.coor_current_device_index_var: VariableTracker | None = None
 
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent

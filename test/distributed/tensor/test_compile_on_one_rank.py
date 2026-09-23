@@ -303,6 +303,32 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             lambda msg: f"{msg}\nno node should bake a concrete indexed cuda device; found: {baked}",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_dynamo_output_graph_factory_device_not_baked(self):
+        # The same factory pattern as test_factory_device_replaced_with_current_device,
+        # but reached through Dynamo instead of calling make_fx directly.
+        #
+        # Dynamo constant-folds x.device to a concrete torch.device and bakes it into
+        # its output graph. The current_device() substitution runs later, during
+        # make_fx, so it cannot undo what Dynamo already froze. This is the graph
+        # tlparse records as dynamo_output_graph, and in a real CooR job it differs
+        # across ranks (index=0 vs index=7), which keeps it from being shareable.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        torch._dynamo.reset()
+        backend = EagerAndRecordGraphs()
+        torch.compile(_factory_from_input_device, backend=backend, fullgraph=True)(
+            torch.randn(2, 8, device="cuda:0")
+        )
+        self.assertEqual(len(backend.graphs), 1)
+        baked = _indexed_cuda_device_nodes(backend.graphs[0])
+        self.assertEqual(
+            baked,
+            [],
+            f"dynamo baked a rank-specific device into its output graph: {baked}",
+        )
+
     @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_runtime_follows_current_device_not_input(self):
@@ -483,6 +509,29 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         code0, code1 = code_on(0), code_on(1)
         self.assertEqual(code0, code1)
         self.assertNotIn("cuda:", code0)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_dynamo_output_graph_identical_across_devices(self):
+        # The Dynamo counterpart of test_graph_code_identical_across_devices, and the
+        # form the divergence actually takes in a real job: the same factory traces to
+        # device(type='cuda', index=0) on one rank and index=N on another, so the two
+        # ranks' dynamo_output_graph artifacts are not the same text and the graph
+        # cannot be shared between them.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        def graph_on(dev):
+            with torch.cuda.device(dev):
+                torch._dynamo.reset()
+                backend = EagerAndRecordGraphs()
+                torch.compile(
+                    _factory_from_input_device, backend=backend, fullgraph=True
+                )(torch.randn(2, 8, device=f"cuda:{dev}"))
+                return backend.graphs[0].print_readable(print_output=False)
+
+        graph0, graph1 = graph_on(0), graph_on(1)
+        self.assertEqual(graph0, graph1)
+        self.assertNotIn("index=0", graph0)
 
     # ---- inductor codegen and launcher must be device-agnostic across ranks ----
     # A device-derived factory + a reduction, so inductor emits a real kernel.
@@ -803,6 +852,229 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             proc.returncode,
             0,
             f"CooR compile failed with no visible device:\n{proc.stderr[-3000:]}",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_constructor_passes_through_current_device_under_coor(self):
+        # torch.device(d) on a device is the identity, so it has to hand the
+        # rank-relative device back rather than fall through to device.__new__.
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            return x + torch.zeros(1, device=torch.device(x.device))
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(compiled(x), f(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_properties_graph_break_is_explicit_under_coor(self):
+        # The properties object mixes rank-invariant hardware facts with per-card
+        # identity (uuid, pci_bus_id), so folding the compiling rank's answer would
+        # be wrong for part of it. Break, and say why rather than reporting the
+        # generic "torch.* op returned non-Tensor".
+        from torch._dynamo.exc import Unsupported
+
+        def f(x):
+            return x + torch.cuda.get_device_properties(x.device).multi_processor_count
+
+        # Not "compile_on_one_rank": this file's own name appears in the traceback.
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "rank-relative device"):
+            torch.compile(f, fullgraph=True)(torch.zeros(1, device="cuda"))
+
+        # Allowing the break, the eager fallback reads the running rank's properties.
+        torch._dynamo.reset()
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(f)(x), f(x))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_as_dict_key_under_coor(self):
+        # Equality reports the current device equal to an explicit cuda:N, so under
+        # CooR every device of one type hashes alike and equality decides the bucket.
+        from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+
+        def sourceless():
+            x = torch.randn(4, device="cuda")
+            y = torch.randn(4, device="cuda")
+            return len({x.device: 1, y.device: 2})
+
+        def sourced(x, y):
+            return len({x.device: 1, y.device: 2})
+
+        def with_cpu(x):
+            return len({x.device: 1, torch.device("cpu"): 2})
+
+        def grouped(x, y):
+            return len(_group_tensors_by_device_and_dtype([[x, y]]))
+
+        def mixed(x):
+            return len({x.device: 1, torch.device("cuda:0"): 2})
+
+        x = torch.randn(4, device="cuda")
+        y = torch.randn(4, device="cuda")
+        cases = [
+            (sourceless, ()),
+            (sourced, (x, y)),
+            (with_cpu, (x,)),
+            (grouped, (x, y)),
+        ]
+        for fn, args in cases:
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(compiled(*args), fn(*args))
+
+        # Against an explicit index, key equality depends on the runtime index.
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            torch.compile(mixed, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(mixed, backend="eager")(x), mixed(x))
+
+        # Without compile_on_one_rank the device is an ordinary constant again.
+        with compiler_config.patch(compile_on_one_rank=False):
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(mixed, backend="eager", fullgraph=True)(x), mixed(x)
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_clip_grad_norm_under_coor(self):
+        m = torch.nn.Linear(4, 4, device="cuda")
+        inp = torch.randn(2, 4, device="cuda")
+
+        def step(inp):
+            m.zero_grad()
+            m(inp).sum().backward()
+            return torch.nn.utils.clip_grad_norm_(m.parameters(), 1.0)
+
+        expected = step(inp)
+        for backend in ("eager", "inductor"):
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(step, backend=backend)(inp), expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_observation_is_cached_per_graph(self):
+        # One node per graph, the way _current_device_edge already caches the device
+        # itself. A fresh node per read means a fresh unbacked symbol per read, so
+        # two reads are not comparable to each other, and N reads cost N fallback
+        # kernels and N cudagraph partition boundaries for a value that cannot
+        # change within a graph.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        def f(x):
+            return x + x.device.index + x.get_device() + x.device.index
+
+        torch._dynamo.reset()
+        torch.compile(f, backend=backend, fullgraph=True)(torch.zeros(1, device="cuda"))
+        nodes = [
+            n
+            for g in backend.graphs
+            for n in g.graph.nodes
+            if "current_device_index" in str(n.target)
+        ]
+        self.assertEqual(len(nodes), 1, f"expected one cached node, got {len(nodes)}")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_symbol_is_not_size_like(self):
+        # The index is unbacked, but it is not a *size*. Allocating it with
+        # new_dynamic_size() files it under ShapeEnv.size_like, which carries the
+        # size-oblivious assumption that a value is never 0 or 1 -- here, that this
+        # rank is never cuda:0 or cuda:1.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            index = torch.ops.coor.current_device_index.default()
+
+        self.assertEqual(shape_env.size_like, set())
+        # The >= 0 bound is the part worth keeping.
+        self.assertEqual(shape_env.var_to_range[index.node.expr].lower, 0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_does_not_graph_break_by_default(self):
+        # new_dynamic_size() also trips the allow_dynamic_output_shape_ops gate,
+        # which Dynamo sets to "one_graph", so without fullgraph=True a device-index
+        # read breaks the graph and claims the op's "output shape depends on input
+        # Tensor data" -- which is not true of a nullary op returning a device index.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        torch._dynamo.reset()
+        torch.compile(lambda x: x * 2 + x.device.index, backend=backend)(
+            torch.zeros(1, device="cuda")
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_predicate_is_data_dependent_under_coor(self):
+        def f(x):
+            return x + (1 if x.device.index == 0 else 2)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(
+                torch.zeros(1, device="cuda")
+            )
+
+        torch._dynamo.reset()
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(f, backend="eager")(x), f(x))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_get_device_predicate_is_data_dependent_under_coor(self):
+        # Branching on the index is the one thing that cannot be honoured. The value
+        # is unknown until the artifact runs, so under fullgraph=True there is no
+        # answer to fold and the data-dependent error is the correct outcome -- an
+        # error is what should happen, not something to be worked around. Pinned
+        # because the tempting "fix" is to specialize the branch, which silently
+        # hands every rank the tracing rank's answer.
+        def branch(x):
+            return x + (1 if x.get_device() == 0 else 2)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            torch.compile(branch, backend="eager", fullgraph=True)(
+                torch.zeros(1, device="cuda")
+            )
+
+        # Without fullgraph the same predicate is a graph break, not an error, and
+        # the eager continuation answers it against the device actually in use.
+        torch._dynamo.reset()
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(branch, backend="eager")(x), branch(x))
+
+        # A predicate the index bound already settles must still fold. get_device()
+        # is emitted with a non-negative range, so this is provable for every rank
+        # and erroring on it would be over-eager.
+        def provable(x):
+            return x + (1 if x.get_device() >= 0 else 2)
+
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(provable, backend="eager", fullgraph=True)(x), provable(x)
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
