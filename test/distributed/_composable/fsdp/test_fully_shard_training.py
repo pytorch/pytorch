@@ -949,6 +949,29 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             ac=False,
         )
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_partial_group_releases_deferred_all_gather_after_backward(self):
+        """Root backward releases state retained by a partial forward."""
+        dim, vocab_size = 32, 128
+        model = ChunkedHeadModel(dim, vocab_size, tie=False).to(device_type)
+        fully_shard([model.norm, model.head])
+        fully_shard(model)
+        tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+
+        hidden = model(tokens, skip_head=True)
+        chunk = hidden.detach().requires_grad_()
+        model.head(chunk).sum().backward()
+        comm_ctx = model.head._get_fsdp_state()._comm_ctx
+        # The standalone head forward leaves this deferred state for the root
+        # backward boundary to release.
+        self.assertIsNotNone(comm_ctx.all_gather_state)
+
+        # Pipeline schedules use non-final backwards while accumulating grads.
+        model.set_is_last_backward(False)
+        hidden.backward(chunk.grad)
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
     def _test_partial_group_forward_then_standalone(
         self,
         reshard_after_forward: bool | int,
@@ -1308,7 +1331,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model(tokens, skip_head=True)
         model.body.armed = False
 
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        self.assertIsNotNone(comm_ctx.all_gather_state)
         model.reset_iter_state()
+        self.assertIsNone(comm_ctx.all_gather_state)
 
         # Proves the reset is real: the next iteration completes cleanly.
         model(tokens).sum().backward()

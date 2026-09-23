@@ -460,8 +460,8 @@ test_cpuset_num_threads() {
     echo "taskset not available, skipping cpuset num_threads test"
     return
   fi
-  env -u OMP_NUM_THREADS -u MKL_NUM_THREADS taskset -c 0 python -c \
-    'import torch; n = torch.get_num_threads(); print("num_threads =", n); assert n == 1, n'
+  (cd test && env -u OMP_NUM_THREADS -u MKL_NUM_THREADS taskset -c 0 python -c \
+    'import torch; n = torch.get_num_threads(); print("num_threads =", n); assert n == 1, n')
   assert_git_not_dirty
 }
 
@@ -1901,7 +1901,6 @@ test_distributed_single_gpu() {
   # `default` config's Python tests.
   install_torchcomms
   install_spmd_types
-  install_nccl4py
   test_distributed not-multigpu
 }
 
@@ -2538,7 +2537,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
   install_spmd_types
-  install_nccl4py
   # On CUDA and ROCm the single-process (single-GPU) distributed tests are hived
   # off to the `default` config's 1-GPU runner (see below), so this multi-GPU box
   # only runs the process-spawning ones. Elsewhere (e.g. CPU pull) there is no
@@ -2763,7 +2761,6 @@ elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   install_torchcomms
-  install_nccl4py
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem

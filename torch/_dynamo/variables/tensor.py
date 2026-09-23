@@ -53,7 +53,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
-    CompileOnOneRankUnsupported,
     ObservedAttributeError,
     raise_observed_exception,
     raise_type_error,
@@ -66,7 +65,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, TensorProperty, TensorPropertySource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -279,27 +278,13 @@ class CurrentDeviceVariable(VariableTracker):
         return "torch.fx.experimental.proxy_tensor._coor_current_device()"
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # There is no trace-time hash that can be right. tp_richcompare_impl below
-        # reports this device equal to an explicit cuda:N whenever N is the running
-        # rank's index, so hashing the indexless device puts equal keys in different
-        # buckets: len({x.device: 1, torch.device("cuda:0"): 2}) is 1 eagerly and 2
-        # compiled. A correct hash needs the index, which is the one thing
-        # compile_on_one_rank exists to keep out of the graph -- so refuse instead
-        # of answering wrongly.
-        #
-        # A hard error, not a graph break: breaking out would quietly drop the
-        # frame back to eager, which is the one thing compile_on_one_rank was
-        # turned on to avoid. Keying on a device is outside what the feature can
-        # express, so say so instead of deoptimizing behind the user's back.
-        raise CompileOnOneRankUnsupported(
-            "Cannot hash a rank-relative device under compile_on_one_rank. The "
-            "current device's index is only known at runtime, and it compares "
-            f"equal to an explicit {self.value.type}:N, so any hash chosen here "
-            "would put equal devices in different dict buckets.\n"
-            "Next steps: key on `x.device.type` instead of the device itself, "
-            "pass an explicit device if it is the same on every rank, or turn off "
-            "compile_on_one_rank for this region.",
-        )
+        # tp_richcompare_impl reports this device equal to an explicit cuda:N
+        # whenever N is the running rank's index, so a hash has to agree with every
+        # cuda:N. Under CooR ConstantVariable.hash_impl drops the index from device
+        # hashes too, so all devices of one type share a bucket and equality decides:
+        # two rank-relative devices are equal, and against an explicit cuda:N the
+        # comparison is on the runtime index rather than silently unequal.
+        return hash(self.value), False
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1268,6 +1253,24 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
     ) -> VariableTracker | None:
         return self._method_size_stride("stride", *args, **kwargs)
+
+    def method_storage_offset(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        if self.source is None or not self.source.subguards_allowed():
+            return None
+
+        fake = self.proxy.node.meta.get("example_value")
+        if fake is None:
+            return None
+
+        storage_offset = fake.storage_offset()
+        if not isinstance(storage_offset, int):
+            return None
+
+        source = TensorPropertySource(self.source, TensorProperty.STORAGE_OFFSET)
+        install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        return ConstantVariable.create(storage_offset, source=source)
 
     def _method_size_stride(
         self, name: str, dim: Any | None = None
@@ -2601,6 +2604,7 @@ class TensorVariable(VariableTracker):
     tp_methods = {
         "size": Method(method_size),
         "stride": Method(method_stride),
+        "storage_offset": Method(method_storage_offset),
         "numel": Method(method_numel),
         "nelement": Method(method_nelement),
         "dim": Method(method_dim),

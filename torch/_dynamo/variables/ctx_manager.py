@@ -811,6 +811,9 @@ class GenericDeviceVariable(ContextWrappingVariable):
     _exchange_fn: Any
     _maybe_exchange_fn: Any
     _get_device_index_fn: Any
+    # False for managers whose constructor takes an integer index rather than a
+    # torch.device, which cannot accept a rank-relative device.
+    _accepts_device_object = True
 
     @classmethod
     def create(
@@ -859,7 +862,15 @@ class CurrentDeviceContextVariable(ContextWrappingVariable):
     """A device context whose target is the CooR runtime current device.
 
     CooR assumes one accelerator per rank, so entering this context is a no-op.
-    Reconstruct the real context manager when execution crosses a graph break.
+    That holds only while nothing moves the current device mid-frame, which is why
+    entering a device with an explicit index is refused under CooR (see
+    ``UserDefinedClassVariable.call_function``), as is calling a device setter such
+    as ``torch.cuda.set_device`` (see ``SkipFunctionVariable.call_function``).
+
+    ``target_values`` is deliberately index-less: at a graph break the inherited
+    ``reconstruct`` calls e.g. ``torch.cuda.device(torch.device("cuda"))``, which
+    resolves to whatever device is current in the resuming process. Freezing the
+    compiling rank's index here is exactly the bug this class exists to avoid.
     """
 
     _nonvar_fields = {
@@ -928,6 +939,7 @@ class AcceleratorDeviceIndexVariable(GenericDeviceVariable):
     _exchange_fn = staticmethod(torch._C._accelerator_exchangeDevice)
     _maybe_exchange_fn = staticmethod(torch._C._accelerator_maybeExchangeDevice)
     _get_device_index_fn = staticmethod(lambda device, **kwargs: device)
+    _accepts_device_object = False
 
     def module_name(self) -> str:
         return "torch.accelerator"
