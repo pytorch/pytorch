@@ -13,7 +13,7 @@ import torch._native.registry as registry_module
 from torch._native import cutedsl_utils as cu
 from torch._native.ops.linear_cross_entropy import cutedsl_impl
 from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import has_device_side_assert, TEST_CUDA
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
@@ -35,12 +35,7 @@ _needs_kernel = unittest.skipIf(
 
 
 def _compact_options(**overrides):
-    """The one options shape the kernel's gate accepts.
-
-    Callers name what they vary -- in practice the chunk size -- and the rest
-    stays fixed, so a call says exactly what it chose and nothing about what it
-    did not.
-    """
+    """The one options shape the kernel's gate accepts; callers set what varies."""
     return LinearCrossEntropyOptions(
         **{
             "acc_policy": "compact",
@@ -87,15 +82,9 @@ class TestLinearCrossEntropyOverride(TestCase):
 
     @_needs_kernel
     def test_empty_batch_returns_a_zeroed_bias_gradient(self):
-        """`grad_linear_bias` is left uninitialized because the `copy_` after
-        the loop writes all of it. An empty batch has no loop, so the early
-        return is the one path where that allocation has to be zeroed, and the
-        only place where skipping the fill would be visible as a wrong result.
-
-        `fill_uninitialized_memory` is what gives this teeth: `torch.empty`
-        otherwise tends to hand back zeroed pages, and the assertion would pass
-        whether or not the allocation is guarded.
-        """
+        """An empty batch has no loop to write `grad_linear_bias`, so the early
+        return must zero it. `fill_uninitialized_memory` makes an unzeroed
+        allocation visible, since `torch.empty` often returns zeroed pages."""
         in_features, num_classes = 32, 64
         input = torch.zeros(
             0, in_features, device="cuda", dtype=torch.bfloat16, requires_grad=True
@@ -122,18 +111,12 @@ class TestLinearCrossEntropyOverride(TestCase):
     @unittest.skipIf(not TEST_CUDA, "the overrides register at a CUDA key")
     @parametrize("reduction", ["mean", "none"])
     def test_cutedsl_path_is_used(self, reduction):
-        """A call must route to one of the registered overrides.
-
-        Checked by exporting and applying the registry's decomposition table:
-        the override's own ``_native::<node_id>`` op appears in the graph
-        exactly when the call is routed to it. The router emits nothing per
-        call, so the graph is the only place the choice is observable.
-
-        ``mean`` reaches the scalar-reduction override, ``none`` the
-        no_reduction one. Only ``mean`` depends on the architecture: its
-        `cond` is the kernel's gate, which declines below the DSL's floor.
-        ``_no_reduction_cond`` is unconditional, so that half routes anywhere
-        the overrides are registered and is not skipped with it.
+        """A call must route to one of the registered overrides: exporting and
+        applying the registry's decomposition table puts the override's own
+        ``_native::<node_id>`` op in the graph exactly when the call is routed
+        to it. ``mean`` reaches the scalar-reduction override, whose `cond` is
+        the kernel's gate; ``none`` reaches the unconditional no_reduction one,
+        so only ``mean`` is skipped where the kernel declines the device.
         """
         if reduction == "mean" and not cutedsl_impl._arch_supported():
             self.skipTest("the scalar op's kernel declines this device")
@@ -179,29 +162,15 @@ class TestLinearCrossEntropyOverride(TestCase):
         [("mean", False), ("mean", True), ("none", False), ("none", True)],
     )
     def test_sample_filter_matches_the_gate(self, reduction, requires_grad):
-        """The OpInfo variants select their samples by asking
-        ``F.linear_cross_entropy``'s own predicate whether a chunked op -- and
-        so an override -- is reached. Sharing the predicate means the answer
-        cannot drift from the dispatch, but the filter still has to hand it the
-        right arguments out of a ``SampleInput``, and the predicate still has
-        to agree with what the call actually does. Both are checked here across
-        each generator's whole sample space, in both grad modes the variants run
-        in.
-
-        The shared accumulator is called if and only if a chunked op runs (the
-        reference path uses linear + cross_entropy instead), so counting entries
-        into it is the same question the predicate answers -- but only while no
-        override REPLACES that call. The kernel, where it is eligible for the
-        sample, runs instead of the accumulator and makes the witness read
-        False for a sample that did reach the op, so the whole loop runs with
-        the cutedsl overrides disabled. That is also the honest scope: the predicate
-        describes the functional's gate, which is about whether a chunked op is
-        reached, not about which implementation answers.
-
-        The predicate is evaluated in the same grad mode as the call it
-        describes: one of its clauses reads ``torch.is_grad_enabled()``, so
-        evaluating it under a different mode would make the two disagree by
-        construction.
+        """The OpInfo variants select samples with ``F.linear_cross_entropy``'s
+        own predicate for "a chunked op is reached". This checks, over each
+        generator's whole sample space and in both grad modes, that the filter
+        passes the right arguments and that the predicate agrees with the call:
+        the shared accumulator runs if and only if a chunked op does. The
+        cutedsl overrides are disabled, since an eligible kernel replaces the
+        accumulator and would hide a reached op. The predicate is evaluated
+        under the call's grad mode, since one clause reads
+        ``torch.is_grad_enabled()``.
         """
         import torch.nn.modules.linear_cross_entropy as lce_module
         from torch.testing._internal import common_methods_invocations as cmi
@@ -251,19 +220,11 @@ class TestLinearCrossEntropyOverride(TestCase):
     @_needs_kernel
     def test_noncontiguous_target_reads_the_right_classes(self):
         """The kernel is compiled for a stride-1 target, and `_corrected_target`
-        returns the caller's tensor untouched when `ignore_index` is itself a
-        valid class -- so without a contiguity fix a strided target reaches the
-        kernel and is read at the wrong offsets.
-
-        Checked against the SAME call with a contiguous target rather than
-        against eager: identical values through an identical path, so the
-        comparison is exact and the only difference under test is the layout.
-        Eager would need tolerances for the formulation difference in
-        `grad_linear_weight`, which is the noise this test has to see through.
-
-        Comparing the override against itself is what makes the accumulator
-        witness necessary rather than decorative: on a fallback both legs would
-        be eager, agree exactly, and pass while testing nothing.
+        returns the caller's tensor when `ignore_index` is a valid class, so a
+        strided target must be made contiguous before the launch. Compared
+        exactly against the same call with a contiguous target; the accumulator
+        witness ensures both legs ran the kernel, since two eager legs would
+        also agree exactly.
         """
         import torch.nn.modules.linear_cross_entropy as lce_module
 
@@ -314,15 +275,10 @@ class TestLinearCrossEntropyOverride(TestCase):
     @_needs_kernel
     @parametrize("logit", [1.0, 2.0**12, 2.0**24, -(2.0**24)])
     def test_a_large_common_logit_keeps_the_loss(self, logit):
-        """Equal logits make the loss log(C) whatever their common value is:
-        the row max cancels out of it exactly.
-
-        It cancels numerically only if the two statistics the loss is built
-        from are themselves shifted by that max. From the unshifted pair,
-        `m + log(l)` rounds back to `m` in fp32 once `m` is large -- at 2**24
-        the next float is two away and log(2) does not reach it -- so the
-        difference comes out zero and the loss with it. A kernel-level test
-        cannot see this: it compares against a reference built the same way.
+        """Equal logits make the loss log(C) whatever their common value, which
+        holds in fp32 only if both statistics are shifted by the row max: at
+        2**24, `m + log(l)` rounds back to `m`. The kernel tests cannot see this,
+        since their reference is built the same way.
         """
         import torch.nn.modules.linear_cross_entropy as lce_module
 
@@ -368,10 +324,9 @@ class TestLinearCrossEntropyOverride(TestCase):
         """Both ends of the class count, which the gate has to decline rather
         than truncate or read past.
 
-        Zero classes is the end that matters: every target is out of range, the
-        kernel clamps the read to column 0, and on a `(Bc, 0)` buffer that is an
-        illegal access that poisons the CUDA context -- where eager raises on
-        the empty reduction. The int32 end is unreachable, since the weight
+        Zero classes is the end that matters: every target is out of range and
+        the kernel traps, taking the CUDA context with it -- where eager raises
+        on the empty reduction. The int32 end is unreachable, since the weight
         alone would be terabytes, so the predicate is asked directly under
         `FakeTensorMode`, which is also how the router asks it while tracing.
         """
@@ -399,24 +354,17 @@ class TestLinearCrossEntropyOverride(TestCase):
                     compute_linear_bias_grad=False,
                 )
 
-        self.assertFalse(eligible(0), "no column for the clamped read to land in")
+        self.assertFalse(eligible(0), "zero classes: every target is out of range")
         self.assertTrue(eligible(1), "one class is indexable")
-        # Not "the largest safe count": the kernel strides past V, so the real
-        # ceiling is lower by a knob-dependent margin. This pins where the gate
-        # switches, which is what the gate promises.
+        # Where the gate switches; the kernel's exact ceiling is lower (see the gate).
         self.assertTrue(eligible(2**31 - 1), "the largest count int32 can hold")
         self.assertFalse(eligible(2**31), "one class past int32")
 
     @_needs_kernel
     def test_kernel_declines_a_tensor_on_another_device(self):
-        """The gate is the only place that can require one device. Past it the
-        launch takes each tensor through the FFI, where a stray CPU one comes
-        back as an argument-type error naming an FFI parameter -- where eager
-        said "expected all tensors to be on the same device". Declining sends
-        the call back through the router to eager, which says that again.
-
-        Asked directly, with real tensors: they are small, and the point is the
-        predicate rather than the launch.
+        """Every tensor must be on the input's device; the gate declines
+        otherwise, so eager raises its own device-mismatch error. Asked of the
+        predicate directly, with small real tensors.
         """
 
         def eligible(**on_cpu):
@@ -449,72 +397,31 @@ class TestLinearCrossEntropyOverride(TestCase):
             self.assertFalse(eligible(**{name: True}), f"{name} on another device")
 
     @_needs_kernel
-    def test_an_out_of_range_target_poisons_both_parameter_gradients(self):
-        """What the caller sees when a target is out of range, which is not
-        what the kernel does.
-
-        `test_out_of_range_target_poisons_its_row` pins the kernel's behaviour
-        on `g`: the offending row is nan and the others are finite. That
-        row-locality does not survive the loop. Both parameter gradients are
-        reductions OVER rows -- `g.t() @ input_chunk` and `g.sum(dim=0)` -- so
-        one bad target in one chunk makes the whole `(C, F)` weight gradient,
-        the whole `(C,)` bias gradient and the scalar loss nan. `grad_input` is
-        the only output that stays row-local.
-
-        The public note on `linear_cross_entropy` states exactly this, so it is
-        pinned here rather than inferred from the kernel test, whose assertion
-        is true and yet does not imply it.
-
-        The class-`weight` path raises instead of poisoning, which the note
-        also states. That is not asserted here: the raise is a CUDA device-side
-        assert, and it would poison the context for every test after it.
-        """
-        import torch.nn.modules.linear_cross_entropy as lce_module
-
-        num_tokens, in_features, num_classes = 64, 32, 512
-        bad_row = 7
-        gen = torch.Generator(device="cuda").manual_seed(0)
-        input = torch.randn(
-            num_tokens, in_features, device="cuda", dtype=torch.bfloat16, generator=gen
-        ).requires_grad_()
-        linear_weight = torch.randn(
-            num_classes, in_features, device="cuda", dtype=torch.bfloat16, generator=gen
-        ).requires_grad_()
-        linear_bias = torch.randn(
-            num_classes, device="cuda", dtype=torch.bfloat16, generator=gen
-        ).requires_grad_()
-        target = torch.randint(
-            0, num_classes, (num_tokens,), device="cuda", generator=gen
-        )
-        target[bad_row] = num_classes + 5
-        # Several chunks, with the bad row in the first: the accumulators live
-        # across the whole loop, so which chunk it lands in must not matter.
-        options = _compact_options(batch_chunk_size=16)
-        with unittest.mock.patch.object(
-            lce_module,
-            "_linear_cross_entropy_batch_chunked_accumulator",
-            wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
-        ) as accumulator:
-            loss = torch.nn.functional.linear_cross_entropy(
-                input, linear_weight, target, linear_bias=linear_bias, options=options
-            )
-            self.assertEqual(
-                accumulator.call_count, 0, "the call fell back to the accumulator"
-            )
-        loss.backward()
-
-        self.assertTrue(torch.isnan(loss), "the loss carries the poison")
-        self.assertTrue(
-            torch.isnan(linear_weight.grad).all(),
-            "grad_linear_weight is a reduction over rows, so all of it is nan",
-        )
-        self.assertTrue(
-            torch.isnan(linear_bias.grad).all(), "grad_linear_bias likewise"
-        )
-        nan_rows = torch.isnan(input.grad).any(dim=1).nonzero().flatten().tolist()
-        self.assertEqual(
-            nan_rows, [bad_row], "grad_input is the one output that stays row-local"
-        )
+    def test_an_out_of_range_target_traps(self):
+        """Through the public op, in a child process since the trap takes the
+        CUDA context with it. The fallback is disabled there, so eager's own
+        index assert cannot pass for the kernel's."""
+        stdout, stderr = self.run_process_no_exception("""
+import torch
+import torch.nn.modules.linear_cross_entropy as lce_module
+from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
+lce_module._linear_cross_entropy_batch_chunked_accumulator = None
+input = torch.randn(64, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+weight = torch.randn(512, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+target = torch.randint(0, 512, (64,), device="cuda")
+target[7] = 517
+options = LinearCrossEntropyOptions(
+    acc_policy="compact", acc_dtype=torch.float32, chunking_method=None,
+    batch_chunk_size=16,
+)
+try:
+    torch.nn.functional.linear_cross_entropy(input, weight, target, options=options)
+except RuntimeError:
+    pass  # raised by whichever later op notices first, e.g. a cuBLAS call
+torch.cuda.synchronize()
+""")
+        self.assertTrue(has_device_side_assert(stderr.decode()))
+        self.assertIn("linear_cross_entropy: target >= num_classes", stdout.decode())
 
     @_needs_kernel
     @parametrize("reduction", ["mean", "sum"])
@@ -522,18 +429,11 @@ class TestLinearCrossEntropyOverride(TestCase):
     def test_the_parameter_axes_the_kernel_accepts_match_eager(
         self, reduction, weighted
     ):
-        """The row scale is where the op's parameters meet the kernel.
-
-        `_neg_weight_target` branches on both of these -- `sum` keeps the class
-        weight where `mean` divides by its total, and a `None` weight takes a
-        different branch from a real one -- and the kernel multiplies whatever
-        comes out into every row. The tests around this one all use
-        `reduction='mean'` with no class weight, so three of those four
-        branches reach the kernel nowhere.
-
-        `ignore_index` is set on a quarter of the rows by construction. Picking
-        a valid class and hoping, as a strided-target test elsewhere does, puts
-        the expected number of ignored rows below one.
+        """`_neg_weight_target` branches on `reduction` (`sum` keeps the class
+        weight, `mean` divides by its total) and on whether a class weight is
+        given, and the kernel multiplies its result into every row, so all four
+        branches are compared against eager. `ignore_index` is set on a quarter
+        of the rows.
         """
         import torch.nn.modules.linear_cross_entropy as lce_module
 
@@ -607,15 +507,10 @@ class TestLinearCrossEntropyOverride(TestCase):
 
     @_needs_kernel
     def test_label_smoothing_never_reaches_the_chunked_path(self):
-        """The kernel implements no label smoothing, and neither does the
-        chunked path it overrides -- so `options` are refused one level above
-        the override, with a warning, and the call goes to the reference path.
-
-        Worth pinning because it is the layer the refusal happens at that keeps
-        the kernel safe here. The gate's own `label_smoothing == 0.0` clause is
-        belt-and-braces: nothing reaching it through the public API can carry a
-        non-zero one, so that clause cannot be exercised end to end and a test
-        that tried would be asserting against the wrong layer.
+        """Neither the kernel nor the chunked path implements label smoothing,
+        so `options` are refused one level above the override, with a warning,
+        and the call takes the reference path. The gate's own
+        `label_smoothing == 0.0` clause is unreachable through the public API.
         """
         num_batches, in_features, num_classes = 64, 32, 256
         gen = torch.Generator(device="cuda").manual_seed(0)
@@ -651,19 +546,11 @@ class TestLinearCrossEntropyOverride(TestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("requires_grad", [True, False])
     def test_forward_only_loss_matches_the_reference(self, dtype, requires_grad):
-        """The override has a second, separate loss path.
-
-        With no gradient requested there is no `g` to write, so the override
-        does not call the kernel at all: it shifts, exponentiates and reduces
-        with eager ops, reimplementing the loss a second time. That code is
-        reached by any `no_grad` call the gate accepts -- ordinary inference --
-        and a wrong loss there is silent, since nothing downstream of it is
-        compared against anything.
-
-        `test_nn`'s `test_linear_cross_entropy_loss_no_grad` does not cover it:
-        it builds fp32 tensors, which the gate declines, so it measures eager
-        against eager. Both `requires_grad` settings are run because the
-        wrapper decides through `torch.is_grad_enabled()` as well as the leaves.
+        """With no gradient requested the override does not call the kernel: it
+        forms the loss with eager ops, a second loss implementation reached by
+        any `no_grad` call the gate accepts. Both `requires_grad` settings run,
+        since the wrapper decides through `torch.is_grad_enabled()` as well as
+        the leaves.
         """
         import torch.nn.modules.linear_cross_entropy as lce_module
 
@@ -723,15 +610,10 @@ class TestLinearCrossEntropyOverride(TestCase):
         ],
     )
     def test_every_bias_dtype_the_op_takes_reaches_the_kernel(self, dtype, bias_dtype):
-        """The override has to accept every bias dtype the op accepts.
-
-        It forms the logits with `addmm`, which takes `self` only in `out_dtype`
-        or in `mat1`'s dtype. With fp16 inputs the logits buffer is fp16, so an
-        fp32 bias -- which the chunked path takes -- matches neither and the
-        matmul rejects it unless the override casts first. The other three pairs
-        need no cast and are here to pin that they do not get one: each is
-        compared against the same call with the kernel disabled, which is the
-        behaviour the override has to reproduce.
+        """Every bias dtype the op takes must reach the kernel. `addmm` takes
+        `self` only in `out_dtype` or `mat1`'s dtype, so with fp16 inputs an
+        fp32 bias needs a cast; each pair is compared against the same call with
+        the kernel disabled.
         """
         import torch.nn.modules.linear_cross_entropy as lce_module
 
@@ -759,11 +641,8 @@ class TestLinearCrossEntropyOverride(TestCase):
 
         # Any entry into the accumulator means the call fell back, and a
         # fallback would hide exactly the failure this test is about.
-        # `fill_uninitialized_memory` is the other half of the empty-batch
-        # test below: the parameter gradients are allocated uninitialized on
-        # the promise that the first chunk writes rather than accumulates, and
-        # under the guard anything the first chunk leaves untouched comes back
-        # nan instead of whatever the caching allocator last held.
+        # Under `fill_uninitialized_memory`, any gradient element the first chunk
+        # fails to write comes back NaN, which pins write-not-accumulate.
         with (
             unittest.mock.patch.object(
                 lce_module,
@@ -787,12 +666,8 @@ class TestLinearCrossEntropyOverride(TestCase):
             # Absolute only: these gradients hold near-zero elements, where a
             # relative bound is dominated by division rather than by error.
             self.assertEqual(a, b, atol=1e-3, rtol=0, msg=f"{name} disagrees")
-        # The loss is a single scalar of order log(C), nowhere near zero, and
-        # it comes back in `dtype` -- where one ULP at that magnitude is
-        # 3.1e-2 in bf16 and 3.9e-3 in fp16. The gradients' absolute 1e-3 is
-        # below both, so applying it here would be a bitwise assertion dressed
-        # as a tolerance, holding only while the two paths agree exactly. A
-        # few ULP, relative, is what this comparison can actually promise.
+        # The loss is a scalar of order log(C) returned in `dtype`, where one ULP
+        # exceeds the gradients' 1e-3, so it gets a few ULP, relative.
         self.assertEqual(
             fused[0],
             plain[0],
@@ -803,17 +678,10 @@ class TestLinearCrossEntropyOverride(TestCase):
 
     @_needs_kernel
     def test_empty_batch_returns_a_zeroed_weight_gradient(self):
-        """`grad_linear_weight` is left uninitialized because the first chunk
-        writes it outright. An empty batch has no first chunk, so the early
-        return is the one path where that allocation has to be zeroed, and the
-        only place where skipping the fill would be visible as a wrong result.
-
-        `fill_uninitialized_memory` is what gives this teeth: `torch.empty`
-        otherwise tends to hand back zeroed pages, and the assertion would pass
-        whether or not the allocation is guarded. Nothing else in the mode
-        bears on this path: an empty batch returns before the chunk loop, so
-        the allocation under test is the only one the fill can reach.
-        """
+        """An empty batch has no first chunk to write `grad_linear_weight`, so
+        the early return must zero it. `fill_uninitialized_memory` makes an
+        unzeroed allocation visible, since `torch.empty` often returns zeroed
+        pages."""
         import torch.nn.modules.linear_cross_entropy as lce_module
 
         in_features, num_classes = 64, 512
@@ -857,22 +725,11 @@ class TestLinearCrossEntropyOverride(TestCase):
 
     @_needs_kernel
     def test_kernel_path_is_deterministic(self):
-        """Two identical calls must give bit-identical gradients.
-
-        The dense grad-logits formulation replaced eager's `index_add_` --
-        atomic on CUDA, and used there for both `grad_linear_weight` and
-        `grad_linear_bias` -- with a GEMM and a fixed-order column sum, so the
-        whole backward is deterministic. That is a user-visible property, and
-        the reason a bias-grad epilogue built on atomics was rejected, so it is
-        pinned here rather than left aspirational.
-
-        Two assertions, because the claim has two halves. Bit-identical repeats
-        are the property a caller sees, and atomics would break them. The
-        absence of the scatter is asserted separately, by spying on
-        `index_add_`: `torch.use_deterministic_algorithms(True)` would NOT pin
-        it, since `index_add` on CUDA is listed as acting deterministically
-        under that flag rather than raising, so a reintroduced scatter would
-        pass a deterministic-mode check and merely run slower.
+        """Two identical calls give bit-identical gradients: a GEMM and a
+        fixed-order column sum replace eager's atomic `index_add_`. The absence
+        of the scatter is asserted separately, by spying on `index_add_`,
+        because `torch.use_deterministic_algorithms(True)` lets `index_add` run
+        deterministically instead of raising, so it would not catch one.
         """
         import torch.nn.modules.linear_cross_entropy as lce_module
 
