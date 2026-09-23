@@ -4,6 +4,7 @@
 
 import math
 from collections.abc import MutableMapping
+from typing import Any, cast
 
 import torch
 from torch import Tensor
@@ -85,6 +86,53 @@ def _foreach_zeropower_via_newtonschulz(
         )
         ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
     return ortho_grad.T if transpose else ortho_grad
+
+
+def _grouped_muon_is_supported(ns_steps: int, *flat_metadata: Any) -> bool:
+    from torch._inductor.kernel.muon import can_use_grouped_muon
+
+    metadata = [
+        (flat_metadata[i], flat_metadata[i + 1], flat_metadata[i + 2 : i + 4])
+        for i in range(0, len(flat_metadata), 4)
+    ]
+    return can_use_grouped_muon(metadata, ns_steps)
+
+
+cast(Any, _grouped_muon_is_supported)._dynamo_marked_constant = True
+
+
+def _use_grouped_muon(params: list[Tensor], ns_steps: int) -> bool:
+    if not torch.compiler.is_compiling() or torch.compiler.is_exporting():
+        return False
+    from torch._dynamo import config as dynamo_config
+
+    if (
+        not dynamo_config.assume_static_by_default
+        or not params
+        or ns_steps <= 0
+        or torch.version.hip is not None
+        or any(getattr(param, "_dynamo_dynamic_indices", ()) for param in params)
+        or not any(
+            param.device.type == "cuda"
+            and param.dtype is torch.bfloat16
+            and param.ndim == 2
+            and all(dim > 0 and dim % 8 == 0 for dim in param.shape)
+            and torch.cuda.get_device_capability(param.device)[0] in (10, 11)
+            for param in params
+        )
+    ):
+        return False
+    metadata = []
+    for param in params:
+        metadata.extend(
+            (
+                param.device,
+                param.dtype,
+                int(min(param.shape)),
+                int(max(param.shape)),
+            )
+        )
+    return _grouped_muon_is_supported(ns_steps, *metadata)
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
@@ -209,7 +257,7 @@ class Muon(Optimizer):
                 params_with_grad,
                 grads,
                 muon_momentum_bufs,
-                foreach=torch.compiler.is_compiling(),
+                foreach=_use_grouped_muon(params_with_grad, group["ns_steps"]),
                 lr=lr,
                 weight_decay=weight_decay,
                 momentum=momentum,
@@ -438,7 +486,11 @@ def muon(
 
     See :class:`~torch.optim.Muon` for details.
     """
-    func = _foreach_muon if foreach and ns_steps > 0 else _single_tensor_muon
+    func = (
+        _foreach_muon
+        if foreach and ns_steps > 0 and not torch.compiler.is_exporting()
+        else _single_tensor_muon
+    )
 
     func(
         params,

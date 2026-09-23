@@ -5,6 +5,8 @@ from typing import Any
 
 import torch
 
+from ..utils import clear_on_fresh_cache
+
 
 def _match_normalization(
     placeholder: torch.fx.Node,
@@ -92,6 +94,12 @@ def match_muon_foreach(
     gm: torch.fx.GraphModule,
 ) -> tuple[tuple[float, float, float, int, float], list[int]] | None:
     """Match the functional Muon Newton-Schulz body captured by foreach_map."""
+    if any(
+        node.is_impure()
+        for node in gm.graph.nodes
+        if node.op not in ("placeholder", "output")
+    ):
+        return None
     all_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
     positions = [
         index
@@ -222,7 +230,7 @@ def _supports(
         device.type != "cuda"
         or torch.version.hip is not None
         or dtype is not torch.bfloat16
-        or steps == 0
+        or steps <= 0
         or any(m <= 0 or k <= 0 or m % 8 or k % 8 for m, k in shapes)
     ):
         return False
@@ -238,6 +246,72 @@ def _supports(
     )
 
 
+def _partition_inputs(
+    metadata: list[tuple[torch.device, torch.dtype, tuple[int, int]]], steps: int
+) -> list[tuple[list[int], bool]]:
+    buckets: dict[
+        tuple[torch.device, torch.dtype, int | tuple[int, int]], list[int]
+    ] = {}
+    small: dict[tuple[torch.device, torch.dtype], dict[tuple[int, int], list[int]]] = {}
+    for index, (device, dtype, shape) in enumerate(metadata):
+        m = shape[0]
+        if m <= 1024:
+            small.setdefault((device, dtype), {}).setdefault(shape, []).append(index)
+        else:
+            bucket = shape if m >= 4096 else m
+            buckets.setdefault((device, dtype, bucket), []).append(index)
+    for device_dtype, shape_buckets in small.items():
+        remainder = []
+        for shape, indices in shape_buckets.items():
+            if len(indices) >= 6:
+                buckets[(*device_dtype, shape)] = indices
+            else:
+                remainder.extend(indices)
+        if remainder:
+            buckets[(*device_dtype, 0)] = remainder
+
+    chunks = []
+    for (device, dtype, _), indices in buckets.items():
+        indices.sort(key=lambda index: metadata[index][2])
+        m = metadata[indices[0]][2][0]
+        max_chunk = 4 if m >= 7168 else 8 if m >= 4096 else 32
+        count = math.ceil(len(indices) / max_chunk)
+        size, extra = divmod(len(indices), count)
+        offset = 0
+        for chunk_index in range(count):
+            chunk = indices[offset : offset + size + (chunk_index < extra)]
+            offset += len(chunk)
+            shapes = [metadata[index][2] for index in chunk]
+            chunks.append((chunk, _supports(device, dtype, shapes, steps)))
+    return chunks
+
+
+def can_use_grouped_muon(
+    metadata: list[tuple[torch.device, torch.dtype, tuple[int, int]]], steps: int
+) -> bool:
+    return any(supported for _, supported in _partition_inputs(metadata, steps))
+
+
+def _workspace_bytes(
+    metadata: list[tuple[torch.device, torch.dtype, tuple[int, int]]], steps: int
+) -> int:
+    total = 0
+    for chunk, supported in _partition_inputs(metadata, steps):
+        if not supported:
+            continue
+        shapes = [metadata[index][2] for index in chunk]
+        if len(shapes) <= 3:
+            gram_elements = sum(m * m for m in {shape[0] for shape in shapes})
+        else:
+            gram_elements = sum(m * m for m, _ in shapes)
+        total += (
+            2
+            * torch.bfloat16.itemsize
+            * (sum(m * k for m, k in shapes) + gram_elements)
+        )
+    return total
+
+
 class _MuonForeachPlan:
     def __init__(
         self,
@@ -246,63 +320,35 @@ class _MuonForeachPlan:
         steps: int,
     ) -> None:
         self._run_lock = threading.Lock()
-        buckets: dict[tuple[torch.device, int | tuple[int, int]], list[int]] = {}
-        small: dict[torch.device, dict[tuple[int, int], list[int]]] = {}
-        for index, x in enumerate(inputs):
-            shape = (min(x.shape), max(x.shape))
-            m = shape[0]
-            if m <= 1024:
-                small.setdefault(x.device, {}).setdefault(shape, []).append(index)
-            else:
-                bucket = shape if m >= 4096 else m
-                buckets.setdefault((x.device, bucket), []).append(index)
-        for device, shape_buckets in small.items():
-            remainder = []
-            for shape, indices in shape_buckets.items():
-                if len(indices) >= 6:
-                    buckets[(device, shape)] = indices
-                else:
-                    remainder.extend(indices)
-            if remainder:
-                buckets[(device, 0)] = remainder
+        original_shapes: list[tuple[int, int]] = [
+            (x.shape[0], x.shape[1]) for x in inputs
+        ]
+        metadata = [(x.device, x.dtype, (min(x.shape), max(x.shape))) for x in inputs]
         self.chunks: list[tuple[list[int], Any | None]] = []
-        for (device, _), indices in buckets.items():
-            indices.sort(
-                key=lambda index: (min(inputs[index].shape), max(inputs[index].shape))
-            )
-            m = min(inputs[indices[0]].shape)
-            max_chunk = 4 if m >= 7168 else 8 if m >= 4096 else 32
-            count = math.ceil(len(indices) / max_chunk)
-            size, extra = divmod(len(indices), count)
-            offset = 0
-            for chunk_index in range(count):
-                chunk = indices[offset : offset + size + (chunk_index < extra)]
-                offset += len(chunk)
-                shapes = [
-                    (min(inputs[index].shape), max(inputs[index].shape))
-                    for index in chunk
-                ]
-                plan = None
-                if _supports(device, inputs[chunk[0]].dtype, shapes, steps):
-                    from .grouped_symmetric_mm import (
-                        GroupedMuonPlan,
-                        PackedSymmetricMuonPlan,
-                        SequentialSymmetricMuonPlan,
-                    )
+        self.workspace_bytes = _workspace_bytes(metadata, steps)
+        for chunk, supported in _partition_inputs(metadata, steps):
+            device = metadata[chunk[0]][0]
+            shapes = [original_shapes[index] for index in chunk]
+            plan = None
+            if supported:
+                from .grouped_symmetric_mm import (
+                    GroupedMuonPlan,
+                    PackedSymmetricMuonPlan,
+                    SequentialSymmetricMuonPlan,
+                )
 
-                    if len(shapes) <= 3:
-                        plan = SequentialSymmetricMuonPlan(
-                            shapes, device, coefficients, steps
-                        )
-                    elif shapes[0][0] >= 4096 and all(
-                        shape == shapes[0] for shape in shapes
-                    ):
-                        plan = PackedSymmetricMuonPlan(
-                            shapes, device, coefficients, steps
-                        )
-                    else:
-                        plan = GroupedMuonPlan(shapes, device, coefficients, steps)
-                self.chunks.append((chunk, plan))
+                if len(shapes) <= 3:
+                    plan = SequentialSymmetricMuonPlan(
+                        shapes, device, coefficients, steps
+                    )
+                elif min(shapes[0]) >= 4096 and all(
+                    (min(shape), max(shape)) == (min(shapes[0]), max(shapes[0]))
+                    for shape in shapes
+                ):
+                    plan = PackedSymmetricMuonPlan(shapes, device, coefficients, steps)
+                else:
+                    plan = GroupedMuonPlan(shapes, device, coefficients, steps)
+            self.chunks.append((chunk, plan))
         self.coefficients = coefficients
         self.steps = steps
 
@@ -316,27 +362,41 @@ class _MuonForeachPlan:
                 ]
             else:
                 results = plan(selected, eps)
-                results = [
-                    result.T if source.shape[0] > source.shape[1] else result
-                    for source, result in zip(selected, results)
-                ]
             for index, result in zip(indices, results):
-                outputs[index] = result.clone(memory_format=torch.contiguous_format)
+                outputs[index] = result.clone()
         return outputs
 
 
-_PLAN_CACHE: OrderedDict[tuple[Any, ...], _MuonForeachPlan] = OrderedDict()
 _PLAN_LOCK = threading.Lock()
-_MAX_CACHED_PLANS = 32
+_MAX_CACHED_PLAN_BYTES = 1024**3
 
 
-@torch.library.custom_op(
-    "inductor::grouped_muon",
-    mutates_args=(),
-    tags=(torch._C.Tag.cudagraph_unsafe,),
-)
-def grouped_muon(
-    inputs: list[torch.Tensor], a: float, b: float, c: float, steps: int, eps: float
+class _PlanCache(OrderedDict[tuple[Any, ...], _MuonForeachPlan]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.total_bytes = 0
+
+    def clear(self) -> None:
+        super().clear()
+        self.total_bytes = 0
+
+    def cache_clear(self) -> None:
+        with _PLAN_LOCK:
+            self.clear()
+
+
+_PLAN_CACHE = _PlanCache()
+_PLAN_BUILD_EVENTS: dict[tuple[Any, ...], threading.Event] = {}
+clear_on_fresh_cache(_PLAN_CACHE)
+
+
+def grouped_muon_impl(
+    inputs: list[torch.Tensor],
+    a: float,
+    b: float,
+    c: float,
+    steps: int,
+    eps: float,
 ) -> list[torch.Tensor]:
     streams = tuple(
         torch.cuda.current_stream(x.device).cuda_stream
@@ -352,22 +412,45 @@ def grouped_muon(
         c,
         steps,
     )
-    with _PLAN_LOCK:
-        plan = _PLAN_CACHE.get(key)
-        if plan is None:
-            plan = _MuonForeachPlan(inputs, (a, b, c), steps)
-            _PLAN_CACHE[key] = plan
-            if len(_PLAN_CACHE) > _MAX_CACHED_PLANS:
-                _PLAN_CACHE.popitem(last=False)
-        else:
-            _PLAN_CACHE.move_to_end(key)
+    metadata = [(x.device, x.dtype, (min(x.shape), max(x.shape))) for x in inputs]
+    workspace_bytes = _workspace_bytes(metadata, steps)
+    plan = None
+    while plan is None:
+        with _PLAN_LOCK:
+            plan = _PLAN_CACHE.get(key)
+            if plan is not None:
+                _PLAN_CACHE.move_to_end(key)
+                break
+            build_event = _PLAN_BUILD_EVENTS.get(key)
+            if build_event is None:
+                build_event = threading.Event()
+                _PLAN_BUILD_EVENTS[key] = build_event
+                break
+        build_event.wait()
+    if plan is None:
+        try:
+            candidate = _MuonForeachPlan(inputs, (a, b, c), steps)
+        except BaseException:
+            with _PLAN_LOCK:
+                _PLAN_BUILD_EVENTS.pop(key).set()
+            raise
+        with _PLAN_LOCK:
+            plan = _PLAN_CACHE.get(key)
+            if plan is None:
+                plan = candidate
+                if workspace_bytes <= _MAX_CACHED_PLAN_BYTES:
+                    while (
+                        _PLAN_CACHE
+                        and _PLAN_CACHE.total_bytes + workspace_bytes
+                        > _MAX_CACHED_PLAN_BYTES
+                    ):
+                        _, evicted = _PLAN_CACHE.popitem(last=False)
+                        _PLAN_CACHE.total_bytes -= evicted.workspace_bytes
+                        del evicted
+                    _PLAN_CACHE[key] = plan
+                    _PLAN_CACHE.total_bytes += plan.workspace_bytes
+            else:
+                _PLAN_CACHE.move_to_end(key)
+            _PLAN_BUILD_EVENTS.pop(key).set()
     with plan._run_lock:
         return plan(inputs, eps)
-
-
-@grouped_muon.register_fake
-def _(inputs, a, b, c, steps, eps):
-    return [
-        torch.empty(input.shape, device=input.device, dtype=torch.bfloat16)
-        for input in inputs
-    ]

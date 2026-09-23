@@ -17,6 +17,24 @@ from torch.testing._internal.common_utils import (
 
 
 class SymmetricMMTest(TestCase):
+    def _check_symmetric_compile(self, fn, *args, uses_quack):
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, fullgraph=True)
+        stream = torch.cuda.Stream(device=args[0].device)
+        stream.wait_stream(torch.cuda.current_stream(args[0].device))
+        with torch.cuda.stream(stream):
+            actual, code = run_and_get_code(compiled, *args)
+            expected = fn(*args)
+        stream.synchronize()
+        check = FileCheck()
+        if uses_quack:
+            check.check("extern_kernels._quack_symmetric_mm")
+        else:
+            check.check_not("extern_kernels._quack_symmetric_mm")
+        check.run("\n".join(code))
+        self.assertEqual(actual, expected, rtol=2e-2, atol=1)
+        return actual
+
     def _check_grouped_muon(
         self,
         params,
@@ -42,6 +60,7 @@ class SymmetricMMTest(TestCase):
             adjust_lr_fn=adjust_lr_fn,
         )
         stream = torch.cuda.Stream(device=params[0].device)
+        stream.wait_stream(torch.cuda.current_stream(params[0].device))
         torch._dynamo.reset()
         compiled_step = torch.compile(optimizer.step, fullgraph=True, mode=compile_mode)
         with torch.cuda.stream(stream):
@@ -68,6 +87,9 @@ class SymmetricMMTest(TestCase):
                     )
         stream.synchronize()
         self.assertEqual(params, expected, rtol=2e-2, atol=2e-2)
+        if expected_plans == 0:
+            self.assertFalse(_PLAN_CACHE)
+            return None
         plans = next(iter(_PLAN_CACHE.values()))
         self.assertEqual(
             sum(plan is not None for _, plan in plans.chunks), expected_plans
@@ -101,56 +123,43 @@ class SymmetricMMTest(TestCase):
         self.assertIsNone(match_muon_foreach(torch.fx.GraphModule({}, graph)))
 
     @skipIfNoCuteDSL
-    @parametrize("shape", [(4096, 4096), (5120, 8192)])
+    @parametrize(
+        "shape",
+        [(4096, 4096), (5120, 8192), (2, 4096, 8192), (0, 4096, 4096)],
+    )
     def test_quack_symmetric_mm(self, device, shape):
         if torch.cuda.get_device_capability(device)[0] != 10:
             self.skipTest("requires SM100")
 
         def fn(x):
-            return x @ x.T
+            return torch.bmm(x, x.mT) if x.ndim == 3 else x @ x.T
 
         x = torch.randn(shape, device=device, dtype=torch.bfloat16)
-        torch._dynamo.reset()
-        compiled = torch.compile(fn, fullgraph=True)
-        stream = torch.cuda.Stream(device=device)
-        stream.wait_stream(torch.cuda.current_stream(device))
-        with torch.cuda.stream(stream):
-            actual, code = run_and_get_code(compiled, x)
-            expected = fn(x)
-        stream.synchronize()
-        FileCheck().check("extern_kernels._quack_symmetric_mm").run(code[0])
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual, actual.T)
-
-    @skipIfNoCuteDSL
-    def test_quack_batched_symmetric_mm(self, device):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("requires SM100")
-
-        def fn(x):
-            return torch.bmm(x, x.mT)
-
-        x = torch.randn((2, 4096, 8192), device=device, dtype=torch.bfloat16)
-        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
-        FileCheck().check("extern_kernels._quack_symmetric_mm").run(code[0])
-        self.assertEqual(actual, fn(x))
+        actual = self._check_symmetric_compile(fn, x, uses_quack=True)
         self.assertEqual(actual, actual.mT)
 
     @skipIfNoCuteDSL
     @parametrize(
         "case",
-        ["k_alignment", "m_alignment", "min_m", "aspect_ratio", "layout", "dtype"],
+        [
+            "alignment",
+            "min_m",
+            "aspect_ratio",
+            "layout",
+            "dtype",
+            "not_transposed",
+            "different_input",
+        ],
     )
-    def test_quack_symmetric_mm_eligibility_fallback(self, device, case):
+    def test_quack_symmetric_mm_fallback(self, device, case):
         if torch.cuda.get_device_capability(device)[0] != 10:
             self.skipTest("requires SM100")
 
         def fn(x):
             return x @ x.T
 
-        if case == "k_alignment":
-            x = torch.randn((4096, 4097), device=device, dtype=torch.bfloat16)
-        elif case == "m_alignment":
+        args = None
+        if case == "alignment":
             x = torch.randn((4097, 4104), device=device, dtype=torch.bfloat16)
         elif case == "min_m":
             x = torch.randn((4088, 4096), device=device, dtype=torch.bfloat16)
@@ -161,66 +170,28 @@ class SymmetricMMTest(TestCase):
             x = storage[:, ::2]
         elif case == "dtype":
             x = torch.randn((4096, 4096), device=device, dtype=torch.float16)
-        else:
-            raise AssertionError(f"unexpected test case: {case}")
+        elif case == "not_transposed":
 
-        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
-        FileCheck().check_not("extern_kernels._quack_symmetric_mm").run(code[0])
-        self.assertEqual(actual, fn(x), rtol=2e-2, atol=1)
-
-    @skipIfNoCuteDSL
-    @parametrize("case", ["not_transposed", "different_input"])
-    def test_quack_symmetric_mm_near_match_fallback(self, device, case):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("requires SM100")
-
-        if case == "not_transposed":
-
-            def fn(x, y):
+            def fn(x):
                 return x @ x.permute(0, 1)
 
+            x = torch.randn((4096, 4096), device=device, dtype=torch.bfloat16)
         elif case == "different_input":
 
             def fn(x, y):
                 return x @ y.T
 
+            x = torch.randn((4096, 4096), device=device, dtype=torch.bfloat16)
+            args = (x, torch.randn_like(x))
         else:
             raise AssertionError(f"unexpected test case: {case}")
 
-        x = torch.randn((4096, 4096), device=device, dtype=torch.bfloat16)
-        y = torch.randn_like(x)
-        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
-        FileCheck().check_not("extern_kernels._quack_symmetric_mm").run(code[0])
-        self.assertEqual(actual, fn(x, y), rtol=2e-2, atol=1)
+        self._check_symmetric_compile(fn, *(args or (x,)), uses_quack=False)
 
-    def test_quack_symmetric_mm_without_cute(self, device):
-        from torch._inductor.fx_passes.post_grad import _is_quack_symmetric_mm
-
-        x = torch.empty((4096, 4096), device=device, dtype=torch.bfloat16)
-        match = SimpleNamespace(
-            kwargs={"x": SimpleNamespace(meta={"val": x}), "dims": [1, 0]}
-        )
-        with mock.patch(
-            "torch._inductor.fx_passes.post_grad.ensure_cute_available",
-            return_value=False,
-        ):
-            self.assertFalse(_is_quack_symmetric_mm(match))
-
-    @skipIfNoCuteDSL
-    def test_quack_symmetric_mm_architecture_fallback(self, device):
-        from torch._inductor.fx_passes.post_grad import _is_quack_symmetric_mm
-
-        x = torch.empty((4096, 4096), device=device, dtype=torch.bfloat16)
-        match = SimpleNamespace(
-            kwargs={"x": SimpleNamespace(meta={"val": x}), "dims": [1, 0]}
-        )
-        with mock.patch.object(
-            torch.cuda, "get_device_capability", return_value=(11, 0)
-        ):
-            self.assertFalse(_is_quack_symmetric_mm(match))
-
-    @skipIfNoCuteDSL
-    def test_quack_symmetric_mm_hip_fallback(self, device):
+    @parametrize(
+        "case", ["no_cute", "architecture", "hip", "cpp_wrapper", "fx_wrapper"]
+    )
+    def test_quack_symmetric_mm_environment_fallback(self, device, case):
         from torch._inductor.fx_passes.post_grad import _is_quack_symmetric_mm
         from torch._inductor.kernel.symmetric_mm import quack_symmetric_mm
 
@@ -228,66 +199,58 @@ class SymmetricMMTest(TestCase):
         match = SimpleNamespace(
             kwargs={"x": SimpleNamespace(meta={"val": x}), "dims": [1, 0]}
         )
-        with mock.patch.object(torch.version, "hip", "6.3"):
+        with (
+            mock.patch(
+                "torch._inductor.fx_passes.post_grad.ensure_cute_available",
+                return_value=case != "no_cute",
+            ),
+            mock.patch(
+                "torch._inductor.utils.ensure_cute_available",
+                return_value=case != "no_cute",
+            ),
+            mock.patch.object(
+                torch.cuda,
+                "get_device_capability",
+                return_value=(11, 0) if case == "architecture" else (10, 0),
+            ),
+            mock.patch.object(torch.version, "hip", "6.3" if case == "hip" else None),
+            config.patch(
+                {
+                    "cpp_wrapper": case == "cpp_wrapper",
+                    "fx_wrapper": case == "fx_wrapper",
+                }
+            ),
+        ):
             self.assertFalse(_is_quack_symmetric_mm(match))
-            self.assertEqual(quack_symmetric_mm(x), x @ x.T)
+            if case in ("no_cute", "architecture", "hip"):
+                self.assertEqual(quack_symmetric_mm(x), x @ x.T)
 
     @skipIfNoCuteDSL
-    def test_quack_symmetric_mm_unaligned_pointer_fallback(self, device):
+    @parametrize("case", ["unaligned_pointer", "contiguous_intermediate"])
+    def test_quack_symmetric_mm_realizes_input(self, device, case):
         if torch.cuda.get_device_capability(device)[0] != 10:
             self.skipTest("requires SM100")
 
-        def fn(x):
-            return x @ x.T
+        if case == "unaligned_pointer":
 
-        storage = torch.randn(4096 * 4096 + 1, device=device, dtype=torch.bfloat16)
-        x = storage[1:].view(4096, 4096)
-        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
-        FileCheck().check("extern_kernels._quack_symmetric_mm").run(code[0])
-        self.assertEqual(actual, fn(x), rtol=2e-2, atol=1)
+            def fn(x):
+                return x @ x.T
 
-    @skipIfNoCuteDSL
-    def test_quack_symmetric_mm_contiguous_intermediate(self, device):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("requires SM100")
+            storage = torch.randn(4096 * 4096 + 1, device=device, dtype=torch.bfloat16)
+            x = storage[1:].view(4096, 4096)
+        elif case == "contiguous_intermediate":
 
-        def fn(x):
-            y = x.permute(1, 0, 2).sum(2)
-            return y @ y.T
+            def fn(x):
+                y = x.permute(1, 0, 2).sum(2)
+                return y @ y.T
 
-        x = torch.randn((4096, 4096, 2), device=device, dtype=torch.bfloat16)
-        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
-        FileCheck().check("extern_kernels._quack_symmetric_mm").run(code[0])
-        self.assertEqual(actual, fn(x))
+            x = torch.randn((4096, 4096, 2), device=device, dtype=torch.bfloat16)
+        else:
+            raise AssertionError(f"unexpected test case: {case}")
+
+        self._check_symmetric_compile(fn, x, uses_quack=True)
 
     @skipIfNoCuteDSL
-    def test_quack_symmetric_mm_empty_batch(self, device):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("requires SM100")
-
-        def fn(x):
-            return torch.bmm(x, x.mT)
-
-        x = torch.randn((0, 4096, 4096), device=device, dtype=torch.bfloat16)
-        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
-        FileCheck().check("extern_kernels._quack_symmetric_mm").run(code[0])
-        self.assertEqual(actual, fn(x))
-
-    @skipIfNoCuteDSL
-    @parametrize("wrapper", ["cpp_wrapper", "fx_wrapper"])
-    def test_quack_symmetric_mm_wrapper_fallback(self, device, wrapper):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("requires SM100")
-
-        def fn(x):
-            return x @ x.T
-
-        x = torch.randn((4096, 4096), device=device, dtype=torch.bfloat16)
-        with config.patch({wrapper: True}):
-            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
-        FileCheck().check_not("quack_symmetric_mm").run("\n".join(code))
-        self.assertEqual(actual, fn(x))
-
     def test_quack_grouped_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -305,6 +268,7 @@ class SymmetricMMTest(TestCase):
         self.assertEqual(update, expected, rtol=2e-2, atol=5e-1)
         self.assertEqual(update, update.mT)
 
+    @skipIfNoCuteDSL
     def test_quack_pointer_grouped_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -315,21 +279,34 @@ class SymmetricMMTest(TestCase):
             torch.randn(512, 1024, device=device, dtype=torch.bfloat16),
             torch.randn(768, 1536, device=device, dtype=torch.bfloat16),
         ]
-        gram_plan = GroupedSymmetricPlan(inputs)
+        expected_inputs = list(inputs)
+        outputs = [
+            torch.empty(x.shape[0], x.shape[0], device=device, dtype=x.dtype)
+            for x in inputs
+        ]
+        gram_plan = GroupedSymmetricPlan(inputs, outputs=outputs)
+        inputs.clear()
+        outputs.clear()
         with self.assertRaisesRegex(ValueError, "compiled.*incompatible"):
-            GroupedSymmetricPlan(inputs[:1], compiled_plan=gram_plan)
+            GroupedSymmetricPlan(expected_inputs[:1], compiled_plan=gram_plan)
         grams = gram_plan()
-        for x, gram in zip(inputs, grams):
+        for x, gram in zip(expected_inputs, grams):
             self.assertEqual(gram, torch.mm(x, x.T))
 
         reuse_inputs = [
             torch.randn(x.shape[0], 2048, device=device, dtype=torch.bfloat16)
-            for x in inputs
+            for x in expected_inputs
         ]
         reuse_plan = GroupedSymmetricPlan(reuse_inputs, compiled_plan=gram_plan)
         self.assertIs(reuse_plan.compiled, gram_plan.compiled)
         for x, gram in zip(reuse_inputs, reuse_plan()):
             self.assertEqual(gram, torch.mm(x, x.T))
+
+        scaled_plan = GroupedSymmetricPlan(
+            reuse_inputs, alpha=2.0, compiled_plan=gram_plan
+        )
+        for x, gram in zip(reuse_inputs, scaled_plan()):
+            self.assertEqual(gram, 2.0 * torch.mm(x, x.T))
 
         update_plan = GroupedSymmetricPlan(grams, c=grams, alpha=2.0315, beta=-4.775)
         updates = update_plan()
@@ -338,6 +315,7 @@ class SymmetricMMTest(TestCase):
             self.assertEqual(update, expected, rtol=2e-2, atol=5e-1)
             self.assertEqual(update, update.T)
 
+    @skipIfNoCuteDSL
     def test_quack_grouped_symmetric_mm_rejects_unaligned_inputs(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -355,6 +333,7 @@ class SymmetricMMTest(TestCase):
             with self.assertRaisesRegex(ValueError, "aligned contiguous"):
                 GroupedSymmetricPlan([x])
 
+    @skipIfNoCuteDSL
     def test_muon_uses_grouped_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -371,6 +350,7 @@ class SymmetricMMTest(TestCase):
         plan = next(plan for _, plan in plans.chunks if plan is not None)
         self.assertIs(plan.gram_plans[0].compiled, plan.update_plan.compiled)
 
+    @skipIfNoCuteDSL
     def test_muon_foreach_map_compile(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -408,6 +388,7 @@ class SymmetricMMTest(TestCase):
         self.assertEqual(params, expected, rtol=2e-2, atol=2e-2)
         self.assertEqual(bufs, expected_bufs)
 
+    @skipIfNoCuteDSL
     def test_muon_merges_sparse_small_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -419,6 +400,7 @@ class SymmetricMMTest(TestCase):
         ]
         self._check_grouped_muon(params)
 
+    @skipIfNoCuteDSL
     def test_muon_groups_heterogeneous_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -431,16 +413,19 @@ class SymmetricMMTest(TestCase):
             )
         self._check_grouped_muon(params)
 
-    def test_muon_unaligned_shape_fallback(self, device):
+    @parametrize("case", ["unaligned", "unprofitable"])
+    def test_muon_shape_fallback(self, device, case):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
 
+        shape = (127, 1025) if case == "unaligned" else (128, 1024)
         params = [
-            torch.randn(127, 1025, device=device, dtype=torch.bfloat16)
-            for _ in range(4)
+            torch.randn(shape, device=device, dtype=torch.bfloat16)
+            for _ in range(4 if case == "unaligned" else 1)
         ]
         self._check_grouped_muon(params, expected_plans=0)
 
+    @skipIfNoCuteDSL
     def test_muon_cudagraph_fallback(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -456,14 +441,34 @@ class SymmetricMMTest(TestCase):
         optimizer = torch.optim.Muon([param])
         torch.compile(optimizer.step, fullgraph=True)()
 
-    def test_muon_zero_steps(self, device):
+    @skipIfNoCuteDSL
+    def test_muon_grouped_dynamic_shape_fallback(self, device):
+        if torch.cuda.get_device_capability(device)[0] not in (10, 11):
+            self.skipTest("requires SM100 or SM110")
+
+        from torch.optim._muon import _use_grouped_muon
+
+        params = [
+            torch.randn(1536, 5120, device=device, dtype=torch.bfloat16)
+            for _ in range(4)
+        ]
+        torch._dynamo.mark_dynamic(params[0], 0)
+
+        def use_grouped_muon(*inputs):
+            return inputs[0] + int(_use_grouped_muon(list(inputs), 5))
+
+        actual = torch.compile(use_grouped_muon, fullgraph=True)(*params)
+        self.assertEqual(actual, params[0])
+
+    @parametrize("ns_steps", [0, -1])
+    def test_muon_zero_steps(self, device, ns_steps):
         param = torch.randn(8, 16, device=device, requires_grad=True)
         expected = param.detach().clone().requires_grad_()
         grad = torch.randn_like(param)
         param.grad = grad
         expected.grad = grad.clone()
-        optimizer = torch.optim.Muon([param], ns_steps=0)
-        expected_optimizer = torch.optim.Muon([expected], ns_steps=0)
+        optimizer = torch.optim.Muon([param], ns_steps=ns_steps)
+        expected_optimizer = torch.optim.Muon([expected], ns_steps=ns_steps)
         expected_optimizer.step()
         torch.compile(optimizer.step, fullgraph=True)()
         self.assertEqual(param, expected)
@@ -491,6 +496,7 @@ class SymmetricMMTest(TestCase):
                 has_complex=False,
             )
 
+    @skipIfNoCuteDSL
     def test_muon_uses_singleton_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -499,6 +505,7 @@ class SymmetricMMTest(TestCase):
         self._check_grouped_muon(params)
 
     @parametrize("count", [2, 4])
+    @skipIfNoCuteDSL
     def test_muon_uses_direct_symmetric_mm(self, device, count):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -513,6 +520,7 @@ class SymmetricMMTest(TestCase):
         ]
         self._check_grouped_muon(params)
 
+    @skipIfNoCuteDSL
     def test_muon_groups_small_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -536,9 +544,16 @@ class SymmetricMMTest(TestCase):
         for _ in range(4):
             param = torch.randn(128, 1024, device=device, dtype=dtype)
             params.append(param if contiguous else param.T.contiguous().T)
-        self._check_grouped_muon(params, expected_plans=0, nesterov=False, ns_steps=4)
+        self._check_grouped_muon(
+            params,
+            expected_plans=0,
+            nesterov=False,
+            ns_steps=4,
+            compile_mode="reduce-overhead",
+        )
 
     @parametrize("lr_device", ["cpu", "cuda"])
+    @skipIfNoCuteDSL
     def test_muon_grouped_tensor_lr(self, device, lr_device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -551,6 +566,7 @@ class SymmetricMMTest(TestCase):
         self._check_grouped_muon(params, lr=lr)
 
     @parametrize("adjust_lr_fn", ["original", "match_rms_adamw", "spectral_unclamped"])
+    @skipIfNoCuteDSL
     def test_muon_grouped_adjust_lr(self, device, adjust_lr_fn):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")
@@ -580,7 +596,7 @@ class SymmetricMMTest(TestCase):
             "torch._inductor.utils.ensure_cute_available", return_value=False
         ):
             plans = self._check_grouped_muon(params, expected_plans=0)
-        self.assertTrue(all(plan is None for _, plan in plans.chunks))
+        self.assertIsNone(plans)
 
 
 instantiate_device_type_tests(SymmetricMMTest, globals(), only_for="cuda")
