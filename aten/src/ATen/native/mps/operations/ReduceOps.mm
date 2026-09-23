@@ -864,12 +864,19 @@ static const char* reduction_kernel_suffix(ReductionKernel kernel) {
   TORCH_INTERNAL_ASSERT(false, "Unknown reduction kernel");
 }
 
+struct MetalType {
+  MetalType(ScalarType dtype) : name(scalarToMetalTypeString(dtype)), size(c10::elementSize(dtype)) {}
+  MetalType(std::string name, size_t size) : name(std::move(name)), size(size) {}
+  std::string name;
+  size_t size;
+};
+
 struct ReductionOp {
   ReductionFamily family;
   std::string prefix;
-  ScalarType input_dtype;
-  ScalarType output_dtype;
-  float divisor = 0;
+  MetalType input_type;
+  MetalType output_type;
+  float param = 0;
 };
 
 struct ReductionPartials {
@@ -886,17 +893,15 @@ static void encode_reduction(MPSStream* stream,
                              const ReductionPartials& partials = {}) {
   const auto& layout = plan.layout;
   const bool is_arg = op.family == ReductionFamily::Arg;
-  const bool has_divisor = op.family == ReductionFamily::Sum;
   const bool split_arg = is_arg && plan.num_segments > 1;
   const auto name = op.prefix + "reduction" + reduction_kernel_suffix(plan.kernel);
-  const auto input_type = scalarToMetalTypeString(op.input_dtype);
   std::string kernel_name;
   if (split_arg) {
-    kernel_name = fmt::format("{}_p1_{}", name, input_type);
+    kernel_name = fmt::format("{}_p1_{}", name, op.input_type.name);
   } else if (plan.kernel == ReductionKernel::ArgCombine) {
-    kernel_name = fmt::format("{}_{}", name, input_type);
+    kernel_name = fmt::format("{}_{}", name, op.input_type.name);
   } else {
-    kernel_name = fmt::format("{}_{}_{}", name, input_type, scalarToMetalTypeString(op.output_dtype));
+    kernel_name = fmt::format("{}_{}_{}", name, op.input_type.name, op.output_type.name);
   }
   auto encoder = stream->commandEncoder();
   auto pipeline = lib.getPipelineStateForFunc(kernel_name);
@@ -921,14 +926,11 @@ static void encode_reduction(MPSStream* stream,
         mtl_setArgs(encoder, input, output, sizes);
       } else if (plan.kernel == ReductionKernel::InnerChunk) {
         const std::array<uint32_t, 4> sizes{layout.outer_size, layout.dim_size, plan.lanes, plan.num_segments};
-        mtl_setArgs(encoder, input, output, sizes);
+        mtl_setArgs(encoder, input, output, sizes, op.param);
         num_simdgroups = at::ceil_div(num_simdgroups, c10::metal::simdgroup_size / plan.lanes);
       } else {
         const std::array<uint32_t, 2> sizes{layout.outer_size, layout.dim_size};
-        mtl_setArgs(encoder, input, output, sizes);
-      }
-      if (has_divisor) {
-        mtl_setArgs<3>(encoder, op.divisor);
+        mtl_setArgs(encoder, input, output, sizes, op.param);
       }
       const auto num_tgs = at::ceil_div(num_simdgroups, INNER_TG_SIZE / c10::metal::simdgroup_size);
       grid = MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1);
@@ -943,13 +945,12 @@ static void encode_reduction(MPSStream* stream,
       const std::array<uint32_t, 4> sizes{layout.dim_size, layout.inner_size, plan.num_segments, plan.num_segments};
       if (is_arg && narrow) {
         mtl_setArgs(encoder, input, partials.values, partials.indices, sizes);
+      } else if (is_arg) {
+        mtl_setArgs(encoder, input, output, sizes, layout.strides);
       } else {
-        mtl_setArgs(encoder, input, output, sizes);
-        if (has_divisor) {
-          mtl_setArgs<3>(encoder, op.divisor);
-        }
+        mtl_setArgs(encoder, input, output, sizes, op.param);
         if (plan.kernel != ReductionKernel::Narrow) {
-          mtl_setBytes(encoder, layout.strides, has_divisor ? 4 : 3);
+          mtl_setArgs<4>(encoder, layout.strides);
         }
       }
       if (narrow) {
@@ -976,7 +977,7 @@ static void encode_reduction(MPSStream* stream,
     case ReductionKernel::Generic: {
       NormParams params{};
       params.ndim = input.dim();
-      params.p = op.divisor;
+      params.p = op.param;
       params.reduction_size = layout.dim_size / plan.num_segments;
       for (const auto d : c10::irange(input.dim())) {
         params.input_sizes[d] = input.size(d);
@@ -1005,7 +1006,7 @@ static void encode_reduction(MPSStream* stream,
 static void reduction_dispatch_mps(Tensor input,
                                    Tensor output,
                                    const ReductionOp& op,
-                                   ScalarType partial_dtype,
+                                   const MetalType& partial_type,
                                    const std::string& combine_prefix,
                                    const std::string& profile_name = {}) {
   const bool is_arg = op.family == ReductionFamily::Arg;
@@ -1048,16 +1049,16 @@ static void reduction_dispatch_mps(Tensor input,
   // pass-1 output dtype: opmath of output.scalar_type() for sum
   // (fp16/bf16/chalf partials would round once per segment),
   // output.scalar_type() for min/max, uchar for all/any.
-  partials.values = at::empty({output.numel() * plan.num_segments}, output.options().dtype(partial_dtype));
+  const auto num_partials = output.numel() * plan.num_segments;
+  partials.values = at::empty({num_partials * static_cast<int64_t>(partial_type.size)}, output.options().dtype(kByte));
   if (is_arg) {
-    partials.indices = at::empty_like(partials.values, output.options().dtype(kInt));
+    partials.indices = at::empty({num_partials}, output.options().dtype(kInt));
   }
 
   // Two-pass paths divide on the final pass only, while the accumulator is
-  // still in opmath_t; sum-family kernels always take the divisor buffer, so
-  // pass 1 binds a no-op 0 (value ops take none).
-  const ReductionOp first_op{op.family, op.prefix, op.input_dtype, partial_dtype};
-  const ReductionOp combine_op{op.family, combine_prefix, partial_dtype, op.output_dtype, op.divisor};
+  // still in opmath_t.
+  const ReductionOp first_op{op.family, op.prefix, op.input_type, partial_type};
+  const ReductionOp combine_op{op.family, combine_prefix, partial_type, op.output_type, op.param};
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       encode_reduction(stream, input, is_arg ? output : partials.values, plan, first_op, profile_name, partials);
