@@ -98,6 +98,7 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, Method, typestr, VariableTracker
 from .ctx_manager import (
+    _autocast_entries,
     AutocastModeVariable,
     ProfilerContextVariable,
     ProfilerRecordFunctionContextVariable,
@@ -263,55 +264,53 @@ constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 # Third-party backends (e.g. PrivateUse1 devices) register after torch is
 # imported, so the module-level sets above cannot contain their entries.
-# Backends extend them through the register_* functions below at import time.
-# Lazy queries make registrations take effect regardless of import order.
+# Backends extend the autocast handling through register_device_autocast_entry
+# below; _get_supported_ctx_manager_classes queries the registries lazily so
+# registrations take effect regardless of import order.
 
 _extra_ctx_manager_classes: dict[Any, None] = {}
 
-_constant_fold_extra: dict[Any, None] = {}
-_constant_fold_extra_need_guards: dict[Any, None] = {}
-
-_autocast_entries: dict[Any, str | None] = {
-    torch.amp.autocast_mode.autocast: None,
-    torch.cuda.amp.autocast: "cuda",
-    torch.cpu.amp.autocast: "cpu",
-}
-
-
-def register_ctx_manager_class(cls: Any) -> None:
-    """Register a context manager class that Dynamo can inline through.
-
-    Third-party device backends use this to make e.g.
-    ``torch.<backend>.amp.autocast`` traceable without graph breaks.
-    """
-    if not callable(cls):
-        raise TypeError(f"expected a callable context manager class, got {cls!r}")
-    _extra_ctx_manager_classes[cls] = None
-
-
-def register_constant_fold_function(fn: Any, *, needs_guard: bool = False) -> None:
-    """Register a function Dynamo may constant-fold during tracing.
-
-    Third-party device backends register e.g. ``torch.<backend>.is_available``
-    so guard-style branches do not graph break.
-    """
-    if not callable(fn):
-        raise TypeError(f"expected a callable, got {fn!r}")
-    if needs_guard:
-        _constant_fold_extra_need_guards[fn] = None
-    else:
-        _constant_fold_extra[fn] = None
-
 
 def register_device_autocast_entry(fn: Any, device_type: str) -> None:
-    """Register a device-specific autocast entry point, e.g.
-    ``torch.npu.amp.autocast``. The function must accept the same
-    (device_type, dtype, enabled, cache_enabled) signature family."""
+    """Register a legacy device-specific autocast entry point, e.g.
+    ``torch.npu.amp.autocast``.
+
+    Such entries mirror ``torch.cuda.amp.autocast``: they accept
+    ``(dtype=..., enabled=..., cache_enabled=...)`` and omit ``device_type``,
+    which is supplied from the registration instead. Registration also makes
+    the entry traceable as a context manager, so a single call is sufficient.
+    """
     if not callable(fn):
         raise TypeError(f"expected a callable autocast function, got {fn!r}")
-    if not isinstance(device_type, str) or not device_type:
-        raise TypeError(f"expected a non-empty device_type, got {device_type!r}")
+    if not isinstance(device_type, str):
+        raise TypeError(f"expected a device_type string, got {device_type!r}")
+    if not device_type:
+        raise ValueError(f"expected a non-empty device_type, got {device_type!r}")
+    if fn in _autocast_entries:
+        raise ValueError(f"autocast entry already registered: {fn!r}")
+    signature = inspect.signature(fn)
+    required = ("dtype", "enabled", "cache_enabled")
+    missing = [name for name in required if name not in signature.parameters]
+    if missing:
+        raise TypeError(
+            "expected an autocast entry accepting (dtype, enabled, "
+            f"cache_enabled), missing parameter(s) {missing} in {fn!r}"
+        )
+    extra = [name for name in signature.parameters if name not in required]
+    if extra:
+        raise TypeError(
+            "expected an autocast entry accepting exactly (dtype, enabled, "
+            f"cache_enabled), got extra parameter(s) {extra} in {fn!r}"
+        )
+    try:
+        signature.bind(dtype=None, enabled=True, cache_enabled=None)
+    except TypeError as exc:
+        raise TypeError(
+            "expected an autocast entry callable as (dtype, enabled, "
+            f"cache_enabled), got {fn!r}: {exc}"
+        ) from exc
     _autocast_entries[fn] = device_type
+    _extra_ctx_manager_classes[fn] = None
 
 
 def _get_supported_ctx_manager_classes() -> dict[Any, None]:
@@ -320,20 +319,6 @@ def _get_supported_ctx_manager_classes() -> dict[Any, None]:
         return supported_ctx_manager_classes
     return {**supported_ctx_manager_classes, **_extra_ctx_manager_classes}
 
-
-def _is_constant_foldable(fn: Any, *, needs_guard: bool = False) -> bool:
-    # constant_fold_functions already contains the need_guards entries; the
-    # extras mirror that so needs_guard registrations fold too.
-    if needs_guard:
-        return (
-            fn in constant_fold_functions_need_guards
-            or fn in _constant_fold_extra_need_guards
-        )
-    return (
-        fn in constant_fold_functions
-        or fn in _constant_fold_extra
-        or fn in _constant_fold_extra_need_guards
-    )
 
 # Ops that consume scalar values from 0-d tensors (via .item()) for computation
 # only, not for output shapes. When capture_scalar_outputs is enabled, these ops
@@ -728,7 +713,7 @@ class BaseTorchVariable(VariableTracker):
         return VariableTracker.build(tx, result)
 
     def can_constant_fold_through(self) -> bool:
-        if _is_constant_foldable(self.value):
+        if self.value in constant_fold_functions:
             return True
 
         if (
@@ -908,7 +893,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 ),
             )
         elif self.value in _autocast_entries:
-            # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             torch.profiler.record_function,
@@ -3765,7 +3749,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             args, kwargs
         ):
             # constant fold functions need to be guarded.
-            if _is_constant_foldable(self.value, needs_guard=True):
+            if self.value in constant_fold_functions_need_guards:
                 if self.source is None:
                     raise AssertionError(
                         "Expected source to be set for constant fold function needing guards"

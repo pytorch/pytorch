@@ -1079,6 +1079,17 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         return contextlib._GeneratorContextManager
 
 
+# Legacy device-specific autocast entry points (e.g. torch.cuda.amp.autocast)
+# that omit device_type from their signature, mapped to their device_type.
+# Third-party backends (e.g. PrivateUse1 devices) extend this through
+# torch._dynamo.variables.torch.register_device_autocast_entry at import time.
+_autocast_entries: dict[Any, str | None] = {
+    torch.amp.autocast_mode.autocast: None,
+    torch.cuda.amp.autocast: "cuda",
+    torch.cpu.amp.autocast: "cpu",
+}
+
+
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(
@@ -1086,10 +1097,6 @@ class AutocastModeVariable(ContextWrappingVariable):
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
-        # Lazy import: torch.py imports this module and defines
-        # _autocast_entries later, so a module-level import would deadlock.
-        from .torch import _autocast_entries
-
         if func not in _autocast_entries:
             raise AssertionError(f"unexpected autocast function: {func}")
         # device_type : str,

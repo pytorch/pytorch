@@ -443,6 +443,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_autocast_third_party_device_type_injection(self):
         # A registered third-party autocast with a legacy signature (no
         # device_type parameter) gets its device_type from registration.
+        from unittest import mock
+
         from torch._dynamo.variables import torch as dynamo_torch
         from torch._dynamo.variables.constant import ConstantVariable
         from torch._dynamo.variables.ctx_manager import AutocastModeVariable
@@ -450,7 +452,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         def fake_legacy_autocast(dtype, enabled=True, cache_enabled=None):
             pass
 
-        try:
+        with mock.patch.dict(dynamo_torch._autocast_entries, {}), mock.patch.dict(
+            dynamo_torch._extra_ctx_manager_classes, {}
+        ):
             dynamo_torch.register_device_autocast_entry(fake_legacy_autocast, "npu")
             var = AutocastModeVariable.create(
                 fake_legacy_autocast, (ConstantVariable.create(torch.float16),), {}
@@ -458,8 +462,37 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(var.target_values[0], "npu")
             self.assertEqual(var.target_values[1], torch.float16)
             self.assertEqual(var.target_values[2], True)
-        finally:
-            dynamo_torch._autocast_entries.pop(fake_legacy_autocast, None)
+
+    def test_autocast_third_party_end_to_end(self):
+        # register_device_autocast_entry alone must make an entry traceable
+        # through the real path (builder -> is_matching_cls -> call_function)
+        # under torch.compile, not just AutocastModeVariable.create. The entry
+        # mirrors the real legacy form (torch.cuda/cpu.amp.autocast): a subclass
+        # of the generic autocast whose signature omits device_type.
+        from unittest import mock
+
+        from torch._dynamo.variables import torch as dynamo_torch
+
+        class LegacyAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(self, enabled=True, dtype=torch.bfloat16, cache_enabled=True):
+                super().__init__(
+                    "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
+                )
+
+        with mock.patch.dict(dynamo_torch._autocast_entries, {}), mock.patch.dict(
+            dynamo_torch._extra_ctx_manager_classes, {}
+        ):
+            dynamo_torch.register_device_autocast_entry(LegacyAutocast, "cpu")
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def fn(x):
+                with LegacyAutocast(dtype=torch.bfloat16):
+                    return torch.mm(x, x)
+
+            out = fn(torch.randn(8, 8))
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(cnt.frame_count, 1)
 
     def test_autocast_device_type_equivalence(self):
         # Generic/cuda/cpu paths keep their device_type inference unchanged.
@@ -484,12 +517,32 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_register_device_autocast_entry_validates_args(self):
         from torch._dynamo.variables import torch as dynamo_torch
 
+        def entry_with_device_type(
+            dtype=None, enabled=True, cache_enabled=None, device_type=None
+        ):
+            pass
+
         with self.assertRaises(TypeError):
             dynamo_torch.register_device_autocast_entry(None, "npu")
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             dynamo_torch.register_device_autocast_entry(lambda: None, "")
         with self.assertRaises(TypeError):
             dynamo_torch.register_device_autocast_entry(lambda: None, 42)
+        with self.assertRaises(TypeError):
+            # legacy entries must omit device_type, which comes from the
+            # registration, even when they otherwise match the contract
+            dynamo_torch.register_device_autocast_entry(entry_with_device_type, "npu")
+        with self.assertRaises(TypeError):
+            # *args/**kwargs signatures would pass a keyword bind() but leave
+            # AutocastModeVariable.create() unable to read its named arguments
+            dynamo_torch.register_device_autocast_entry(
+                lambda *args, **kwargs: None, "npu"
+            )
+        with self.assertRaises(ValueError):
+            # re-registering a builtin entry would override global behavior
+            dynamo_torch.register_device_autocast_entry(
+                torch.amp.autocast_mode.autocast, "npu"
+            )
 
     def test_autocast_cpu_graph_break_2(self):
         # Regression for: https://github.com/pytorch/pytorch/issues/93890
