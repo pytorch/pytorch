@@ -226,7 +226,7 @@ def get_dtype_as_int(tensor):
     return _TORCH_DTYPE_TO_ENUM[dtype]
 
 
-# Those operators will be automatically populated to a instance method
+# Those operators will be automatically populated to an instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
 kind_to_standard_operators: dict[str, Callable[..., Any]] = {

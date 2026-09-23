@@ -1,5 +1,5 @@
 # Fusion Pattern Format
-The patterns are we matching against is float modules types, functional operators and pytorch operators in reverse order:
+The patterns we are matching against are float module types, functional operators and pytorch operators in reverse order:
 ```
 operator = module_type | functional | torch op | native op | MatchAllNode
 Pattern = (operator, Pattern, Pattern, ...) | operator
