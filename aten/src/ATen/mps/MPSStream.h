@@ -75,6 +75,8 @@ class TORCH_API MPSStream {
   }
 
   MPSCommandBuffer_t commandBuffer();
+  // Must be called from a block running on queue(), and the returned encoder
+  // is only valid for the rest of that block.
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
@@ -162,6 +164,11 @@ TORCH_API MPSStream* getDefaultMPSStream();
  * in round-robin order. Note: The default stream is not in the pool.
  */
 TORCH_API MPSStream* getStreamFromPool();
+
+/**
+ * Get a stream by its ID. 0 is the default stream, 1 - 32 are pool streams.
+ */
+TORCH_API MPSStream* getStreamByID(int64_t stream_id);
 
 /**
  * Synchronize the default stream and any pool streams created so far.

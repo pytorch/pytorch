@@ -6,6 +6,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FakeTensor.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -1325,6 +1326,21 @@ static Tensor make_qtensor(
   return result;
 }
 
+// as_strided creates a new TensorImpl but shares the storage so for faketensor
+// we need to copy over the metadata like the device and also the faketensormode
+// pointer
+static void maybe_copy_fake_tensor_metadata(
+    const Tensor& self,
+    TensorImpl* result) {
+  if (!self.is_fake()) {
+    return;
+  }
+  auto fake_device = self.unsafeGetTensorImpl()->fake_device();
+  TORCH_INTERNAL_ASSERT(fake_device.has_value());
+  at::set_and_normalize_fake_device(result, *fake_device);
+  result->set_fake_tensor_mode(self.unsafeGetTensorImpl()->fake_tensor_mode());
+}
+
 Tensor as_strided_tensorimpl(
     const Tensor& self,
     IntArrayRef size,
@@ -1337,6 +1353,7 @@ Tensor as_strided_tensorimpl(
       self.key_set(),
       self.dtype());
   setStrided(result, size, stride, storage_offset);
+  maybe_copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1371,6 +1388,7 @@ Tensor as_strided_tensorimpl_meta_symint(
   // bases / storage size.
   setStridedUnchecked(
       result, sym_size, sym_stride, std::move(sym_storage_offset));
+  maybe_copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1896,8 +1914,9 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
   const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
   if (size_diff > 0) {
     std::vector<c10::SymInt> new_reps(size_diff, 1);
-    for (const auto i : c10::irange(reps.size())) {
-      new_reps.emplace_back(reps[i]);
+    new_reps.reserve(static_cast<size_t>(size_diff) + reps.size());
+    for (const auto& rep : reps) {
+      new_reps.emplace_back(rep);
     }
     return self.repeat_symint(SymIntArrayRef(new_reps));
   }
@@ -1937,6 +1956,7 @@ static Tensor alias_with_sizes_and_strides(
   } else {
     self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
+  maybe_copy_fake_tensor_metadata(self, self_tmp_);
   return self_;
 }
 
@@ -4825,9 +4845,9 @@ void unbind_copy_int_out(
     int64_t dim,
     at::TensorList out) {
   if (at::GradMode::is_enabled()) {
-    for (const auto i : c10::irange(out.size())) {
+    for (const auto& out_elem : out) {
       TORCH_CHECK(
-          !out[i].requires_grad(),
+          !out_elem.requires_grad(),
           "unbind_copy(): functions with out=... arguments don't support automatic differentiation, "
           "but one of the arguments requires grad.");
     }
