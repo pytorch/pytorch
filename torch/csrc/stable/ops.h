@@ -1330,6 +1330,28 @@ inline bool is_pinned(const torch::stable::Tensor& self) {
   return torch::stable::detail::to<bool>(stack[0]);
 }
 
+/// Stable version of the flip op.
+///
+/// Reverses the order of elements along the given dimensions and returns
+/// the result as a new tensor. Negative dimensions are wrapped.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param dims The dimensions to flip.
+/// @return A new tensor with the given dimensions reversed.
+inline torch::stable::Tensor flip(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef dims) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dims)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::flip", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)
