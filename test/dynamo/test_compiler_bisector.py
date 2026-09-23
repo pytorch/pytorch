@@ -12,8 +12,10 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import has_triton
 
 
 aten = torch.ops.aten
@@ -286,59 +288,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
 
-    @config.patch(
-        {
-            "test_configs.bisect_pre_grad_graph": True,
-            "test_configs.bisect_keep_custom_backend_for_inductor": True,
-        }
-    )
-    def test_bisect_pre_grad_graph(self):
-        def f(x):
-            for _ in range(5):
-                x = x + 1
-            return x.relu()
-
-        class MyBackend:
-            def __call__(self, gm, example_inputs):
-                node_idx = 0
-
-                def node_to_graph_id(node):
-                    nonlocal node_idx
-                    out = 0 if node_idx < 3 else 1
-                    node_idx += 1
-                    return out
-
-                split_gm = torch.fx.passes.split_module.split_module(
-                    gm, None, node_to_graph_id, keep_original_order=True
-                )
-
-                for name, submod in split_gm.named_modules():
-                    if "submod_" in name:
-                        # the test case is simple enough that using
-                        # the original example_inputs works for sub
-                        # module
-                        submod.forward = torch._inductor.standalone_compile(
-                            submod,
-                            example_inputs,
-                            dynamic_shapes="from_example_inputs",
-                            options={},
-                        )
-
-                return split_gm
-
-        def test_fn():
-            torch._dynamo.reset()
-
-            x = torch.randn(1024, device=GPU_TYPE)
-            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
-                opt_f = torch.compile(f, backend=MyBackend())
-                return torch.allclose(opt_f(x), f(x))
-
-        out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "pre_grad_graph")
-        self.assertEqual(out.bisect_number, 1)
-
     # XPU doesn't support cudagrah
     @requires_cuda
     def test_cudagraph_bisect_max(self):
@@ -411,6 +360,69 @@ class TestCompilerBisector(TestCase):
             "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
         )
         self.assertIn(expected_result, output.stdout)
+
+
+class TestCompilerBisectorDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    @config.patch(
+        {
+            "test_configs.bisect_pre_grad_graph": True,
+            "test_configs.bisect_keep_custom_backend_for_inductor": True,
+        }
+    )
+    def test_bisect_pre_grad_graph(self, device):
+        def f(x):
+            for _ in range(5):
+                x = x + 1
+            return x.relu()
+
+        class MyBackend:
+            def __call__(self, gm, example_inputs):
+                node_idx = 0
+
+                def node_to_graph_id(node):
+                    nonlocal node_idx
+                    out = 0 if node_idx < 3 else 1
+                    node_idx += 1
+                    return out
+
+                split_gm = torch.fx.passes.split_module.split_module(
+                    gm, None, node_to_graph_id, keep_original_order=True
+                )
+
+                for name, submod in split_gm.named_modules():
+                    if "submod_" in name:
+                        # the test case is simple enough that using
+                        # the original example_inputs works for sub
+                        # module
+                        submod.forward = torch._inductor.standalone_compile(
+                            submod,
+                            example_inputs,
+                            dynamic_shapes="from_example_inputs",
+                            options={},
+                        )
+
+                return split_gm
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            x = torch.randn(1024, device=device)
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+                opt_f = torch.compile(f, backend=MyBackend())
+                return torch.allclose(opt_f(x), f(x))
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "pre_grad_graph")
+        self.assertEqual(out.bisect_number, 1)
+
+
+instantiate_device_type_tests(
+    TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
