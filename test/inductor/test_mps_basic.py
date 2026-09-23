@@ -3,10 +3,12 @@ import importlib
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 import torch
+from torch._inductor.codegen.mps import MetalKernel
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
@@ -82,6 +84,26 @@ class MPSBasicTests(TestCase):
             raise AssertionError("tanh(100) should be +1")
         if torch.isnan(result).any():
             raise AssertionError("tanh should not produce NaN for large values")
+
+    def test_erfc_tail_accuracy(self):
+        # gh-187806: compiled erfc must lower to c10::metal::erfc, not the
+        # 1 - erf fallback that flushes the tail to zero past x ~ 3.9
+        x = torch.arange(-9.0, 9.0, 2**-10, device="mps")
+
+        @torch.compile
+        def fn(x):
+            return torch.erfc(x)
+
+        actual = fn(x).cpu().double()
+        expected = torch.erfc(x.cpu().double())
+        self.assertEqual(actual, expected, rtol=1e-6, atol=0)
+        # specials and the clamped tail (t = min(|x|, 10.5) in the kernel);
+        # erfc rounds to exactly 0/2 in fp32 well before the clamp
+        inf, nan = float("inf"), float("nan")
+        vals = [0.0, inf, -inf, nan, 10.5, -10.5, 1e30, -1e30]
+        sp = torch.tensor(vals, device="mps")
+        expected_sp = torch.tensor([1.0, 0.0, 2.0, nan, 0.0, 2.0, 0.0, 2.0])
+        self.assertEqual(fn(sp).cpu(), expected_sp, rtol=0, atol=0)
 
     def test_floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
@@ -334,6 +356,9 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_metal_kernel_device_type(self):
+        self.assertEqual(MetalKernel.device_type, "mps")
+
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 class MPSBasicTestsAOTI(TestCase):
@@ -478,6 +503,58 @@ class MPSBasicTestsAOTI(TestCase):
                 target_count,
                 exactly=True,
             ).run(src_code)
+
+    def test_shader_compile_error_raises(self):
+        # A shader that fails to compile must surface as an exception rather
+        # than killing the process. The shader library is built lazily inside
+        # the generated handle getter, so the failure lands on the first run,
+        # not at compile time. Without AOTI_TORCH_ERROR_CODE_CHECK the null
+        # library handle reaches aoti_torch_mps_get_kernel_function, which
+        # dereferences it and segfaults.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        ep = torch.export.export(M().to("mps"), inp)
+
+        with patch(
+            "torch._inductor.codegen.mps._embed_headers",
+            return_value="__DELIBERATE_MSL_SYNTAX_ERROR__;",
+        ):
+            path = torch._inductor.aoti_compile_and_package(ep)
+
+        m = torch._inductor.aoti_load_package(path)
+        # The Metal compiler diagnostic must reach Python, not just some error.
+        with self.assertRaisesRegex(RuntimeError, "__DELIBERATE_MSL_SYNTAX_ERROR__"):
+            m(*inp)
+
+    def test_kernel_function_lookup_error_raises(self):
+        # Covers the second shim call, which the test above never reaches
+        # because it fails at the first. Renaming the kernel symbol leaves a
+        # library that compiles but contains no "generated_kernel", so the
+        # lookup fails. Without AOTI_TORCH_ERROR_CODE_CHECK the null function
+        # handle reaches aoti_torch_mps_run_command_block and segfaults.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        ep = torch.export.export(M().to("mps"), inp)
+
+        headers = (
+            "#include <metal_stdlib>\n"
+            "using namespace metal;\n"
+            "#define generated_kernel renamed_kernel\n"
+        )
+        with patch("torch._inductor.codegen.mps._embed_headers", return_value=headers):
+            path = torch._inductor.aoti_compile_and_package(ep)
+
+        m = torch._inductor.aoti_load_package(path)
+        with self.assertRaisesRegex(
+            RuntimeError, "Failed to create function state object"
+        ):
+            m(*inp)
 
 
 if __name__ == "__main__":

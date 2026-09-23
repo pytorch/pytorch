@@ -116,10 +116,11 @@ jobs:
 
       - name: Download Build Artifacts
         id: download-artifacts
-        # NB: When the previous build job is skipped, there won't be any artifacts and
-        # this step will fail. Binary build jobs can only be skipped on CI, not nightly
-        continue-on-error: true
-        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
+        # A skipped build job on a ciflow run legitimately leaves no artifact, so
+        # tolerate that. On nightly/release-tag pushes the artifact always exists,
+        # and swallowing its absence makes "Upload binaries" a silent no-op.
+        continue-on-error: ${{ !(github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')))) }}
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"

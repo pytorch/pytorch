@@ -90,12 +90,6 @@ inline bool isIntegralType(ScalarType t, bool includeBool) {
   return isIntegral || (includeBool && t == ScalarType::Bool);
 }
 
-[[deprecated(
-    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")]] inline bool
-isIntegralType(ScalarType t) {
-  return isIntegralType(t, /*includeBool=*/false);
-}
-
 inline bool isFloat8Type(ScalarType t) {
   return t == ScalarType::Float8_e5m2 || t == ScalarType::Float8_e5m2fnuz ||
       t == ScalarType::Float8_e4m3fn || t == ScalarType::Float8_e4m3fnuz ||
@@ -124,7 +118,7 @@ inline bool isBitsType(ScalarType t) {
       t == ScalarType::Bits16;
 }
 
-inline bool isBarebonesUnsignedType(ScalarType t) {
+constexpr bool isBarebonesUnsignedType(ScalarType t) {
   return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
       t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
       t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
@@ -308,4 +302,5 @@ C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap()
 
 } // namespace c10
 
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()

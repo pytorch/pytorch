@@ -19,7 +19,10 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
+from torch.distributed.pipelining._utils import (
+    generate_stage_to_rank_mapping,
+    InferenceMode,
+)
 from torch.distributed.pipelining.schedules import (
     _Action,
     _add_reduce_grad,
@@ -51,9 +54,10 @@ from torch.distributed.pipelining.stage import (
     _RecvInfo,
     PipelineStage,
 )
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -64,11 +68,6 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
-device = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
@@ -144,6 +143,8 @@ def _run_adjacency_validation(stage, num_stages):
 
 
 class ScheduleTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_schedule_class(self):
         # List of all expected schedule names
         schedule_names = [
@@ -162,11 +163,12 @@ class ScheduleTest(TestCase):
             with self.subTest(name=name):
                 schedule_class = get_schedule_class(name)
                 self.assertIsNotNone(
-                    schedule_class, f"Class for {name} should not be None"
+                    schedule_class,
+                    lambda msg: f"{msg}\nClass for {name} should not be None",
                 )
                 self.assertTrue(
                     issubclass(schedule_class, _PipelineSchedule),
-                    f"{name} should be a subclass of _PipelineSchedule",
+                    lambda msg: f"{msg}\n{name} should be a subclass of _PipelineSchedule",
                 )
 
         error_case = ["ScheduleThatDoesNotExist"]
@@ -221,80 +223,228 @@ class ScheduleTest(TestCase):
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
         )
-        d_hid, batch_size = 512, 256
-        n_stages = 1
-        device = "cpu"
-        full_mod = MultiMLP(d_hid, n_layers=n_stages)
-        full_mod.to(device)
+        try:
+            d_hid, batch_size = 512, 256
+            n_stages = 1
+            device = "cpu"
+            full_mod = MultiMLP(d_hid, n_layers=n_stages)
+            full_mod.to(device)
 
-        x = torch.randn(batch_size, d_hid, device=device)
-        ref_mod = copy.deepcopy(full_mod)
-        with torch.no_grad():
-            y = ref_mod(x)
-            # Add a small perturbation
-            target = y + torch.randn(batch_size, d_hid, device=device)
+            x = torch.randn(batch_size, d_hid, device=device)
+            ref_mod = copy.deepcopy(full_mod)
+            with torch.no_grad():
+                y = ref_mod(x)
+                # Add a small perturbation
+                target = y + torch.randn(batch_size, d_hid, device=device)
 
-        def loss_fn(y, target):
-            return torch.nn.functional.cross_entropy(y, target)
+            def loss_fn(y, target):
+                return torch.nn.functional.cross_entropy(y, target)
 
-        # Run reference
-        for _ in range(2):
-            ref_mod.zero_grad()
-            ref_out = ref_mod(x)
-            ref_loss = loss_fn(ref_out, target)
-            ref_loss.backward()
+            # Run reference
+            for _ in range(2):
+                ref_mod.zero_grad()
+                ref_out = ref_mod(x)
+                ref_loss = loss_fn(ref_out, target)
+                ref_loss.backward()
 
-        submod_name = "layers.0"
-        stage_module = full_mod.get_submodule(submod_name)
+            submod_name = "layers.0"
+            stage_module = full_mod.get_submodule(submod_name)
 
-        # Create a pipeline stage to wrap that submodule
-        num_microbatches = 2
-        stages = [
-            PipelineStage(
-                stage_module,
-                0,
-                n_stages,
-                device,
+            # Create a pipeline stage to wrap that submodule
+            num_microbatches = 2
+            stages = [
+                PipelineStage(
+                    stage_module,
+                    0,
+                    n_stages,
+                    device,
+                )
+            ]
+
+            if issubclass(ScheduleClass, PipelineScheduleSingle):
+                stages = stages[0]
+
+            # Attach to a schedule
+            schedule = ScheduleClass(
+                stages,
+                num_microbatches,
+                loss_fn=loss_fn,
             )
-        ]
+            # Run
+            for _ in range(2):
+                # Zero gradients
+                stage_module.zero_grad()
+                losses = []
+                out = schedule.step(x, target=target, losses=losses)
 
-        if issubclass(ScheduleClass, PipelineScheduleSingle):
-            stages = stages[0]
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+            # Check loss
+            # Since the reduction used in the loss function above is "mean", we use
+            # "mean" here to reduce microbatch losses into a single value too.
+            pipe_loss = torch.stack(losses).mean()
+            torch.testing.assert_close(pipe_loss, ref_loss)
 
-        # Attach to a schedule
-        schedule = ScheduleClass(
-            stages,
-            num_microbatches,
-            loss_fn=loss_fn,
+            # Check gradients
+            # Get corresponding submodule from reference model
+            ref_submod = ref_mod.get_submodule(submod_name)
+            # Check gradients per parameter
+            for name, p in stage_module.named_parameters():
+                ref_p = ref_submod.get_parameter(name)
+                try:
+                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+                except AssertionError:
+                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                    raise
+
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
+    def test_schedule_with_pre_split_inputs(self, ScheduleClass):
+        """
+        Test that schedules can consume pre-split microbatch args, kwargs, and target.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
         )
-        # Run
-        for _ in range(2):
-            # Zero gradients
-            stage_module.zero_grad()
-            losses = []
-            out = schedule.step(x, target=target, losses=losses)
+        try:
+            d_hid, batch_size = 16, 8
+            n_stages = 1
+            num_microbatches = 2
+            device = "cpu"
 
-        # Check output
-        torch.testing.assert_close(out, ref_out)
-        # Check loss
-        # Since the reduction used in the loss function above is "mean", we use
-        # "mean" here to reduce microbatch losses into a single value too.
-        pipe_loss = torch.stack(losses).mean()
-        torch.testing.assert_close(pipe_loss, ref_loss)
+            class KwargModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(d_hid, d_hid)
 
-        # Check gradients
-        # Get corresponding submodule from reference model
-        ref_submod = ref_mod.get_submodule(submod_name)
-        # Check gradients per parameter
-        for name, p in stage_module.named_parameters():
-            ref_p = ref_submod.get_parameter(name)
-            try:
-                torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
-            except AssertionError:
-                print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
-                raise
+                def forward(self, x, y):
+                    return self.linear(torch.relu(x + y))
 
-        torch.distributed.destroy_process_group()
+            auto_mod = KwargModule().to(device)
+            pre_split_mod = copy.deepcopy(auto_mod)
+
+            x = torch.randn(batch_size, d_hid, device=device)
+            y = torch.randn(batch_size, d_hid, device=device)
+            target = torch.randn(batch_size, d_hid, device=device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
+
+            def make_schedule(mod):
+                stage = PipelineStage(mod, 0, n_stages, device)
+                if issubclass(ScheduleClass, PipelineScheduleSingle):
+                    stages = stage
+                else:
+                    stages = [stage]
+                return ScheduleClass(
+                    stages,
+                    num_microbatches,
+                    loss_fn=loss_fn,
+                    scale_grads=False,
+                )
+
+            auto_schedule = make_schedule(auto_mod)
+            pre_split_schedule = make_schedule(pre_split_mod)
+
+            auto_losses = []
+            auto_out = auto_schedule.step(x, y=y, target=target, losses=auto_losses)
+
+            arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+            kwarg_mbs = [
+                {"y": y_mb} for y_mb in torch.tensor_split(y, num_microbatches)
+            ]
+            target_mbs = list(torch.tensor_split(target, num_microbatches))
+            pre_split_losses = []
+            pre_split_out = pre_split_schedule.step(
+                arg_mbs=arg_mbs,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, auto_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(auto_losses))
+
+            for (name, pre_split_param), (auto_name, auto_param) in zip(
+                pre_split_mod.named_parameters(),
+                auto_mod.named_parameters(),
+                strict=True,
+            ):
+                self.assertEqual(name, auto_name)
+                self.assertEqual(
+                    pre_split_param.grad,
+                    auto_param.grad,
+                    msg=f"Gradient mismatch for {name}",
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_schedule_pre_split_validation(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid = 4
+            device = "cpu"
+            x0 = torch.randn(2, d_hid, device=device)
+            x1 = torch.randn(2, d_hid, device=device)
+            stage = PipelineStage(torch.nn.Identity(), 0, 1, device)
+            schedule = ScheduleGPipe(stage, 2)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split positional inputs through arg_mbs",
+            ):
+                schedule.step(x0, arg_mbs=[(x0,), (x1,)])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Unexpected keyword arguments with pre-split inputs: y",
+            ):
+                schedule.step(y=x0, kwarg_mbs=[{}, {}])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split targets through target_mbs",
+            ):
+                schedule.step(target=x0, target_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "arg_mbs must be a list"):
+                schedule.step(arg_mbs=(x0,))
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 arg_mbs"):
+                schedule.step(arg_mbs=[])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list"):
+                schedule.step(
+                    arg_mbs=[(x0,), (x1,)],
+                    kwarg_mbs={"y": x0},
+                )
+
+            with self.assertRaisesRegex(TypeError, "arg_mbs must be a list of tuples"):
+                schedule.step(arg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list of dicts"):
+                schedule.step(kwarg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 target_mbs"):
+                schedule.step(
+                    arg_mbs=[(x0,), (x1,)],
+                    target_mbs=[x0],
+                )
+        finally:
+            torch.distributed.destroy_process_group()
 
     @parametrize(
         "ScheduleClass",
@@ -307,9 +457,7 @@ class ScheduleTest(TestCase):
         ],
     )
     def test_schedule_eval_then_train(self, ScheduleClass):
-        """
-        Test that simply runs evaluation followed by training.
-        """
+        """Test full-batch and pre-split evaluation followed by training."""
         store = FakeStore()
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
@@ -338,17 +486,77 @@ class ScheduleTest(TestCase):
 
         # Attach to a schedule
         schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
-        # Run eval
-        for _ in range(2):
-            # Zero gradients
-            stage_module.zero_grad()
-            losses = []
-            schedule.eval(x, target=target, losses=losses)
-        # Run training
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+
         try:
-            for _ in range(2):
-                losses = []
-                schedule.step(x, target=target, losses=losses)
+            stage_module.zero_grad()
+            full_losses = []
+            full_out = schedule.eval(x, target=target, losses=full_losses)
+            pre_split_losses = []
+            pre_split_out = schedule.eval(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, full_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNone(
+                    parameter.grad,
+                    msg=f"eval unexpectedly produced a gradient for {name}",
+                )
+
+            train_losses = []
+            train_out = schedule.step(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=train_losses,
+            )
+            self.assertEqual(train_out, full_out)
+            self.assertEqual(torch.stack(train_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNotNone(
+                    parameter.grad,
+                    msg=f"training did not produce a gradient for {name}",
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize("rank", [0, 1])
+    def test_fake_pg_cross_rank_uses_static_metadata(self, rank):
+        """
+        With a fake process group, the cross-rank warm-up vote cannot exchange
+        real data, so the schedule must infer the metadata mode locally:
+        STATIC when complete metadata is supplied, and a clear error when
+        dynamic inference would be required.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=rank, world_size=2, store=store
+        )
+        d_hid, batch_size = 16, 8
+        n_stages, num_microbatches = 2, 2
+        device = torch.device("cpu")
+        mod = MultiMLP(d_hid, n_layers=n_stages).get_submodule(f"layers.{rank}")
+
+        x = torch.randn(batch_size, d_hid, device=device)
+        mb = torch.randn(batch_size // num_microbatches, d_hid, device=device)
+        try:
+            stage = PipelineStage(
+                mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
+            )
+            schedule = ScheduleGPipe(stage, num_microbatches)
+            schedule.step(x) if rank == 0 else schedule.step()
+            self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+
+            # Without static metadata, dynamic inference is required, which
+            # cannot work over a fake group and must fail loudly.
+            stage_dyn = PipelineStage(mod, rank, n_stages, device)
+            schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
+            with self.assertRaisesRegex(RuntimeError, "fake process group"):
+                schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
         finally:
             torch.distributed.destroy_process_group()
 
@@ -391,6 +599,8 @@ instantiate_parametrized_tests(ScheduleTest)
 
 
 class TestSchedulePlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
@@ -472,6 +682,31 @@ class TestSchedulePlan(TestCase):
                     num_stages=num_stages,
                 )
 
+    def test_max_active_stages_is_used_for_lowering(self):
+        stages = [
+            MockPipelineStage(group_size=4, group_rank=3, num_stages=16)
+            for _ in range(4)
+        ]
+
+        default_schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+        )
+        retained_schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+            max_active_stages=4,
+        )
+
+        def count_stage_15_unshards(schedule):
+            return sum(
+                action.stage_index == 15 and action.computation_type == UNSHARD
+                for action in schedule.pipeline_order_with_comms[3]
+            )
+
+        self.assertEqual(count_stage_15_unshards(default_schedule), 4)
+        self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
+
     @parametrize(
         "ScheduleClass",
         [ScheduleInterleaved1F1B, ScheduleInterleavedZeroBubble],
@@ -495,7 +730,6 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
-                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size
@@ -558,6 +792,8 @@ instantiate_parametrized_tests(TestSchedulePlan)
 
 
 class TestScheduleCsv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "ScheduleClass,csv_name",
         [
@@ -591,17 +827,25 @@ class TestScheduleCsv(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
-                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+                self.assertEqual(
+                    a,
+                    b,
+                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
+                )
 
 
 instantiate_parametrized_tests(TestScheduleCsv)
 
 
-class TestScheduleLowering(TestCase):
-    """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
-
+class ScheduleLoweringTestBase(TestCase):
     def _parse_actions(self, actions: list[str]) -> list[_Action]:
         return [_Action.from_str(s) for s in actions]
+
+
+class TestScheduleLowering(ScheduleLoweringTestBase):
+    """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize(
         "action_str_and_ref",
@@ -663,7 +907,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -702,7 +946,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -737,7 +981,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {merged_sch}"
                 ),
             )
@@ -888,7 +1132,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        f"Mismatch on rank {rank} at position {i}."
+                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_comms_sch[rank]}"
                         f"\nActual:   {comms_sch[rank]}"
                     ),
@@ -1242,7 +1486,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        f"Mismatch on rank {rank} at position {i}."
+                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_sch[rank]}"
                         f"\nActual:   {result_sch[rank]}"
                     ),
@@ -1326,7 +1570,7 @@ class TestScheduleLowering(TestCase):
             self.assertLess(
                 i,
                 len(non_none) - 1,
-                f"RECV {a} on rank 1 has no following consumer",
+                lambda msg: f"{msg}\nRECV {a} on rank 1 has no following consumer",
             )
             consumer = non_none[i + 1]
             consumer_subs = (
@@ -1350,7 +1594,7 @@ class TestScheduleLowering(TestCase):
                 )
             self.assertTrue(
                 matched,
-                f"RECV {a} on rank 1 is not immediately followed by its "
+                lambda msg: f"{msg}\nRECV {a} on rank 1 is not immediately followed by its "
                 f"consumer (next action: {consumer})",
             )
 
@@ -1408,7 +1652,11 @@ class TestScheduleLowering(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
-                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+                self.assertEqual(
+                    a,
+                    b,
+                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
+                )
 
         simulated_schedule = _simulate_comms_compute(
             comms_sch,
@@ -1420,8 +1668,11 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 113)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_grad_with_v_schedule(self):
+
+class TestScheduleLoweringDevice(ScheduleLoweringTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_grad_with_v_schedule(self, device):
         """
         We have a special case for V schedules where 2 adjacent stages are on the same rank.
         E.g.
@@ -1437,109 +1688,114 @@ class TestScheduleLowering(TestCase):
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
         )
-        d_hid = 512
-        batch_size = 256
-        n_stages = 2
-        full_mod = MultiMLP(d_hid, n_layers=n_stages)
-        full_mod.to(device)
+        try:
+            d_hid = 512
+            batch_size = 256
+            n_stages = 2
+            full_mod = MultiMLP(d_hid, n_layers=n_stages)
+            full_mod.to(device)
 
-        ref_mod = copy.deepcopy(full_mod)
-        x = torch.randn(batch_size, d_hid, device=device)
-        with torch.no_grad():
-            y = ref_mod(x)
-            # Add a small perturbation
-            target = y + torch.randn(batch_size, d_hid, device=device)
+            ref_mod = copy.deepcopy(full_mod)
+            x = torch.randn(batch_size, d_hid, device=device)
+            with torch.no_grad():
+                y = ref_mod(x)
+                # Add a small perturbation
+                target = y + torch.randn(batch_size, d_hid, device=device)
 
-        loss_fn = torch.nn.MSELoss(reduction="sum")
+            loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        # Run reference
-        for _ in range(2):
-            ref_mod.zero_grad()
-            ref_out = ref_mod(x)
-            ref_loss = loss_fn(ref_out, target)
-            ref_loss.backward()
-
-        stage_indices = [0, 1]
-        submod_names = [f"layers.{i}" for i in stage_indices]
-        stage_modules = [
-            full_mod.get_submodule(submod_name) for submod_name in submod_names
-        ]
-        # Create a pipeline stage to wrap that submodule
-        num_microbatches = 2
-        stages = [
-            PipelineStage(
-                stage_module,
-                stage_idx,
-                n_stages,
-                device,
-            )
-            for stage_module, stage_idx in zip(stage_modules, stage_indices)
-        ]
-
-        # Attach to a schedule
-        schedule = _PipelineScheduleRuntime(
-            stages,
-            num_microbatches,
-            loss_fn=loss_fn,
-            scale_grads=False,
-        )
-        schedule._prepare_schedule_with_comms(
-            {
-                0: self._parse_actions(
-                    [
-                        "0F0",
-                        "0F1",
-                        "1F0",
-                        "1F1",
-                        "1B0",
-                        "1B1",
-                        "0B0",
-                        "0B1",
-                    ]
-                ),
-            },
-            format="compute_comms",
-        )
-
-        # Run
-        with check_leaked_tensors() as garbage_tensors:
+            # Run reference
             for _ in range(2):
-                # Zero gradients
-                for stage_module in stage_modules:
-                    stage_module.zero_grad()
-                losses = []
-                out = schedule.step(x, target=target, losses=losses)
-        self.assertEqual(
-            len(garbage_tensors),
-            0,
-            "Found leaked tensors, check logs above for debug info",
-        )
+                ref_mod.zero_grad()
+                ref_out = ref_mod(x)
+                ref_loss = loss_fn(ref_out, target)
+                ref_loss.backward()
 
-        # Check output
-        torch.testing.assert_close(out, ref_out)
-        # Check loss
-        # Since the reduction used in the loss function above is "sum", we use
-        # "sum" here to reduce microbatch losses into a single value too.
-        pipe_loss = sum(losses)
-        torch.testing.assert_close(pipe_loss, ref_loss)
+            stage_indices = [0, 1]
+            submod_names = [f"layers.{i}" for i in stage_indices]
+            stage_modules = [
+                full_mod.get_submodule(submod_name) for submod_name in submod_names
+            ]
+            # Create a pipeline stage to wrap that submodule
+            num_microbatches = 2
+            stages = [
+                PipelineStage(
+                    stage_module,
+                    stage_idx,
+                    n_stages,
+                    device,
+                )
+                for stage_module, stage_idx in zip(stage_modules, stage_indices)
+            ]
 
-        # Check gradients
-        for stage_module, submod_name in zip(stage_modules, submod_names):
-            # Get corresponding submodule from reference model
-            ref_submod = ref_mod.get_submodule(submod_name)
-            # Check gradients per parameter
-            for name, p in stage_module.named_parameters():
-                ref_p = ref_submod.get_parameter(name)
-                try:
-                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
-                except AssertionError:
-                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
-                    raise
+            # Attach to a schedule
+            schedule = _PipelineScheduleRuntime(
+                stages,
+                num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+            schedule._prepare_schedule_with_comms(
+                {
+                    0: self._parse_actions(
+                        [
+                            "0F0",
+                            "0F1",
+                            "1F0",
+                            "1F1",
+                            "1B0",
+                            "1B1",
+                            "0B0",
+                            "0B1",
+                        ]
+                    ),
+                },
+                format="compute_comms",
+            )
 
-        torch.distributed.destroy_process_group()
+            # Run
+            with check_leaked_tensors() as garbage_tensors:
+                for _ in range(2):
+                    # Zero gradients
+                    for stage_module in stage_modules:
+                        stage_module.zero_grad()
+                    losses = []
+                    out = schedule.step(x, target=target, losses=losses)
+            self.assertEqual(
+                len(garbage_tensors),
+                0,
+                "Found leaked tensors, check logs above for debug info",
+            )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_grad_with_split_b_w(self):
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+            # Check loss
+            # Since the reduction used in the loss function above is "sum", we use
+            # "sum" here to reduce microbatch losses into a single value too.
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+            # Check gradients
+            for stage_module, submod_name in zip(stage_modules, submod_names):
+                # Get corresponding submodule from reference model
+                ref_submod = ref_mod.get_submodule(submod_name)
+                # Check gradients per parameter
+                for name, p in stage_module.named_parameters():
+                    ref_p = ref_submod.get_parameter(name)
+                    try:
+                        torch.testing.assert_close(
+                            p.grad, ref_p.grad, rtol=1e-5, atol=4e-5
+                        )
+                    except AssertionError:
+                        print(
+                            f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}"
+                        )
+                        raise
+
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_grad_with_split_b_w(self, device):
         """
         Ensure that separate dInput and dWeight computations are correctly executed.
         This test runs on a single rank and just tests a single stage with 2 microbatches with separate B, W operations.
@@ -1548,107 +1804,123 @@ class TestScheduleLowering(TestCase):
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
         )
-        d_hid = 512
-        batch_size = 256
-        n_stages = 1
-        full_mod = MultiMLP(d_hid, n_layers=n_stages)
-        full_mod.to(device)
+        try:
+            d_hid = 512
+            batch_size = 256
+            n_stages = 1
+            full_mod = MultiMLP(d_hid, n_layers=n_stages)
+            full_mod.to(device)
 
-        ref_mod = copy.deepcopy(full_mod)
-        x = torch.randn(batch_size, d_hid, device=device)
-        with torch.no_grad():
-            y = ref_mod(x)
-            # Add a small perturbation
-            target = y + torch.randn(batch_size, d_hid, device=device)
+            ref_mod = copy.deepcopy(full_mod)
+            x = torch.randn(batch_size, d_hid, device=device)
+            with torch.no_grad():
+                y = ref_mod(x)
+                # Add a small perturbation
+                target = y + torch.randn(batch_size, d_hid, device=device)
 
-        loss_fn = torch.nn.MSELoss(reduction="sum")
+            loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        # Run reference
-        for _ in range(2):
-            ref_mod.zero_grad()
-            ref_out = ref_mod(x)
-            ref_loss = loss_fn(ref_out, target)
-            ref_loss.backward()
-
-        stage_indices = [0]
-        submod_names = [f"layers.{i}" for i in stage_indices]
-        stage_modules = [
-            full_mod.get_submodule(submod_name) for submod_name in submod_names
-        ]
-        # Create a pipeline stage to wrap that submodule
-        num_microbatches = 2
-        stages = [
-            PipelineStage(
-                stage_module,
-                stage_idx,
-                n_stages,
-                device,
-            )
-            for stage_module, stage_idx in zip(stage_modules, stage_indices)
-        ]
-
-        # Attach to a schedule
-        schedule = _PipelineScheduleRuntime(
-            stages,
-            num_microbatches,
-            loss_fn=loss_fn,
-            scale_grads=False,
-        )
-        schedule._prepare_schedule_with_comms(
-            {
-                0: self._parse_actions(
-                    [
-                        "0F0",
-                        "0F1",
-                        "0I0",
-                        "0I1",
-                        "0W0",
-                        "0W1",
-                    ]
-                ),
-            },
-            format="compute_comms",
-        )
-
-        # Run
-        with check_leaked_tensors() as garbage_tensors:
+            # Run reference
             for _ in range(2):
-                # Zero gradients
-                for stage_module in stage_modules:
-                    stage_module.zero_grad()
-                losses = []
-                out = schedule.step(x, target=target, losses=losses)
-        self.assertEqual(
-            len(garbage_tensors),
-            0,
-            "Found leaked tensors, check logs above for debug info",
-        )
+                ref_mod.zero_grad()
+                ref_out = ref_mod(x)
+                ref_loss = loss_fn(ref_out, target)
+                ref_loss.backward()
 
-        # Check output
-        torch.testing.assert_close(out, ref_out)
-        # Check loss
-        # Since the reduction used in the loss function above is "sum", we use
-        # "sum" here to reduce microbatch losses into a single value too.
-        pipe_loss = sum(losses)
-        torch.testing.assert_close(pipe_loss, ref_loss)
+            stage_indices = [0]
+            submod_names = [f"layers.{i}" for i in stage_indices]
+            stage_modules = [
+                full_mod.get_submodule(submod_name) for submod_name in submod_names
+            ]
+            # Create a pipeline stage to wrap that submodule
+            num_microbatches = 2
+            stages = [
+                PipelineStage(
+                    stage_module,
+                    stage_idx,
+                    n_stages,
+                    device,
+                )
+                for stage_module, stage_idx in zip(stage_modules, stage_indices)
+            ]
 
-        # Check gradients
-        for stage_module, submod_name in zip(stage_modules, submod_names):
-            # Get corresponding submodule from reference model
-            ref_submod = ref_mod.get_submodule(submod_name)
-            # Check gradients per parameter
-            for name, p in stage_module.named_parameters():
-                ref_p = ref_submod.get_parameter(name)
-                try:
-                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
-                except AssertionError:
-                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
-                    raise
+            # Attach to a schedule
+            schedule = _PipelineScheduleRuntime(
+                stages,
+                num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+            schedule._prepare_schedule_with_comms(
+                {
+                    0: self._parse_actions(
+                        [
+                            "0F0",
+                            "0F1",
+                            "0I0",
+                            "0I1",
+                            "0W0",
+                            "0W1",
+                        ]
+                    ),
+                },
+                format="compute_comms",
+            )
 
-        torch.distributed.destroy_process_group()
+            # Run
+            with check_leaked_tensors() as garbage_tensors:
+                for _ in range(2):
+                    # Zero gradients
+                    for stage_module in stage_modules:
+                        stage_module.zero_grad()
+                    losses = []
+                    out = schedule.step(x, target=target, losses=losses)
+            self.assertEqual(
+                len(garbage_tensors),
+                0,
+                "Found leaked tensors, check logs above for debug info",
+            )
+
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+            # Check loss
+            # Since the reduction used in the loss function above is "sum", we use
+            # "sum" here to reduce microbatch losses into a single value too.
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+            # Check gradients
+            for stage_module, submod_name in zip(stage_modules, submod_names):
+                # Get corresponding submodule from reference model
+                ref_submod = ref_mod.get_submodule(submod_name)
+                # Check gradients per parameter
+                for name, p in stage_module.named_parameters():
+                    ref_p = ref_submod.get_parameter(name)
+                    try:
+                        torch.testing.assert_close(
+                            p.grad, ref_p.grad, rtol=1e-5, atol=4e-5
+                        )
+                    except AssertionError:
+                        print(
+                            f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}"
+                        )
+                        raise
+
+        finally:
+            torch.distributed.destroy_process_group()
+
+
+instantiate_device_type_tests(
+    TestScheduleLoweringDevice,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 class TestValidateSchedule(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_valid_schedule(self):
         schedule_actions = [
             {
@@ -1689,6 +1961,8 @@ class TestValidateSchedule(TestCase):
 
 
 class ScheduleUtilTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_generate_stage_to_rank_mapping(self):
         stage_to_rank = generate_stage_to_rank_mapping(2, 2)
         self.assertEqual(
@@ -1762,6 +2036,8 @@ instantiate_parametrized_tests(TestScheduleLowering)
 class TestBatchP2P(TestCase):
     """Tests that _batch_p2p dispatches homogeneous ops individually to avoid
     head-of-line blocking, while still batching mixed ops for deadlock avoidance."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _make_p2p_op(self, op, group_peer=0, group=None):
         p = MagicMock()

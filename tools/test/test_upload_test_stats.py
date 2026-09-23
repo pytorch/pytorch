@@ -30,10 +30,11 @@ class TestUploadTestStats(unittest.TestCase):
         summary = summarize_test_cases(test_cases)
         self.assertEqual(len(summary), 5068)
 
-    def test_backfill_skips_unexpected_report_layout(self) -> None:
-        """ROCm gfx950 jobs store reports under <dir>/test-reports instead of the
-        usual <dir>/test/test-reports. Backfill must skip those rather than
-        raising ValueError, while still uploading reports in the expected layout.
+    def test_backfill_uploads_both_report_layouts(self) -> None:
+        """Reports usually live under <dir>/test/test-reports, but ROCm jobs
+        upload them under <dir>/test-reports (no test/ prefix). Backfill keys off
+        the nearest test-reports dir and uploads both, while skipping reports
+        that have no test-reports dir at all.
         """
         # backfill chdir's into a TemporaryDirectory; restore cwd afterwards.
         self.addCleanup(os.chdir, os.getcwd())
@@ -53,11 +54,22 @@ class TestUploadTestStats(unittest.TestCase):
             rocm_xml.parent.mkdir(parents=True)
             rocm_xml.write_text(_MINIMAL_JUNIT_XML)
 
-            def fake_download(prefix: str, *_a: object, **_k: object) -> list[str]:
-                # No pre-existing test-jsons; two test-report artifacts.
-                return ["normal.zip", "rocm.zip"] if prefix == "test-report" else []
+            other_dir = root / "other"
+            other_xml = other_dir / "some" / "dir" / "baz-1.xml"
+            other_xml.parent.mkdir(parents=True)
+            other_xml.write_text(_MINIMAL_JUNIT_XML)
 
-            unzip_map = {"normal.zip": normal_dir, "rocm.zip": rocm_dir}
+            zips = ["normal.zip", "rocm.zip", "other.zip"]
+
+            def fake_download(prefix: str, *_a: object, **_k: object) -> list[str]:
+                # No pre-existing test-jsons; three test-report artifacts.
+                return zips if prefix == "test-report" else []
+
+            unzip_map = {
+                "normal.zip": normal_dir,
+                "rocm.zip": rocm_dir,
+                "other.zip": other_dir,
+            }
 
             with (
                 mock.patch(
@@ -73,13 +85,13 @@ class TestUploadTestStats(unittest.TestCase):
                 ),
                 mock.patch("tools.stats.upload_test_stats.upload_to_s3") as mock_upload,
             ):
-                # Must not raise on the ROCm layout.
                 backfill_test_jsons_while_running(1, 1)
 
-            uploaded_keys = [call.args[1] for call in mock_upload.call_args_list]
-            self.assertEqual(len(uploaded_keys), 1)
-            self.assertIn("foo-1", uploaded_keys[0])
-            self.assertFalse(any("bar-1" in key for key in uploaded_keys))
+            joined = " ".join(call.args[1] for call in mock_upload.call_args_list)
+            self.assertEqual(len(mock_upload.call_args_list), 2)
+            self.assertIn("python-pytest_foo-1.json", joined)
+            self.assertIn("python-pytest_bar-1.json", joined)
+            self.assertNotIn("baz-1", joined)
 
 
 if __name__ == "__main__":
