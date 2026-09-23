@@ -2948,7 +2948,7 @@ def _new_process_group_helper(
 
     if device_id is not None and device_id.index is None:
         raise ValueError(
-            "init_process_group device_id parameter must be a device with a " 
+            "init_process_group device_id parameter must be a device with a "
             "valid index, e.g. cpu:0 or cuda:0"
         )
 
