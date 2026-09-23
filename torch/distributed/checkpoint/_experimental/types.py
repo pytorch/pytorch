@@ -7,11 +7,13 @@ saving and loading.
 """
 
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import Any
+from typing_extensions import TypeAliasType
 
 
-# Type alias for state dictionaries used in checkpointing
-STATE_DICT: TypeAlias = dict[str, Any]
+# Use TypeAliasType so that __module__ is set correctly for public API reexports
+# See: https://github.com/pytorch/pytorch/issues/171905
+STATE_DICT = TypeAliasType("STATE_DICT", dict[str, Any])
 
 
 @dataclass
