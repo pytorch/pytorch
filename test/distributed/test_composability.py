@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_WITH_ROCM,
+    skipIfRocm,
 )
 
 
@@ -387,10 +387,8 @@ class ComposabilityTest(MultiProcContinuousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skipIfRocm
     def test_pp_fsdp_outer_gradient_accumulation(self):
-        if TEST_WITH_ROCM:
-            return
-
         torch.get_device_module(device_type).set_device(self.device)
         device_mesh = init_device_mesh(
             "cuda",
@@ -492,8 +490,6 @@ class ComposabilityTest(MultiProcContinuousTest):
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
         """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""
-        if TEST_WITH_ROCM:
-            return
 
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size, 1)

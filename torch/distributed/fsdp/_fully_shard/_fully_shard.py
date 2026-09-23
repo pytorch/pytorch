@@ -19,7 +19,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, is_bw, ShardPlacementFnResult
+from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -431,7 +431,10 @@ class FSDPModule:
                 "set_manual_backward_finalization must be called on the root "
                 f"{state._state_name} module"
             )
-        if enabled != state._state_ctx.manual_backward_finalization and is_bw():
+        if (
+            enabled != state._state_ctx.manual_backward_finalization
+            and torch._C._current_graph_task_id() != -1
+        ):
             raise RuntimeError(
                 "set_manual_backward_finalization cannot change mode during backward"
             )
