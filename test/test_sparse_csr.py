@@ -2434,7 +2434,7 @@ class TestSparseCSR(TestCase):
     @parametrize("blocksize", [(1, 1), (2, 2), (2, 3)])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypes(*floating_and_complex_types())
     def test_sparse_add_blocked(self, device, dtype, layout, index_dtype, blocksize):
         m, n = 6, 12
         total_blocks = (m // blocksize[0]) * (n // blocksize[1])
@@ -2499,6 +2499,227 @@ class TestSparseCSR(TestCase):
         batched = gen([2, 4, 4], 2, (2, 2))
         with self.assertRaisesRegex(RuntimeError, "batched inputs are not supported"):
             torch.add(batched, batched.clone())
+
+    def _make_blocked_add_operand(self, layout, device, blocks, dtype=torch.float32,
+                                  index_dtype=torch.int64, size=(6, 6), blocksize=(2, 2), dense_shape=()):
+        blocks = sorted(blocks)
+        n_compressed = size[0] // blocksize[0] if layout == torch.sparse_bsr else size[1] // blocksize[1]
+        offsets = [0]
+        plain = []
+        next_block = 0
+        for compressed in range(n_compressed):
+            while next_block < len(blocks) and blocks[next_block][0] == compressed:
+                plain.append(blocks[next_block][1])
+                next_block += 1
+            offsets.append(len(plain))
+        values = torch.tensor([value for _, _, value in blocks], dtype=dtype, device=device)
+        values = values.reshape(len(blocks), *([1] * (2 + len(dense_shape))))
+        values = values.expand(len(blocks), *blocksize, *dense_shape).clone()
+        return torch.sparse_compressed_tensor(
+            torch.tensor(offsets, dtype=index_dtype, device=device),
+            torch.tensor(plain, dtype=index_dtype, device=device),
+            values, (*size, *dense_shape), layout=layout, check_invariants=True)
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    @parametrize("index_dtypes", [(torch.int32, torch.int64), (torch.int64, torch.int32)])
+    @parametrize("pattern", ["same", "subset", "union", "empty_left", "empty_right", "both_empty"])
+    def test_sparse_add_blocked_structure(self, device, layout, index_dtypes, pattern):
+        left_blocks = [(0, 1, 4), (1, 1, 8)]
+        right_blocks = {
+            "same": [(0, 1, 2), (1, 1, 3)],
+            "subset": [(1, 1, 3)],
+            "union": [(0, 0, 1), (0, 1, 2), (0, 2, 4), (1, 0, 3), (2, 2, 4)],
+            "empty_left": [(0, 0, 1), (2, 2, 4)],
+            "empty_right": [],
+            "both_empty": [],
+        }[pattern]
+        if pattern in ("empty_left", "both_empty"):
+            left_blocks = []
+        left = self._make_blocked_add_operand(layout, device, left_blocks, index_dtype=index_dtypes[0])
+        right = self._make_blocked_add_operand(layout, device, right_blocks, index_dtype=index_dtypes[1])
+        expected = torch.add(left.to_dense(), right.to_dense(), alpha=-1.5)
+        expected_dtype = torch.promote_types(*index_dtypes)
+        output = self._make_blocked_add_operand(layout, device, [(0, 0, 9)], index_dtype=torch.int32)
+        actual = torch.add(left, right, alpha=-1.5, out=output)
+        self.assertIs(actual, output)
+        self.assertEqual(actual, expected)
+        compressed, plain = sparse_compressed_indices_methods[layout]
+        self.assertEqual(compressed(actual).dtype, expected_dtype)
+        self.assertEqual(plain(actual).dtype, expected_dtype)
+        union = sorted({(c, p) for c, p, _ in left_blocks + right_blocks})
+        pattern_tensor = self._make_blocked_add_operand(layout, device,
+                                                        [(c, p, 0) for c, p in union], index_dtype=expected_dtype)
+        self.assertEqual(compressed(actual), compressed(pattern_tensor))
+        self.assertEqual(plain(actual), plain(pattern_tensor))
+        torch.sparse_compressed_tensor(compressed(actual), plain(actual), actual.values(), actual.shape,
+                                       layout=layout, check_invariants=True)
+        inplace = left.clone()
+        self.assertIs(inplace.add_(right, alpha=-1.5), inplace)
+        self.assertEqual(inplace, expected)
+        self.assertEqual(compressed(inplace).dtype, expected_dtype)
+        self.assertEqual(plain(inplace).dtype, expected_dtype)
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    def test_sparse_add_blocked_output_dtype(self, device, layout):
+        cases = [
+            (torch.float64, torch.float32, 16777217, -16777216, 1, False),
+            (torch.float32, torch.float64, 16777216, 1, 1, False),
+            (torch.float64, torch.float32, 0, 16777217, 3, True),
+        ]
+        for input_dtype, output_dtype, a_value, b_value, alpha, empty_left in cases:
+            left_blocks = [] if empty_left else [(0, 0, a_value)]
+            left = self._make_blocked_add_operand(layout, device, left_blocks, dtype=input_dtype)
+            right = self._make_blocked_add_operand(layout, device, [(0, 0, b_value)], dtype=input_dtype)
+            out = self._make_blocked_add_operand(layout, device, [], dtype=output_dtype)
+            dense_out = torch.empty(left.shape, device=device, dtype=output_dtype)
+            torch.add(left.to_dense(), right.to_dense(), alpha=alpha, out=dense_out)
+            self.assertIs(torch.add(left, right, alpha=alpha, out=out), out)
+            self.assertEqual(out, dense_out, atol=0, rtol=0)
+
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, 1)], dtype=torch.float32)
+        right = self._make_blocked_add_operand(layout, device, [(0, 0, 2), (2, 2, 3)], dtype=torch.float64)
+        self.assertEqual(torch.add(left, right), torch.add(left.to_dense(), right.to_dense()))
+        out = self._make_blocked_add_operand(layout, device, [], dtype=torch.float64)
+        self.assertIs(torch.add(left, left, out=out), out)
+        self.assertEqual(out, torch.add(left.to_dense(), left.to_dense()))
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_sparse_add_blocked_low_precision_alpha(self, device, dtype, layout):
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, -1), (1, 1, 2)], dtype=dtype)
+        for right_blocks in ([(0, 0, 1)], [(0, 0, 1), (2, 2, 1)]):
+            right = self._make_blocked_add_operand(layout, device, right_blocks, dtype=dtype)
+            expected = torch.add(left.to_dense(), right.to_dense(), alpha=1.0001)
+            self.assertEqual(torch.add(left, right, alpha=1.0001), expected, atol=0, rtol=0)
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    @parametrize("dense_shape", [(3,), (2, 3)])
+    def test_sparse_add_blocked_hybrid(self, device, layout, dense_shape):
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, 2), (1, 1, 3)],
+                                              dense_shape=dense_shape)
+        for right_blocks in ([], [(1, 1, 4)], [(0, 0, 5), (2, 2, 6)]):
+            right = self._make_blocked_add_operand(layout, device, right_blocks, dense_shape=dense_shape)
+            actual = torch.add(left, right)
+            self.assertEqual(actual.dense_dim(), len(dense_shape))
+            self.assertEqual(actual, torch.add(left.to_dense(), right.to_dense()))
+        self.assertEqual(torch.add(left, left), torch.add(left.to_dense(), left.to_dense()))
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    def test_sparse_add_blocked_zero_alpha_nonfinite(self, device, layout):
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, 1)])
+        for right_blocks in ([(0, 0, float('inf'))], [(1, 1, float('nan'))]):
+            right = self._make_blocked_add_operand(layout, device, right_blocks)
+            actual = torch.add(left, right, alpha=0).to_dense()
+            expected = torch.add(left.to_dense(), right.to_dense(), alpha=0)
+            self.assertEqual(torch.isnan(actual), torch.isnan(expected))
+            self.assertTrue(torch.isnan(actual).any().item())
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    def test_sparse_add_blocked_validation(self, device, layout):
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, 1)])
+        other_layout = torch.sparse_bsc if layout == torch.sparse_bsr else torch.sparse_bsr
+        wrong_layout = self._make_blocked_add_operand(other_layout, device, [(0, 0, 1)])
+        for right in (wrong_layout, torch.eye(6, device=device).to_sparse_csr()):
+            with self.assertRaisesRegex(RuntimeError, "expected both operands to have the same layout"):
+                torch.add(left, right)
+            with self.assertRaisesRegex(RuntimeError, "expected both operands to have the same layout"):
+                torch.add(right, left)
+        for out in (wrong_layout.clone(), torch.eye(6, device=device).to_sparse_csr(),
+                    torch.zeros(left.shape, device=device)):
+            before = out.clone()
+            for right in (left, left.clone()):
+                with self.assertRaisesRegex(RuntimeError, "expected 'out' to have"):
+                    torch.add(left, right, out=out)
+                self.assertEqual(out, before)
+        with self.assertRaisesRegex(RuntimeError, "Boolean alpha only supported"):
+            torch.add(left, left.clone(), alpha=True, out=left.clone())
+        with self.assertRaisesRegex(RuntimeError, "non-complex input tensors"):
+            torch.add(left, left.clone(), alpha=0j, out=left.clone())
+        with self.assertRaisesRegex(RuntimeError, "non-complex input tensors"):
+            left.add_(left.clone(), alpha=1j)
+        hybrid = self._make_blocked_add_operand(layout, device, [(0, 0, 1)], size=(4, 4), dense_shape=(4,))
+        batched = self.genSparseCompressedTensor([4, 4, 4], 4, layout=layout, device=device,
+                                                 dtype=torch.float32, index_dtype=torch.int64, blocksize=(2, 2))
+        with self.assertRaisesRegex(RuntimeError, "general batched inputs are not supported"):
+            torch.add(hybrid, batched)
+        with self.assertRaisesRegex(RuntimeError, "general batched inputs are not supported"):
+            torch.add(batched, hybrid)
+        self.assertEqual(torch.add(batched, batched), batched.to_dense() * 2)
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    @parametrize("alias", ["left", "right"])
+    def test_sparse_add_blocked_out_alias(self, device, layout, alias):
+        left = self._make_blocked_add_operand(layout, device, [(0, 1, 2), (1, 1, 3)],
+                                              index_dtype=torch.int32)
+        right = self._make_blocked_add_operand(layout, device, [(0, 0, 4), (0, 1, 5)],
+                                               index_dtype=torch.int64)
+        expected = torch.add(left.to_dense(), right.to_dense())
+        out = left if alias == "left" else right
+        other = right if alias == "left" else left
+        other_before = other.clone()
+        self.assertIs(torch.add(left, right, out=out), out)
+        self.assertEqual(out, expected)
+        compressed, plain = sparse_compressed_indices_methods[layout]
+        self.assertEqual(compressed(out).dtype, torch.int64)
+        self.assertEqual(plain(out).dtype, torch.int64)
+        self.assertEqual(other, other_before)
+
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    def test_sparse_add_blocked_complex_promotion(self, device, layout):
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, 2)], dtype=torch.float32)
+        right = self._make_blocked_add_operand(layout, device, [(0, 0, 1j), (1, 1, 2j)],
+                                               dtype=torch.complex64)
+        expected = torch.add(left.to_dense(), right.to_dense(), alpha=1j)
+        self.assertEqual(torch.add(left, right, alpha=1j), expected)
+        with self.assertRaisesRegex(RuntimeError, "Can't convert result type"):
+            torch.add(left, right, out=left.clone())
+        empty = self._make_blocked_add_operand(layout, device, [])
+        with self.assertRaisesRegex(RuntimeError, "non-complex input tensors"):
+            torch.add(left, empty, alpha=1j, out=left.clone())
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    def test_sparse_add_blocked_noncontiguous_left(self, device, layout):
+        blocksize = (2, 3)
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, 1), (1, 1, 2)], blocksize=blocksize)
+        compressed, plain = sparse_compressed_indices_methods[layout]
+        values = left.values().transpose(-2, -1).contiguous().transpose(-2, -1)
+        self.assertFalse(values.is_contiguous())
+        noncontiguous = torch.sparse_compressed_tensor(compressed(left), plain(left), values, left.shape,
+                                                       layout=layout, check_invariants=True)
+        for right_blocks in ([(1, 1, 3)], [(0, 1, 3), (1, 1, 4)]):
+            right = self._make_blocked_add_operand(layout, device, right_blocks, blocksize=blocksize)
+            self.assertEqual(torch.add(noncontiguous, right),
+                             torch.add(noncontiguous.to_dense(), right.to_dense()))
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    def test_sparse_add_blocked_mismatched_cuda_devices(self, device, layout):
+        if torch.device(device).type != 'cuda' or torch.cuda.device_count() < 2:
+            self.skipTest('requires two CUDA devices')
+        other_device = 'cuda:1' if torch.device(device).index != 1 else 'cuda:0'
+        left = self._make_blocked_add_operand(layout, device, [(0, 0, 1)])
+        empty = self._make_blocked_add_operand(layout, other_device, [])
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            torch.add(left, empty, out=left.clone())
+        out = self._make_blocked_add_operand(layout, other_device, [(0, 0, 9)])
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            torch.add(left, left.clone(), out=out)
+        self.assertEqual(out.values(), torch.full_like(out.values(), 9))
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    def test_sparse_add_blocked_large_flat_key(self, device, layout):
+        size = (131072, 131072)
+        left = self._make_blocked_add_operand(layout, device, [(32768, 0, 2)],
+                                              index_dtype=torch.int32, size=size)
+        right = self._make_blocked_add_operand(layout, device,
+                                               [(32767, 65535, 3), (65535, 65535, 4)], size=size)
+        actual = torch.add(left, right)
+        compressed, plain = sparse_compressed_indices_methods[layout]
+        expected = self._make_blocked_add_operand(layout, device,
+                                                  [(32767, 65535, 3), (32768, 0, 2), (65535, 65535, 4)], size=size)
+        self.assertEqual(compressed(actual), compressed(expected))
+        self.assertEqual(plain(actual), plain(expected))
+        self.assertEqual(actual.values(), expected.values())
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
