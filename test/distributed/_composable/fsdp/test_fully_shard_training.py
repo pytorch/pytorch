@@ -48,6 +48,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
@@ -1514,13 +1515,12 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
             self.assertTrue(param.grad.to_local().is_contiguous())
 
 
-class TestFullyShardSharedParams(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        min_world_size = 4
-        if device_type.type == "cpu":
-            return min_world_size
-        return min(min_world_size, torch.get_device_module(device_type).device_count())
+class TestFullyShardSharedParams(FSDPTestContinuous):
+    world_size = (
+        4
+        if device_type.type == "cpu"
+        else min(4, torch.get_device_module(device_type).device_count())
+    )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_train_parity_with_shared_params(self):
@@ -1702,13 +1702,12 @@ class TestFullyShardSharedParams(FSDPTest):
         out.sum().backward()
 
 
-class TestFullyShardGradientAccumulation(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        min_world_size = 4
-        if device_type.type == "cpu":
-            return min_world_size
-        return min(min_world_size, torch.get_device_module(device_type).device_count())
+class TestFullyShardGradientAccumulation(FSDPTestContinuous):
+    world_size = (
+        4
+        if device_type.type == "cpu"
+        else min(4, torch.get_device_module(device_type).device_count())
+    )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_gradient_accumulation(self):

@@ -560,6 +560,7 @@ class TestDistBackend(MultiProcessTestCase):
         super().setUpClass()
 
     def setUp(self):
+        # Skip in the parent when every rank would skip, avoiding worker startup.
         test = getattr(self, self._testMethodName)
         if (
             getattr(test, "_skip_small_worldsize_before_spawn", False)

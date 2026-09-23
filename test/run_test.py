@@ -923,7 +923,9 @@ def run_test_retries(
 
 
 def run_test_with_class_supervisors(test_module, test_directory, options, classes):
+    """Run each of ``classes`` in one process; other tests keep --subprocess."""
     args = options.additional_args
+    # Only split plain full-file runs; other modes keep per-test isolation.
     if (
         not options.pytest
         or not test_module.test.is_full_file()
@@ -938,17 +940,16 @@ def run_test_with_class_supervisors(test_module, test_directory, options, classe
     ):
         return run_test_with_subprocess(test_module, test_directory, options)
 
-    selected = " or ".join(classes)
-    for expression, handler in (
-        *((name, run_test) for name in classes),
-        (f"not ({selected})", run_test_with_subprocess),
-    ):
+    def subset(expression):
         subset_options = copy.copy(options)
         subset_options.pytest_k_expr = expression
-        result = handler(test_module, test_directory, subset_options)
-        if result:
+        return subset_options
+
+    for name in classes:
+        if result := run_test(test_module, test_directory, subset(name)):
             return result
-    return 0
+    rest = subset(f"not ({' or '.join(classes)})")
+    return run_test_with_subprocess(test_module, test_directory, rest)
 
 
 def run_gloo_test(test_module, test_directory, options):
@@ -1205,13 +1206,8 @@ def test_distributed(test_module, test_directory, options):
                     test_module, test_directory, options, launcher_cmd=mpiexec
                 )
             else:
-                return_code = run_test(
-                    test_module,
-                    test_directory,
-                    options,
-                    # Each test already creates fresh rank processes.
-                    extra_unittest_args=[],
-                )
+                # No --subprocess: each test already spawns fresh rank processes.
+                return_code = run_test(test_module, test_directory, options)
             if return_code != 0:
                 return return_code
         finally:
