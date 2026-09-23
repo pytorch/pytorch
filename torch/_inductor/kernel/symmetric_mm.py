@@ -7,13 +7,24 @@ from ..select_algorithm import ExternKernelChoice, realize_inputs
 
 
 def _quack_symmetric_mm(x: Tensor, *, out: Tensor) -> None:
-    if torch.version.hip is not None or not x.is_contiguous() or x.data_ptr() % 16:
+    from ..utils import ensure_cute_available
+
+    if (
+        torch.version.hip is not None
+        or not ensure_cute_available()
+        or torch.cuda.get_device_capability(x.device)[0] != 10
+        or not x.is_contiguous()
+        or x.data_ptr() % 16
+    ):
         torch.matmul(x, x.mT, out=out)
         return
 
+    from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
+    from torch._vendor.quack.cache import cache_dir_override
     from torch._vendor.quack.gemm_interface import gemm_symmetric
 
-    gemm_symmetric(x, x.mT, out=out)
+    with cache_dir_override(inductor_quack_cache_dir()):
+        gemm_symmetric(x, x.mT, out=out)
 
 
 quack_symmetric_mm_extern = ExternKernelChoice(_quack_symmetric_mm)
