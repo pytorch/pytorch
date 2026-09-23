@@ -560,6 +560,18 @@ namespace {
             [](const vec& v) { return v.exp_u20(); },
             test_case
         );
+
+        if constexpr (std::is_same_v<VT, float>) {
+            // Below ln(FLT_MIN) the result is subnormal; no backend may
+            // flush it to zero.
+            for (VT value : {VT(-87.5), VT(-90.0), VT(-100.0)}) {
+                VT expected = VT(std::exp(value));
+                VT actual;
+                vec{value}.exp_u20().store(&actual, 1);
+                EXPECT_LT(0.5f * expected, actual);
+                EXPECT_LT(actual, 2.0f * expected);
+            }
+        }
     }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
