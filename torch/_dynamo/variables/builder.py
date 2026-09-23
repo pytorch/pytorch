@@ -3135,12 +3135,14 @@ class VariableBuilder:
 
         if (
             safe_has_grad(value)
-            and safe_grad(value) is not None
-            # type: ignore[attr-defined]
-            and value.dtype != safe_grad(value).dtype
+            and (grad_value := safe_grad(value)) is not None
+            and value.dtype != grad_value.dtype
+            and (
+                not value.is_leaf
+                or value.grad_dtype not in (None, grad_value.dtype)
+            )
         ):
-            safe_grad_val = safe_grad(value)
-            grad_str = str(safe_grad_val.dtype) if safe_grad_val is not None else "None"
+            grad_str = str(grad_value.dtype)
             unimplemented(
                 gb_type="dtype mismatch between tensor and its gradient",
                 context=f"tensor dtype: {value.dtype}; grad dtype: {grad_str}",
@@ -5152,6 +5154,14 @@ def _wrap_to_fake_tensor_and_record_impl(
     ):
         if source is None:
             raise AssertionError("source must not be None for tensor wrapping")
+        if e.requires_grad:
+            install_guard(
+                AttrSource(source, "is_leaf").make_guard(GuardBuilder.CONSTANT_MATCH)
+            )
+            if e.is_leaf:
+                install_guard(
+                    AttrSource(source, "grad_dtype").make_guard(GuardBuilder.CONSTANT_MATCH)
+                )
         static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,

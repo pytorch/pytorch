@@ -188,6 +188,7 @@ class FSDPParam:
     orig_dtype: torch.dtype
     param_dtype: torch.dtype | None
     reduce_dtype: torch.dtype | None
+    grad_dtype: torch.dtype | None
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: tuple[int, ...]
@@ -802,10 +803,17 @@ class FSDPParam:
     def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
         param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
         self.orig_dtype = self.sharded_param.dtype
+        self.grad_dtype = mp_policy.grad_dtype
+        if self.grad_dtype is not None and self.orig_dtype.is_floating_point:
+            self.sharded_param.grad_dtype = self.grad_dtype
+            if hasattr(self, "_unsharded_param"):
+                self._unsharded_param.grad_dtype = self.grad_dtype
+            if reduce_dtype is None:
+                reduce_dtype = self.grad_dtype
         # Clamp `reduce_dtype` to `None` if no casting is required: since
-        # gradients are computed in `param_dtype`, if `reduce_dtype` matches,
-        # then we do not need extra casting
-        if reduce_dtype == param_dtype:
+        # autograd delivers gradients in `grad_dtype` when specified, otherwise
+        # in `param_dtype`, matching reduction requires no extra casting.
+        if reduce_dtype == (self.grad_dtype or param_dtype):
             reduce_dtype = None
         # Clamp `param_dtype` to `None` if no casting is required or if the
         # parameter is non-floating-point (mixed precision is only meaningful
@@ -930,6 +938,8 @@ class FSDPParam:
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
+        if self.grad_dtype is not None and unsharded_param.is_floating_point():
+            self._unsharded_param.grad_dtype = self.grad_dtype
         self._release_all_gather_outputs_if_needed()
 
     def _release_all_gather_outputs_if_needed(self) -> None:
@@ -1034,10 +1044,15 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
-        return _from_local_no_grad(
-            tensor,
-            self._sharding_spec,
-        )
+        spec = self._sharding_spec
+        if spec.tensor_meta is not None and spec.tensor_meta.dtype != tensor.dtype:
+            spec = replace(
+                spec,
+                tensor_meta=TensorMeta(
+                    spec.tensor_meta.shape, spec.tensor_meta.stride, tensor.dtype
+                ),
+            )
+        return _from_local_no_grad(tensor, spec)
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
         if tensor.shape != self.sharded_post_forward_size:
@@ -1196,7 +1211,9 @@ class FSDPParam:
 
     @property
     def unsharded_zero_grad_data(self) -> torch.Tensor:
-        return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
+        return self._get_grad_inner_tensor(
+            torch.zeros_like(self.unsharded_param, dtype=self.grad_dtype)
+        )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_spmd_types:
@@ -1290,6 +1307,8 @@ class FSDPParam:
                 )
             self.sharded_param = new_param
 
+        if self.mp_policy.grad_dtype is not None and new_param.is_floating_point():
+            self.sharded_param.grad_dtype = self.mp_policy.grad_dtype
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
