@@ -404,6 +404,34 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         )
 
 
+@contextmanager
+def core_dumps_disabled():
+    """Make a device-side assert raise instead of killing the caller.
+
+    The HIP runtime aborts the process on a GPU exception whenever core dumps
+    are enabled, so that it can write a GPU core file; with RLIMIT_CORE at 0 it
+    instead keeps a sticky error that surfaces as an exception at the next
+    sync, which is what CUDA does either way. The limit is read when the fault
+    happens, so this works after the GPU context already exists. CI runs with
+    core dumps off already; this lets the same tests pass on a dev box.
+
+    The fault is processed asynchronously, so keep the block open through the
+    sync that surfaces the error. The previous soft limit is restored on exit.
+    No-op on Windows, which has no RLIMIT_CORE.
+    """
+    if sys.platform == "win32":
+        yield
+        return
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
+    resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
+    try:
+        yield
+    finally:
+        resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
+
+
 def with_nccl_blocking_wait(func):
     """
     Convenience decorator to set/unset TORCH_NCCL_BLOCKING_WAIT flag. Note that use of
