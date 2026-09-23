@@ -501,6 +501,9 @@ Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
 
+// Symmetric MAPE: 2 * |self - target| / (|self| + |target| + eps).
+// reduction is at::Reduction (None, Mean, Sum). Floating point only.
+// eps must be non-negative so the denominator cannot change sign.
 Tensor smape_loss(const Tensor& self, const Tensor& target, double eps, int64_t reduction) {
   TORCH_CHECK(eps >= 0, "smape_loss does not support negative eps, got ", eps);
   TORCH_CHECK(
@@ -511,6 +514,8 @@ Tensor smape_loss(const Tensor& self, const Tensor& target, double eps, int64_t 
   return apply_loss_reduction(diff / denom * 2, reduction);
 }
 
+// Squared hinge: relu(1 - self * target)^2.
+// reduction is at::Reduction (None, Mean, Sum). Floating point only.
 Tensor squared_hinge_loss(const Tensor& self, const Tensor& target, int64_t reduction) {
   TORCH_CHECK(
       self.is_floating_point() && target.is_floating_point(),

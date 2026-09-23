@@ -2933,11 +2933,14 @@
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
 
+# 2 * |self - target| / (|self| + |target| + eps). Mean reduction.
+# Integer inputs and a negative eps are rejected in the composite.
 - func: smape_loss(Tensor self, Tensor target, float eps=1e-8, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
     CompositeImplicitAutograd: smape_loss
 
+# relu(1 - self * target)^2. Mean reduction. Floating point only.
 - func: squared_hinge_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
