@@ -2436,8 +2436,8 @@ class TestProfilerDevice(TestCase):
             self.skipTest("Kineto is required")
         device_type = device.split(":")[0]
 
-        with _profile(use_kineto=use_kineto) as prof:
-            t1, t2 = torch.ones(1), torch.ones(1)
+        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
+            t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
             torch.add(t1, t2)
 
         with TemporaryFileName(mode="w+") as fname:
@@ -2448,7 +2448,7 @@ class TestProfilerDevice(TestCase):
                 json.load(f)
 
         # test empty trace
-        with _profile(use_kineto=use_kineto) as prof:
+        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
             pass
         # saving an empty trace
         with TemporaryFileName(mode="w+") as fname:
@@ -2464,20 +2464,6 @@ class TestProfilerDevice(TestCase):
                             if "No Valid Trace Events" in warning:
                                 found_empty_warning = True
                         self.assertTrue(found_empty_warning)
-
-        # Same test but for an accelerator.
-        if device_type == "cpu":
-            return
-
-        with _profile(use_device=device_type, use_kineto=use_kineto) as prof:
-            t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
-            torch.add(t1, t2)
-
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            # Now validate the json
-            with open(fname) as f:
-                json.load(f)
 
     def test_memory_profiler(self, device):
         device_type = device.split(":")[0]
