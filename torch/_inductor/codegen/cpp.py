@@ -748,6 +748,14 @@ class CppOverrides(OpOverrides):
             # abs(x) == x for unsigned types; return identity to avoid
             # -Wtautological-compare and unsigned unary minus warnings.
             return f"{x}"
+        if isinstance(x, CppCSEVariable) and x.dtype in (
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ):
+            # eager wraps abs(INT_MIN) to INT_MIN
+            return f"{x} < 0 ? {CppOverrides.neg(x)} : {x}"
         return f"std::abs({x})"
 
     @staticmethod
@@ -762,6 +770,10 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def neg(x):
+        if isinstance(x, CppCSEVariable) and x.dtype in (torch.int32, torch.int64):
+            # -INT_MIN is signed overflow in C++; eager wraps
+            cpp_type = DTYPE_TO_CPP[x.dtype]
+            return f"{cpp_type}(-static_cast<std::make_unsigned_t<{cpp_type}>>({x}))"
         return f"decltype({x})(-{x})"
 
     @staticmethod
