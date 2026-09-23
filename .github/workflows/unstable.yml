@@ -70,29 +70,11 @@ jobs:
       build-environment: linux-jammy-aarch64-cuda13.2-py3.12-gcc13
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      cuda-arch-list: '10.0;10.3'
+      cuda-arch-list: '10.0'
       max-jobs: "8"
       python-version: "3.12"
       compiler: gcc13
       cuda-version: "13.2"
-    secrets: inherit
-
-  linux-jammy-aarch64-cuda13_4-py3_12-gcc13-build:
-    if: github.repository_owner == 'pytorch'
-    name: linux-jammy-aarch64-cuda13.4-py3.12-gcc13
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: linux.arm64.m7g.4xlarge
-      build-environment: linux-jammy-aarch64-cuda13.4-py3.12-gcc13
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      cuda-arch-list: '10.0;10.3'
-      max-jobs: "8"
-      python-version: "3.12"
-      compiler: gcc13
-      cuda-version: "13.4"
     secrets: inherit
 
   # B200 CUDA 13.2 sm100 smoke coverage, staged here to gauge B200 runner
