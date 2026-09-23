@@ -616,8 +616,10 @@ def sample_inputs_linalg_cholesky_inverse(
     test_cases = [torch.linalg.cholesky(a, upper=False) for a in inputs]
     if op_info.name == "cholesky_inverse":
         # Regression sample for https://github.com/pytorch/pytorch/issues/196682.
-        # Unlike the nearly diagonal factors above, its order-one off-diagonal
-        # entries expose the noncommuting matrix products in the JVP formula.
+        # The default singular values above are tightly clustered around 1, so
+        # M @ M.mH is near identity and its Cholesky factor nearly commutes with
+        # its inverse. This factor makes that noncommutativity visible; uniformly
+        # rescaling an existing factor would not change the relative discrepancy.
         # Keep it specific to cholesky_inverse: cholesky_solve also reuses this
         # generator, but its factor derivative fails for non-diagonal inputs.
         nontrivial_factor = torch.tensor(
