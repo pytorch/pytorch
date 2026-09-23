@@ -82,23 +82,6 @@ inline void check_grid_sampler_3d(
     " and grid with sizes ", grid.sizes());
 }
 
-// TODO: drop this overload once torch-xpu-ops stops calling it. torch-xpu-ops
-// passes the mode; in-tree backends call the overload above and refuse bicubic
-// themselves.
-// See NOTE [ grid_sampler Native Functions ].
-inline void check_grid_sampler_3d(
-  const TensorBase& input,
-  const TensorBase& grid,
-  int64_t interpolation_mode
-) {
-  check_grid_sampler_3d(input, grid);
-  TORCH_CHECK_NOT_IMPLEMENTED(
-    static_cast<GridSamplerInterpolation>(interpolation_mode) !=
-      GridSamplerInterpolation::Bicubic,
-    "grid_sampler(): bicubic interpolation with 5D input is not "
-    "implemented for ", input.device().type());
-}
-
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_backward(
   const TensorBase& input,
