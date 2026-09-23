@@ -13,10 +13,7 @@ install_ubuntu() {
 
     install_rocm
 
-    # Standalone CMake projects such as rocm-origami call find_package(hip)
-    # directly instead of using PyTorch's ROCM_PATH-aware LoadHIP.cmake.
     {
-        printf 'export CMAKE_PREFIX_PATH=%q:${CMAKE_PREFIX_PATH:-}\n' "${ROCM_HOME}"
         printf 'export LD_LIBRARY_PATH=%q:${LD_LIBRARY_PATH:-}\n' "${ROCM_HOME}/lib"
         if [[ -n "${USE_MSLK:-}" ]]; then
             printf 'export USE_MSLK=%q\n' "${USE_MSLK}"
@@ -70,6 +67,8 @@ install_rocm() {
         printf 'export ROCM_PATH=%q\n' "${ROCM_HOME}"
         printf 'export ROCM_HOME=%q\n' "${ROCM_HOME}"
         printf 'export PATH=%q:${PATH}\n' "${ROCM_BIN}"
+        # Nested builds such as AOTriton do not inherit parent CMake variables.
+        printf 'export CMAKE_PREFIX_PATH=%q:${CMAKE_PREFIX_PATH:-}\n' "${ROCM_HOME}"
     } > /etc/rocm_env.sh
 
     echo "TheRock ROCm wheel install complete: ROCM_HOME=${ROCM_HOME}"
