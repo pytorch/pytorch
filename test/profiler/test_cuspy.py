@@ -22,13 +22,7 @@ from unittest.mock import patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
-from torch.profiler import (
-    kineto_available,
-    profile,
-    ProfilerActivity,
-    record_function,
-    supported_activities,
-)
+from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
@@ -37,6 +31,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
+from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -47,30 +42,18 @@ from torch.testing._internal.common_utils import (
 
 
 def setUpModule():
-    if (
-        kineto_available()
-        and torch.cuda.is_available()
-        and ProfilerActivity.CUDA in supported_activities()
-    ):
-        # Kineto's process-global profiler cannot currently upgrade from a
-        # CPU-only first initialization to CUDA-capable profiling. Prime it with
-        # CUDA so CPU-only tests do not poison later CUDA profiler tests.
-        x = torch.ones(1, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]):
-            x + x
-            torch.cuda.synchronize()
-        # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
-        # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
-        # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
-        # safe; libkineto re-subscribes on its next profile, so kineto tests are
-        # unaffected. See pylibcupti().finalize.
-        if TEST_CUPTI_V13_3:
-            from torch.profiler._cuspy.cupti_python import pylibcupti
+    # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
+    # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
+    # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
+    # safe; libkineto re-subscribes on its next profile, so kineto tests are
+    # unaffected. See pylibcupti().finalize.
+    if initialize_kineto_with_cuda() and TEST_CUPTI_V13_3:
+        from torch.profiler._cuspy.cupti_python import pylibcupti
 
-            try:
-                pylibcupti().finalize()
-            except Exception:
-                pass
+        try:
+            pylibcupti().finalize()
+        except Exception:
+            pass
 
 
 def _isolated(test_fn):
