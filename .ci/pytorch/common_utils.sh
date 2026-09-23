@@ -414,7 +414,7 @@ function install_cutlass_operators() {
   # Skip [torch] extra so pip does not pull PyPI torch over the CI build.
   # Pin 0.2.0: Operator.get_workspace_size returns AllocationRequirement
   # (size_bytes) and CompiledArtifact requires compiled_for.
-  pip_install nvidia-cutlass-operators==0.2.0
+  pip_install nvidia-cutlass-operators==0.3.0
 
   echo "CUTLASS Operators installation complete."
 }
