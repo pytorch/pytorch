@@ -1158,15 +1158,24 @@ def export_python(
     ``nn.Module`` arguments. Python scalar/config arguments are rejected because
     ``make_fx`` specializes their values without emitting runtime guards; close such
     constants over in ``fn`` instead. Other keyword-only parameters are not expressible
-    in the artifact's positional convention and are rejected. Each ``nn.Module``
-    argument's per-submodule ``training`` state, which ``make_fx`` resolves without
-    emitting a guard, is recorded as a comment stamp and checked on every call.
-    Where ``torch.compile`` would recompile, an artifact cannot, so treat any
+    in the artifact's positional convention and are rejected. Two things that
+    ``make_fx`` or the code generator resolves without emitting a guard are recorded as
+    comment stamps and checked on every call:
+    each ``nn.Module`` argument's per-submodule ``training`` state, and which input
+    tensors shared memory at capture (aliasing decides what an in-place mutation means).
+    What is *not*
+    guarded is a change in *how* two aliased
+    inputs overlap: when capture and the call both pass intersecting views, the artifact
+    runs with capture's relative offsets baked in and may compute the wrong thing.
+    ``torch.compile`` has the same hole *there*, but this list is not a complete
+    account of what the artifact bakes: a tensor subclass's inner shapes and a DTensor's
+    placements are unrecorded, and so is a CUDA artifact's compute capability (see the
+    machine-type warning above). Where ``torch.compile`` would recompile, an artifact cannot, so treat any
     ambient change between capture and call as needing a fresh capture unless a stamp
     covers it. A hand-edit that drops a stamp turns that one check off with a warning.
-    Both stamps (that one and the version stamp) must stay in the artifact's
+    All three stamps (these two plus the version stamp) must stay in the artifact's
     leading comment block: the reader stops at the first non-comment line, so inserting code above them
-    turns every check off -- loudly for the training check, which warns per
+    turns every check off -- loudly for the checked stamps, each of which warns per
     call while it is missing, and silently for the version warning, which just
     returns. Other Python attributes and Python
     control flow are specialized at capture and must remain compatible with the example.

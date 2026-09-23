@@ -31,6 +31,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 log = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ _R = TypeVar("_R")
 # by a different torch (see _warn_on_version_skew). It is a comment, so it does not
 # affect exec; a hand-edit that drops it just disables the skew warning, so
 # hill-climbing an artifact never triggers a spurious version warning.
-# Both stamps must stay in the artifact's LEADING comment block: the reader stops
+# All three stamps must stay in the artifact's LEADING comment block: the reader stops
 # at the first line that is not a comment, so inserting code above them turns every
 # check off -- each checked stamp warns per call while it is missing, and the version
 # warning is the only one that goes quiet.
@@ -53,6 +54,12 @@ _VERSION_TAG = "# torch.compiler.export_python torch-version: "
 # the version stamp it is exec-inert, and dropping it in a hand-edit just turns the
 # check off (see _check_module_training).
 _MODULE_TRAINING_TAG = "# torch.compiler.export_python module-training: "
+# Which input tensors overlapped in memory at capture. make_fx bakes that into the
+# graph with no runtime guard, and aliased inputs change what a mutation means.
+# Exec-inert like the other stamps, and dropping it turns only its own check off. What
+# no stamp guards is a change in HOW two aliased inputs overlap -- capture's relative
+# offsets stay baked in, exactly as they do under torch.compile.
+_INPUT_OVERLAP_TAG = "# torch.compiler.export_python input-overlap: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
 # a real I/O problem (a full disk, a bad permission) that must not be swallowed.
@@ -156,6 +163,132 @@ def _module_training_state(
     ]
 
 
+def _byte_span(t: torch.Tensor) -> tuple[int, int]:
+    # The [start, end) byte range the tensor can touch. Exact for a dense tensor and a
+    # bounding range for a strided one, which errs toward reporting overlap.
+    start = t.data_ptr()
+    extent = sum((size - 1) * stride for size, stride in zip(t.shape, t.stride()))
+    return start, start + (extent + 1) * t.element_size()
+
+
+def _dense_leaves(t: torch.Tensor) -> list[torch.Tensor] | None:
+    """The real-memory tensors inside t, or None if its bytes cannot be located.
+
+    A wrapper subclass (DTensor, TwoTensor, FunctionalTensor) reports data_ptr() == 0
+    with a real device and is_meta False, so comparing its byte span against a plain
+    tensor's would report every pair as disjoint. It is left unlocated here.
+    """
+    if is_traceable_wrapper_subclass(t):
+        return None
+    try:
+        if t.data_ptr() == 0:
+            return None
+    except RuntimeError:
+        return None
+    return [t]
+
+
+def _reports_no_bytes(t: torch.Tensor) -> bool:
+    """Whether t can be ruled out from its own report, without locating its bytes.
+
+    Only for tensors that are what they say they are. A wrapper subclass's numel and
+    is_meta describe what it PRESENTS: torch.load with
+    map_location={torch.device("cpu"): "meta"} -- keyed by a device OBJECT, which remaps
+    the wrapper without remapping its storages -- builds one reporting meta over live
+    cpu payloads, and taking that at face value says it aliases nothing, including its
+    own payload. The string form {"cpu": "meta"} does the reverse and is not the case
+    this guards.
+    """
+    return not is_traceable_wrapper_subclass(t) and (t.numel() == 0 or t.is_meta)
+
+
+def _shares_memory(a: torch.Tensor, b: torch.Tensor) -> bool:
+    """Whether two tensors can touch the same bytes.
+
+    NOT torch._C._overlaps, which is IValue::overlaps -- storage IDENTITY, ignoring
+    offsets. That reports byte-disjoint slices of one buffer as overlapping, which
+    rejects the arena / fused-QKV / KV-cache shape this API exists to serve.
+
+    Compares addresses, not storage objects: the same bytes can be reached through
+    different UntypedStorages (from_numpy on overlapping slices, frombuffer, DLPack,
+    __cuda_array_interface__ onto a live arena), and a storage-identity gate reports
+    those as disjoint -- a donor would then be written over a live input. data_ptr is a
+    process-global address and differing devices are rejected below, so
+    distinct allocations cannot collide. One allocation visible under two device types
+    still can: mapped pinned host memory has the same address as its CUDA view, and
+    this reports the pair disjoint. torch._C._overlaps answers that case identically.
+    Conservative for anything whose extent cannot be computed: a bounding range for
+    strided tensors, and for sparse or otherwise unlocatable tensors "aliases anything
+    of the same device type" -- NOT storage identity, which is the predicate this
+    function exists to avoid.
+    """
+    if _reports_no_bytes(a) or _reports_no_bytes(b):
+        # No real memory, and every meta tensor reports data_ptr 0, which would
+        # otherwise make every pair look coincident.
+        return False
+    a_leaves, b_leaves = _dense_leaves(a), _dense_leaves(b)
+    if a_leaves is None or b_leaves is None:
+        # An addressless tensor (a wrapper subclass, sparse, nested). Its bytes are
+        # unknown, so the only safe answer is "assume it aliases" -- NOT storage
+        # identity, which is the predicate that made byte-disjoint arena slices look
+        # aliased in the first place. Device type is all that can still rule a pair
+        # out, and a wrapper misreporting its type is taken at its word here.
+        return a.device.type == b.device.type
+    if a.device != b.device:
+        return False
+    try:
+        (a_start, a_end), (b_start, b_end) = _byte_span(a), _byte_span(b)
+    except RuntimeError:
+        return True
+    return a_start < b_end and b_start < a_end
+
+
+def _input_tensors(args: Sequence[Any]) -> list[torch.Tensor]:
+    """Every tensor an artifact call can reach, in a stable order.
+
+    Module params and buffers are included, and come after the user tensors so their
+    presence does not shift the indices a previously written stamp recorded. They have
+    to be here: AOTAutograd dedups a user tensor that aliases a module buffer into one
+    graph slot, so an artifact captured with that alias computes -- and mutates -- the
+    wrong thing when the runtime call passes independent tensors, and the reverse.
+    """
+    user = [
+        leaf
+        for arg in args
+        if not isinstance(arg, torch.nn.Module)
+        for leaf in pytree.tree_leaves(arg)
+        if isinstance(leaf, torch.Tensor)
+    ]
+    module: list[torch.Tensor] = []
+    seen: set[int] = set()
+    for arg in args:
+        if not isinstance(arg, torch.nn.Module):
+            continue
+        for tensor in [*arg.parameters(), *arg.buffers()]:
+            if id(tensor) not in seen:
+                seen.add(id(tensor))
+                module.append(tensor)
+    return [*user, *module]
+
+
+def _input_overlaps(
+    args: Sequence[Any], tensors: list[torch.Tensor] | None = None
+) -> list[list[int]]:
+    """Which pairs of input tensors share memory, as sorted [i, j] index pairs.
+
+    Lists (not tuples) so the stamp round-trips through ast.literal_eval to something
+    that compares equal.
+    """
+    if tensors is None:
+        tensors = _input_tensors(args)
+    return [
+        [i, j]
+        for i in range(len(tensors))
+        for j in range(i + 1, len(tensors))
+        if _shares_memory(tensors[i], tensors[j])
+    ]
+
+
 class ExportedPythonArtifact:
     """Materializes and disk-caches a ``torch.compiler.precompile`` artifact.
 
@@ -186,6 +319,7 @@ class ExportedPythonArtifact:
         self._decompositions = decompositions
         self._example_inputs = None if example_inputs is None else tuple(example_inputs)
         self._module_training: list[tuple[int, list[tuple[str, bool]]]] | None = None
+        self._input_overlaps: list[list[int]] | None = None
         self._loaded: Callable[..., Any] | None = None
         # (pid, tid) currently inside _materialize. There is deliberately no
         # per-artifact lock: capture is already serialized process-wide, so a second
@@ -213,6 +347,18 @@ class ExportedPythonArtifact:
                     "non-leaf tensor or a weight_norm module). Pass explicit "
                     "example_inputs=... to precompile against dedicated inputs."
                 ) from e
+            if _input_overlaps(example) != _input_overlaps(args):
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "torch.compiler.export_python: deep-copying the first-call "
+                    "arguments did not preserve how their tensors share memory, so "
+                    "capturing from the copy would bake in aliasing the real arguments "
+                    "do not have. nn.Parameter.__deepcopy__ clones, so two Parameters "
+                    "backed by one storage become independent in the copy. Pass "
+                    "example_inputs=... built with the same sharing as the real "
+                    "arguments to capture against those instead."
+                )
         else:
             example = self._bind_positional(example, {}, "example_inputs=")
             self._check_supported_args(example)
@@ -232,9 +378,12 @@ class ExportedPythonArtifact:
         # The stamps lead the artifact as exec-inert comments, each guarding one thing
         # make_fx specialized without a runtime guard. A hand-edit may drop any of them;
         # each just turns its own check off.
+        example_tensors = _input_tensors(example)
         code = (
             f"{_VERSION_TAG}{torch.__version__!r}\n"
-            f"{_MODULE_TRAINING_TAG}{_module_training_state(example)!r}\n{code}"
+            f"{_MODULE_TRAINING_TAG}{_module_training_state(example)!r}\n"
+            f"{_INPUT_OVERLAP_TAG}{_input_overlaps(example, example_tensors)!r}\n"
+            f"{code}"
         )
         if _atomic_publish(self._path, code.encode("utf-8")):
             return code, False
@@ -294,6 +443,41 @@ class ExportedPythonArtifact:
             if stripped and not stripped.startswith("#"):
                 break
         return None
+
+    def _check_capture_environment(self, args: tuple[Any, ...]) -> None:
+        # Another thing make_fx specialized with no runtime guard. Input ALIASING
+        # decides what an in-place mutation means, so an artifact captured with two
+        # arguments sharing memory computes the wrong thing (and mutates the wrong
+        # thing) when they are distinct at runtime -- torch.compile guards this and
+        # recompiles.
+        tensors: list[torch.Tensor] | None = None
+
+        def input_tensors() -> list[torch.Tensor]:
+            # Walked once and shared by the checks below. Lazily, so an artifact
+            # whose stamps were all hand-edited away does not pay for a walk no check
+            # will read.
+            nonlocal tensors
+            if tensors is None:
+                tensors = _input_tensors(args)
+            return tensors
+
+        if self._input_overlaps is None:
+            log.warning(
+                "torch.compiler.export_python: the artifact at %s carries no recorded "
+                "input-aliasing stamp, so a runtime call whose inputs share memory "
+                "differently than capture is unchecked. Delete %s to regenerate it.",
+                self._path,
+                self._path,
+            )
+        else:
+            actual = _input_overlaps(args, input_tensors())
+            if actual != self._input_overlaps:
+                raise _precompile_error(
+                    "torch.compiler.export_python: the runtime inputs do not share "
+                    f"memory the way capture did (captured overlapping index pairs "
+                    f"{self._input_overlaps}, got {actual}). Aliasing is baked into the "
+                    "graph, so this call would compute against the wrong assumption."
+                )
 
     def _check_module_training(self, args: tuple[Any, ...]) -> None:
         actual = _module_training_state(args)
@@ -400,6 +584,7 @@ class ExportedPythonArtifact:
         if from_disk:
             self._warn_on_version_skew(code)
         self._module_training = self._read_stamp(code, _MODULE_TRAINING_TAG)
+        self._input_overlaps = self._read_stamp(code, _INPUT_OVERLAP_TAG)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
         self._decompositions = None
@@ -540,6 +725,7 @@ class ExportedPythonArtifact:
         loaded = self._loaded
         if loaded is None:
             loaded = self._materialize_once(args)
+        self._check_capture_environment(args)
         self._check_module_training(args)
         return loaded(*args)
 
