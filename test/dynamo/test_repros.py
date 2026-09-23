@@ -3574,13 +3574,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager")
         with self.assertRaisesRegex(AssertionError, "tensor"):
             opt_f(args)
-        for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
-            if "assert with non-string message" in gb:
-                self.assertEqual(cnt, 1)
-                break
-        else:
-            # graph break not found
-            self.assertTrue(False)
+        self.assertEqual(torch._dynamo.utils.counters["graph_break"], {})
 
     def test_rewrite_assert_noop(self):
         def f(x):
@@ -9830,6 +9824,48 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         Base.y = 42
         result = fn(obj, t)
         self.assertEqual(result, torch.tensor([43.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_mro_source_cache_shared_across_instances(self):
+        # Two instances reaching the same class attribute share one source for
+        # it, rather than aliasing two sources with an OBJECT_ALIASING guard.
+        class Cfg:
+            scale = 2
+
+        class Layer:
+            cfg = Cfg()
+
+        a, b = Layer(), Layer()
+
+        def fn(x):
+            return x * a.cfg.scale + x * b.cfg.scale
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+        entries = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("OBJECT_ALIASING", str(entries[0].guard_manager))
+
+    def test_mro_source_cache_descriptor_shared_by_classes(self):
+        # One descriptor object in two unrelated classes: the source through A
+        # does not see B's attribute being reassigned, so B needs its own.
+        p = property(lambda self: 1.0)
+
+        class A:
+            val = p
+
+        class B:
+            val = p
+
+        a, b = A(), B()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x + a.val + b.val
+
+        x = torch.zeros(1)
+        self.assertEqual(fn(x), torch.tensor([2.0]))
+        B.val = property(lambda self: 100.0)
+        self.assertEqual(fn(x), torch.tensor([101.0]))
         self.assertEqual(cnt.frame_count, 2)
 
     def test_pytree_tree_is_leaf_with_namedtuple(self):

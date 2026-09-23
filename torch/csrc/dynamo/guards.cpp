@@ -4587,6 +4587,7 @@ class RootGuardManager : public GuardManager {
         std::make_unique<RootGuardManager>();
     cloned_root->_local_state = _local_state;
     cloned_root->_init_local_state = _init_local_state;
+    cloned_root->_compile_on_one_rank = _compile_on_one_rank;
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
