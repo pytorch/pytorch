@@ -1227,6 +1227,37 @@ class TestPinnedTensorPickle(TestCase):
         self.assertEqual(restored, original)
 
     @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_tensor_preserves_python_state(self):
+        pinned = torch.tensor([1, 2, 3], pin_memory=True)
+        pinned._is_frozen_param = True
+        restored = self._roundtrip(pinned)
+        self.assertTrue(restored.is_pinned())
+        self.assertTrue(hasattr(restored, "_is_frozen_param"))
+        pageable = torch.tensor([1, 2, 3])
+        pageable._is_frozen_param = True
+        restored_pageable = self._roundtrip(pageable)
+        self.assertFalse(restored_pageable.is_pinned())
+        self.assertTrue(hasattr(restored_pageable, "_is_frozen_param"))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_tensor_with_requires_grad_stays_leaf(self):
+        pinned = torch.tensor([1.0, 2.0, 3.0], pin_memory=True).requires_grad_(True)
+        restored = self._roundtrip(pinned)
+        self.assertTrue(restored.is_pinned())
+        self.assertTrue(restored.requires_grad)
+        self.assertTrue(restored.is_leaf)
+        self.assertIsNone(restored.grad_fn)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_parameter_preserves_dict(self):
+        pinned = torch.nn.Parameter(torch.tensor([1.0, 2.0, 3.0], pin_memory=True))
+        pinned._custom_tag = "keep me"
+        restored = self._roundtrip(pinned)
+        self.assertIsInstance(restored, torch.nn.Parameter)
+        self.assertTrue(restored.is_pinned())
+        self.assertEqual(getattr(restored, "_custom_tag", None), "keep me")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
     def test_pinned_aliased_tensors_roundtrip_values_and_flags(self):
         base = torch.tensor([1, 2, 3, 4], pin_memory=True)
         view = base[0:2]

@@ -602,7 +602,7 @@ class _TensorPickleData:
 def _is_pinned_cpu_tensor(obj: object) -> TypeGuard[torch.Tensor]:
     if not isinstance(obj, torch.Tensor) or is_fake_tensor(obj):
         return False
-    if obj.device.type != "cpu":
+    if obj.device.type != "cpu" or not torch.cuda.is_available():
         return False
     try:
         return obj.is_pinned()
@@ -648,13 +648,18 @@ class _PinnedTensorPickleData:
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch.Tensor:
         tensor = pickle.loads(self.tensor_bytes)
+        state = dict(tensor.__dict__)
         try:
             if not tensor.is_pinned() and torch.cuda.is_available():
-                tensor = tensor.pin_memory()
+                with torch.no_grad():
+                    tensor = tensor.pin_memory()
         except Exception:
             log.debug("Failed to restore pinned memory, keeping pageable tensor")
         if self.is_param:
             tensor = torch.nn.Parameter(tensor, requires_grad=self.requires_grad)
+        else:
+            tensor.requires_grad_(self.requires_grad)
+        tensor.__dict__.update(state)
         return tensor
 
 
