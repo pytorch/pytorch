@@ -55,7 +55,6 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
-from ..runtime.hints import DeviceProperties, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
@@ -71,8 +70,10 @@ from ..utils import (
     get_constexpr_repr_children,
     get_dtype_size,
     get_importable_constexpr_types,
+    GPU_ALIGN_BYTES,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
+    is_gpu,
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
@@ -92,7 +93,12 @@ from .common import (
 )
 from .cpp_utils import cexpr
 from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
-from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
+from .triton_utils import (
+    config_of,
+    should_unwrap_unspec_arg,
+    signature_to_meta,
+    triton_meta_device_props,
+)
 
 
 if TYPE_CHECKING:
@@ -102,6 +108,7 @@ if TYPE_CHECKING:
 
     from ..graph import GraphLowering
     from ..ir import ExternKernel
+    from ..runtime.hints import TritonMeta
     from ..scheduler import BaseSchedulerNode
     from .wrapper_fxir import FxConverter
 
@@ -1229,7 +1236,7 @@ class AllocateLine(MemoryPlanningLine):
         device = self.node.get_device()
         if not (device is not None and device.index is not None):
             raise AssertionError(
-                f"Comm buffer requires a valid CUDA device with index, got {device}"
+                f"Comm buffer requires a valid accelerator device with index, got {device}"
             )
         dtype = self.node.get_dtype()
         shape = tuple(self.node.get_size())
@@ -1244,9 +1251,12 @@ class AllocateLine(MemoryPlanningLine):
             # [device-as-parameter] under compile-on-one-rank the comm buffer must follow
             # the running rank's device, not the compile-time index.
             if _coor_enabled():
-                device_arg = f'torch.device("cuda", {V.graph.device_ops.current_device_idx_expr()})'
+                device_arg = (
+                    f'torch.device("{device.type}", '
+                    f"{V.graph.device_ops.current_device_idx_expr()})"
+                )
             else:
-                device_arg = f'torch.device("cuda:{device.index}")'
+                device_arg = f'torch.device("{device.type}:{device.index}")'
             line = (
                 f"{name} = empty_strided_p2p("
                 f"{self.wrapper.codegen_shape_tuple(shape)}, "
@@ -2123,8 +2133,27 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
             self.codegen_input_size_asserts()
+        if config.alignment_asserts_inputs:
+            self.codegen_input_alignment_asserts()
         if config.nan_asserts:
             self.codegen_input_nan_asserts()
+
+    def codegen_input_alignment_asserts(self) -> None:
+        # Partition prefixes are generated after their kernels.
+        body = self.lines
+        self.lines = []
+        inputs = self.get_graph_inputs()
+        for name, buf in V.graph.graph_inputs.items():
+            if (
+                name not in inputs
+                or name in V.graph.unaligned_buffers
+                or not isinstance(buf, ir.TensorBox)
+            ):
+                continue
+            device = buf.get_device()
+            if device is not None and is_gpu(device.type):
+                self.write_assert_alignment(name, GPU_ALIGN_BYTES, "input")
+        self.lines.extend(body)
 
     # Input size/stride assertions are deferred from the top of call() to just
     # before the first kernel that uses each input. This avoids a block of N
@@ -3852,7 +3881,7 @@ class PythonWrapperCodegen(CodeGen):
             use_fp64_for_python_float=False,
         )
         device = V.graph.get_current_device_or_throw()
-        device_props = DeviceProperties.create(device)
+        device_props = triton_meta_device_props(device)
         triton_meta: TritonMeta = {
             "signature": triton_signature,
             "device": device_props,
