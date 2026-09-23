@@ -910,14 +910,13 @@ def _decl_map(graph: GraphLowering) -> dict[str, str]:
     return decls
 
 
-def _aten_of(op: ir.Operation) -> str:
-    """The ATen ops this node came from, e.g. ``mm``.
+def _primary_aten_of(op: ir.Operation) -> str:
+    """The primary ATen operation represented by a template, e.g. ``mm``.
 
-    Same source Inductor uses to name kernels: ``origin.meta["original_aten"]``.
-    Without it a template renders as an anonymous call and the reader cannot tell
-    what it computes.
+    A template can inherit origins from pointwise producers and consumers. Those
+    operations are rendered in their own blocks, so including them in the template
+    name would duplicate them and incorrectly suggest that they are template calls.
     """
-    names: list[str] = []
     try:
         origins = op.get_origins() or ()
     except (AttributeError, NotImplementedError):
@@ -927,12 +926,9 @@ def _aten_of(op: ir.Operation) -> str:
         if aten is None:
             continue
         if isinstance(aten, torch._ops.OpOverload):
-            name = aten._overloadpacket.__name__
-        else:
-            name = str(aten)
-        if name not in names:
-            names.append(name)
-    return ",".join(names)
+            return aten._overloadpacket.__name__
+        return str(aten)
+    return ""
 
 
 def _template_desc(op: ir.TemplateBuffer) -> tuple[str, str | None]:
@@ -948,7 +944,7 @@ def _template_desc(op: ir.TemplateBuffer) -> tuple[str, str | None]:
     epilogue, while a Triton one can.
     """
     choices = getattr(op, "_choices", None)
-    what = _aten_of(op)
+    what = _primary_aten_of(op)
     call = f"template {what}" if what else "template"
     if choices:
         counts: dict[str, int] = {}
