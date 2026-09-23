@@ -145,7 +145,8 @@ class PrecompileContext:
     def take_artifact(cls, key: str) -> BackendCacheArtifact[Any] | None:
         """
         Remove and return the backend cache artifact with the associated key, so
-        a capture that owns it does not leave it behind in the process-global list
+        a capture that owns it does not leave it behind in the process-global list.
+        Ownership moves to the caller: serialize_artifact_by_key no longer finds it.
         """
         return cls._backend_artifacts_by_key.pop(_BackendId(key), None)
 
