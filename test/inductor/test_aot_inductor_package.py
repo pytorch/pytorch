@@ -30,10 +30,7 @@ from torch.export.pt2_archive._package import (
     load_weights_to_pt2_contents,
 )
 from torch.testing._internal.common_cuda import requires_triton_ptxas_compat
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    IS_FBCODE,
-)
+from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils import _pytree as pytree
 
