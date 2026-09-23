@@ -1637,6 +1637,111 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_exception_traceback_frame_lineno(self):
+        class ExitFails:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                raise ValueError
+
+        class Noop:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        def simple():
+            1 / 0
+
+        def in_finally():
+            try:
+                1 / 0
+            finally:
+                pass
+
+        def other_except():
+            try:
+                1 / 0
+            except TypeError:
+                pass
+
+        def reraise_named():
+            try:
+                1 / 0
+            except ZeroDivisionError as e:
+                raise ValueError from e
+
+        def with_noop():
+            with Noop():
+                1 / 0
+
+        def with_exit_fails():
+            with ExitFails():
+                1 / 0
+
+        def fn(x, f):
+            try:
+                f()
+            except Exception as ex:
+                t = ex.__traceback__
+            lines = []
+            while t:
+                frame = t.tb_frame
+                first = frame.f_code.co_firstlineno
+                lines.append((t.tb_lineno - first, frame.f_lineno - first))
+                t = t.tb_next
+            return x + 1, lines
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for f in (
+            simple,
+            in_finally,
+            other_except,
+            reraise_named,
+            with_noop,
+            with_exit_fails,
+        ):
+            self.assertEqual(fn(x, f), opt_fn(x, f))
+
+    def test_exception_traceback_frame_unsupported_attr(self):
+        def fn(x):
+            try:
+                raise ValueError("oops")
+            except ValueError as e:
+                if e.__traceback__.tb_frame.f_trace is None:
+                    x = x + 1
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Unsupported frame attribute"):
+            opt_fn(torch.randn(4))
+
+    def test_exception_traceback_chain_lineno(self):
+        # Each entry is the line where its frame called the next one.
+        def inner():
+            raise ValueError
+
+        def outer():
+            inner()
+
+        def fn(x):
+            try:
+                outer()
+            except ValueError as e:
+                t = e.__traceback__
+            lines = []
+            while t:
+                lines.append(t.tb_lineno - fn.__code__.co_firstlineno)
+                t = t.tb_next
+            return x + 1, lines
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_exception_with_traceback_method(self):
         # Test the with_traceback() method
         def fn(x):
