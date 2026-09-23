@@ -117,6 +117,10 @@ class SymmetricMMTest(TestCase):
                 "torch._inductor.fx_passes.post_grad.ensure_cute_available",
                 return_value=case != "no_cute",
             ),
+            mock.patch(
+                "torch._inductor.utils.ensure_cute_available",
+                return_value=case != "no_cute",
+            ),
             mock.patch.object(
                 torch.cuda,
                 "get_device_capability",
@@ -131,7 +135,7 @@ class SymmetricMMTest(TestCase):
             ),
         ):
             self.assertFalse(_is_quack_symmetric_mm(match))
-            if case == "hip":
+            if case in ("no_cute", "architecture", "hip"):
                 self.assertEqual(quack_symmetric_mm(x), x @ x.T)
 
     @skipIfNoCuteDSL
