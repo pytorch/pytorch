@@ -9,7 +9,10 @@ namespace at::native::scaled {
 
 #ifdef USE_ROCM
 // On ROCm, sm90_only/sm100_only are ignored.
-bool scaled_mm_arch_allowed(bool /*sm90_only*/, bool /*sm100_only*/) {
+bool scaled_mm_arch_allowed(
+    bool /*sm90_only*/,
+    bool /*sm100_only*/,
+    c10::DeviceIndex device_index) {
   static const std::vector<std::string> archs = {
       "gfx942",
 #if ROCM_VERSION >= 60300
@@ -22,11 +25,14 @@ bool scaled_mm_arch_allowed(bool /*sm90_only*/, bool /*sm100_only*/) {
       "gfx1250",
 #endif
   };
-  return at::detail::getCUDAHooks().isGPUArch(archs);
+  return at::detail::getCUDAHooks().isGPUArch(archs, device_index);
 }
 #else
-bool scaled_mm_arch_allowed(bool sm90_only, bool sm100_only) {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
+bool scaled_mm_arch_allowed(
+    bool sm90_only,
+    bool sm100_only,
+    c10::DeviceIndex device_index) {
+  auto dprops = at::cuda::getDeviceProperties(device_index);
   if (sm90_only || sm100_only) {
     return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
   }
