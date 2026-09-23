@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: ossf-scorecard
 on:
   # Only the default branch is supported.
@@ -14,7 +15,7 @@ permissions: read-all
 jobs:
   analysis:
     name: Scorecards analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # Needed to upload the results to code-scanning dashboard.
       security-events: write

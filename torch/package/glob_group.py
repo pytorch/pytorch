@@ -24,7 +24,7 @@ class GlobGroup:
         ``torch.*``: matches ``torch.nn`` or ``torch.functional``, but not ``torch.nn.functional``.
         ``torch*.**``: matches ``torch``, ``torchvision``, and all their submodules.
 
-    A candidates will match the ``GlobGroup`` if it matches any of the ``include`` patterns and
+    A candidate will match the ``GlobGroup`` if it matches any of the ``include`` patterns and
     none of the ``exclude`` patterns.
 
     Args:

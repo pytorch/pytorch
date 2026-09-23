@@ -14,7 +14,6 @@
 #else
 #include <ATen/ops/eq.h>
 #include <ATen/ops/isin_native.h>
-#include <ATen/ops/nan_to_num_native.h>
 #include <ATen/ops/ones_like_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/where_native.h>
@@ -95,29 +94,6 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   }
 }
 
-static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
-  if (iter.numel() == 0) {
-    return;
-  }
-  const auto& self = iter.input(0);
-  auto& out = iter.output(0);
-  @autoreleasepool {
-    auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(
-        __func__ + std::to_string(is_neg) + getTensorsStringKey(self), [&](auto mpsGraph, auto newCachedGraph) {
-          auto infTensor = [mpsGraph constantWithScalar:is_neg ? -std::numeric_limits<float>::infinity()
-                                                               : std::numeric_limits<float>::infinity()
-                                               dataType:getMPSScalarType(self)];
-          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          newCachedGraph->outputTensor_ = [mpsGraph equalWithPrimaryTensor:newCachedGraph->inputTensor_
-                                                           secondaryTensor:infTensor
-                                                                      name:nil];
-        });
-    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    runMPSGraph(
-        getCurrentMPSStream(), cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
-  }
-}
 } // namespace mps
 
 // APIs exposed to at::native scope
@@ -218,108 +194,14 @@ static void where_kernel_mps(TensorIterator& iter) {
   }
 }
 
-Tensor& nan_to_num_out_mps(const Tensor& self,
-                           std::optional<double> nan,
-                           std::optional<double> pos_inf,
-                           std::optional<double> neg_inf,
-                           Tensor& result) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(),
-              "nan_to_num: dtype of out: ",
-              result.scalar_type(),
-              " should be same as input: ",
-              self.scalar_type());
-  if (result.numel() == 0) {
-    return result;
-  }
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    at::native::resize_output(result, self.sizes());
-    result.copy_(self);
-    return result;
-  }
-  using namespace mps;
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* selfTensor = nil;
-    MPSGraphTensor* outputTensor = nil;
-    MPSGraphTensor* nanReplacementTensor = nil;
-    MPSGraphTensor* posInfReplacementTensor = nil;
-    MPSGraphTensor* negInfReplacementTensor = nil;
-  };
-
-  @autoreleasepool {
-    std::string key = "nan_to_num" + getTensorsStringKey({self});
-    MPSDataType self_dtype = getMPSScalarType(self.scalar_type());
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      newCachedGraph->nanReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
-      newCachedGraph->posInfReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
-      newCachedGraph->negInfReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
-
-      MPSGraphTensor* nanFreeTensor =
-          [mpsGraph selectWithPredicateTensor:[mpsGraph isNaNWithTensor:newCachedGraph->selfTensor name:nil]
-                          truePredicateTensor:newCachedGraph->nanReplacementTensor
-                         falsePredicateTensor:newCachedGraph->selfTensor
-                                         name:nil];
-      MPSGraphTensor* subZeroTensor = [mpsGraph lessThanWithPrimaryTensor:nanFreeTensor
-                                                          secondaryTensor:[mpsGraph constantWithScalar:0.0
-                                                                                              dataType:self_dtype]
-                                                                     name:nil];
-      MPSGraphTensor* isInfTensor = [mpsGraph isInfiniteWithTensor:nanFreeTensor name:nil];
-      // workaround for Monterey; On Ventura the output of lessThan() is always Boolean
-      if (subZeroTensor.dataType != MPSDataTypeBool) {
-        subZeroTensor = castMPSTensor(mpsGraph, subZeroTensor, kBool);
-      }
-      if (isInfTensor.dataType != MPSDataTypeBool) {
-        isInfTensor = castMPSTensor(mpsGraph, isInfTensor, kBool);
-      }
-      MPSGraphTensor* isNegInfTensor = [mpsGraph logicalANDWithPrimaryTensor:subZeroTensor
-                                                             secondaryTensor:isInfTensor
-                                                                        name:nil];
-      MPSGraphTensor* negInfFreeTensor = [mpsGraph selectWithPredicateTensor:isNegInfTensor
-                                                         truePredicateTensor:newCachedGraph->negInfReplacementTensor
-                                                        falsePredicateTensor:nanFreeTensor
-                                                                        name:nil];
-      newCachedGraph->outputTensor = [mpsGraph selectWithPredicateTensor:[mpsGraph isInfiniteWithTensor:negInfFreeTensor
-                                                                                                   name:nil]
-                                                     truePredicateTensor:newCachedGraph->posInfReplacementTensor
-                                                    falsePredicateTensor:negInfFreeTensor
-                                                                    name:nil];
-    });
-    MPSScalar nanReplacementScalar, posInfReplacementScalar, negInfReplacementScalar;
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
-      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
-      scalar_t pos_inf_replacement =
-          pos_inf.has_value() ? static_cast<scalar_t>(pos_inf.value()) : std::numeric_limits<scalar_t>::max();
-      scalar_t neg_inf_replacement =
-          neg_inf.has_value() ? static_cast<scalar_t>(neg_inf.value()) : std::numeric_limits<scalar_t>::lowest();
-
-      nanReplacementScalar = getMPSScalar(nan_replacement, self.scalar_type());
-      posInfReplacementScalar = getMPSScalar(pos_inf_replacement, self.scalar_type());
-      negInfReplacementScalar = getMPSScalar(neg_inf_replacement, self.scalar_type());
-    });
-
-    MPSStream* stream = getCurrentMPSStream();
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, result);
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      cachedGraph->nanReplacementTensor : getMPSGraphTensorFromScalar(stream, nanReplacementScalar),
-      cachedGraph->posInfReplacementTensor : getMPSGraphTensorFromScalar(stream, posInfReplacementScalar),
-      cachedGraph->negInfReplacementTensor : getMPSGraphTensorFromScalar(stream, negInfReplacementScalar),
-    };
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-  return result;
-}
-
 static void isneginf_kernel_mps(TensorIteratorBase& iter) {
-  mps::is_posneginf_helper(iter, true);
+  // bool output is non-floating, so ILP is opt-in (logical_not precedent);
+  // the check is trivial ALU and bandwidth-bound at large sizes.
+  lib.exec_unary_kernel(iter, "isneginf", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
 }
 
 static void isposinf_kernel_mps(TensorIteratorBase& iter) {
-  mps::is_posneginf_helper(iter, false);
+  lib.exec_unary_kernel(iter, "isposinf", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
 }
 
 static void clamp_kernel_mps(TensorIteratorBase& iter) {

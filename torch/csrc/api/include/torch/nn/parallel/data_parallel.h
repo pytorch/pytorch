@@ -89,7 +89,7 @@ struct ReduceAdd : public autograd::Node {
       output.add_(input.to(destination_device_));
     }
 
-    return {output};
+    return {std::move(output)};
   }
 
  private:
@@ -113,6 +113,7 @@ void replicate_grad_edges(
     for (const auto i : c10::irange(devices.size())) {
       autograd::set_history(replicas[i]->parameters_[parameter.key()], grad_fn);
     }
+    autograd::fire_node_creation_hooks(grad_fn);
   }
 
   for (auto& buffer : module->named_buffers(/*recurse=*/false)) {
@@ -123,6 +124,7 @@ void replicate_grad_edges(
       for (const auto i : c10::irange(devices.size())) {
         autograd::set_history(replicas[i]->buffers_[buffer.key()], grad_fn);
       }
+      autograd::fire_node_creation_hooks(grad_fn);
     }
   }
 
@@ -154,7 +156,7 @@ std::vector<std::shared_ptr<ModuleType>> replicate(
     replicas.push_back(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
-  // Configure gradient edges to point from replcia parameters to original
+  // Configure gradient edges to point from replica parameters to original
   // module parameters. See [Replicating Modules]
   replicate_grad_edges(module, replicas, devices);
   return replicas;
