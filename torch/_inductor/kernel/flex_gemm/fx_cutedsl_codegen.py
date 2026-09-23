@@ -54,7 +54,6 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedReduction,
 )
 from torch._inductor.kernel.gemm_epilogue_analysis import (
-    build_output_contraction_plan,
     GemmIndexedOutputStore,
     GemmLocalReduceAnalysis,
     GemmOutputLocalReducePlan,
@@ -69,6 +68,7 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLOpOverrides,
     lower_gemm_epilogue_fx_node,
 )
+from torch._inductor.kernel.gemm_epilogue_layout import build_output_contraction_plan
 from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known_equal,
     statically_known_shape_equal,
@@ -835,6 +835,9 @@ class FlexGemmEpilogueEmitter:
         self.analysis = analysis
         self.outputs = analysis.outputs
         self.local_reduce = self.outputs.local_reduce
+        self.paired_reduction = (
+            self.local_reduce is not None and self.local_reduce.match.physical_span > 1
+        )
         self.output_contraction_select_indices = (
             analysis.output_contraction_select_indices
         )
@@ -862,10 +865,11 @@ class FlexGemmEpilogueEmitter:
             self.local_reduce_spec = spec
             sink = spec.sink
             match = self.local_reduce.match
-            paired = match.physical_span > 1
             # Complete logical groups are finalized before their physical broadcast.
-            self.local_reduce_finalize = None if paired else sink.finalize
-            if paired and swap_ab:
+            self.local_reduce_finalize = (
+                None if self.paired_reduction else sink.finalize
+            )
+            if self.paired_reduction and swap_ab:
                 raise NotImplementedError(
                     "nested TensorSSA reductions do not support swap_ab=True"
                 )
@@ -880,15 +884,19 @@ class FlexGemmEpilogueEmitter:
                 prepass is None
                 and self.local_reduce.feeds_main
                 and match.geometry.axis == 1
-                and not paired
+                and not self.paired_reduction
             ):
                 prepass = sink
             self.local_reduce_prepass = prepass
             # GroupedMainStore min_fragment_n keeps each paired logical group
             # inside one fragment, so QuACK skips only its in-fragment fold.
-            self.local_reduce_fragment_reduced = paired
+            self.local_reduce_fragment_reduced = self.paired_reduction
             if (
-                (not self.local_reduce.feeds_main or prepass is not None or paired)
+                (
+                    not self.local_reduce.feeds_main
+                    or prepass is not None
+                    or self.paired_reduction
+                )
                 and self.local_reduce.store is not None
                 and self.local_reduce.store.value_node is not sink.node
             ):
@@ -916,11 +924,13 @@ class FlexGemmEpilogueEmitter:
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
-        grouped_tensors = analysis.output_contraction_layouts | (
+        # A chunk view can also look like a generic N group. Its lane mapping
+        # must take precedence over that shape-only classification.
+        grouped_tensors = (
             analysis.local_reduce.grouped_tensors
             if self.local_reduce_fragment_reduced
             else {}
-        )
+        ) | analysis.output_contraction_layouts
         self.grouped_layouts = {
             node: GroupedTensorSSALayout(layout.group, layout.axis)
             for node, layout in grouped_tensors.items()
@@ -937,7 +947,7 @@ class FlexGemmEpilogueEmitter:
         if self.local_reduce_prepass is not None or (
             self.local_reduce is not None
             and self.local_reduce.feeds_main
-            and self.local_reduce.match.physical_span == 1
+            and not self.paired_reduction
         ):
             self.params.append(LOCAL_REDUCE_FEED_MAIN_ARG_NAME)
         self.local_reduce_prepass_value: CuteDSLCSEVariable | None = None
@@ -1189,11 +1199,11 @@ class FlexGemmEpilogueEmitter:
             f"reduction_profile={layout.reduction_profile})",
             source,
         )
-        if match.physical_span > 1 and sink.finalize == "mean":
+        if self.paired_reduction and sink.finalize == "mean":
             reduced = self.generate_like(
                 f"({reduced} / {float(geometry.group)!r})", reduced
             )
-        if match.physical_span > 1 and self.local_reduce.store is not None:
+        if self.paired_reduction and self.local_reduce.store is not None:
             # QuACK collects this sink at physical fragment width; broadcast the
             # logical group value across both paired lanes.
             physical = GroupedTensorSSALayout(
@@ -1262,7 +1272,7 @@ class FlexGemmEpilogueEmitter:
                 if node is self.gemm or node.op in ("placeholder", "output"):
                     continue
                 if (
-                    (local_reduce is None or local_reduce.match.physical_span == 1)
+                    not self.paired_reduction
                     and (
                         self.local_reduce_prepass is None
                         or (spec is not None and spec.prepass is not None)
@@ -1360,7 +1370,7 @@ class FlexGemmEpilogueEmitter:
             and (
                 not self.local_reduce.feeds_main
                 or self.local_reduce_prepass is not None
-                or self.local_reduce.match.physical_span > 1
+                or self.paired_reduction
             )
         ):
             store_value = (
