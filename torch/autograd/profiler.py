@@ -1241,7 +1241,7 @@ def load_nvprof(path):
     return EventList(_parse_nvprof_trace(path))
 
 
-class EnforceUnique:
+class _EnforceUnique:
     """Raises an error if a key is seen more than once."""
 
     def __init__(self):
@@ -1254,6 +1254,19 @@ class EnforceUnique:
         if key in self.seen:
             raise RuntimeError("duplicate key: " + str(key))
         self.seen.add(key)
+
+
+@deprecated(
+    "`torch.autograd.profiler.EnforceUnique` is deprecated and will be removed "
+    "in a future release.",
+    category=FutureWarning,
+)
+class EnforceUnique(_EnforceUnique):
+    """Raises an error if a key is seen more than once.
+
+    .. deprecated::
+        This class is deprecated and will be removed in a future release.
+    """
 
 
 @deprecated(
@@ -1293,7 +1306,7 @@ def _parse_nvprof_trace(path):
     """
     functions = []
     functions_map = {}
-    unique = EnforceUnique()
+    unique = _EnforceUnique()
     for row in conn.execute(marker_query):
         unique.see(row["marker_id"])
         evt = FunctionEvent(
@@ -1323,7 +1336,7 @@ def _parse_nvprof_trace(path):
         INNER JOIN CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL AS kernel
             ON kernel.correlationId = runtime.correlationId
     """
-    unique = EnforceUnique()
+    unique = _EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row["marker_id"], row["runtime_id"])
         # 211 is cudaKernelLaunch for cuda >= 9.2

@@ -1073,6 +1073,10 @@ class TestProfiler(TestCase):
                 events = getattr(torch.autograd.profiler, api)("trace.prof")
         self.assertEqual(events, [])
 
+    def test_enforce_unique_deprecated(self):
+        with self.assertWarnsRegex(FutureWarning, "EnforceUnique.*deprecated"):
+            torch.autograd.profiler.EnforceUnique()
+
     def test_profiler_metadata(self):
         t1, t2 = torch.ones(1), torch.ones(1)
         with profile() as prof:
