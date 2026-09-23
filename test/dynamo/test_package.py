@@ -161,15 +161,16 @@ class TestPackage(torch._inductor.test_case.TestCase):
         PrecompileContext.clear()
 
     def test_collapse_device_types_prefers_an_accelerator(self):
-        # The single string both callers record. Among several accelerators
-        # one SystemInfo.check_compatibility checks wins: alphabetical order
-        # would record "mps" for {"mps", "xpu"}, and a name outside CHECK_GPUS
-        # skips every host check the way the old "cpu" did.
+        # The single string both callers record. An accelerator wins over
+        # cpu: alphabetical order alone would record "cpu" for
+        # {"cpu", "cuda"}. Ties among accelerators break alphabetically:
+        # check_compatibility now arms its host checks for every
+        # accelerator, so no name needs to be preferred over another.
         self.assertEqual(_collapse_device_types(frozenset()), "cpu")
         self.assertEqual(_collapse_device_types(frozenset(("cpu",))), "cpu")
         self.assertEqual(_collapse_device_types(frozenset(("cpu", "cuda"))), "cuda")
         self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
-        self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
+        self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "mps")
         self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
 
     def test_package_records_the_devices_a_graph_names(self):
