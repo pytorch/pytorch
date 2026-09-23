@@ -685,7 +685,8 @@ def _build_multigraph_forward():
     opened = set()
     for _frame in frames:
         module = _frame["python_module"]
-        if _frame["variants"]:
+        # The frames _make_dispatcher opens a scope for.
+        if _frame["variants"] or (_frame["trivial"] and not _frame["is_entry"]):
             opened.add(module)
         for _name in _frame["resume_names"] if module in opened else ():
             existing = vars(_import(module)).get(_name)
@@ -712,8 +713,8 @@ def _build_multigraph_forward():
         # under its parent's module, except under config.nested_graph_breaks
         # (default False), where an inlined frame's continuation is recorded
         # under the inlined function's module while the root frame's bytecode
-        # does the LOAD_GLOBAL. A dead record whose module no live frame opened
-        # has no frame left to name it, so it binds nothing.
+        # does the LOAD_GLOBAL. A dead record whose module no served frame
+        # opened has no frame left to name it, so it binds nothing.
         scope = scopes.get(_frame["python_module"])
         if scope is not None:
             for _name in _frame["resume_names"]:
