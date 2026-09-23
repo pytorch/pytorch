@@ -137,20 +137,13 @@ aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
     xfail("bucketize"),
-    xfail("conj_physical"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
     xfail("diag"),
-    xfail("fft.ihfft2"),
-    xfail("fft.ihfftn"),
-    xfail("frexp"),
     xfail("geqrf"),
     xfail("heaviside"),
     xfail("histc"),
-    xfail("index_add"),
-    xfail("index_copy"),
-    xfail("index_select"),
     xfail("isin"),
     xfail("kthvalue"),
     xfail("lerp"),
@@ -176,7 +169,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("mode"),
     xfail("msort"),
     xfail("multinomial"),
-    xfail("nan_to_num"),
     xfail("native_batch_norm"),
     xfail("neg"),
     xfail("nn.functional.avg_pool3d"),
@@ -200,8 +192,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
     xfail("take"),
-    xfail("tril"),
-    xfail("triu"),
     xfail("unfold_copy"),
     # Output has dynamic shape.
     # Does not have a meta kernel implementation.
@@ -717,7 +707,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -730,7 +719,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -1955,6 +1943,7 @@ class TestCompositeCompliance(TestCase):
             skip("topk", variant_name="cutedsl_optimized"),
             skip("topk", variant_name="cutedsl_optimized_deterministic"),
             skip("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
+            skip("nn.functional.linear_cross_entropy", variant_name="cutedsl_none"),
         }
     )
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
@@ -2763,6 +2752,7 @@ fake_autocast_device_skips = defaultdict(dict)
 # TODO: investigate/fix
 fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
 fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
+fake_autocast_device_skips["xpu"] = {"linalg.pinv", "pinverse"}
 
 
 dynamic_output_op_tests = (
