@@ -642,8 +642,8 @@ class _MakeFxCapture(Capture):
             raise PrecompileError(
                 "MakeFxTracer cannot capture a fn that updates a parameter in place "
                 "(e.g. an optimizer step): serving the capture would apply the update "
-                "a second time, and the trace has already applied it once. Step the "
-                "optimizer outside the captured fn."
+                "a second time, and the trace may already have applied it once. Step "
+                "the optimizer outside the captured fn."
             )
 
 
@@ -892,8 +892,8 @@ def _aliased_input(node: torch.fx.Node) -> object:
 def _writes_a_parameter(gm: torch.fx.GraphModule, num_params: int) -> bool:
     """Whether a traced op writes into one of the first ``num_params`` placeholders
     (the lifted parameters), directly or through a view or alias of one such as
-    ``p.data`` or a ``chunk`` piece. Read off the graph because neither the version counter nor a view's
-    own counter records a write through ``.data``."""
+    ``p.data`` or a ``chunk`` piece. Read off the graph because neither the version
+    counter nor a view's own counter records a write through ``.data``."""
     placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
     param_nodes = set(placeholders[:num_params])
     for node in gm.graph.nodes:
