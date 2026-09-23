@@ -3615,7 +3615,7 @@ class TestSparseCSRDevice(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
-class TestSparseCSRCudaOnly(TestCase):
+class TestSparseCSRCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not TEST_CUDA_CUDSS, "The test requires cudss")
