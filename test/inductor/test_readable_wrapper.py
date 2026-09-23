@@ -3,6 +3,7 @@
 import os
 import re
 import tempfile
+from unittest import mock
 
 import torch
 from torch._higher_order_ops.associative_scan import associative_scan
@@ -31,6 +32,17 @@ def _code_for(fn, *args, **config_kwargs):
     with config.patch(**config_kwargs):
         result, codes = run_and_get_code(torch.compile(fn), *args)
     return result, "\n".join(codes)
+
+
+def _softmax(x):
+    return torch.softmax(x * 2, dim=-1)
+
+
+def _cond_softmax(x):
+    # Kernels in both the root and the branch subgraphs, whose text the root splices in.
+    return torch.cond(
+        x.sum() > 0, lambda t: torch.softmax(t * 2, dim=-1), lambda t: t.cos(), (x,)
+    )
 
 
 class TestReadableWrapperCodegen(TestCase):
@@ -195,6 +207,105 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertEqual(self._run_standalone(code, args), expected, **tol)
 
     @requires_cuda_and_triton
+    def test_preamble_binds_only_what_the_graph_uses(self):
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        preamble = code.split("# kernel path:")[0]
+        self.assertIn("empty_strided_cuda", preamble)
+        self.assertIn("assert_size_stride", preamble)
+        for unused in (
+            "empty_strided_xpu",
+            "empty_strided_mtia",
+            "empty_strided_cpu_pinned",
+            "alloc_from_pool",
+            "maybe_profile",
+            "run_intermediate_hooks",
+            "import tempfile",
+            "import random",
+            "from ctypes import",
+        ):
+            self.assertNotIn(unused, preamble, f"{unused!r} kept but unused")
+
+    def test_default_wrapper_emits_the_whole_preamble(self):
+        # The preamble tables replaced two blobs for every python wrapper, not just the
+        # readable one; the default wrapper must still write every entry.
+        real = PythonWrapperCodegen.write_preamble_line
+        with mock.patch.object(
+            PythonWrapperCodegen, "write_preamble_line", autospec=True, side_effect=real
+        ) as spy:
+            _, code = _code_for(torch.relu, torch.randn(8), cpu_backend="cpp")
+        wrapper = spy.call_args_list[0].args[0]
+        table = wrapper._preamble_imports() + wrapper._preamble_bindings()
+        written = {call.args[3] for call in spy.call_args_list}
+        for _, line in table:
+            self.assertIn(line, written)
+            self.assertIn(line, code)
+
+    def test_cpu_graph_does_not_bind_gpu_allocators(self):
+        def fn(x):
+            return (x + 1).relu().sum(0)
+
+        x = torch.randn(1024)
+        _, code = _code_for(fn, x, readable_wrapper=True, cpu_backend="cpp")
+        self.assertIn("empty_strided_cpu", code)
+        self.assertNotIn("empty_strided_cuda", code)
+        self.assertNotIn("empty_strided_xpu", code)
+
+    @requires_cuda_and_triton
+    def test_a_binding_is_not_kept_alive_by_its_own_definition(self):
+        # `_quantized = torch.ops._quantized` names itself on the right-hand side, so
+        # any analysis that counts attribute names as uses can never drop it.
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertNotIn("_quantized", code)
+
+    @requires_cuda_and_triton
+    def test_a_name_mentioned_only_in_a_comment_is_not_a_use(self):
+        # Inductor stamps each kernel with a provenance comment naming its source ops
+        # ("Original ATen: [aten.mul, ...]"), which is not a use of the aten binding.
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertIn("Original ATen: [aten.", code)
+        self.assertNotIn("aten = torch.ops.aten", code)
+
+    @requires_cuda_and_triton
+    def test_a_name_used_only_inside_a_kernel_is_not_a_wrapper_use(self):
+        # A kernel module supplies its own imports (`math as tl_math`) and carries
+        # `'device': 0` in its metadata. Neither is a use of the wrapper's binding, and
+        # once kernels are hoisted they sit in the same text as the wrapper's own code.
+        x = torch.randn(64, 128, device="cuda")
+        for fn in (_softmax, _cond_softmax):
+            with self.subTest(fn.__name__):
+                _, code = _code_for(fn, x, readable_wrapper=True)
+                self.assertIn("math as tl_math", code)
+                self.assertNotIn("\nimport math\n", code)
+                self.assertNotIn("from torch import device, empty_strided", code)
+
+    @requires_cuda_and_triton
+    def test_names_the_wrapper_uses_are_kept(self):
+        # The other direction: extern calls name `device(...)` and `inf` in the
+        # wrapper's own code, so their imports must survive the trim.
+        def fn(x):
+            perm = torch.randperm(x.shape[0], device=x.device)
+            return torch.cdist(x, x * 2, p=float("inf")).sum() + perm.sum()
+
+        x = torch.randn(8, 4, device="cuda")
+        expected, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertIn("device=device(type='cuda'", code)
+        self.assertIn("from torch import device, empty_strided", code)
+        self.assertIn("from math import inf, nan", code)
+        self.assertEqual(self._run_standalone(code, [x])[0], expected)
+
+    @requires_cuda_and_triton
     def test_no_stale_pointer_to_a_cache_file(self):
         # Inductor stamps each kernel "# kernel path: /tmp/torchinductor_.../x.py",
         # naming where the kernel WOULD have been compiled from. It is defined in this
@@ -208,6 +319,23 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertNotIn("# kernel path:", code)
         # the rest of the provenance comment is still worth having
         self.assertIn("Original ATen:", code)
+
+    @requires_cuda_and_triton
+    def test_triton_is_not_imported_twice(self):
+        # A hoisted kernel carries its own triton imports, so the wrapper's copy is dead
+        # weight -- and `start_graph`/`end_graph` are only used under profile_bandwidth.
+        x = torch.randn(64, 128, device="cuda")
+        for fn in (_softmax, _cond_softmax):
+            with self.subTest(fn.__name__):
+                _, code = _code_for(fn, x, readable_wrapper=True)
+                preamble = code.split("Original ATen:")[0]
+                self.assertNotIn("import triton", preamble)
+                self.assertNotIn("start_graph", preamble)
+                # each kernel still supplies what it needs, and nothing else does
+                kernels = len(re.findall(r"^def triton_\w+\(", code, re.MULTILINE))
+                self.assertGreater(kernels, 0)
+                for line in ("import triton\n", "import triton.language as tl\n"):
+                    self.assertEqual(code.count(line), kernels, line)
 
     @requires_cuda_and_triton
     def test_default_wrapper_still_uses_async_compile(self):
@@ -269,6 +397,17 @@ class TestReadableWrapperCodegen(TestCase):
         with patch_inductor_backend("cpu"):
             pass
         self.assertIs(get_wrapper_codegen_for_device("cpu"), PythonWrapperCodegen)
+
+    def test_profile_bandwidth_output_is_refused(self):
+        # profile_bandwidth_output runs the benchmark harness, which this mode drops.
+        def fn(x):
+            return (x * 2).relu()
+
+        x = torch.randn(256)
+        with self.assertRaisesRegex(Exception, "profile_bandwidth_output"):
+            _code_for(
+                fn, x, readable_wrapper=True, profile_bandwidth_output="unused.txt"
+            )
 
 
 instantiate_parametrized_tests(TestReadableWrapperCodegen)
