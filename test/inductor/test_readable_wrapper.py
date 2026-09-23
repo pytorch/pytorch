@@ -275,6 +275,25 @@ class TestReadableWrapperCodegen(TestCase):
         )
 
     @requires_cuda_and_triton
+    @config.patch(coordinate_descent_tuning=True, incremental_autotune=True)
+    def test_user_kernel_does_not_read_the_autotune_cache(self):
+        # A user kernel keeps filename=, so coordinate_descent_tuning in its meta would
+        # have a cached best config replace its own.
+        from torch.testing._internal.triton_utils import add_kernel
+
+        def fn(x):
+            out = torch.empty_like(x)
+            add_kernel[(4,)](x, x, out, x.numel(), BLOCK_SIZE=64)
+            return out
+
+        x = torch.randn(256, device="cuda")
+        expected, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertNotIn("'coordinate_descent_tuning'", code)
+        self.assertNotIn("'incremental_autotune': True", code)
+        with _no_runtime_tuning():
+            self.assertEqual(self._run_standalone(code, [x])[0], expected)
+
+    @requires_cuda_and_triton
     def test_user_kernel_autotuned_over_several_configs_is_refused(self):
         # It stays a source string for AsyncCompile, whose autotuner would benchmark
         # its configs on first launch.
