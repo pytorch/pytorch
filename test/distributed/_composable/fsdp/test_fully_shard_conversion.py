@@ -294,7 +294,6 @@ class TestFullyShardConversion(TestCase):
             (None, torch.float32, "forward"),
             ("default", torch.bfloat16, "forward_after_warmup"),
             ("default", torch.float32, "conversion"),
-            (torch.float32, None, "load_state_dict"),
         ],
     )
     def test_grad_dtype_change_after_fully_shard_rejected(
@@ -308,7 +307,6 @@ class TestFullyShardConversion(TestCase):
         if boundary == "forward_after_warmup":
             model(inp).sum().backward()
             model.zero_grad(set_to_none=True)
-        state_dict = model.state_dict() if boundary == "load_state_dict" else None
 
         # Setting the default's current dtype explicitly also changes policy:
         # future parameter conversions would otherwise stop following dtype.
@@ -316,8 +314,6 @@ class TestFullyShardConversion(TestCase):
         with self.assertRaisesRegex(RuntimeError, "grad_dtype.*fully_shard"):
             if boundary == "conversion":
                 model.to(torch.bfloat16)
-            elif boundary == "load_state_dict":
-                model.load_state_dict(state_dict, assign=True)
             else:
                 model(inp)
 
@@ -505,8 +501,9 @@ class TestFullyShardConversion(TestCase):
             model.set_reduce_scatter_unused_params(True)
 
     @parametrize("grad_dtype", ["default", torch.float32, None])
-    def test_grad_dtype_policy_preserved_after_conversion_and_replacement(
-        self, device, grad_dtype
+    @parametrize("assign", [False, True])
+    def test_grad_dtype_policy_preserved_after_conversion_and_load_state_dict(
+        self, device, grad_dtype, assign
     ):
         reference = nn.Linear(4, 4, bias=False, device=device)
         model = copy.deepcopy(reference)
@@ -528,9 +525,9 @@ class TestFullyShardConversion(TestCase):
         replacement = nn.Parameter(state_dict["weight"])
         replacement.grad_dtype = torch.float64
         state_dict["weight"] = replacement
-        model.load_state_dict(state_dict, assign=True)
-        self.assertIsNot(model.weight, previous)
-        self.assertIs(model.weight, replacement)
+        model.weight.grad_dtype = torch.float64
+        model.load_state_dict(state_dict, assign=assign)
+        self.assertIs(model.weight, replacement if assign else previous)
         self._assert_parity(model, reference, check_override=grad_dtype != "default")
         for module in (model, reference):
             module.to(torch.float32)

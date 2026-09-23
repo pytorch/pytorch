@@ -241,11 +241,8 @@ class FSDPParam:
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
         self._param_fqn: str | None = None  # prefixed from root module
-        self._pre_load_hook_handle = (
-            module_info.module.register_load_state_dict_pre_hook(
-                lambda *args: self.check_grad_dtype()
-            )
-        )
+        # load_state_dict() intentionally ignores unsupported grad_dtype edits
+        # after fully_shard(); reset_sharded_param() restores the captured policy.
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
         self._post_load_hook_handle = (
