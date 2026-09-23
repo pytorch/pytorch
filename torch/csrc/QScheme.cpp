@@ -3,6 +3,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/refcount_contention.h>
 
 #include <cstring>
 #include <string>
@@ -15,6 +16,7 @@ PyObject* THPQScheme_New(at::QScheme qscheme, const std::string& name) {
   self_->qscheme = qscheme;
   std::strncpy(self_->name, name.c_str(), QSCHEME_NAME_LEN);
   self_->name[QSCHEME_NAME_LEN] = '\0';
+  torch::utils::set_immortal_if_possible(self.get());
   return self.release();
 }
 

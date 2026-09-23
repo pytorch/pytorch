@@ -1,21 +1,27 @@
 import torch
 from torch import Tensor
 
-from ..ir import FixedLayout, FlexibleLayout
+from ..ir import ExternKernel, FixedLayout, FlexibleLayout
 from ..lowering import register_lowering
 from ..select_algorithm import ExternKernelChoice, realize_inputs
 
 
 def _quack_symmetric_mm(x: Tensor, *, out: Tensor) -> None:
-    from torch._vendor.quack.gemm_symmetric import gemm_symmetric
+    if torch.version.hip is not None or not x.is_contiguous() or x.data_ptr() % 16:
+        torch.matmul(x, x.mT, out=out)
+        return
 
-    gemm_symmetric(x, out, autotune=True)
+    from torch._vendor.quack.gemm_interface import gemm_symmetric
+
+    gemm_symmetric(x, x.mT, out=out)
 
 
 quack_symmetric_mm_extern = ExternKernelChoice(_quack_symmetric_mm)
 
 
-@torch.library.custom_op("inductor::quack_symmetric_mm", mutates_args=())
+@torch.library.custom_op(
+    "inductor::quack_symmetric_mm", mutates_args=(), device_types="cuda"
+)
 def quack_symmetric_mm(x: Tensor) -> Tensor:
     out = torch.empty(
         (*x.shape[:-2], x.shape[-2], x.shape[-2]),
@@ -35,11 +41,11 @@ def _(x: Tensor) -> Tensor:
     torch.ops.inductor.quack_symmetric_mm.default, type_promotion_kind=None
 )
 def quack_symmetric_mm_lowering(x):
-    x = realize_inputs(x)
+    x = ExternKernel.require_contiguous(realize_inputs(x))
     size = x.get_size()
     output_size = [*size[:-2], size[-2], size[-2]]
     layout = FixedLayout(
-        x.get_device(),
+        x.get_device_or_error(),
         x.get_dtype(),
         output_size,
         FlexibleLayout.contiguous_strides(output_size),
