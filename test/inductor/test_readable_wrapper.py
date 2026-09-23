@@ -14,7 +14,7 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -146,6 +146,9 @@ class TestReadableWrapperCodegen(TestCase):
         # Both reach emit_triton_kernel_definition by their own route, with source of a
         # different shape from a pointwise kernel's: a Triton matmul template, and a
         # combo kernel with its module-level device functions.
+        if "max_autotune" in cfg and not is_big_gpu():
+            self.skipTest("Triton GEMM templates need a big GPU")
+
         def fn(a, b, x, y):
             return a @ b, x.sin(), y.cos()
 
