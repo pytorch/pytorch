@@ -5,18 +5,42 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 
 
 SCRIPT = Path(__file__).resolve().parent / "map_ec2_to_arc.py"
 
+# Minimal runner_mapping shared by the lf_allowlist fixture tests below.
+FIXTURE_RUNNER_MAPPING = textwrap.dedent("""\
+    runner_mapping:
+      linux.4xlarge: l-x86iavx512-16-128
+      linux.g5.4xlarge.nvidia.gpu: l-x86aavx2-29-113-a10g
+    meta_only_runners: []
+    """)
+
+
+def write_arc_yaml(tmp_dir: str, lf_allowlist_yaml: str = "") -> str:
+    """Write a fixture arc.yaml with FIXTURE_RUNNER_MAPPING plus optional
+    lf_allowlist content, so restricted-mode tests don't touch the real
+    arc.yaml."""
+    path = Path(tmp_dir) / "arc.yaml"
+    path.write_text(FIXTURE_RUNNER_MAPPING + lf_allowlist_yaml)
+    return str(path)
+
 
 def run(
-    matrix: str, prefix: str = "", github_output: str | None = None
+    matrix: str,
+    prefix: str = "",
+    github_output: str | None = None,
+    lf_runners: str | None = None,
+    arc_yaml: str | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [sys.executable, str(SCRIPT)]
     if prefix:
         cmd += ["--prefix", prefix]
+    if lf_runners is not None:
+        cmd += ["--lf-runners", lf_runners]
     cmd.append(matrix)
 
     env = os.environ.copy()
@@ -24,6 +48,10 @@ def run(
         env["GITHUB_OUTPUT"] = github_output
     else:
         env.pop("GITHUB_OUTPUT", None)
+    if arc_yaml is not None:
+        env["ARC_YAML_PATH"] = arc_yaml
+    else:
+        env.pop("ARC_YAML_PATH", None)
 
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
@@ -265,6 +293,165 @@ def test_h100_multi_gpu_variants_force_mt():
         ],
         f"unexpected runners: {runners}",
     )
+
+
+def test_lf_runners_flag_restricts_unlisted_runner():
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(d)
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.4xlarge" },
+        ]}"""
+        result = run(
+            matrix, prefix="lf-", lf_runners="l-x86aavx2-29-113-a10g", arc_yaml=arc_yaml
+        )
+        check(result.returncode == 0, result.stderr)
+        output = parse_output(result.stdout)
+        check(
+            output["include"][0]["runner"] == "mt-l-x86iavx512-16-128",
+            f"expected mt- override, got {output['include'][0]['runner']}",
+        )
+
+
+def test_lf_runners_flag_allows_listed_runner():
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(d)
+        gpu_runner = "linux.g5.4xlarge.nvidia.gpu"
+        matrix = f"""{{ include: [
+          {{ config: "default", shard: 1, num_shards: 1, runner: "lf-{gpu_runner}" }},
+        ]}}"""
+        result = run(
+            matrix, prefix="lf-", lf_runners="l-x86aavx2-29-113-a10g", arc_yaml=arc_yaml
+        )
+        check(result.returncode == 0, result.stderr)
+        output = parse_output(result.stdout)
+        check(output["include"][0]["runner"] == "lf-l-x86aavx2-29-113-a10g")
+
+
+def test_lf_runners_flag_ignored_when_prefix_is_mt():
+    """--lf-runners only matters for lf- prefixed requests."""
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(d)
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "mt-linux.4xlarge" },
+        ]}"""
+        result = run(
+            matrix, prefix="mt-", lf_runners="l-x86aavx2-29-113-a10g", arc_yaml=arc_yaml
+        )
+        check(result.returncode == 0, result.stderr)
+        output = parse_output(result.stdout)
+        check(output["include"][0]["runner"] == "mt-l-x86iavx512-16-128")
+
+
+def test_lf_runners_empty_string_overrides_restricted_arc_yaml():
+    """An explicit empty --lf-runners means unrestricted, even if arc.yaml
+    itself is restricted."""
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(
+            d,
+            textwrap.dedent("""\
+                lf_allowlist:
+                  mode: restricted
+                  runners:
+                    - l-x86aavx2-29-113-a10g
+                """),
+        )
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.4xlarge" },
+        ]}"""
+        result = run(matrix, prefix="lf-", lf_runners="", arc_yaml=arc_yaml)
+        check(result.returncode == 0, result.stderr)
+        output = parse_output(result.stdout)
+        actual = output["include"][0]["runner"]
+        check(
+            actual == "lf-l-x86iavx512-16-128",
+            f"empty --lf-runners should mean unrestricted, got {actual}",
+        )
+
+
+def test_no_lf_runners_flag_falls_back_to_restricted_arc_yaml():
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(
+            d,
+            textwrap.dedent("""\
+                lf_allowlist:
+                  mode: restricted
+                  runners:
+                    - l-x86aavx2-29-113-a10g
+                """),
+        )
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.4xlarge" },
+        ]}"""
+        result = run(matrix, prefix="lf-", arc_yaml=arc_yaml)
+        check(result.returncode == 0, result.stderr)
+        output = parse_output(result.stdout)
+        actual = output["include"][0]["runner"]
+        check(
+            actual == "mt-l-x86iavx512-16-128",
+            f"expected fallback to arc.yaml restricted mode, got {actual}",
+        )
+
+
+def test_no_lf_runners_flag_arc_yaml_mode_all_is_noop():
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(
+            d,
+            textwrap.dedent("""\
+                lf_allowlist:
+                  mode: all
+                  runners: []
+                """),
+        )
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.4xlarge" },
+        ]}"""
+        result = run(matrix, prefix="lf-", arc_yaml=arc_yaml)
+        check(result.returncode == 0, result.stderr)
+        output = parse_output(result.stdout)
+        check(output["include"][0]["runner"] == "lf-l-x86iavx512-16-128")
+
+
+def test_invalid_lf_allowlist_mode_fails():
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(
+            d,
+            textwrap.dedent("""\
+                lf_allowlist:
+                  mode: bogus
+                  runners: []
+                """),
+        )
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.4xlarge" },
+        ]}"""
+        result = run(matrix, prefix="lf-", arc_yaml=arc_yaml)
+        check(result.returncode == 1)
+        check("lf_allowlist.mode must be one of" in result.stderr, result.stderr)
+
+
+def test_invalid_lf_allowlist_mode_fails_even_with_lf_runners_override():
+    """Regression guard: mode validation must not be skipped just because a
+    caller passes --lf-runners."""
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(
+            d,
+            textwrap.dedent("""\
+                lf_allowlist:
+                  mode: bogus
+                  runners: []
+                """),
+        )
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.4xlarge" },
+        ]}"""
+        result = run(
+            matrix,
+            prefix="lf-",
+            lf_runners="l-x86iavx512-16-128",
+            arc_yaml=arc_yaml,
+        )
+        check(result.returncode == 1)
+        check("lf_allowlist.mode must be one of" in result.stderr, result.stderr)
 
 
 if __name__ == "__main__":
