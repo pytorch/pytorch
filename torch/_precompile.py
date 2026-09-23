@@ -3151,9 +3151,12 @@ def load(
     calling convention. ``load`` reads the source's ``BACKEND``, checks the cache's
     ``backend`` tag against it, primes the inductor kernel caches when the cache
     carries a bundle so a warm reload loads precompiled kernels instead of
-    JIT-compiling, and then exec's ``python_code``. With no usable cache it degrades to JIT'ing from
-    ``python_code``. Both files are trusted, EXECUTABLE input: load only artifacts
-    you produced or otherwise trust.
+    JIT-compiling, and then exec's ``python_code``. With no usable cache a
+    :class:`MakeFxTracer` artifact degrades to JIT'ing from ``python_code``; a
+    :class:`DynamoTracer` artifact carries its compiled subgraphs inside
+    ``python_code``, with their kernels under inductor's default bundling, so it
+    serves without JIT either way. Both files are trusted, EXECUTABLE input: load
+    only artifacts you produced or otherwise trust.
 
     Call the result with the SAME argument structure ``fn`` took -- the model(s)
     in their original positions plus the runtime inputs (keyword arguments too,
