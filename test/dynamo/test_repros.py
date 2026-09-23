@@ -81,10 +81,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
-    skipIfRocm,
     skipIfWindows,
     skipIfXpu,
-    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -3041,7 +3039,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(a)
         self.assertTrue(same(ref, res))
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/184324")
     def test_tokenization(self):
         from collections import UserDict
 
@@ -3577,13 +3574,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager")
         with self.assertRaisesRegex(AssertionError, "tensor"):
             opt_f(args)
-        for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
-            if "assert with non-string message" in gb:
-                self.assertEqual(cnt, 1)
-                break
-        else:
-            # graph break not found
-            self.assertTrue(False)
+        self.assertEqual(torch._dynamo.utils.counters["graph_break"], {})
 
     def test_rewrite_assert_noop(self):
         def f(x):
@@ -10016,7 +10007,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             self.assertEqual(grad, ref_grad)
 
     @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "flash attention not supported",
     )
     def test_flex_attention_guard_on_constant_func_defaults(self, device):

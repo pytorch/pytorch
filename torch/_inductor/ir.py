@@ -7015,15 +7015,13 @@ class ConcatKernel(NopKernel):
                 input_unwrapped = inp.data.unwrap_view()
             else:
                 input_unwrapped = inp.data
+
             if (
                 isinstance(input_unwrapped, StorageBox)
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
-                and (
-                    not is_dynamic(input_buffer)
-                    or config.combo_kernel_foreach_dynamic_shapes
-                )
+                and not is_dynamic(input_buffer)
             ):
                 op_names.append(input_buffer.get_operation_name())
 
@@ -9755,6 +9753,10 @@ class FallbackKernel(ExternKernelAlloc):
             example_output, (torch._C.ScriptObject, FakeScriptObject)
         ) or is_custom_class_obj(example_output):
             return torch.device("cpu")
+        if isinstance(example_output, dict):
+            # generate_output builds a MultiOutput per value, so the values carry
+            # the devices; the keys never do.
+            example_output = list(example_output.values())
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
                 # pyrefly: ignore [bad-argument-type]
@@ -10358,8 +10360,6 @@ class FallbackKernel(ExternKernelAlloc):
             device = torch.device("cpu")
 
         def create_direct_output(output: torch.Tensor) -> FallbackKernel:
-            if not device:
-                raise AssertionError("Not sure where to find device info")
             packed = cls(
                 cls.tensor_to_layout(output),
                 kernel,
@@ -10413,8 +10413,12 @@ class FallbackKernel(ExternKernelAlloc):
             return create_direct_output(example_output)
 
         else:
+            # No tensor in or out, so there is no device to inherit and nothing to
+            # run on but the host. An op that produces no output keeps None above --
+            # its placement is decided by the scheduler, and forcing a device there
+            # moves stream and event HOPs out of the stream block they belong to.
             if not device:
-                raise AssertionError("Not sure where to find device info")
+                device = torch.device("cpu")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
@@ -10473,7 +10477,7 @@ class FallbackKernel(ExternKernelAlloc):
         if isinstance(outputs, (list, tuple)):
             packed.outputs = outputs
         elif isinstance(outputs, dict):
-            packed.outputs = tuple(outputs)
+            packed.outputs = tuple(outputs.values())
         else:
             packed.outputs = [outputs]
 

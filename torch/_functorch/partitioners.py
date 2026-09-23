@@ -2376,6 +2376,10 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
     The with_effects node returns a tuple (token, result). We recursively find all
     leaf outputs extracted via getitem and mark them as MUST_SAVE. Since these are
     saved, the with_effects op doesn't need to be recomputed in backward.
+
+    AOTAutograd cannot rematerialize a forward effect because the backward token
+    chain is established before partitioning. Reject an explicit MUST_RECOMPUTE
+    policy instead of emitting an invalid saved-token calling convention.
     """
 
     def mark_getitem_outputs(node: fx.Node) -> None:
@@ -2386,12 +2390,15 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
                     user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
     for node in joint_module.graph.nodes:
-        if (
-            is_with_effects(node)
-            and not must_recompute(node)
-            and not _has_tag_is_backward(node)
-        ):
-            mark_getitem_outputs(node)
+        if not is_with_effects(node) or _has_tag_is_backward(node):
+            continue
+        if node.meta.get("recompute") == CheckpointPolicy.MUST_RECOMPUTE:
+            raise RuntimeError(
+                "AOTAutograd does not support MUST_RECOMPUTE for effectful "
+                "operations because forward effects cannot join the backward "
+                "effect-token chain."
+            )
+        mark_getitem_outputs(node)
 
 
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
@@ -4284,9 +4291,10 @@ def min_cut_rematerialization_partition(
             break
 
     # The partitioner applies a single budget per joint graph, so all annotated
-    # nodes must agree and the annotation must cover every forward op; otherwise
-    # the caller mixed budgets or annotated only part of a graph (across a graph
-    # break each graph is resolved independently). Collect both in one pass.
+    # nodes must agree. By default the annotation must cover every forward op;
+    # the full-coverage config can permit partial coverage and apply the budget
+    # to the entire graph. Collect the budget and any unannotated forward ops in
+    # one pass.
     region_budgets: OrderedSet[float] = OrderedSet()
     unannotated_fw_ops: list[fx.Node] = []
     for node in joint_graph.nodes:
@@ -4296,11 +4304,11 @@ def min_cut_rematerialization_partition(
         elif node.op == "call_function" and node_info.is_required_fw(node):
             unannotated_fw_ops.append(node)
 
-    # A budget must consistently cover the entire forward, including HOP bodies.
-    # Recurse into nested subgraph modules: collect their budgets (for the
-    # agreement check) and flag any unannotated call_function (for coverage). In
-    # a consistent graph every node in every body carries the budget, so an
-    # unannotated body op means the budget did not cover that HOP.
+    # Budget agreement and optional full-coverage checks include HOP bodies.
+    # Recurse into nested subgraph modules to collect their budgets and any
+    # unannotated call_function nodes. In a consistent graph every node in every
+    # body carries the budget, so an unannotated body op means the budget did not
+    # cover that HOP.
     all_budgets: OrderedSet[float] = OrderedSet(region_budgets)
     for _, sub in joint_module.named_modules():
         if isinstance(sub, fx.GraphModule) and sub.graph is not joint_graph:
@@ -4319,14 +4327,15 @@ def min_cut_rematerialization_partition(
         )
 
     if all_budgets:
-        if unannotated_fw_ops:
+        if config.activation_memory_budget_require_full_coverage and unannotated_fw_ops:
             raise RuntimeError(
                 f"torch.autograd.graph.region_activation_memory_budget: must "
                 f"cover the entire forward of a graph (including HOP bodies), but "
                 f"{len(unannotated_fw_ops)} forward op(s) are unannotated. Wrap "
-                f"the whole forward in a single region; use a graph break to scope "
-                f"different budgets to different graphs. Note that a graph break "
-                f"inside the annotated region can also cause unannotated ops here. "
+                f"the whole forward in a single region, or set "
+                f"torch._functorch.config."
+                f"activation_memory_budget_require_full_coverage=False to apply "
+                f"the budget to the entire graph. "
                 f"Unannotated ops: {[n.name for n in unannotated_fw_ops]}."
             )
         memory_budget = next(iter(all_budgets))

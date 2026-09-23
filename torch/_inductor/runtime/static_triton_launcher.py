@@ -253,9 +253,11 @@ class StaticallyLaunchedTritonKernel:
         # compile-on-one-rank: a device-agnostic kernel (no baked device index) can be
         # launched on more than one device within a single process. A loaded module/
         # function is bound to a single device, so when device_agnostic is set we keep
-        # them per device and resolve the current device at launch time. The retained
-        # binary can be loaded onto additional devices, and the per-launcher lock
-        # serializes each device's first load and handle publication.
+        # them per device and resolve the current device at launch time. The
+        # device-agnostic binary is retained so it can be loaded onto additional
+        # devices. CooR's intended model uses one current device per rank/process,
+        # which make_launcher loads eagerly; the per-launcher lock also serializes
+        # each device's first load and handle publication.
         self.device_agnostic: bool = False
         self._load_lock = threading.Lock()
         self.functions: dict[int, int] = {}

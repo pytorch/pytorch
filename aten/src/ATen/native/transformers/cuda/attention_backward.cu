@@ -5,6 +5,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -252,8 +253,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
         is_nested || query.size(2) != 1 || !sdp::is_cudnn_attention_decode_disabled(),
         "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x.");
     TORCH_CHECK(
-        !is_nested || max_q > 128,
-        "cuDNN varlen attention does not support query sequence length <= 128.");
+        !is_nested || max_q > 128 ||
+            at::detail::getCUDAHooks().versionRuntimeCuDNN() >= 92400,
+        "cuDNN varlen attention requires cuDNN >= 9.24 for query sequence length <= 128.");
 
     if (!is_nested) {
       const int64_t batch_size = query.size(0);
@@ -565,6 +567,17 @@ _efficient_attention_backward(
 
 #ifdef USE_ROCM
   // ROCM Implementation
+  // Empty grad_out means there is nothing to accumulate; skip the backends,
+  // which cannot launch on empty inputs (see _efficient_attention_forward).
+  if (grad_out.numel() == 0) {
+    grad_q.zero_();
+    grad_k.zero_();
+    grad_v.zero_();
+    if (grad_bias.defined()) {
+      grad_bias.zero_();
+    }
+    return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
+  }
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
