@@ -88,7 +88,10 @@ def _capture_config() -> Iterator[None]:
     AOTAutograd otherwise defers it to the first ``.backward()``, and a graph
     compiled with grad enabled whose backward was never lowered is never saved,
     so a capture that never makes one -- a training step, or an inference call
-    made outside ``torch.no_grad()`` -- would record no backend at all.
+    made outside ``torch.no_grad()`` -- would record no backend at all. Such an
+    inference call therefore compiles a backward too, and a backward the
+    backend cannot compile fails the capture; capturing under
+    ``torch.no_grad()`` avoids both.
     ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
     guards reach the artifact; it also extends the lifetime of objects the frame
     holds -- with it on, a weakref callback on a value the frame captured does
