@@ -1158,14 +1158,16 @@ def export_python(
     ``nn.Module`` arguments. Python scalar/config arguments are rejected because
     ``make_fx`` specializes their values without emitting runtime guards; close such
     constants over in ``fn`` instead. Other keyword-only parameters are not expressible
-    in the artifact's positional convention and are rejected. Three things that
+    in the artifact's positional convention and are rejected. Four things that
     ``make_fx`` or the code generator resolves without emitting a guard are recorded as
     comment stamps and checked on every call:
     each ``nn.Module`` argument's per-submodule ``training`` state, which input tensors
-    shared memory at capture (aliasing decides what an in-place mutation means), and which
+    shared memory at capture (aliasing decides what an in-place mutation means), which
     input positions held the *same* tensor object (AOTAutograd folds those into a single
     graph slot, which byte overlap alone cannot distinguish from two views that merely
-    intersect). What is *not*
+    intersect), and the ambient ``torch.autocast`` state (which picks the dtypes the
+    kernels were built for, for every device type the artifact's own source names, not
+    only the ones its inputs live on). What is *not*
     guarded is a change in *how* two aliased
     inputs overlap: when capture and the call both pass intersecting views, the artifact
     runs with capture's relative offsets baked in and may compute the wrong thing.
@@ -1175,7 +1177,7 @@ def export_python(
     machine-type warning above). Where ``torch.compile`` would recompile, an artifact cannot, so treat any
     ambient change between capture and call as needing a fresh capture unless a stamp
     covers it. A hand-edit that drops a stamp turns that one check off with a warning.
-    All four stamps (these three plus the version stamp) must stay in the artifact's
+    All five stamps (these four plus the version stamp) must stay in the artifact's
     leading comment block: the reader stops at the first non-comment line, so inserting code above them
     turns every check off -- loudly for the checked stamps, each of which warns per
     call while it is missing, and silently for the version warning, which just
