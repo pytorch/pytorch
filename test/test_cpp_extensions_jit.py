@@ -490,7 +490,8 @@ class TestCppExtensionJIT(common.TestCase):
             y_incorrect = torch.zeros(20, device="cuda", dtype=torch.float32)
             module.cudnn_relu(x, y_incorrect)
 
-    @unittest.skipIf(CUDA_HOME is None, "CUDA not found")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
     def test_cudnn_cuda_versioned_layout_paths(self):
         # cuDNN 9 Windows CUDA 13+ packages nest headers and libs under
         # include/<cuda>/ and lib/<cuda>/<arch>/. Flat include/cudnn.h is absent.
