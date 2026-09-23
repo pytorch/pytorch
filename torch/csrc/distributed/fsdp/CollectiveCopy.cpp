@@ -69,9 +69,9 @@ bool check_all_gather_copy_out_inputs(
   return needs_resize;
 }
 
-namespace {
-
-void all_gather_copy_out_with_resize(
+// Called from libtorch_cuda as well as libtorch_cpu.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+std::vector<at::Tensor> split_all_gather_output_with_resize(
     at::TensorList out,
     const at::Tensor& input,
     at::IntArrayRef split_sizes,
@@ -79,13 +79,11 @@ void all_gather_copy_out_with_resize(
     int64_t num_chunks) {
   // Hooks may change payload sizes while reusing cached outputs. Resize only
   // the rank-major copy views, then reassemble using the cached output layout.
-  std::vector<at::Tensor> buffers;
   std::vector<at::Tensor> outputs;
-  buffers.reserve(out.size());
   outputs.reserve(out.size());
   for (const auto i : c10::irange(out.size())) {
-    buffers.push_back(outer_sizes[i] == 1 ? out[i] : at::empty_like(out[i]));
-    auto output = buffers.back().view({num_chunks, -1});
+    auto buffer = outer_sizes[i] == 1 ? out[i] : at::empty_like(out[i]);
+    auto output = buffer.view({num_chunks, -1});
     if (input.scalar_type() == at::kByte) {
       output = output.view(at::kByte);
     }
@@ -95,15 +93,38 @@ void all_gather_copy_out_with_resize(
     at::split_with_sizes_copy_out(
         outputs, input.view({num_chunks, -1}), split_sizes, 1);
   }
+  return outputs;
+}
+
+namespace {
+
+void all_gather_copy_out_with_resize(
+    at::TensorList out,
+    const at::Tensor& input,
+    at::IntArrayRef split_sizes,
+    at::IntArrayRef outer_sizes,
+    int64_t num_chunks) {
+  auto outputs = split_all_gather_output_with_resize(
+      out, input, split_sizes, outer_sizes, num_chunks);
   for (const auto i : c10::irange(out.size())) {
     if (outer_sizes[i] != 1 && split_sizes[i] > 0) {
-      auto output = out[i].view({-1});
-      auto buffer = buffers[i].view({-1});
+      auto output = out[i];
       if (input.scalar_type() == at::kByte) {
-        output = output.view(at::kByte);
-        buffer = buffer.view(at::kByte);
+        output = output.view({-1}).view(at::kByte);
       }
-      auto chunks = buffer.view({num_chunks, outer_sizes[i], -1}).unbind(0);
+      const auto& buffer = outputs[i];
+      const auto outer_size = outer_sizes[i];
+      // The copy view may have resized; reassemble the cached output layout.
+      const auto rank_stride = output.numel() / num_chunks;
+      const auto inner_size = rank_stride / outer_size;
+      std::vector<at::Tensor> chunks;
+      chunks.reserve(num_chunks);
+      for (const auto rank : c10::irange(num_chunks)) {
+        chunks.push_back(buffer.as_strided(
+            {outer_size, inner_size},
+            {inner_size, 1},
+            buffer.storage_offset() + rank * rank_stride));
+      }
       auto target = output.view({outer_sizes[i], -1});
       at::cat_out(target, chunks, 1);
     }

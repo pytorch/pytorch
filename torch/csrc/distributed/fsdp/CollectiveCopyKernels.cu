@@ -1,6 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/fsdp/CollectiveCopyCUDA.hpp>
 #include <algorithm>
 #include <cstring>
@@ -23,6 +26,14 @@ static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
 static_assert(BLOCK_SIZE == kCopyThreadsPerBlock);
 static_assert(BYTES_PER_BLOCK == kChunkCatBytesPerBlock);
+
+static constexpr size_t REASSEMBLY_BATCH_SIZE = 64;
+
+struct AllGatherReassemblyBatch {
+  AllGatherReassembly copies[REASSEMBLY_BATCH_SIZE];
+};
+
+static_assert(sizeof(AllGatherReassemblyBatch) + sizeof(int64_t) <= 4096);
 
 static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
@@ -130,6 +141,46 @@ static __device__ __inline__ void copy_chunk(
   if (align_off + aligned_size + thread_idx < chunk_size) {
     dst[align_off + aligned_size + thread_idx] =
         src[align_off + aligned_size + thread_idx];
+  }
+}
+
+template <typename index_t>
+static __global__ void all_gather_reassembly_kernel(
+    AllGatherReassemblyBatch batch,
+    index_t num_chunks) {
+  const auto& copy = batch.copies[blockIdx.y];
+  const auto* src = static_cast<const char*>(copy.src);
+  auto* dst = static_cast<char*>(copy.dst);
+  const auto rank_size = static_cast<index_t>(copy.rank_size);
+  const auto inner_size = rank_size / static_cast<index_t>(copy.outer_size);
+  constexpr index_t vector_size = BYTES_PER_THREAD;
+  const index_t numel = rank_size * num_chunks;
+  const index_t vectors = (numel - 1) / vector_size + 1;
+  CUDA_KERNEL_LOOP_TYPE(vector, vectors, index_t) {
+    const index_t offset = vector * vector_size;
+    const index_t inner_offset = offset % inner_size;
+    const index_t dst_offset =
+        ((offset % rank_size) / inner_size * num_chunks + offset / rank_size) *
+            inner_size +
+        inner_offset;
+    if (numel - offset >= vector_size &&
+        inner_size - inner_offset >= vector_size &&
+        is_aligned<uint4>(dst + dst_offset)) {
+      uint4 value;
+      load128(value, src + offset);
+      stream_store128(dst + dst_offset, value);
+    } else {
+      const index_t bytes =
+          numel - offset < vector_size ? numel - offset : vector_size;
+      for (index_t byte = 0; byte < bytes; ++byte) {
+        const index_t pos = offset + byte;
+        const index_t target =
+            ((pos % rank_size) / inner_size * num_chunks + pos / rank_size) *
+                inner_size +
+            pos % inner_size;
+        dst[target] = src[pos];
+      }
+    }
   }
 }
 
@@ -322,6 +373,42 @@ static __global__ void chunk_cat_cuda_kernel(
       actual_copy_size,
       thread_idx,
       num_threads);
+}
+
+void launch_all_gather_reassembly(
+    at::ArrayRef<AllGatherReassembly> copies,
+    int64_t num_chunks,
+    bool use32) {
+  if (copies.empty()) {
+    return;
+  }
+  const auto* properties = at::cuda::getCurrentDeviceProperties();
+  const int64_t max_blocks =
+      static_cast<int64_t>(properties->multiProcessorCount) *
+      properties->maxThreadsPerMultiProcessor / BLOCK_SIZE * 2;
+  AT_DISPATCH_INDEX_TYPES(
+      use32 ? at::kInt : at::kLong, "all_gather_reassembly", [&] {
+        for (size_t start = 0; start < copies.size();
+             start += REASSEMBLY_BATCH_SIZE) {
+          const auto count =
+              std::min(REASSEMBLY_BATCH_SIZE, copies.size() - start);
+          AllGatherReassemblyBatch batch{};
+          int64_t max_bytes = 0;
+          for (const auto i : c10::irange(count)) {
+            batch.copies[i] = copies[start + i];
+            max_bytes =
+                std::max(max_bytes, batch.copies[i].rank_size * num_chunks);
+          }
+          const auto blocks = std::min(
+              (max_bytes - 1) / BYTES_PER_BLOCK + 1,
+              std::max<int64_t>(1, max_blocks / count));
+          all_gather_reassembly_kernel<index_t>
+              <<<dim3(blocks, count), BLOCK_SIZE, 0,
+                 at::cuda::getCurrentCUDAStream()>>>(
+                  batch, static_cast<index_t>(num_chunks));
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        }
+      });
 }
 
 void launch_split_with_sizes_copy(
