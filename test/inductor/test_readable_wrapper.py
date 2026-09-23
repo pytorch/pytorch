@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import os
 import re
 import tempfile
@@ -14,7 +15,7 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -29,12 +30,30 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 def _code_for(fn, *args, **config_kwargs):
     torch._dynamo.reset()
-    if config_kwargs.get("readable_wrapper"):
-        # Triton kernels in this mode are pinned to the configs tuned at compile time.
-        config_kwargs.setdefault("triton.autotune_at_compile_time", True)
     with config.patch(**config_kwargs):
         result, codes = run_and_get_code(torch.compile(fn), *args)
     return result, "\n".join(codes)
+
+
+@contextlib.contextmanager
+def _no_runtime_tuning():
+    from torch._inductor.runtime.triton_heuristics import (
+        AutotuneCache,
+        CachingAutotuner,
+    )
+
+    def runtime_tuning(*args, **kwargs):
+        raise AssertionError("a readable module autotuned at runtime")
+
+    with (
+        mock.patch.object(CachingAutotuner, "autotune_to_one_config", runtime_tuning),
+        mock.patch.object(
+            CachingAutotuner, "_coordinate_descent_tuning", runtime_tuning
+        ),
+        # a cached best config would replace the pinned one
+        mock.patch.object(AutotuneCache, "create", runtime_tuning),
+    ):
+        yield
 
 
 def _softmax(x):
@@ -144,6 +163,9 @@ class TestReadableWrapperCodegen(TestCase):
         # Both reach emit_triton_kernel_definition by their own route, with source of a
         # different shape from a pointwise kernel's: a Triton matmul template, and a
         # combo kernel with its module-level device functions.
+        if "max_autotune" in cfg and not is_big_gpu():
+            self.skipTest("Triton GEMM templates need a big GPU")
+
         def fn(a, b, x, y):
             return a @ b, x.sin(), y.cos()
 
@@ -155,7 +177,12 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertIn(marker, code)
         expected = fn(a, b, x, y)
         self.assertEqual(result, expected)
-        self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
+        with _no_runtime_tuning():
+            self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
+        # A template is built with its one config, so it keeps its decorator unpinned.
+        configs = code[code.index("\nKERNEL_CONFIGS = {") :].split("\n}\n")[0]
+        for template in re.findall(r"^def (triton_tem_\w+)\(", code, re.MULTILINE):
+            self.assertNotIn(repr(template), configs)
 
     @requires_cuda_and_triton
     @parametrize(
@@ -181,30 +208,14 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertTrue(decorators)
         self.assertEqual(set(decorators), {"fixed_config"}, decorators)
         self.assertIn("\nKERNEL_CONFIGS = {\n", code)
-        from torch._inductor.runtime.triton_heuristics import (
-            AutotuneCache,
-            CachingAutotuner,
-            config_to_dict,
-        )
-
-        def runtime_tuning(*args, **kwargs):
-            raise AssertionError("a readable module autotuned at runtime")
+        from torch._inductor.runtime.triton_heuristics import config_to_dict
 
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "artifact.py")
             with open(path, "w") as f:
                 f.write(code)
             ns: dict[str, object] = {"__file__": path, "__name__": "_readable_artifact"}
-            with (
-                mock.patch.object(
-                    CachingAutotuner, "autotune_to_one_config", runtime_tuning
-                ),
-                mock.patch.object(
-                    CachingAutotuner, "_coordinate_descent_tuning", runtime_tuning
-                ),
-                # a cached best config would replace the pinned one
-                mock.patch.object(AutotuneCache, "create", runtime_tuning),
-            ):
+            with _no_runtime_tuning():
                 exec(compile(code, path, "exec"), ns)
                 # the same configs as the compile, so the same bits
                 self.assertEqual(ns["call"]([x])[0], expected, atol=0, rtol=0)  # type: ignore[operator]
@@ -218,8 +229,16 @@ class TestReadableWrapperCodegen(TestCase):
 
     @requires_cuda_and_triton
     def test_triton_kernels_require_compile_time_autotuning(self):
-        # Without it the kernels could only be tuned on first launch.
+        # Unset, the mode turns it on; turned off, the kernels could only be tuned on
+        # first launch.
         x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(
+            _softmax,
+            x,
+            readable_wrapper=True,
+            **{"triton.autotune_at_compile_time": None},
+        )
+        self.assertIn("\nKERNEL_CONFIGS = {\n", code)
         with self.assertRaisesRegex(Exception, "triton.autotune_at_compile_time"):
             _code_for(
                 _softmax,
