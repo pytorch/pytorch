@@ -11,11 +11,11 @@ Both versions will work in your code.
 However, it is possible that a small part of the model code cannot be
 handled by `torch.compiler`. In this case, you might want to disable
 the compiler on that particular portion, while running compilation on
-the rest of the model. This section describe the existing APIs that
+the rest of the model. This section describes the existing APIs that you can
 use to define parts of your code in which you want to skip compilation
 and the relevant use cases.
 
-The API that you can use to define portions of the code on which you can
+The APIs that you can use to define portions of the code on which you can
 disable compilation are listed in the following table:
 
 ```{eval-rst}
@@ -24,12 +24,17 @@ disable compilation are listed in the following table:
    :widths: auto
 
    "``torch.compiler.disable``", "Disables Dynamo on the decorated function as well as recursively invoked functions.", "Excellent for unblocking a user, if a small portion of the model cannot be handled with ``torch.compile``."
-   "``torch._dynamo.disallow_in_graph``", "Disallows the marked op in the TorchDynamo graph. TorchDynamo causes graph break, and runs the op in the eager (no compile) mode.\n\nThis is suitable for the ops, while ``torch.compiler.disable`` is suitable for decorating functions.", "This API is excellent for both debugging and unblocking if a custom op like ``torch.ops.fbgemm.*`` is causing issues with the ``torch.compile`` function."
-   "``torch.compile.allow_in_graph``", "The annotated callable goes as is in the TorchDynamo graph. For example, a black-box for TorchDynamo Dynamo.\n\nNote that AOT Autograd will trace through it, so the ``allow_in_graph`` is only a Dynamo-level concept.", "This API is useful for portions of the model which have known TorchDynamo hard-to-support features, like hooks or ``autograd.Function``. However, each usage of ``allow_in_graph`` **must be carefully screened** (no graph breaks, no closures)."
+   "``torch._dynamo.disallow_in_graph``", "Disallows the marked op in the TorchDynamo graph. TorchDynamo causes graph break, and runs the op in the eager (no compile) mode.
+
+      This is suitable for the ops, while ``torch.compiler.disable`` is suitable for decorating functions.", "This API is excellent for both debugging and unblocking if a custom op like ``torch.ops.fbgemm.*`` is causing issues with the ``torch.compile`` function."
+   "``torch.compiler.nonstrict_trace``", "Disables Dynamo and instead traces via PyTorch's operator overloading capabilities.  This has fewer guarantees than Dynamo and may result in incorrect compiled code, but is also more flexible.  See [Non-strict Tracing](programming_model.dynamo_nonstrict_trace) for more details", "Useful for functions that are known to be safe but are hard for Dynamo to trace"
+   "``torch.compile.allow_in_graph``", "The annotated callable goes as is in the TorchDynamo graph. For example, a black-box for TorchDynamo Dynamo.  Note that AOT Autograd will trace through it, so ``allow_in_graph`` is only a Dynamo-level concept.  This is similar to ``nonstrict_trace`` but has additional restrictions on the inputs - for this reason, prefer ``nonstrict_trace``", "This API is useful for portions of the model which have known TorchDynamo hard-to-support features, like hooks or ``autograd.Function``. However, each usage of ``allow_in_graph`` **must be carefully screened** (no graph breaks, no closures)."
    "``torch._dynamo.graph_break``", "Adds a graph break. The code before and after the graph break goes through TorchDynamo.", "**Rarely useful for deployment** - If you think you need this, most probably you need either ``disable`` or ``disallow_in_graph``."
-   "``torch.compiler.is_compiling``", "Indicates whether a graph is executed/traced as part of torch.compile() or torch.export()."
+   "``torch.compiler.is_compiling``", "Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().", "Useful for selectively disabling parts of a function that cannot be compiled (i.e. logging statements, general I/O, network access, etc).  See also ``torch._dynamo.config.ignore_logging_functions``"
    "``torch.compiler.is_dynamo_compiling``", "Indicates whether a graph is traced via TorchDynamo. It's stricter than torch.compiler.is_compiling() flag, as it would only be set to True when TorchDynamo is used."
    "``torch.compiler.is_exporting``", "Indicates whether a graph is traced via export. It's stricter than torch.compiler.is_compiling() flag, as it would only be set to True when torch.export is used."
+   "``torch.compiler.assume_constant_result``", "Allows Dynamo to assume that the function always produces the same result.  The function is executed at trace time to determine the result, which is then baked into the graph", "Useful for functions with expensive and untraceable side effects that nevertheless produce constant results"
+   "``torch.compiler.substitute_in_graph``", "Registers a polyfill that Dynamo will trace instead of the substituted function", "Useful for adding compile support for native functions that Dynamo does not yet support."
 ```
 
 ## `torch.compiler.disable`
