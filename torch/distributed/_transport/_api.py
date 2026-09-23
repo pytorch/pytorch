@@ -60,7 +60,7 @@ class Transport(ABC):
     Operations use byte ranges, not tensor shapes or dtypes. One endpoint has
     one outgoing peer; no process group, ranks, or matching receives are needed.
     Exchange connection bytes and remote descriptors through a trusted control
-    plane. Registration is valid until close, including after bind/connect.
+    plane. Registration is valid until unregistration or close, including after bind/connect.
 
     ``timeout`` is a nonnegative, finite number of seconds; ``None`` selects the
     backend default. A timeout bounds the caller's wait, not the transfer's
@@ -73,8 +73,8 @@ class Transport(ABC):
 
     Never resize, replace storage, or modify buffers while registered/exposed to
     a peer. The application must coordinate remote access and notify peers before
-    close; local completion does not establish that a peer has stopped accessing
-    this endpoint. Descriptors are invalid after their owner closes.
+    unregistering memory or closing; local completion does not establish that a peer has stopped accessing
+    this endpoint. Descriptors are invalid after unregistration or their owner closes.
     CUDA stream, graph capture, and tracing semantics are not part of this API.
     """
 
@@ -114,6 +114,20 @@ class Transport(ABC):
 
         Exchange its remote-buffer descriptor with the peer before remote access.
         """
+
+    def unregister_memory(
+        self, memory: Memory, *, timeout: float | None = None
+    ) -> None:
+        """Unregister memory after coordinating with peers to stop remote access.
+
+        Wait for locally submitted transfers using this registration first.
+        Reused registrations share one lifetime: unregistering any handle
+        invalidates all aliases, existing views, and exported descriptors.
+        Register the tensor again and exchange fresh descriptors before reuse.
+        Repeating unregistration on the same handle is a no-op while open.
+        Backends without this operation raise ``NotImplementedError``.
+        """
+        raise NotImplementedError("transport does not support memory unregistration")
 
     @abstractmethod
     def write(

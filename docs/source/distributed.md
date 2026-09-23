@@ -2269,7 +2269,7 @@ Synchronous reads/writes return zero; ``async_op=True`` returns
 :class:`torch.distributed.Work`. Successful completion means the transfer completed,
 not that the remote application consumed or acknowledged the data. Asyncio callers
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
-until close, and tensors must not be resized or have their storage replaced.
+until unregistration or close, and tensors must not be resized or have their storage replaced.
 
 CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
 rank-based bootstrap helpers are outside this initial API.
@@ -2293,6 +2293,12 @@ NIXL backend
 The initial backend is NIXL, installed separately with ``pip install nixl``.
 Its default UCX plugin supports CPU and CUDA memory, subject to the installed
 NIXL/UCX build and hardware.
+
+``unregister_memory(memory)`` deregisters a local allocation without closing the
+transport. Wait for local transfers first and coordinate with peers to stop remote
+access; the backend cannot detect incoming DMA. All handles sharing a registration,
+including previously created views and exported descriptors, become invalid.
+Register again and exchange fresh descriptors before resuming transfers.
 
 NIXL transfers return Work objects that retain their request handles until
 completion. ``wait_all``, ``read_async``, and ``write_async`` await Work futures.
