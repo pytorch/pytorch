@@ -677,13 +677,9 @@ REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
 struct logical_not_functor {
-  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  template <typename T>
   inline bool operator()(const T x) {
-    return x == T(0);
-  }
-  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
-  inline bool operator()(const T x) {
-    return x.x == 0 && x.y == 0;
+    return !c10::metal::cast_to<bool>(x);
   }
 };
 
