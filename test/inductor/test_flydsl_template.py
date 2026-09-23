@@ -356,7 +356,6 @@ class TestFlyDSLTemplate(TestCase):
         ),
     )
     def test_mm_gate_rejects_invalid_inputs(self, size, dtype, stride, offset, n):
-
         def node(size, stride, offset=0):
             return SimpleNamespace(
                 get_size=lambda: size,
