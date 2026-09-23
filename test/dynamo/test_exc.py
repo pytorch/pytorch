@@ -665,6 +665,44 @@ Failed Source Expressions:
         )
 
     @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_zero_width_unicode_source_caret_alignment(self):
+        # (source, display columns minus code points before "gn()")
+        cases = [
+            # wide emoji (2 columns) followed by a zero-width variation selector
+            ('    return "\U0001f600\ufe0f" + gn()\n', 0),
+            # base letter followed by a zero-width combining accent
+            ('    return "e\u0301" + gn()\n', -1),
+        ]
+        for i, (source, column_delta) in enumerate(cases):
+            with self.subTest(source=source):
+                filename = f"{__file__}.zero_width{i}"
+                linecache.cache[filename] = (
+                    len(source),
+                    None,
+                    source.splitlines(True),
+                    filename,
+                )
+                self.addCleanup(linecache.cache.pop, filename, None)
+                start = len(source[: source.index("gn()")].encode())
+                frame = traceback.FrameSummary(
+                    filename,
+                    1,
+                    "fn",
+                    lookup_line=False,
+                    end_lineno=1,
+                    colno=start,
+                    end_colno=start + len("gn()"),
+                )
+
+                result = format_user_stack([frame])
+                source_line, marker_line = result.splitlines()[1:]
+
+                self.assertEqual(
+                    len(marker_line) - len(marker_line.lstrip()),
+                    source_line.index("gn()") + column_delta,
+                )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
     def test_user_stack_multiline_variable_width_source(self):
         filename = f"{__file__}.multiline"
         source_lines = [
