@@ -357,7 +357,6 @@ class FSDPParamGroup:
             ]
         orig_dtypes = {p.orig_dtype for p in params_for_dtype}
         reduce_dtypes = {p.reduce_dtype for p in params_for_dtype}
-        unsharded_grad_dtypes = {p.unsharded_grad_dtype for p in trainable_params}
         if len(trainable_params) > 0 and len(orig_dtypes) != 1:
             # Models may have no grad params
             raise AssertionError(
@@ -367,17 +366,13 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
-        if len(unsharded_grad_dtypes) > 1:
-            raise AssertionError(
-                "FSDP expects uniform unsharded gradient dtype but got "
-                f"{unsharded_grad_dtypes}. Set MixedPrecisionPolicy.reduce_dtype "
-                "to a common dtype."
-            )
         dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
         self._orig_dtype = next(iter(orig_dtypes)) if dtype_sets_are_uniform else None
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
+
+    def _init_reduce_scatter_param_order(self) -> None:
         # Cache the packing order after resolving dtypes, keeping all-gather's
         # parameter order unchanged. Backward filters this order to active grads.
         dtype_indices: dict[torch.dtype | None, list[int]] = {}
@@ -405,6 +400,7 @@ class FSDPParamGroup:
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
+        self._init_reduce_scatter_param_order()
         self._register_state_dict_hooks()
 
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
@@ -758,14 +754,6 @@ class FSDPParamGroup:
                         )
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(grad)
-                grad_dtypes = {grad.dtype for grad in unsharded_grads}
-                if len(grad_dtypes) > 1:
-                    raise AssertionError(
-                        "FSDP expects uniform gradient dtype but got "
-                        f"{grad_dtypes}. Set MixedPrecisionPolicy.reduce_dtype "
-                        "to a common dtype."
-                    )
-                for fsdp_param in fsdp_params_with_grad:
                     fsdp_param.unsharded_param.grad = None
                 if self.reshard_after_backward:
                     self.reshard()

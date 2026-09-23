@@ -724,11 +724,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 ) as reduce_scatter,
                 patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
             ):
-                with self.assertRaisesRegex(
-                    AssertionError, "uniform unsharded gradient dtype"
-                ):
-                    model(inp)
-                all_gather.assert_not_called()
+                with self.assertRaisesRegex(AssertionError, "uniform gradient dtype"):
+                    model(inp).sum().backward()
+                all_gather.assert_called_once()
                 reduce_scatter.assert_not_called()
                 all_reduce.assert_not_called()
             return
@@ -790,8 +788,13 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
     @parametrize("use_hsdp", [False, True])
     @parametrize("use_no_sync", [False, True])
     @parametrize("reduce_dtype", [None, torch.float32])
+    @parametrize("second_grad_dtype", [None, torch.float32])
     def test_grad_dtype_none_requires_uniform_gradients(
-        self, use_hsdp: bool, use_no_sync: bool, reduce_dtype: torch.dtype | None
+        self,
+        use_hsdp: bool,
+        use_no_sync: bool,
+        reduce_dtype: torch.dtype | None,
+        second_grad_dtype: torch.dtype | None,
     ):
         if use_hsdp and self.world_size != 4:
             self.skipTest("HSDP requires four devices")
@@ -810,7 +813,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 self.second = nn.Parameter(torch.ones_like(self.first))
                 self.register_buffer("first_scale", torch.ones(8, device=device_type))
                 self.register_buffer("second_scale", self.first_scale.bfloat16())
-                self.first.grad_dtype = self.second.grad_dtype = None
+                self.first.grad_dtype = None
+                self.second.grad_dtype = second_grad_dtype
 
             def forward(self):
                 return (self.first * self.first_scale).sum() + (
@@ -843,17 +847,18 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             model.set_requires_gradient_sync(True)
             model.set_is_last_backward(True)
             loss = model()
-            if reduce_dtype is None:
+            if reduce_dtype is None and second_grad_dtype is None:
                 with self.assertRaisesRegex(AssertionError, "uniform gradient dtype"):
                     loss.backward()
-                self.assertEqual(model.first.grad.dtype, torch.float32)
-                self.assertEqual(model.second.grad.dtype, torch.bfloat16)
                 reduce_scatter.assert_not_called()
                 all_reduce.assert_not_called()
             else:
                 loss.backward()
                 reduce_scatter.assert_called_once()
                 self.assertEqual(all_reduce.call_count, int(use_hsdp))
+                model.reshard()
+                for param in model.parameters():
+                    self.assertEqual(param.grad.dtype, torch.float32)
             all_gather.assert_called_once()
 
     @skip_if_lt_x_gpu(2)
