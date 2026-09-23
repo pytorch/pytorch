@@ -53,6 +53,7 @@ from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..device_interface import get_registered_device_interfaces
 from ..exc import (
+    CompileOnOneRankUnsupported,
     handle_observed_exception,
     ObservedAttributeError,
     ObservedKeyError,
@@ -1291,9 +1292,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch.fx.experimental.proxy_tensor import (
+            _coor_current_accelerator,
+            _coor_enabled,
+        )
+
         from ..side_effects import SideEffects
         from .builder import SourcelessBuilder, wrap_fx_proxy
         from .ctx_manager import (
+            CurrentDeviceContextVariable,
             GenericContextWrappingVariable,
             get_device_context_manager,
         )
@@ -1494,12 +1501,49 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and len(args) == 1
             and (variable_cls := get_device_context_manager(self.value)) is not None
         ):
+            name = f"{self.value.__module__}.{self.value.__qualname__}"
+            if variable_cls._accepts_device_object and isinstance(
+                args[0], CurrentDeviceVariable
+            ):
+                # Validation only: raises when the device type does not match the
+                # context manager, as eager does. The index it returns is the
+                # compiling rank's, so it must not be captured.
+                variable_cls._get_device_index_fn(args[0].value, optional=True)
+                return CurrentDeviceContextVariable(args[0].value.type, self.value)
             if not args[0].is_python_constant():
-                raise_type_error(
-                    tx,
-                    f"{self.value.__module__}.{self.value.__qualname__} requires a constant argument",
-                )
-            return variable_cls.create(tx, args[0].as_python_constant())
+                raise_type_error(tx, f"{name} requires a constant argument")
+            arg = args[0].as_python_constant()
+            if _coor_enabled():
+                # The artifact runs on every rank, so an explicit index -- even the
+                # compiling rank's own -- names a GPU that is wrong on other ranks.
+                # Only an index-less device, which means the current one, may be
+                # entered.
+                dev = torch.device(arg) if isinstance(arg, str) else arg
+                index = dev.index if isinstance(dev, torch.device) else dev
+                if index is not None:
+                    raise CompileOnOneRankUnsupported(
+                        f"Cannot enter {name}({arg}) under compile_on_one_rank: an "
+                        "explicit device index names a specific GPU, but the compiled "
+                        "artifact runs on every rank.\n"
+                        "Next steps: pass a tensor's `.device` or an index-less device "
+                        "to follow the current device, or turn off "
+                        "compile_on_one_rank for this region."
+                    )
+                cur = _coor_current_accelerator()
+                if (
+                    cur is not None
+                    and variable_cls._accepts_device_object
+                    and getattr(torch.get_device_module(cur.type), "device", None)
+                    is self.value
+                ):
+                    # Validation only, as in the CurrentDeviceVariable case above.
+                    variable_cls._get_device_index_fn(arg, optional=True)
+                    # Keep it rank-relative rather than resolving cur.index into the
+                    # graph. Dynamo's own reconstruct at a graph break re-enters
+                    # through here, so this is what stops a resumed frame from
+                    # pinning the compiling rank.
+                    return CurrentDeviceContextVariable(cur.type, self.value)
+            return variable_cls.create(tx, arg)
         elif (
             issubclass(type(self.value), type)
             and hasattr(
