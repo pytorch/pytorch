@@ -1282,7 +1282,6 @@ class TestFullyShardGradDtypePacking(FSDPTest):
             mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
         )
         group = model._get_fsdp_state()._fsdp_param_groups[0]
-        pending_all_reduce = group._pending_all_reduce_state
         # Reuse a layout, insert a parameter before the pending entries, omit
         # fresh gradients for a pending parameter, then change dtype and layout.
         active_sets = ((1,), (1,), (0, 1), (1,), (0, 1), (2,), (3,))
@@ -1301,7 +1300,7 @@ class TestFullyShardGradDtypePacking(FSDPTest):
 
             sync = step == len(active_sets) - 1
             model.set_requires_all_reduce(sync)
-            previous_output = pending_all_reduce.buffer
+            previous_output = group._partial_reduce_output
             with (
                 patch.object(
                     dist, "all_gather_single", wraps=dist.all_gather_single
@@ -1315,11 +1314,12 @@ class TestFullyShardGradDtypePacking(FSDPTest):
                 all_gather.assert_called_once()
                 reduce_scatter.assert_called_once()
                 self.assertEqual(all_reduce.call_count, int(sync))
-            self.assertIs(group._pending_all_reduce_state, pending_all_reduce)
-            output = pending_all_reduce.buffer
+            output = group._partial_reduce_output
             if sync:
                 self.assertIsNone(output)
-                self.assertEqual(len(pending_all_reduce.layout), len(model.params))
+                self.assertEqual(
+                    len(group._partial_reduce_output_layout), len(model.params)
+                )
                 continue
             self.assertIsNotNone(output)
             self.assertEqual(output.dtype, reduce_dtype or inp_dtype)
@@ -1331,7 +1331,7 @@ class TestFullyShardGradDtypePacking(FSDPTest):
                 self.assertIsNone(param.grad)
             if step == 1:
                 model.to(device=device)  # A no-op preserves pending reductions.
-                self.assertIs(pending_all_reduce.buffer, output)
+                self.assertIs(group._partial_reduce_output, output)
                 with self.assertRaisesRegex(RuntimeError, "pending gradients"):
                     model.set_gradient_divide_factor(2.0)
 
@@ -1348,11 +1348,10 @@ class TestFullyShardGradDtypePacking(FSDPTest):
         model.set_requires_all_reduce(False)
         inp = torch.ones(8, device=device, dtype=torch.bfloat16)
         model(inp, (2,)).backward()
-        self.assertIsNotNone(pending_all_reduce.buffer)
+        self.assertIsNotNone(group._partial_reduce_output)
         model.reset_iter_state()
-        self.assertIs(group._pending_all_reduce_state, pending_all_reduce)
-        self.assertIsNone(pending_all_reduce.buffer)
-        self.assertEqual(pending_all_reduce.layout, {})
+        self.assertIsNone(group._partial_reduce_output)
+        self.assertEqual(group._partial_reduce_output_layout, {})
         model.set_requires_all_reduce(True)
         model(inp, (3,)).backward()
         for param in model.params[:3]:
