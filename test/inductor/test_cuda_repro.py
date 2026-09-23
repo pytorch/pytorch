@@ -2981,6 +2981,60 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
 
+    @skipIfRocm
+    @dynamo_config.patch(capture_scalar_outputs=True)
+    @config.patch({"triton.cudagraphs": False})
+    @parametrize(
+        "assertion_config",
+        [
+            None,
+            "do_not_emit_runtime_assertions",
+            "scalar_asserts",
+            "unsafe_skip_scalar_range_asserts",
+        ],
+    )
+    def test_bounded_unbacked_indexing(self, assertion_config):
+        def fn(x, n):
+            u0 = n.item()
+            torch._check(u0 >= 1)
+            torch._check(u0 <= 1000)
+            y = x.new_ones(u0)
+            return torch.cat([y, y]) + 1.0
+
+        x = torch.randn(4, device=device_type)
+        n = torch.tensor(64, device=device_type)
+        patches = (
+            {assertion_config: assertion_config != "scalar_asserts"}
+            if assertion_config
+            else {}
+        )
+        with config.patch(patches):
+            compiled = torch.compile(fn, fullgraph=True)
+            result, codes = run_and_get_code(compiled, x, n)
+            idiom = "tl.arange(0, XBLOCK)[:].to(tl.int64)"
+            self.assertEqual(idiom in "\n".join(codes), assertion_config is not None)
+            self.assertEqual(result, fn(x, n))
+            if assertion_config is None:
+                with self.assertRaisesRegex(RuntimeError, "<= 1000"):
+                    compiled(x, torch.tensor(1001, device=device_type))
+
+    @skipIfRocm
+    @config.patch({"triton.cudagraphs": False})
+    def test_backward_dynamic_indexing_with_dispatch_guards(self):
+        def fn(x):
+            y = torch.cat([x, x], dim=0)
+            return (y * y).sum()
+
+        x = torch.randn(1024, 512, device=device_type, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        compiled = torch.compile(fn, fullgraph=True)
+
+        _, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: compiled(x))
+        idiom = "tl.arange(0, XBLOCK)[:].to(tl.int64)"
+        self.assertNotIn(idiom, fw_code)
+        self.assertNotIn(idiom, bw_code)
+        self.assertEqual(x.grad, 4 * x)
+
     @skipCUDAIf(
         not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
     )
