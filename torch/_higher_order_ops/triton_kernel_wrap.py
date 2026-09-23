@@ -1898,10 +1898,10 @@ def triton_kernel_wrapper_functional_dense(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
-    # (inductor should always optimize them away).
-    # Requires https://github.com/pytorch/pytorch/issues/109240
+    # For performance reasons, we want to ensure that these
+    # `clone_preserve_strides` calls are never executed at runtime,
+    # the op should be inplaced by Inductor's reinplace.py pass and thus
+    # never called.
     kwargs = {
         key: (
             _clone_mutated_arg(key, val, tensor_bases)
@@ -1935,10 +1935,10 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
-    # (inductor should always optimize them away).
-    # Requires https://github.com/pytorch/pytorch/issues/109240
+    # For performance reasons, we want to ensure that these
+    # `clone_preserve_strides` calls are never executed at runtime,
+    # the op should be inplaced by Inductor's reinplace.py pass and thus
+    # never called.
     return {
         key: _clone_mutated_arg(key, val, tensor_bases)
         for key, val in kwargs.items()
