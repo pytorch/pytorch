@@ -18659,6 +18659,24 @@ class TestInputGradBuffers(TestCase):
             else:
                 out.sum().backward()
 
+    def test_create_graph_cannot_be_masked(self, device):
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, grad_output):
+                ctx.input_grad_buffers
+                return grad_output
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with self.assertRaisesRegex(RuntimeError, "create_graph=True"):
+                Producer.apply(x).sum().backward(create_graph=True)
+
     @onlyAccelerator
     def test_user_stream_switch_does_not_change_execution_stream(self, device):
         observed_buffers = []
@@ -18746,24 +18764,6 @@ class TestInputGradBuffers(TestCase):
             torch.autograd.backward(
                 (direct, first), (torch.ones_like(direct), torch.ones_like(first))
             )
-
-    def test_create_graph_cannot_be_masked(self, device):
-        class Producer(Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x.clone()
-
-            @staticmethod
-            @once_differentiable
-            def backward(ctx, grad_output):
-                ctx.input_grad_buffers
-                return grad_output
-
-        x = torch.randn(4, device=device, requires_grad=True)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with self.assertRaisesRegex(RuntimeError, "create_graph=True"):
-                Producer.apply(x).sum().backward(create_graph=True)
 
     @onlyAccelerator
     def test_lookup_does_not_deadlock_with_python_dispatch(self, device):
